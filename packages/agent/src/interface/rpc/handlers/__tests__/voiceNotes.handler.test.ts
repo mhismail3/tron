@@ -1,18 +1,17 @@
 /**
- * Tests for voiceNotes.handler.ts
+ * @fileoverview Tests for Voice Notes RPC Handlers
+ *
+ * Tests voiceNotes.save, voiceNotes.list, voiceNotes.delete handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import {
-  handleVoiceNotesSave,
-  handleVoiceNotesList,
-  handleVoiceNotesDelete,
-  createVoiceNotesHandlers,
-} from '../voiceNotes.handler.js';
-import type { RpcRequest, RpcResponse, VoiceNotesSaveResult, VoiceNotesListResult } from '../../types.js';
+import { createVoiceNotesHandlers } from '../voiceNotes.handler.js';
+import type { RpcRequest, VoiceNotesSaveResult, VoiceNotesListResult } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
+import { MethodRegistry } from '../../registry.js';
 
 // Mock fs module
 vi.mock('fs/promises');
@@ -24,15 +23,23 @@ vi.mock('@infrastructure/settings/loader.js', () => ({
 
 import { getNotesDir } from '@infrastructure/settings/loader.js';
 
-describe('voiceNotes.handler', () => {
+describe('Voice Notes Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutTranscription: RpcContext;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createVoiceNotesHandlers());
+
     mockContext = {
       transcriptionManager: {
         transcribeAudio: vi.fn(),
       },
     } as unknown as RpcContext;
+
+    mockContextWithoutTranscription = {} as RpcContext;
+
     vi.clearAllMocks();
   });
 
@@ -40,7 +47,7 @@ describe('voiceNotes.handler', () => {
     vi.restoreAllMocks();
   });
 
-  describe('handleVoiceNotesSave', () => {
+  describe('voiceNotes.save', () => {
     it('should return error when audioBase64 is missing', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -48,26 +55,24 @@ describe('voiceNotes.handler', () => {
         params: {},
       };
 
-      const response = await handleVoiceNotesSave(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('audioBase64 is required');
+      expect(response.error?.message).toContain('audioBase64');
     });
 
-    it('should return error when transcriptionManager is not available', async () => {
+    it('should return NOT_AVAILABLE when transcriptionManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'voiceNotes.save',
         params: { audioBase64: 'base64data' },
       };
 
-      const contextWithoutTranscription = {} as RpcContext;
-      const response = await handleVoiceNotesSave(request, contextWithoutTranscription);
+      const response = await registry.dispatch(request, mockContextWithoutTranscription);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Transcription not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should save voice note successfully', async () => {
@@ -96,7 +101,7 @@ describe('voiceNotes.handler', () => {
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
       vi.mocked(fs.writeFile).mockResolvedValue(undefined);
 
-      const response = await handleVoiceNotesSave(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toMatchObject({
@@ -124,7 +129,7 @@ describe('voiceNotes.handler', () => {
         new Error('Transcription service unavailable')
       );
 
-      const response = await handleVoiceNotesSave(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('VOICE_NOTE_SAVE_FAILED');
@@ -132,7 +137,7 @@ describe('voiceNotes.handler', () => {
     });
   });
 
-  describe('handleVoiceNotesList', () => {
+  describe('voiceNotes.list', () => {
     it('should return empty list when notes directory does not exist', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -142,7 +147,7 @@ describe('voiceNotes.handler', () => {
 
       vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT'));
 
-      const response = await handleVoiceNotesList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -182,7 +187,7 @@ This is a test transcription.
       vi.mocked(fs.readdir).mockResolvedValue(mockFiles as any);
       vi.mocked(fs.readFile).mockResolvedValue(mockContent);
 
-      const response = await handleVoiceNotesList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as VoiceNotesListResult;
@@ -215,7 +220,7 @@ Hola, esto es una prueba.
       vi.mocked(fs.readdir).mockResolvedValue(['2025-01-15-120000-voice-note.md'] as any);
       vi.mocked(fs.readFile).mockResolvedValue(mockContent);
 
-      const response = await handleVoiceNotesList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as VoiceNotesListResult;
@@ -237,7 +242,7 @@ Hola, esto es una prueba.
       vi.mocked(fs.access).mockResolvedValue(undefined);
       vi.mocked(fs.readdir).mockRejectedValue(new Error('Permission denied'));
 
-      const response = await handleVoiceNotesList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('VOICE_NOTES_LIST_FAILED');
@@ -260,7 +265,7 @@ created: 2025-01-15
 
 Content`);
 
-      const response = await handleVoiceNotesList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as VoiceNotesListResult;
@@ -268,7 +273,7 @@ Content`);
     });
   });
 
-  describe('handleVoiceNotesDelete', () => {
+  describe('voiceNotes.delete', () => {
     it('should return error when filename is missing', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -276,11 +281,11 @@ Content`);
         params: {},
       };
 
-      const response = await handleVoiceNotesDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('filename is required');
+      expect(response.error?.message).toContain('filename');
     });
 
     it('should reject directory traversal attempts', async () => {
@@ -290,7 +295,7 @@ Content`);
         params: { filename: '../../../etc/passwd' },
       };
 
-      const response = await handleVoiceNotesDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -306,11 +311,11 @@ Content`);
 
       vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT'));
 
-      const response = await handleVoiceNotesDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_FOUND');
-      expect(response.error?.message).toBe('Voice note not found: nonexistent.md');
+      expect(response.error?.code).toBe('FILE_NOT_FOUND');
+      expect(response.error?.message).toContain('Voice note not found');
     });
 
     it('should delete voice note successfully', async () => {
@@ -323,7 +328,7 @@ Content`);
       vi.mocked(fs.access).mockResolvedValue(undefined);
       vi.mocked(fs.unlink).mockResolvedValue(undefined);
 
-      const response = await handleVoiceNotesDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -343,7 +348,7 @@ Content`);
       vi.mocked(fs.access).mockResolvedValue(undefined);
       vi.mocked(fs.unlink).mockRejectedValue(new Error('Permission denied'));
 
-      const response = await handleVoiceNotesDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('VOICE_NOTE_DELETE_FAILED');
@@ -369,40 +374,6 @@ Content`);
       // Check delete handler options
       const deleteHandler = registrations.find(r => r.method === 'voiceNotes.delete');
       expect(deleteHandler?.options?.requiredParams).toContain('filename');
-    });
-
-    it('should create handlers that return results on success', async () => {
-      const registrations = createVoiceNotesHandlers();
-      const listHandler = registrations.find(r => r.method === 'voiceNotes.list')!.handler;
-
-      vi.mocked(fs.access).mockRejectedValue(new Error('ENOENT'));
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'voiceNotes.list',
-        params: {},
-      };
-
-      const result = await listHandler(request, mockContext);
-
-      expect(result).toEqual({
-        notes: [],
-        totalCount: 0,
-        hasMore: false,
-      });
-    });
-
-    it('should create handlers that throw on error', async () => {
-      const registrations = createVoiceNotesHandlers();
-      const saveHandler = registrations.find(r => r.method === 'voiceNotes.save')!.handler;
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'voiceNotes.save',
-        params: {},
-      };
-
-      await expect(saveHandler(request, mockContext)).rejects.toThrow('audioBase64 is required');
     });
   });
 });

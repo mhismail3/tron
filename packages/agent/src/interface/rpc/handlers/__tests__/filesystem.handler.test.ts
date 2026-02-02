@@ -1,28 +1,28 @@
 /**
  * @fileoverview Tests for Filesystem RPC Handlers
  *
- * Tests filesystem.listDir, filesystem.getHome, and filesystem.createDir handlers.
+ * Tests filesystem.listDir, filesystem.getHome, and filesystem.createDir handlers
+ * using the registry dispatch pattern.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import {
-  createFilesystemHandlers,
-  handleFilesystemListDir,
-  handleFilesystemGetHome,
-  handleFilesystemCreateDir,
-} from '../filesystem.handler.js';
+import { createFilesystemHandlers } from '../filesystem.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Filesystem Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let testDir: string;
 
   beforeEach(async () => {
+    registry = new MethodRegistry();
+    registry.registerAll(createFilesystemHandlers());
+
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
@@ -43,7 +43,7 @@ describe('Filesystem Handlers', () => {
     }
   });
 
-  describe('handleFilesystemListDir', () => {
+  describe('filesystem.listDir', () => {
     it('should list directory contents', async () => {
       // Create test files
       await fs.writeFile(path.join(testDir, 'file1.txt'), 'content');
@@ -56,7 +56,7 @@ describe('Filesystem Handlers', () => {
         params: { path: testDir },
       };
 
-      const response = await handleFilesystemListDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { path: string; entries: any[] };
@@ -78,7 +78,7 @@ describe('Filesystem Handlers', () => {
         params: { path: testDir },
       };
 
-      const response = await handleFilesystemListDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { entries: any[] };
@@ -96,7 +96,7 @@ describe('Filesystem Handlers', () => {
         params: { path: testDir, showHidden: true },
       };
 
-      const response = await handleFilesystemListDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { entries: any[] };
@@ -110,7 +110,7 @@ describe('Filesystem Handlers', () => {
         params: {},
       };
 
-      const response = await handleFilesystemListDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { path: string };
@@ -124,21 +124,21 @@ describe('Filesystem Handlers', () => {
         params: { path: '/non/existent/path' },
       };
 
-      const response = await handleFilesystemListDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('FILESYSTEM_ERROR');
     });
   });
 
-  describe('handleFilesystemGetHome', () => {
+  describe('filesystem.getHome', () => {
     it('should return home path', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'filesystem.getHome',
       };
 
-      const response = await handleFilesystemGetHome(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { homePath: string };
@@ -151,7 +151,7 @@ describe('Filesystem Handlers', () => {
         method: 'filesystem.getHome',
       };
 
-      const response = await handleFilesystemGetHome(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { suggestedPaths: any[] };
@@ -162,7 +162,7 @@ describe('Filesystem Handlers', () => {
     });
   });
 
-  describe('handleFilesystemCreateDir', () => {
+  describe('filesystem.createDir', () => {
     it('should create a directory', async () => {
       const newDir = path.join(testDir, 'newdir');
       const request: RpcRequest = {
@@ -171,7 +171,7 @@ describe('Filesystem Handlers', () => {
         params: { path: newDir },
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { created: boolean; path: string };
@@ -189,7 +189,7 @@ describe('Filesystem Handlers', () => {
         params: {},
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -203,7 +203,7 @@ describe('Filesystem Handlers', () => {
         params: { path: testDir + '/../escape' },
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -217,7 +217,7 @@ describe('Filesystem Handlers', () => {
         params: { path: path.join(testDir, '.hidden') },
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -234,7 +234,7 @@ describe('Filesystem Handlers', () => {
         params: { path: existingDir },
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('ALREADY_EXISTS');
@@ -248,7 +248,7 @@ describe('Filesystem Handlers', () => {
         params: { path: nestedPath, recursive: true },
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
 
@@ -265,7 +265,7 @@ describe('Filesystem Handlers', () => {
         params: { path: nestedPath, recursive: false },
       };
 
-      const response = await handleFilesystemCreateDir(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('PARENT_NOT_FOUND');
@@ -285,10 +285,6 @@ describe('Filesystem Handlers', () => {
 
   describe('Registry Integration', () => {
     it('should register and dispatch filesystem handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createFilesystemHandlers();
-      registry.registerAll(handlers);
-
       expect(registry.has('filesystem.listDir')).toBe(true);
       expect(registry.has('filesystem.getHome')).toBe(true);
       expect(registry.has('filesystem.createDir')).toBe(true);

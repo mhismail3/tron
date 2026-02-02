@@ -3,70 +3,35 @@
  *
  * Handlers for message.* RPC methods:
  * - message.delete: Delete a message from a session
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { RpcHandlerError } from '@core/utils/index.js';
 import type {
-  RpcRequest,
-  RpcResponse,
   MessageDeleteParams,
   MessageDeleteResult,
 } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
-
-// =============================================================================
-// Handler Implementations
-// =============================================================================
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { RpcError, RpcErrorCode } from './base.js';
 
 /**
- * Handle message.delete request
- *
- * Deletes a message from a session by creating a deletion event.
+ * Message operation errors
  */
-export async function handleMessageDelete(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  const params = request.params as MessageDeleteParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+class MessageNotFoundError extends RpcError {
+  constructor(message: string) {
+    super('NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
   }
+}
 
-  if (!params?.targetEventId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'targetEventId is required');
+class InvalidOperationError extends RpcError {
+  constructor(message: string) {
+    super('INVALID_OPERATION' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
   }
+}
 
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Event store not available');
-  }
-
-  try {
-    const deletionEvent = await context.eventStore.deleteMessage(
-      params.sessionId,
-      params.targetEventId,
-      params.reason
-    );
-
-    const result: MessageDeleteResult = {
-      success: true,
-      deletionEventId: deletionEvent.id,
-      targetType: (deletionEvent.payload as { targetType: 'message.user' | 'message.assistant' | 'tool.result' }).targetType,
-    };
-
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes('not found')) {
-        return MethodRegistry.errorResponse(request.id, 'NOT_FOUND', error.message);
-      }
-      if (error.message.includes('Cannot delete')) {
-        return MethodRegistry.errorResponse(request.id, 'INVALID_OPERATION', error.message);
-      }
-    }
-    const message = error instanceof Error ? error.message : 'Failed to delete message';
-    return MethodRegistry.errorResponse(request.id, 'MESSAGE_DELETE_FAILED', message);
+class MessageDeleteError extends RpcError {
+  constructor(message: string) {
+    super('MESSAGE_DELETE_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
   }
 }
 
@@ -80,12 +45,34 @@ export async function handleMessageDelete(
  * @returns Array of method registrations for bulk registration
  */
 export function createMessageHandlers(): MethodRegistration[] {
-  const deleteHandler: MethodHandler = async (request, context) => {
-    const response = await handleMessageDelete(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const deleteHandler: MethodHandler<MessageDeleteParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      const deletionEvent = await context.eventStore!.deleteMessage(
+        params.sessionId,
+        params.targetEventId,
+        params.reason
+      );
+
+      const result: MessageDeleteResult = {
+        success: true,
+        deletionEventId: deletionEvent.id,
+        targetType: (deletionEvent.payload as { targetType: 'message.user' | 'message.assistant' | 'tool.result' }).targetType,
+      };
+      return result;
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          throw new MessageNotFoundError(error.message);
+        }
+        if (error.message.includes('Cannot delete')) {
+          throw new InvalidOperationError(error.message);
+        }
+      }
+      const message = error instanceof Error ? error.message : 'Failed to delete message';
+      throw new MessageDeleteError(message);
     }
-    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

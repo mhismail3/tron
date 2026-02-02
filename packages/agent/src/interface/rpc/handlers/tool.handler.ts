@@ -3,70 +3,30 @@
  *
  * Handlers for tool.* RPC methods:
  * - tool.result: Submit a result for a pending tool call
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { RpcHandlerError } from '@core/utils/index.js';
-import type {
-  RpcRequest,
-  RpcResponse,
-  ToolResultParams,
-} from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
-
-// =============================================================================
-// Handler Implementations
-// =============================================================================
+import type { ToolResultParams } from '../types.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { RpcError, RpcErrorCode } from './base.js';
 
 /**
- * Handle tool.result request
- *
- * Submits a result for a pending tool call.
+ * Tool call not found error
  */
-export async function handleToolResult(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.toolCallTracker) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Tool call tracker not available');
+class ToolCallNotFoundError extends RpcError {
+  constructor(toolCallId: string) {
+    super('NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], `No pending tool call found with ID: ${toolCallId}`);
   }
+}
 
-  const params = request.params as ToolResultParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
+/**
+ * Tool result failed error
+ */
+class ToolResultFailedError extends RpcError {
+  constructor() {
+    super('TOOL_RESULT_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], 'Failed to resolve tool call');
   }
-  if (!params?.toolCallId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'toolCallId is required');
-  }
-  if (params.result === undefined) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'result is required');
-  }
-
-  // Check if the tool call is pending
-  if (!context.toolCallTracker.hasPending(params.toolCallId)) {
-    return MethodRegistry.errorResponse(
-      request.id,
-      'NOT_FOUND',
-      `No pending tool call found with ID: ${params.toolCallId}`
-    );
-  }
-
-  // Resolve the pending tool call
-  const resolved = context.toolCallTracker.resolve(params.toolCallId, params.result);
-
-  if (!resolved) {
-    return MethodRegistry.errorResponse(
-      request.id,
-      'TOOL_RESULT_FAILED',
-      'Failed to resolve tool call'
-    );
-  }
-
-  return MethodRegistry.successResponse(request.id, {
-    success: true,
-    toolCallId: params.toolCallId,
-  });
 }
 
 // =============================================================================
@@ -79,12 +39,25 @@ export async function handleToolResult(
  * @returns Array of method registrations for bulk registration
  */
 export function createToolHandlers(): MethodRegistration[] {
-  const resultHandler: MethodHandler = async (request, context) => {
-    const response = await handleToolResult(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const resultHandler: MethodHandler<ToolResultParams> = async (request, context) => {
+    const params = request.params!;
+
+    // Check if the tool call is pending
+    if (!context.toolCallTracker!.hasPending(params.toolCallId)) {
+      throw new ToolCallNotFoundError(params.toolCallId);
     }
-    throw RpcHandlerError.fromResponse(response);
+
+    // Resolve the pending tool call
+    const resolved = context.toolCallTracker!.resolve(params.toolCallId, params.result);
+
+    if (!resolved) {
+      throw new ToolResultFailedError();
+    }
+
+    return {
+      success: true,
+      toolCallId: params.toolCallId,
+    };
   };
 
   return [

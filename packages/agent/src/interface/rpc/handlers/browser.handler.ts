@@ -5,131 +5,42 @@
  * - browser.startStream: Start browser streaming for a session
  * - browser.stopStream: Stop browser streaming
  * - browser.getStatus: Get browser streaming status
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
-import { RpcHandlerError } from '@core/utils/index.js';
 import type {
-  RpcRequest,
-  RpcResponse,
   BrowserStartStreamParams,
   BrowserStopStreamParams,
   BrowserGetStatusParams,
 } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { BrowserError } from './base.js';
 
 const logger = createLogger('rpc:browser');
 
-// =============================================================================
-// Handler Implementations
-// =============================================================================
-
 /**
- * Handle browser.startStream request
- *
- * Starts browser streaming for a session.
+ * Wrap browser operations with consistent error handling
  */
-export async function handleBrowserStartStream(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.browserManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Browser manager not available');
-  }
-
-  const params = request.params as BrowserStartStreamParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
+async function withBrowserErrorHandling<T>(
+  sessionId: string,
+  operation: string,
+  fn: () => Promise<T>
+): Promise<T> {
   try {
-    const result = await context.browserManager.startStream(params);
-    return MethodRegistry.successResponse(request.id, result);
+    return await fn();
   } catch (error) {
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'startStream' });
-    logger.error('Failed to start browser stream', {
-      sessionId: params.sessionId,
+    const structured = categorizeError(error, { sessionId, operation });
+    logger.error(`Failed to ${operation}`, {
+      sessionId,
       code: structured.code,
       category: LogErrorCategory.TOOL_EXECUTION,
       error: structured.message,
       retryable: structured.retryable,
     });
-    const message = error instanceof Error ? error.message : 'Failed to start browser stream';
-    return MethodRegistry.errorResponse(request.id, 'BROWSER_ERROR', message);
-  }
-}
-
-/**
- * Handle browser.stopStream request
- *
- * Stops browser streaming for a session.
- */
-export async function handleBrowserStopStream(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.browserManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Browser manager not available');
-  }
-
-  const params = request.params as BrowserStopStreamParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = await context.browserManager.stopStream(params);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'stopStream' });
-    logger.error('Failed to stop browser stream', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: LogErrorCategory.TOOL_EXECUTION,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    const message = error instanceof Error ? error.message : 'Failed to stop browser stream';
-    return MethodRegistry.errorResponse(request.id, 'BROWSER_ERROR', message);
-  }
-}
-
-/**
- * Handle browser.getStatus request
- *
- * Gets browser streaming status for a session.
- */
-export async function handleBrowserGetStatus(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.browserManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Browser manager not available');
-  }
-
-  const params = request.params as BrowserGetStatusParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = await context.browserManager.getStatus(params);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getStatus' });
-    logger.error('Failed to get browser status', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: LogErrorCategory.TOOL_EXECUTION,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    const message = error instanceof Error ? error.message : 'Failed to get browser status';
-    return MethodRegistry.errorResponse(request.id, 'BROWSER_ERROR', message);
+    const message = error instanceof Error ? error.message : `Failed to ${operation}`;
+    throw new BrowserError(message);
   }
 }
 
@@ -143,28 +54,25 @@ export async function handleBrowserGetStatus(
  * @returns Array of method registrations for bulk registration
  */
 export function createBrowserHandlers(): MethodRegistration[] {
-  const startStreamHandler: MethodHandler = async (request, context) => {
-    const response = await handleBrowserStartStream(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const startStreamHandler: MethodHandler<BrowserStartStreamParams> = async (request, context) => {
+    const params = request.params!;
+    return withBrowserErrorHandling(params.sessionId, 'start browser stream', () =>
+      context.browserManager!.startStream(params)
+    );
   };
 
-  const stopStreamHandler: MethodHandler = async (request, context) => {
-    const response = await handleBrowserStopStream(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const stopStreamHandler: MethodHandler<BrowserStopStreamParams> = async (request, context) => {
+    const params = request.params!;
+    return withBrowserErrorHandling(params.sessionId, 'stop browser stream', () =>
+      context.browserManager!.stopStream(params)
+    );
   };
 
-  const getStatusHandler: MethodHandler = async (request, context) => {
-    const response = await handleBrowserGetStatus(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getStatusHandler: MethodHandler<BrowserGetStatusParams> = async (request, context) => {
+    const params = request.params!;
+    return withBrowserErrorHandling(params.sessionId, 'get browser status', () =>
+      context.browserManager!.getStatus(params)
+    );
   };
 
   return [

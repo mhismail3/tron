@@ -2,21 +2,10 @@
  * @fileoverview Context domain - Context management
  *
  * Handles context snapshots, compaction, and capacity management.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleContextGetSnapshot,
-  handleContextGetDetailedSnapshot,
-  handleContextShouldCompact,
-  handleContextPreviewCompaction,
-  handleContextConfirmCompaction,
-  handleContextCanAcceptTurn,
-  handleContextClear,
-  createContextHandlers,
-} from '../../../../rpc/handlers/context.handler.js';
+// Re-export handler factory
+export { createContextHandlers } from '@interface/rpc/handlers/context.handler.js';
 
 // Re-export types
 export type {
@@ -34,4 +23,4 @@ export type {
   ContextCanAcceptTurnResult,
   ContextClearParams,
   ContextClearResult,
-} from '../../../../rpc/types/context.js';
+} from '@interface/rpc/types/context.js';

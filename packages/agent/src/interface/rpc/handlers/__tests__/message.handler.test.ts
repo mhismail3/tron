@@ -1,27 +1,34 @@
 /**
- * Tests for message.handler.ts
+ * @fileoverview Tests for Message RPC Handlers
+ *
+ * Tests message.delete handler using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  handleMessageDelete,
-  createMessageHandlers,
-} from '../message.handler.js';
-import type { RpcRequest, RpcResponse } from '../../types.js';
+import { createMessageHandlers } from '../message.handler.js';
+import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
+import { MethodRegistry } from '../../registry.js';
 
-describe('message.handler', () => {
+describe('Message Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutEventStore: RpcContext;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createMessageHandlers());
+
     mockContext = {
       eventStore: {
         deleteMessage: vi.fn(),
       },
     } as unknown as RpcContext;
+
+    mockContextWithoutEventStore = {} as RpcContext;
   });
 
-  describe('handleMessageDelete', () => {
+  describe('message.delete', () => {
     it('should return error when sessionId is missing', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -29,11 +36,11 @@ describe('message.handler', () => {
         params: { targetEventId: 'event-123' },
       };
 
-      const response = await handleMessageDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('sessionId is required');
+      expect(response.error?.message).toContain('sessionId');
     });
 
     it('should return error when targetEventId is missing', async () => {
@@ -43,26 +50,24 @@ describe('message.handler', () => {
         params: { sessionId: 'session-123' },
       };
 
-      const response = await handleMessageDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('targetEventId is required');
+      expect(response.error?.message).toContain('targetEventId');
     });
 
-    it('should return error when eventStore is not available', async () => {
+    it('should return NOT_AVAILABLE when eventStore is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'message.delete',
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
       };
 
-      const contextWithoutEventStore = {} as RpcContext;
-      const response = await handleMessageDelete(request, contextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Event store not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should delete message successfully', async () => {
@@ -82,7 +87,7 @@ describe('message.handler', () => {
       };
       vi.mocked(mockContext.eventStore!.deleteMessage).mockResolvedValue(mockDeletionEvent);
 
-      const response = await handleMessageDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -108,7 +113,7 @@ describe('message.handler', () => {
         new Error('Event not found')
       );
 
-      const response = await handleMessageDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('NOT_FOUND');
@@ -125,7 +130,7 @@ describe('message.handler', () => {
         new Error('Cannot delete this message')
       );
 
-      const response = await handleMessageDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_OPERATION');
@@ -142,7 +147,7 @@ describe('message.handler', () => {
         new Error('Database error')
       );
 
-      const response = await handleMessageDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('MESSAGE_DELETE_FAILED');
@@ -158,44 +163,6 @@ describe('message.handler', () => {
       expect(registrations[0].options?.requiredParams).toContain('sessionId');
       expect(registrations[0].options?.requiredParams).toContain('targetEventId');
       expect(registrations[0].options?.requiredManagers).toContain('eventStore');
-    });
-
-    it('should create handler that returns result on success', async () => {
-      const registrations = createMessageHandlers();
-      const handler = registrations[0].handler;
-
-      const mockDeletionEvent = {
-        id: 'deletion-event-456',
-        payload: { targetType: 'message.assistant' },
-      };
-      vi.mocked(mockContext.eventStore!.deleteMessage).mockResolvedValue(mockDeletionEvent);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'message.delete',
-        params: { sessionId: 'session-123', targetEventId: 'event-123' },
-      };
-
-      const result = await handler(request, mockContext);
-
-      expect(result).toEqual({
-        success: true,
-        deletionEventId: 'deletion-event-456',
-        targetType: 'message.assistant',
-      });
-    });
-
-    it('should create handler that throws on error', async () => {
-      const registrations = createMessageHandlers();
-      const handler = registrations[0].handler;
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'message.delete',
-        params: {},
-      };
-
-      await expect(handler(request, mockContext)).rejects.toThrow('sessionId is required');
     });
   });
 });

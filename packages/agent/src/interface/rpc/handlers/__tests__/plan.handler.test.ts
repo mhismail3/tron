@@ -1,22 +1,19 @@
 /**
  * @fileoverview Tests for Plan RPC Handlers
  *
- * Tests plan.enter, plan.exit, plan.getState handlers.
+ * Tests plan.enter, plan.exit, plan.getState handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createPlanHandlers,
-  handlePlanEnter,
-  handlePlanExit,
-  handlePlanGetState,
-} from '../plan.handler.js';
+import { createPlanHandlers } from '../plan.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 import { DEFAULT_PLAN_MODE_BLOCKED_TOOLS } from '../../types.js';
 
 describe('Plan Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutPlanManager: RpcContext;
   let mockEnterPlanMode: ReturnType<typeof vi.fn>;
@@ -24,6 +21,9 @@ describe('Plan Handlers', () => {
   let mockGetPlanModeState: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createPlanHandlers());
+
     mockEnterPlanMode = vi.fn().mockResolvedValue({
       success: true,
       blockedTools: DEFAULT_PLAN_MODE_BLOCKED_TOOLS,
@@ -56,7 +56,7 @@ describe('Plan Handlers', () => {
     };
   });
 
-  describe('handlePlanEnter', () => {
+  describe('plan.enter', () => {
     it('should enter plan mode with default blocked tools', async () => {
       const request: RpcRequest = {
         id: 'req-1',
@@ -67,7 +67,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -98,7 +98,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -121,11 +121,11 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('sessionId is required');
+      expect(response.error?.message).toContain('sessionId');
     });
 
     it('should return error when skillName is missing', async () => {
@@ -137,14 +137,14 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('skillName is required');
+      expect(response.error?.message).toContain('skillName');
     });
 
-    it('should return error when plan manager is not available', async () => {
+    it('should return NOT_AVAILABLE when plan manager is not available', async () => {
       const request: RpcRequest = {
         id: 'req-1',
         method: 'plan.enter',
@@ -154,11 +154,10 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContextWithoutPlanManager);
+      const response = await registry.dispatch(request, mockContextWithoutPlanManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Plan manager not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when already in plan mode', async () => {
@@ -173,7 +172,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('ALREADY_IN_PLAN_MODE');
@@ -192,15 +191,15 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanEnter(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SESSION_NOT_FOUND');
-      expect(response.error?.message).toBe('Session does not exist');
+      expect(response.error?.message).toContain('Session not found');
     });
   });
 
-  describe('handlePlanExit', () => {
+  describe('plan.exit', () => {
     it('should exit plan mode with approved reason', async () => {
       const request: RpcRequest = {
         id: 'req-1',
@@ -211,7 +210,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -234,7 +233,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockExitPlanMode).toHaveBeenCalledWith(
@@ -255,7 +254,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockExitPlanMode).toHaveBeenCalledWith(
@@ -274,11 +273,11 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('sessionId is required');
+      expect(response.error?.message).toContain('sessionId');
     });
 
     it('should return error when reason is missing', async () => {
@@ -290,14 +289,14 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('reason is required');
+      expect(response.error?.message).toContain('reason');
     });
 
-    it('should return error when plan manager is not available', async () => {
+    it('should return NOT_AVAILABLE when plan manager is not available', async () => {
       const request: RpcRequest = {
         id: 'req-1',
         method: 'plan.exit',
@@ -307,11 +306,10 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContextWithoutPlanManager);
+      const response = await registry.dispatch(request, mockContextWithoutPlanManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Plan manager not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when not in plan mode', async () => {
@@ -326,7 +324,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanExit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('NOT_IN_PLAN_MODE');
@@ -334,7 +332,7 @@ describe('Plan Handlers', () => {
     });
   });
 
-  describe('handlePlanGetState', () => {
+  describe('plan.getState', () => {
     it('should get inactive plan mode state', async () => {
       mockGetPlanModeState.mockReturnValue({
         isActive: false,
@@ -349,7 +347,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanGetState(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -374,7 +372,7 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanGetState(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({
@@ -391,14 +389,14 @@ describe('Plan Handlers', () => {
         params: {},
       };
 
-      const response = await handlePlanGetState(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('sessionId is required');
+      expect(response.error?.message).toContain('sessionId');
     });
 
-    it('should return error when plan manager is not available', async () => {
+    it('should return NOT_AVAILABLE when plan manager is not available', async () => {
       const request: RpcRequest = {
         id: 'req-1',
         method: 'plan.getState',
@@ -407,11 +405,10 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanGetState(request, mockContextWithoutPlanManager);
+      const response = await registry.dispatch(request, mockContextWithoutPlanManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Plan manager not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when session is not found', async () => {
@@ -427,11 +424,11 @@ describe('Plan Handlers', () => {
         },
       };
 
-      const response = await handlePlanGetState(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SESSION_NOT_FOUND');
-      expect(response.error?.message).toBe('Session does not exist');
+      expect(response.error?.message).toContain('Session not found');
     });
   });
 
@@ -446,6 +443,14 @@ describe('Plan Handlers', () => {
         'plan.getState',
       ]);
       expect(handlers.every(h => typeof h.handler === 'function')).toBe(true);
+    });
+
+    it('should have planManager as required for all handlers', () => {
+      const handlers = createPlanHandlers();
+
+      for (const handler of handlers) {
+        expect(handler.options?.requiredManagers).toContain('planManager');
+      }
     });
   });
 });

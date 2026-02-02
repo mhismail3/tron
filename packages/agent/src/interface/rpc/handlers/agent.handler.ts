@@ -5,82 +5,16 @@
  * - agent.prompt: Send a prompt to the agent
  * - agent.abort: Abort the current agent operation
  * - agent.getState: Get the current agent state
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { RpcHandlerError } from '@core/utils/index.js';
 import type {
-  RpcRequest,
-  RpcResponse,
   AgentPromptParams,
   AgentAbortParams,
   AgentGetStateParams,
 } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
-
-// =============================================================================
-// Handler Implementations
-// =============================================================================
-
-/**
- * Handle agent.prompt request
- *
- * Sends a prompt to the agent for processing.
- */
-export async function handleAgentPrompt(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  const params = request.params as AgentPromptParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-  if (!params?.prompt) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'prompt is required');
-  }
-
-  const result = await context.agentManager.prompt(params);
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle agent.abort request
- *
- * Aborts the current agent operation for a session.
- */
-export async function handleAgentAbort(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  const params = request.params as AgentAbortParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  const result = await context.agentManager.abort(params.sessionId);
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle agent.getState request
- *
- * Gets the current state of the agent for a session.
- */
-export async function handleAgentGetState(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  const params = request.params as AgentGetStateParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  const result = await context.agentManager.getState(params.sessionId);
-  return MethodRegistry.successResponse(request.id, result);
-}
+import type { MethodRegistration, MethodHandler } from '../registry.js';
 
 // =============================================================================
 // Handler Factory
@@ -92,28 +26,19 @@ export async function handleAgentGetState(
  * @returns Array of method registrations for bulk registration
  */
 export function createAgentHandlers(): MethodRegistration[] {
-  const promptHandler: MethodHandler = async (request, context) => {
-    const response = await handleAgentPrompt(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const promptHandler: MethodHandler<AgentPromptParams> = async (request, context) => {
+    const params = request.params!;
+    return context.agentManager.prompt(params);
   };
 
-  const abortHandler: MethodHandler = async (request, context) => {
-    const response = await handleAgentAbort(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const abortHandler: MethodHandler<AgentAbortParams> = async (request, context) => {
+    const params = request.params!;
+    return context.agentManager.abort(params.sessionId);
   };
 
-  const getStateHandler: MethodHandler = async (request, context) => {
-    const response = await handleAgentGetState(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getStateHandler: MethodHandler<AgentGetStateParams> = async (request, context) => {
+    const params = request.params!;
+    return context.agentManager.getState(params.sessionId);
   };
 
   return [

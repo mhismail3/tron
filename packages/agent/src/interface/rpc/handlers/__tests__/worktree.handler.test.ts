@@ -1,22 +1,18 @@
 /**
  * @fileoverview Tests for Worktree RPC Handlers
  *
- * Tests worktree.getStatus, worktree.commit, worktree.merge, worktree.list handlers.
+ * Tests worktree.getStatus, worktree.commit, worktree.merge, worktree.list handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createWorktreeHandlers,
-  handleWorktreeGetStatus,
-  handleWorktreeCommit,
-  handleWorktreeMerge,
-  handleWorktreeList,
-} from '../worktree.handler.js';
+import { createWorktreeHandlers } from '../worktree.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Worktree Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutWorktreeManager: RpcContext;
   let mockGetWorktreeStatus: ReturnType<typeof vi.fn>;
@@ -25,6 +21,9 @@ describe('Worktree Handlers', () => {
   let mockListWorktrees: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createWorktreeHandlers());
+
     mockGetWorktreeStatus = vi.fn().mockResolvedValue({
       path: '/projects/myapp/.worktrees/sess-123',
       branch: 'session/sess-123',
@@ -68,7 +67,7 @@ describe('Worktree Handlers', () => {
     };
   });
 
-  describe('handleWorktreeGetStatus', () => {
+  describe('worktree.getStatus', () => {
     it('should get worktree status for a session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -76,7 +75,7 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleWorktreeGetStatus(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetWorktreeStatus).toHaveBeenCalledWith('sess-123');
@@ -94,7 +93,7 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-456' },
       };
 
-      const response = await handleWorktreeGetStatus(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { hasWorktree: boolean };
@@ -108,28 +107,28 @@ describe('Worktree Handlers', () => {
         params: {},
       };
 
-      const response = await handleWorktreeGetStatus(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('sessionId');
     });
 
-    it('should return NOT_SUPPORTED without worktreeManager', async () => {
+    it('should return NOT_AVAILABLE without worktreeManager', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'worktree.getStatus',
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleWorktreeGetStatus(request, mockContextWithoutWorktreeManager);
+      const response = await registry.dispatch(request, mockContextWithoutWorktreeManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleWorktreeCommit', () => {
+  describe('worktree.commit', () => {
     it('should commit worktree changes', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -137,7 +136,7 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-123', message: 'Test commit' },
       };
 
-      const response = await handleWorktreeCommit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockCommitWorktree).toHaveBeenCalledWith('sess-123', 'Test commit');
@@ -152,7 +151,7 @@ describe('Worktree Handlers', () => {
         params: { message: 'Test' },
       };
 
-      const response = await handleWorktreeCommit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -166,28 +165,28 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleWorktreeCommit(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('message');
     });
 
-    it('should return NOT_SUPPORTED without worktreeManager', async () => {
+    it('should return NOT_AVAILABLE without worktreeManager', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'worktree.commit',
         params: { sessionId: 'sess-123', message: 'Test' },
       };
 
-      const response = await handleWorktreeCommit(request, mockContextWithoutWorktreeManager);
+      const response = await registry.dispatch(request, mockContextWithoutWorktreeManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleWorktreeMerge', () => {
+  describe('worktree.merge', () => {
     it('should merge worktree to target branch', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -195,7 +194,7 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-123', targetBranch: 'main' },
       };
 
-      const response = await handleWorktreeMerge(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockMergeWorktree).toHaveBeenCalledWith('sess-123', 'main', undefined);
@@ -210,7 +209,7 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-123', targetBranch: 'main', strategy: 'squash' },
       };
 
-      const response = await handleWorktreeMerge(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockMergeWorktree).toHaveBeenCalledWith('sess-123', 'main', 'squash');
@@ -223,7 +222,7 @@ describe('Worktree Handlers', () => {
         params: { targetBranch: 'main' },
       };
 
-      const response = await handleWorktreeMerge(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -237,35 +236,35 @@ describe('Worktree Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleWorktreeMerge(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('targetBranch');
     });
 
-    it('should return NOT_SUPPORTED without worktreeManager', async () => {
+    it('should return NOT_AVAILABLE without worktreeManager', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'worktree.merge',
         params: { sessionId: 'sess-123', targetBranch: 'main' },
       };
 
-      const response = await handleWorktreeMerge(request, mockContextWithoutWorktreeManager);
+      const response = await registry.dispatch(request, mockContextWithoutWorktreeManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleWorktreeList', () => {
+  describe('worktree.list', () => {
     it('should list all worktrees', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'worktree.list',
       };
 
-      const response = await handleWorktreeList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListWorktrees).toHaveBeenCalled();
@@ -273,16 +272,16 @@ describe('Worktree Handlers', () => {
       expect(result.worktrees).toHaveLength(2);
     });
 
-    it('should return NOT_SUPPORTED without worktreeManager', async () => {
+    it('should return NOT_AVAILABLE without worktreeManager', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'worktree.list',
       };
 
-      const response = await handleWorktreeList(request, mockContextWithoutWorktreeManager);
+      const response = await registry.dispatch(request, mockContextWithoutWorktreeManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
@@ -316,29 +315,6 @@ describe('Worktree Handlers', () => {
       const mergeHandler = handlers.find(h => h.method === 'worktree.merge');
       expect(mergeHandler?.options?.requiredParams).toContain('sessionId');
       expect(mergeHandler?.options?.requiredParams).toContain('targetBranch');
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch worktree handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createWorktreeHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('worktree.getStatus')).toBe(true);
-      expect(registry.has('worktree.commit')).toBe(true);
-      expect(registry.has('worktree.merge')).toBe(true);
-      expect(registry.has('worktree.list')).toBe(true);
-
-      // Test worktree.list through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'worktree.list',
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('worktrees');
     });
   });
 });

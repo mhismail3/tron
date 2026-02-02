@@ -5,189 +5,155 @@
  * - plan.enter: Enter plan mode for a session
  * - plan.exit: Exit plan mode for a session
  * - plan.getState: Get plan mode state for a session
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
 import type {
-  RpcRequest,
-  RpcResponse,
   PlanEnterParams,
   PlanExitParams,
   PlanGetStateParams,
 } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { RpcError, RpcErrorCode, SessionNotFoundError } from './base.js';
 
 const logger = createLogger('rpc:plan');
 
 // =============================================================================
-// Handler Implementations
+// Error Types
 // =============================================================================
 
-/**
- * Handle plan.enter request
- *
- * Enters plan mode for a session, blocking write operations until plan is approved.
- */
-export async function handlePlanEnter(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.planManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Plan manager not available');
-  }
-
-  const params = request.params as PlanEnterParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  if (!params?.skillName) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'skillName is required');
-  }
-
-  try {
-    const result = await context.planManager.enterPlanMode(
-      params.sessionId,
-      params.skillName,
-      params.blockedTools
-    );
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes('Already in plan mode')) {
-        return MethodRegistry.errorResponse(request.id, 'ALREADY_IN_PLAN_MODE', 'Session is already in plan mode');
-      }
-      if (error.message.includes('not found')) {
-        return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
-      }
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, skillName: params.skillName, operation: 'enter' });
-    logger.error('Failed to enter plan mode', {
-      sessionId: params.sessionId,
-      skillName: params.skillName,
-      code: structured.code,
-      category: LogErrorCategory.SESSION_STATE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
+class AlreadyInPlanModeError extends RpcError {
+  constructor() {
+    super('ALREADY_IN_PLAN_MODE' as typeof RpcErrorCode[keyof typeof RpcErrorCode], 'Session is already in plan mode');
   }
 }
 
-/**
- * Handle plan.exit request
- *
- * Exits plan mode for a session, unblocking write operations.
- */
-export async function handlePlanExit(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.planManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Plan manager not available');
-  }
-
-  const params = request.params as PlanExitParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  if (!params?.reason) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'reason is required');
-  }
-
-  try {
-    const result = await context.planManager.exitPlanMode(
-      params.sessionId,
-      params.reason,
-      params.planPath
-    );
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes('Not in plan mode')) {
-        return MethodRegistry.errorResponse(request.id, 'NOT_IN_PLAN_MODE', 'Session is not in plan mode');
-      }
-      if (error.message.includes('not found')) {
-        return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
-      }
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, reason: params.reason, operation: 'exit' });
-    logger.error('Failed to exit plan mode', {
-      sessionId: params.sessionId,
-      reason: params.reason,
-      code: structured.code,
-      category: LogErrorCategory.SESSION_STATE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle plan.getState request
- *
- * Gets the current plan mode state for a session.
- */
-export async function handlePlanGetState(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.planManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Plan manager not available');
-  }
-
-  const params = request.params as PlanGetStateParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = context.planManager.getPlanModeState(params.sessionId);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes('not found')) {
-        return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_FOUND', 'Session does not exist');
-      }
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getState' });
-    logger.error('Failed to get plan mode state', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: LogErrorCategory.SESSION_STATE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
+class NotInPlanModeError extends RpcError {
+  constructor() {
+    super('NOT_IN_PLAN_MODE' as typeof RpcErrorCode[keyof typeof RpcErrorCode], 'Session is not in plan mode');
   }
 }
 
 // =============================================================================
-// Handler Registration
+// Handler Factory
 // =============================================================================
 
 /**
  * Create method registrations for all plan handlers.
  */
 export function createPlanHandlers(): MethodRegistration[] {
+  const enterHandler: MethodHandler<PlanEnterParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      return await context.planManager!.enterPlanMode(
+        params.sessionId,
+        params.skillName,
+        params.blockedTools
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Already in plan mode')) {
+          throw new AlreadyInPlanModeError();
+        }
+        if (error.message.includes('not found')) {
+          throw new SessionNotFoundError(params.sessionId);
+        }
+      }
+      const structured = categorizeError(error, { sessionId: params.sessionId, skillName: params.skillName, operation: 'enter' });
+      logger.error('Failed to enter plan mode', {
+        sessionId: params.sessionId,
+        skillName: params.skillName,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      throw error;
+    }
+  };
+
+  const exitHandler: MethodHandler<PlanExitParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      return await context.planManager!.exitPlanMode(
+        params.sessionId,
+        params.reason,
+        params.planPath
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes('Not in plan mode')) {
+          throw new NotInPlanModeError();
+        }
+        if (error.message.includes('not found')) {
+          throw new SessionNotFoundError(params.sessionId);
+        }
+      }
+      const structured = categorizeError(error, { sessionId: params.sessionId, reason: params.reason, operation: 'exit' });
+      logger.error('Failed to exit plan mode', {
+        sessionId: params.sessionId,
+        reason: params.reason,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      throw error;
+    }
+  };
+
+  const getStateHandler: MethodHandler<PlanGetStateParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      return context.planManager!.getPlanModeState(params.sessionId);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        throw new SessionNotFoundError(params.sessionId);
+      }
+      const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getState' });
+      logger.error('Failed to get plan mode state', {
+        sessionId: params.sessionId,
+        code: structured.code,
+        category: LogErrorCategory.SESSION_STATE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      throw error;
+    }
+  };
+
   return [
     {
       method: 'plan.enter',
-      handler: handlePlanEnter as MethodHandler,
+      handler: enterHandler,
+      options: {
+        requiredParams: ['sessionId', 'skillName'],
+        requiredManagers: ['planManager'],
+        description: 'Enter plan mode for a session',
+      },
     },
     {
       method: 'plan.exit',
-      handler: handlePlanExit as MethodHandler,
+      handler: exitHandler,
+      options: {
+        requiredParams: ['sessionId', 'reason'],
+        requiredManagers: ['planManager'],
+        description: 'Exit plan mode for a session',
+      },
     },
     {
       method: 'plan.getState',
-      handler: handlePlanGetState as MethodHandler,
+      handler: getStateHandler,
+      options: {
+        requiredParams: ['sessionId'],
+        requiredManagers: ['planManager'],
+        description: 'Get plan mode state for a session',
+      },
     },
   ];
 }

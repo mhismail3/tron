@@ -1,26 +1,27 @@
 /**
  * @fileoverview Tests for Transcribe RPC Handlers
  *
- * Tests transcribe.audio and transcribe.listModels handlers.
+ * Tests transcribe.audio and transcribe.listModels handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createTranscribeHandlers,
-  handleTranscribeAudio,
-  handleTranscribeListModels,
-} from '../transcribe.handler.js';
+import { createTranscribeHandlers } from '../transcribe.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Transcribe Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutTranscription: RpcContext;
   let mockTranscribeAudio: ReturnType<typeof vi.fn>;
   let mockListModels: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createTranscribeHandlers());
+
     mockTranscribeAudio = vi.fn().mockResolvedValue({
       text: 'Hello world',
       language: 'en',
@@ -51,7 +52,7 @@ describe('Transcribe Handlers', () => {
     };
   });
 
-  describe('handleTranscribeAudio', () => {
+  describe('transcribe.audio', () => {
     it('should transcribe audio', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -62,7 +63,7 @@ describe('Transcribe Handlers', () => {
         },
       };
 
-      const response = await handleTranscribeAudio(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockTranscribeAudio).toHaveBeenCalledWith({
@@ -81,25 +82,24 @@ describe('Transcribe Handlers', () => {
         params: {},
       };
 
-      const response = await handleTranscribeAudio(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('audioBase64');
     });
 
-    it('should return error when transcription not available', async () => {
+    it('should return NOT_AVAILABLE when transcription not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'transcribe.audio',
         params: { audioBase64: 'base64data' },
       };
 
-      const response = await handleTranscribeAudio(request, mockContextWithoutTranscription);
+      const response = await registry.dispatch(request, mockContextWithoutTranscription);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toContain('not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should handle transcription failures', async () => {
@@ -111,7 +111,7 @@ describe('Transcribe Handlers', () => {
         params: { audioBase64: 'invalidaudio' },
       };
 
-      const response = await handleTranscribeAudio(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('TRANSCRIPTION_FAILED');
@@ -130,7 +130,7 @@ describe('Transcribe Handlers', () => {
         },
       };
 
-      const response = await handleTranscribeAudio(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockTranscribeAudio).toHaveBeenCalledWith({
@@ -142,14 +142,14 @@ describe('Transcribe Handlers', () => {
     });
   });
 
-  describe('handleTranscribeListModels', () => {
+  describe('transcribe.listModels', () => {
     it('should list transcription models', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'transcribe.listModels',
       };
 
-      const response = await handleTranscribeListModels(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListModels).toHaveBeenCalled();
@@ -158,16 +158,16 @@ describe('Transcribe Handlers', () => {
       expect(result.models[0].id).toBe('parakeet-tdt-0.6b-v3');
     });
 
-    it('should return error when transcription not available', async () => {
+    it('should return NOT_AVAILABLE when transcription not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'transcribe.listModels',
       };
 
-      const response = await handleTranscribeListModels(request, mockContextWithoutTranscription);
+      const response = await registry.dispatch(request, mockContextWithoutTranscription);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should handle list models failure', async () => {
@@ -178,7 +178,7 @@ describe('Transcribe Handlers', () => {
         method: 'transcribe.listModels',
       };
 
-      const response = await handleTranscribeListModels(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('TRANSCRIPTION_FAILED');
@@ -208,43 +208,6 @@ describe('Transcribe Handlers', () => {
       const listHandler = handlers.find(h => h.method === 'transcribe.listModels');
 
       expect(listHandler?.options?.requiredManagers).toContain('transcriptionManager');
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch transcribe handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createTranscribeHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('transcribe.audio')).toBe(true);
-      expect(registry.has('transcribe.listModels')).toBe(true);
-
-      // Test transcribe.listModels through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'transcribe.listModels',
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('models');
-    });
-
-    it('should dispatch transcribe.audio through registry', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createTranscribeHandlers();
-      registry.registerAll(handlers);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'transcribe.audio',
-        params: { audioBase64: 'testdata' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('text');
     });
   });
 });

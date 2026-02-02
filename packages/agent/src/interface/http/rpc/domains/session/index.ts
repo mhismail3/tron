@@ -2,19 +2,10 @@
  * @fileoverview Session domain - Session management
  *
  * Handles session creation, resumption, listing, deletion, and forking.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleSessionCreate,
-  handleSessionResume,
-  handleSessionList,
-  handleSessionDelete,
-  handleSessionFork,
-  createSessionHandlers,
-} from '../../../../rpc/handlers/session.handler.js';
+// Re-export handler factory
+export { createSessionHandlers } from '@interface/rpc/handlers/session.handler.js';
 
 // Re-export types
 export type {
@@ -28,4 +19,4 @@ export type {
   SessionDeleteResult,
   SessionForkParams,
   SessionForkResult,
-} from '../../../../rpc/types/session.js';
+} from '@interface/rpc/types/session.js';

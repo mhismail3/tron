@@ -1,27 +1,28 @@
 /**
  * @fileoverview Tests for Memory RPC Handlers
  *
- * Tests memory.search, memory.addEntry, and memory.getHandoffs handlers.
+ * Tests memory.search, memory.addEntry, and memory.getHandoffs handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createMemoryHandlers,
-  handleMemorySearch,
-  handleMemoryAddEntry,
-  handleMemoryGetHandoffs,
-} from '../memory.handler.js';
+import { createMemoryHandlers } from '../memory.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Memory Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutMemoryStore: RpcContext;
   let mockSearchEntries: ReturnType<typeof vi.fn>;
   let mockAddEntry: ReturnType<typeof vi.fn>;
   let mockListHandoffs: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createMemoryHandlers());
+
     mockSearchEntries = vi.fn().mockResolvedValue({
       entries: [
         {
@@ -69,9 +70,14 @@ describe('Memory Handlers', () => {
         listHandoffs: mockListHandoffs,
       } as any,
     };
+
+    mockContextWithoutMemoryStore = {
+      sessionManager: {} as any,
+      agentManager: {} as any,
+    };
   });
 
-  describe('handleMemorySearch', () => {
+  describe('memory.search', () => {
     it('should search memory entries', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -79,7 +85,7 @@ describe('Memory Handlers', () => {
         params: { query: 'test', limit: 10 },
       };
 
-      const response = await handleMemorySearch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSearchEntries).toHaveBeenCalledWith({ query: 'test', limit: 10 });
@@ -94,7 +100,7 @@ describe('Memory Handlers', () => {
         method: 'memory.search',
       };
 
-      const response = await handleMemorySearch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSearchEntries).toHaveBeenCalledWith({});
@@ -107,7 +113,7 @@ describe('Memory Handlers', () => {
         params: {},
       };
 
-      const response = await handleMemorySearch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { entries: any[] };
@@ -125,9 +131,22 @@ describe('Memory Handlers', () => {
       // Second entry has default relevance
       expect(result.entries[1].relevance).toBe(1.0);
     });
+
+    it('should return NOT_AVAILABLE without memoryStore', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'memory.search',
+        params: { query: 'test' },
+      };
+
+      const response = await registry.dispatch(request, mockContextWithoutMemoryStore);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
+    });
   });
 
-  describe('handleMemoryAddEntry', () => {
+  describe('memory.addEntry', () => {
     it('should add a memory entry', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -139,7 +158,7 @@ describe('Memory Handlers', () => {
         },
       };
 
-      const response = await handleMemoryAddEntry(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockAddEntry).toHaveBeenCalledWith({
@@ -159,7 +178,7 @@ describe('Memory Handlers', () => {
         params: { content: 'Some content' },
       };
 
-      const response = await handleMemoryAddEntry(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -173,7 +192,7 @@ describe('Memory Handlers', () => {
         params: { type: 'note' },
       };
 
-      const response = await handleMemoryAddEntry(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -187,21 +206,21 @@ describe('Memory Handlers', () => {
         params: {},
       };
 
-      const response = await handleMemoryAddEntry(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
   });
 
-  describe('handleMemoryGetHandoffs', () => {
+  describe('memory.getHandoffs', () => {
     it('should list handoffs', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'memory.getHandoffs',
       };
 
-      const response = await handleMemoryGetHandoffs(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListHandoffs).toHaveBeenCalledWith(undefined, undefined);
@@ -216,7 +235,7 @@ describe('Memory Handlers', () => {
         params: { workingDirectory: '/projects/myapp' },
       };
 
-      const response = await handleMemoryGetHandoffs(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListHandoffs).toHaveBeenCalledWith('/projects/myapp', undefined);
@@ -229,7 +248,7 @@ describe('Memory Handlers', () => {
         params: { limit: 5 },
       };
 
-      const response = await handleMemoryGetHandoffs(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListHandoffs).toHaveBeenCalledWith(undefined, 5);
@@ -242,7 +261,7 @@ describe('Memory Handlers', () => {
         params: {},
       };
 
-      const response = await handleMemoryGetHandoffs(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { handoffs: any[] };
@@ -280,62 +299,6 @@ describe('Memory Handlers', () => {
       for (const handler of handlers) {
         expect(handler.options?.requiredManagers).toContain('memoryStore');
       }
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch memory handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createMemoryHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('memory.search')).toBe(true);
-      expect(registry.has('memory.addEntry')).toBe(true);
-      expect(registry.has('memory.getHandoffs')).toBe(true);
-
-      // Test memory.search through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'memory.search',
-        params: { query: 'test' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('entries');
-      expect(response.result).toHaveProperty('totalCount');
-    });
-
-    it('should dispatch memory.addEntry through registry', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createMemoryHandlers();
-      registry.registerAll(handlers);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'memory.addEntry',
-        params: { type: 'note', content: 'Test content' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('id');
-      expect(response.result).toHaveProperty('created');
-    });
-
-    it('should dispatch memory.getHandoffs through registry', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createMemoryHandlers();
-      registry.registerAll(handlers);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'memory.getHandoffs',
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('handoffs');
     });
   });
 });

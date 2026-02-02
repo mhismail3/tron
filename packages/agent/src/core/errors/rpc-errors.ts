@@ -15,6 +15,8 @@ export const RpcErrorCode = {
   NOT_AVAILABLE: 'NOT_AVAILABLE',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   FILE_NOT_FOUND: 'FILE_NOT_FOUND',
+  FILE_ERROR: 'FILE_ERROR',
+  PERMISSION_DENIED: 'PERMISSION_DENIED',
   BROWSER_ERROR: 'BROWSER_ERROR',
   SKILL_ERROR: 'SKILL_ERROR',
   METHOD_NOT_FOUND: 'METHOD_NOT_FOUND',
@@ -87,6 +89,42 @@ export class FileNotFoundError extends RpcError {
 export class InternalError extends RpcError {
   constructor(message: string) {
     super(RpcErrorCode.INTERNAL_ERROR, message);
+  }
+}
+
+/**
+ * Browser error
+ */
+export class BrowserError extends RpcError {
+  constructor(message: string) {
+    super(RpcErrorCode.BROWSER_ERROR, message);
+  }
+}
+
+/**
+ * Skill error
+ */
+export class SkillError extends RpcError {
+  constructor(message: string) {
+    super(RpcErrorCode.SKILL_ERROR, message);
+  }
+}
+
+/**
+ * File error
+ */
+export class FileError extends RpcError {
+  constructor(message: string) {
+    super(RpcErrorCode.FILE_ERROR, message);
+  }
+}
+
+/**
+ * Permission denied error
+ */
+export class PermissionDeniedError extends RpcError {
+  constructor(message: string) {
+    super(RpcErrorCode.PERMISSION_DENIED, message);
   }
 }
 

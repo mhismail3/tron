@@ -4,124 +4,100 @@
  * Handlers for device.* RPC methods:
  * - device.register: Register a device token for push notifications
  * - device.unregister: Unregister a device token
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
-import type { RpcRequest, RpcResponse } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { RpcError, RpcErrorCode } from './base.js';
 
 const logger = createLogger('rpc:device');
 
 // =============================================================================
-// Handler Implementations
+// Types
 // =============================================================================
 
-/**
- * Handle device.register request
- *
- * Registers or updates a device token for push notifications.
- */
-export async function handleDeviceRegister(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.deviceManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Device manager not available');
-  }
+interface DeviceRegisterParams {
+  deviceToken: string;
+  sessionId?: string;
+  workspaceId?: string;
+  environment?: 'sandbox' | 'production';
+}
 
-  const params = request.params as {
-    deviceToken?: string;
-    sessionId?: string;
-    workspaceId?: string;
-    environment?: 'sandbox' | 'production';
-  } | undefined;
+interface DeviceUnregisterParams {
+  deviceToken: string;
+}
 
-  if (!params?.deviceToken) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'deviceToken is required');
-  }
+// =============================================================================
+// Error Types
+// =============================================================================
 
-  try {
-    const result = await context.deviceManager.registerToken({
-      deviceToken: params.deviceToken,
-      sessionId: params.sessionId,
-      workspaceId: params.workspaceId,
-      environment: params.environment,
-    });
-
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    const structured = categorizeError(error, { operation: 'register' });
-    logger.error('Failed to register device token', {
-      code: structured.code,
-      category: LogErrorCategory.DATABASE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    if (error instanceof Error) {
-      return MethodRegistry.errorResponse(request.id, 'REGISTRATION_FAILED', error.message);
-    }
-    throw error;
+class RegistrationFailedError extends RpcError {
+  constructor(message: string) {
+    super('REGISTRATION_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
   }
 }
 
-/**
- * Handle device.unregister request
- *
- * Unregisters (deactivates) a device token.
- */
-export async function handleDeviceUnregister(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.deviceManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Device manager not available');
-  }
-
-  const params = request.params as { deviceToken?: string } | undefined;
-
-  if (!params?.deviceToken) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'deviceToken is required');
-  }
-
-  try {
-    const result = await context.deviceManager.unregisterToken(params.deviceToken);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    const structured = categorizeError(error, { operation: 'unregister' });
-    logger.error('Failed to unregister device token', {
-      code: structured.code,
-      category: LogErrorCategory.DATABASE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    if (error instanceof Error) {
-      return MethodRegistry.errorResponse(request.id, 'UNREGISTRATION_FAILED', error.message);
-    }
-    throw error;
+class UnregistrationFailedError extends RpcError {
+  constructor(message: string) {
+    super('UNREGISTRATION_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
   }
 }
 
 // =============================================================================
-// Handler Wrappers for Registry
-// =============================================================================
-
-const registerHandler: MethodHandler = async (request, context) => {
-  return handleDeviceRegister(request, context);
-};
-
-const unregisterHandler: MethodHandler = async (request, context) => {
-  return handleDeviceUnregister(request, context);
-};
-
-// =============================================================================
-// Method Registrations
+// Handler Factory
 // =============================================================================
 
 /**
  * Get all device method registrations
  */
 export function getDeviceHandlers(): MethodRegistration[] {
+  const registerHandler: MethodHandler<DeviceRegisterParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      return await context.deviceManager!.registerToken({
+        deviceToken: params.deviceToken,
+        sessionId: params.sessionId,
+        workspaceId: params.workspaceId,
+        environment: params.environment,
+      });
+    } catch (error) {
+      const structured = categorizeError(error, { operation: 'register' });
+      logger.error('Failed to register device token', {
+        code: structured.code,
+        category: LogErrorCategory.DATABASE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      if (error instanceof Error) {
+        throw new RegistrationFailedError(error.message);
+      }
+      throw error;
+    }
+  };
+
+  const unregisterHandler: MethodHandler<DeviceUnregisterParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      return await context.deviceManager!.unregisterToken(params.deviceToken);
+    } catch (error) {
+      const structured = categorizeError(error, { operation: 'unregister' });
+      logger.error('Failed to unregister device token', {
+        code: structured.code,
+        category: LogErrorCategory.DATABASE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      if (error instanceof Error) {
+        throw new UnregistrationFailedError(error.message);
+      }
+      throw error;
+    }
+  };
+
   return [
     {
       method: 'device.register',

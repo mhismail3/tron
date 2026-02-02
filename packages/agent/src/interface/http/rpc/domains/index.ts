@@ -36,8 +36,6 @@
  * - client: Client identification and capabilities
  * - communication: Inter-agent messaging
  * - deployment: Self-deployment pipeline
- *
- * @migration Handlers migrated from rpc/handlers/ to domain structure
  */
 
 // Core domains
@@ -86,4 +84,4 @@ export {
   type TypedHandler,
   type ParamsOf,
   type CreateHandlerOptions,
-} from '../../../rpc/handlers/base.js';
+} from '@interface/rpc/handlers/base.js';

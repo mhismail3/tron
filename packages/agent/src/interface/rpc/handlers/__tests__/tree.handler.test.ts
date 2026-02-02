@@ -1,22 +1,18 @@
 /**
  * @fileoverview Tests for Tree RPC Handlers
  *
- * Tests tree.getVisualization, tree.getBranches, tree.getSubtree, tree.getAncestors handlers.
+ * Tests tree.getVisualization, tree.getBranches, tree.getSubtree, tree.getAncestors handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createTreeHandlers,
-  handleTreeGetVisualization,
-  handleTreeGetBranches,
-  handleTreeGetSubtree,
-  handleTreeGetAncestors,
-} from '../tree.handler.js';
+import { createTreeHandlers } from '../tree.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Tree Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutEventStore: RpcContext;
   let mockGetTreeVisualization: ReturnType<typeof vi.fn>;
@@ -25,6 +21,9 @@ describe('Tree Handlers', () => {
   let mockGetAncestors: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createTreeHandlers());
+
     mockGetTreeVisualization = vi.fn().mockResolvedValue({
       sessionId: 'sess-123',
       rootEventId: 'evt-root',
@@ -83,7 +82,7 @@ describe('Tree Handlers', () => {
     };
   });
 
-  describe('handleTreeGetVisualization', () => {
+  describe('tree.getVisualization', () => {
     it('should get tree visualization for a session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -91,7 +90,7 @@ describe('Tree Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleTreeGetVisualization(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetTreeVisualization).toHaveBeenCalledWith('sess-123', {
@@ -113,7 +112,7 @@ describe('Tree Handlers', () => {
         },
       };
 
-      const response = await handleTreeGetVisualization(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetTreeVisualization).toHaveBeenCalledWith('sess-123', {
@@ -129,28 +128,28 @@ describe('Tree Handlers', () => {
         params: {},
       };
 
-      const response = await handleTreeGetVisualization(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('sessionId');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'tree.getVisualization',
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleTreeGetVisualization(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleTreeGetBranches', () => {
+  describe('tree.getBranches', () => {
     it('should get branches for a session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -158,7 +157,7 @@ describe('Tree Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleTreeGetBranches(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetBranches).toHaveBeenCalledWith('sess-123');
@@ -174,27 +173,27 @@ describe('Tree Handlers', () => {
         params: {},
       };
 
-      const response = await handleTreeGetBranches(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'tree.getBranches',
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleTreeGetBranches(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleTreeGetSubtree', () => {
+  describe('tree.getSubtree', () => {
     it('should get subtree from an event', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -202,7 +201,7 @@ describe('Tree Handlers', () => {
         params: { eventId: 'evt-123' },
       };
 
-      const response = await handleTreeGetSubtree(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetSubtree).toHaveBeenCalledWith('evt-123', {
@@ -224,7 +223,7 @@ describe('Tree Handlers', () => {
         },
       };
 
-      const response = await handleTreeGetSubtree(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetSubtree).toHaveBeenCalledWith('evt-123', {
@@ -240,28 +239,28 @@ describe('Tree Handlers', () => {
         params: {},
       };
 
-      const response = await handleTreeGetSubtree(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('eventId');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'tree.getSubtree',
         params: { eventId: 'evt-123' },
       };
 
-      const response = await handleTreeGetSubtree(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleTreeGetAncestors', () => {
+  describe('tree.getAncestors', () => {
     it('should get ancestors of an event', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -269,7 +268,7 @@ describe('Tree Handlers', () => {
         params: { eventId: 'evt-123' },
       };
 
-      const response = await handleTreeGetAncestors(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetAncestors).toHaveBeenCalledWith('evt-123');
@@ -284,24 +283,24 @@ describe('Tree Handlers', () => {
         params: {},
       };
 
-      const response = await handleTreeGetAncestors(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('eventId');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'tree.getAncestors',
         params: { eventId: 'evt-123' },
       };
 
-      const response = await handleTreeGetAncestors(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
@@ -336,30 +335,6 @@ describe('Tree Handlers', () => {
 
       const ancestorsHandler = handlers.find(h => h.method === 'tree.getAncestors');
       expect(ancestorsHandler?.options?.requiredParams).toContain('eventId');
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch tree handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createTreeHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('tree.getVisualization')).toBe(true);
-      expect(registry.has('tree.getBranches')).toBe(true);
-      expect(registry.has('tree.getSubtree')).toBe(true);
-      expect(registry.has('tree.getAncestors')).toBe(true);
-
-      // Test tree.getBranches through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'tree.getBranches',
-        params: { sessionId: 'sess-123' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('mainBranch');
     });
   });
 });

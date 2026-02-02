@@ -1,25 +1,27 @@
 /**
  * @fileoverview Tests for Model RPC Handlers
  *
- * Tests model.switch and model.list handlers.
+ * Tests model.switch and model.list handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createModelHandlers,
-  handleModelSwitch,
-  handleModelList,
-} from '../model.handler.js';
+import { createModelHandlers } from '../model.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 import { ANTHROPIC_MODELS } from '@llm/providers/models.js';
 
 describe('Model Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutSessionManager: RpcContext;
   let mockSwitchModel: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createModelHandlers());
+
     mockSwitchModel = vi.fn().mockResolvedValue({
       sessionId: 'sess-123',
       previousModel: 'claude-3-sonnet',
@@ -39,9 +41,14 @@ describe('Model Handlers', () => {
       agentManager: {} as any,
       memoryStore: {} as any,
     };
+
+    mockContextWithoutSessionManager = {
+      agentManager: {} as any,
+      memoryStore: {} as any,
+    };
   });
 
-  describe('handleModelSwitch', () => {
+  describe('model.switch', () => {
     it('should switch model for a session', async () => {
       const validModel = ANTHROPIC_MODELS[0]?.id || 'claude-sonnet-4-20250514';
       const request: RpcRequest = {
@@ -50,7 +57,7 @@ describe('Model Handlers', () => {
         params: { sessionId: 'sess-123', model: validModel },
       };
 
-      const response = await handleModelSwitch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSwitchModel).toHaveBeenCalledWith('sess-123', validModel);
@@ -63,7 +70,7 @@ describe('Model Handlers', () => {
         params: { model: 'claude-3-opus' },
       };
 
-      const response = await handleModelSwitch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -77,7 +84,7 @@ describe('Model Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleModelSwitch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -91,22 +98,36 @@ describe('Model Handlers', () => {
         params: { sessionId: 'sess-123', model: 'nonexistent-model' },
       };
 
-      const response = await handleModelSwitch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('Unknown model');
     });
+
+    it('should return NOT_AVAILABLE without sessionManager', async () => {
+      const validModel = ANTHROPIC_MODELS[0]?.id || 'claude-sonnet-4-20250514';
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.switch',
+        params: { sessionId: 'sess-123', model: validModel },
+      };
+
+      const response = await registry.dispatch(request, mockContextWithoutSessionManager);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
+    });
   });
 
-  describe('handleModelList', () => {
+  describe('model.list', () => {
     it('should return list of models', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'model.list',
       };
 
-      const response = await handleModelList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { models: any[] };
@@ -121,7 +142,7 @@ describe('Model Handlers', () => {
         method: 'model.list',
       };
 
-      const response = await handleModelList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       const result = response.result as { models: any[] };
       const anthropicModels = result.models.filter(m => m.provider === 'anthropic');
@@ -134,7 +155,7 @@ describe('Model Handlers', () => {
         method: 'model.list',
       };
 
-      const response = await handleModelList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       const result = response.result as { models: any[] };
       const firstModel = result.models[0];
@@ -165,27 +186,6 @@ describe('Model Handlers', () => {
     });
   });
 
-  describe('Registry Integration', () => {
-    it('should register and dispatch model handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createModelHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('model.switch')).toBe(true);
-      expect(registry.has('model.list')).toBe(true);
-
-      // Test model.list through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'model.list',
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('models');
-    });
-  });
-
   // ===========================================================================
   // Gemini Model Validation Tests
   // ===========================================================================
@@ -198,7 +198,7 @@ describe('Model Handlers', () => {
         params: { sessionId: 'sess-123', model: 'gemini-3-pro-preview' },
       };
 
-      const response = await handleModelSwitch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSwitchModel).toHaveBeenCalledWith('sess-123', 'gemini-3-pro-preview');
@@ -211,7 +211,7 @@ describe('Model Handlers', () => {
         params: { sessionId: 'sess-123', model: 'gemini-3-flash-preview' },
       };
 
-      const response = await handleModelSwitch(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSwitchModel).toHaveBeenCalledWith('sess-123', 'gemini-3-flash-preview');
@@ -223,7 +223,7 @@ describe('Model Handlers', () => {
         method: 'model.list',
       };
 
-      const response = await handleModelList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { models: any[] };
@@ -253,7 +253,7 @@ describe('Model Handlers', () => {
         method: 'model.list',
       };
 
-      const response = await handleModelList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       const result = response.result as { models: any[] };
       const gemini3Pro = result.models.find(m => m.id === 'gemini-3-pro-preview');
@@ -269,7 +269,7 @@ describe('Model Handlers', () => {
         method: 'model.list',
       };
 
-      const response = await handleModelList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       const result = response.result as { models: any[] };
       const gemini3Pro = result.models.find(m => m.id === 'gemini-3-pro-preview');

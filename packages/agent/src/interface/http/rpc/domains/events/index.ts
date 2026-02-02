@@ -2,17 +2,10 @@
  * @fileoverview Events domain - Event store operations
  *
  * Handles event history queries and appending.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleEventsGetHistory,
-  handleEventsGetSince,
-  handleEventsAppend,
-  createEventsHandlers,
-} from '../../../../rpc/handlers/events.handler.js';
+// Re-export handler factory
+export { createEventsHandlers } from '@interface/rpc/handlers/events.handler.js';
 
 // Re-export types
 export type {
@@ -22,4 +15,4 @@ export type {
   EventsGetSinceResult,
   EventsAppendParams,
   EventsAppendResult,
-} from '../../../../rpc/types/events.js';
+} from '@interface/rpc/types/events.js';

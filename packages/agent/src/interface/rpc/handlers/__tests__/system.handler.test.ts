@@ -1,23 +1,23 @@
 /**
  * @fileoverview Tests for System RPC Handlers
  *
- * Tests system.ping and system.getInfo handlers in isolation.
+ * Tests system.ping and system.getInfo handlers using registry dispatch.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createSystemHandlers,
-  handleSystemPing,
-  handleSystemGetInfo,
-} from '../system.handler.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { createSystemHandlers } from '../system.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('System Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createSystemHandlers());
+
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
@@ -25,14 +25,14 @@ describe('System Handlers', () => {
     };
   });
 
-  describe('handleSystemPing', () => {
+  describe('system.ping', () => {
     it('should return pong with timestamp', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'system.ping',
       };
 
-      const response = await handleSystemPing(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.error).toBeUndefined();
       expect(response.result).toMatchObject({
@@ -47,7 +47,7 @@ describe('System Handlers', () => {
         method: 'system.ping',
       };
 
-      const response = await handleSystemPing(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
       const result = response.result as { pong: boolean; timestamp: string };
 
       // Should be a valid ISO date
@@ -61,20 +61,20 @@ describe('System Handlers', () => {
         method: 'system.ping',
       };
 
-      const response = await handleSystemPing(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.id).toBe('custom-id-123');
     });
   });
 
-  describe('handleSystemGetInfo', () => {
+  describe('system.getInfo', () => {
     it('should return system info', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'system.getInfo',
       };
 
-      const response = await handleSystemGetInfo(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.error).toBeUndefined();
       expect(response.result).toMatchObject({
@@ -94,7 +94,7 @@ describe('System Handlers', () => {
         method: 'system.getInfo',
       };
 
-      const response = await handleSystemGetInfo(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
       const result = response.result as { uptime: number };
 
       expect(result.uptime).toBeGreaterThanOrEqual(0);
@@ -106,7 +106,7 @@ describe('System Handlers', () => {
         method: 'system.getInfo',
       };
 
-      const response = await handleSystemGetInfo(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
       const result = response.result as { memoryUsage: { heapUsed: number; heapTotal: number } };
 
       expect(result.memoryUsage.heapUsed).toBeGreaterThan(0);
@@ -140,13 +140,6 @@ describe('System Handlers', () => {
 
   describe('Registry Integration', () => {
     it('should register and dispatch system handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createSystemHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('system.ping')).toBe(true);
-      expect(registry.has('system.getInfo')).toBe(true);
-
       const request: RpcRequest = {
         id: '1',
         method: 'system.ping',
@@ -157,10 +150,6 @@ describe('System Handlers', () => {
     });
 
     it('should list system namespace methods', () => {
-      const registry = new MethodRegistry();
-      const handlers = createSystemHandlers();
-      registry.registerAll(handlers);
-
       const systemMethods = registry.listByNamespace('system');
       expect(systemMethods).toContain('system.ping');
       expect(systemMethods).toContain('system.getInfo');

@@ -6,12 +6,11 @@
  * - worktree.commit: Commit worktree changes
  * - worktree.merge: Merge worktree to target branch
  * - worktree.list: List all worktrees
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { RpcHandlerError } from '@core/utils/index.js';
 import type {
-  RpcRequest,
-  RpcResponse,
   WorktreeGetStatusParams,
   WorktreeGetStatusResult,
   WorktreeCommitParams,
@@ -20,122 +19,7 @@ import type {
   WorktreeMergeResult,
   WorktreeListResult,
 } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
-
-// =============================================================================
-// Handler Implementations
-// =============================================================================
-
-/**
- * Handle worktree.getStatus request
- *
- * Gets the worktree status for a session.
- */
-export async function handleWorktreeGetStatus(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.worktreeManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
-  }
-
-  const params = request.params as WorktreeGetStatusParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  const worktree = await context.worktreeManager.getWorktreeStatus(params.sessionId);
-
-  const result: WorktreeGetStatusResult = {
-    hasWorktree: worktree !== null,
-    worktree: worktree ?? undefined,
-  };
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle worktree.commit request
- *
- * Commits worktree changes.
- */
-export async function handleWorktreeCommit(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.worktreeManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
-  }
-
-  const params = request.params as WorktreeCommitParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-  if (!params?.message) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'message is required');
-  }
-
-  const result: WorktreeCommitResult = await context.worktreeManager.commitWorktree(
-    params.sessionId,
-    params.message
-  );
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle worktree.merge request
- *
- * Merges worktree to target branch.
- */
-export async function handleWorktreeMerge(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.worktreeManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
-  }
-
-  const params = request.params as WorktreeMergeParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-  if (!params?.targetBranch) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'targetBranch is required');
-  }
-
-  const result: WorktreeMergeResult = await context.worktreeManager.mergeWorktree(
-    params.sessionId,
-    params.targetBranch,
-    params.strategy
-  );
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle worktree.list request
- *
- * Lists all worktrees.
- */
-export async function handleWorktreeList(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.worktreeManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Worktree manager not available');
-  }
-
-  const worktrees = await context.worktreeManager.listWorktrees();
-
-  const result: WorktreeListResult = { worktrees };
-
-  return MethodRegistry.successResponse(request.id, result);
-}
+import type { MethodRegistration, MethodHandler } from '../registry.js';
 
 // =============================================================================
 // Handler Factory
@@ -147,36 +31,40 @@ export async function handleWorktreeList(
  * @returns Array of method registrations for bulk registration
  */
 export function createWorktreeHandlers(): MethodRegistration[] {
-  const getStatusHandler: MethodHandler = async (request, context) => {
-    const response = await handleWorktreeGetStatus(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getStatusHandler: MethodHandler<WorktreeGetStatusParams> = async (request, context) => {
+    const params = request.params!;
+    const worktree = await context.worktreeManager!.getWorktreeStatus(params.sessionId);
+
+    const result: WorktreeGetStatusResult = {
+      hasWorktree: worktree !== null,
+      worktree: worktree ?? undefined,
+    };
+    return result;
   };
 
-  const commitHandler: MethodHandler = async (request, context) => {
-    const response = await handleWorktreeCommit(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const commitHandler: MethodHandler<WorktreeCommitParams> = async (request, context) => {
+    const params = request.params!;
+    const result: WorktreeCommitResult = await context.worktreeManager!.commitWorktree(
+      params.sessionId,
+      params.message
+    );
+    return result;
   };
 
-  const mergeHandler: MethodHandler = async (request, context) => {
-    const response = await handleWorktreeMerge(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const mergeHandler: MethodHandler<WorktreeMergeParams> = async (request, context) => {
+    const params = request.params!;
+    const result: WorktreeMergeResult = await context.worktreeManager!.mergeWorktree(
+      params.sessionId,
+      params.targetBranch,
+      params.strategy
+    );
+    return result;
   };
 
-  const listHandler: MethodHandler = async (request, context) => {
-    const response = await handleWorktreeList(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const listHandler: MethodHandler = async (_request, context) => {
+    const worktrees = await context.worktreeManager!.listWorktrees();
+    const result: WorktreeListResult = { worktrees };
+    return result;
   };
 
   return [

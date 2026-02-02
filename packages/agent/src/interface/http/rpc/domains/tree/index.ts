@@ -2,18 +2,10 @@
  * @fileoverview Tree domain - Session tree visualization
  *
  * Handles tree visualization, branches, subtrees, and ancestors.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleTreeGetVisualization,
-  handleTreeGetBranches,
-  handleTreeGetSubtree,
-  handleTreeGetAncestors,
-  createTreeHandlers,
-} from '../../../../rpc/handlers/tree.handler.js';
+// Re-export handler factory
+export { createTreeHandlers } from '@interface/rpc/handlers/tree.handler.js';
 
 // Re-export types
 export type {
@@ -25,4 +17,4 @@ export type {
   TreeGetSubtreeResult,
   TreeGetAncestorsParams,
   TreeGetAncestorsResult,
-} from '../../../../rpc/types/tree.js';
+} from '@interface/rpc/types/tree.js';

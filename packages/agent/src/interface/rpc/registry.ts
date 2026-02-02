@@ -15,6 +15,7 @@
 import type { RpcRequest, RpcResponse } from './types.js';
 import type { RpcContext } from './context-types.js';
 import { buildMiddlewareChain, type Middleware, type MiddlewareNext } from './middleware/index.js';
+import { isRpcError } from '@core/errors/rpc-errors.js';
 
 // =============================================================================
 // Types
@@ -53,10 +54,14 @@ export interface MethodOptions {
 
 /**
  * Full registration record for a method
+ *
+ * Note: handler uses MethodHandler<any> to allow typed handlers to be assigned.
+ * At runtime, all handlers receive the same request/context structure.
  */
 export interface MethodRegistration {
   method: string;
-  handler: MethodHandler;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: MethodHandler<any, any>;
   options?: MethodOptions;
 }
 
@@ -64,7 +69,8 @@ export interface MethodRegistration {
  * Internal storage format
  */
 interface RegistrationEntry {
-  handler: MethodHandler;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: MethodHandler<any, any>;
   options?: MethodOptions;
 }
 
@@ -111,7 +117,8 @@ export class MethodRegistry {
    * @param options - Optional registration options
    * @throws If method is already registered (unless force: true)
    */
-  register(method: string, handler: MethodHandler, options?: MethodOptions): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  register(method: string, handler: MethodHandler<any, any>, options?: MethodOptions): void {
     if (this.handlers.has(method) && !options?.force) {
       throw new Error(`Method "${method}" is already registered`);
     }
@@ -309,6 +316,10 @@ export class MethodRegistry {
       const result = await handler(request, context);
       return MethodRegistry.successResponse(request.id, result);
     } catch (error) {
+      // Handle typed RPC errors with proper codes
+      if (isRpcError(error)) {
+        return MethodRegistry.errorResponse(request.id, error.code, error.message);
+      }
       // Preserve error code if provided by handler, otherwise use INTERNAL_ERROR
       const errorCode = (error as { code?: string })?.code || 'INTERNAL_ERROR';
       return MethodRegistry.errorResponse(

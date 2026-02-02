@@ -2,19 +2,10 @@
  * @fileoverview Todo domain - Task management
  *
  * Handles todo listing, summaries, backlog, and restoration.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleTodoList,
-  handleTodoGetSummary,
-  handleTodoGetBacklog,
-  handleTodoRestore,
-  handleTodoGetBacklogCount,
-  createTodoHandlers,
-} from '../../../../rpc/handlers/todo.handler.js';
+// Re-export handler factory
+export { createTodoHandlers } from '@interface/rpc/handlers/todo.handler.js';
 
 // Re-export types
 export type {
@@ -28,4 +19,4 @@ export type {
   TodoRestoreResult,
   TodoGetBacklogCountParams,
   TodoGetBacklogCountResult,
-} from '../../../../rpc/types/todo.js';
+} from '@interface/rpc/types/todo.js';

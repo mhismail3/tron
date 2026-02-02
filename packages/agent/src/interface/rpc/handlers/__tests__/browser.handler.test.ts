@@ -1,24 +1,28 @@
 /**
- * Tests for browser.handler.ts
+ * @fileoverview Tests for Browser RPC Handlers
+ *
+ * Tests browser.startStream, browser.stopStream, browser.getStatus handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  handleBrowserStartStream,
-  handleBrowserStopStream,
-  handleBrowserGetStatus,
-  createBrowserHandlers,
-} from '../browser.handler.js';
+import { createBrowserHandlers } from '../browser.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
+import { MethodRegistry } from '../../registry.js';
 
-describe('browser.handler', () => {
+describe('Browser Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutBrowserManager: RpcContext;
   let mockStartStream: ReturnType<typeof vi.fn>;
   let mockStopStream: ReturnType<typeof vi.fn>;
   let mockGetStatus: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createBrowserHandlers());
+
     mockStartStream = vi.fn().mockResolvedValue({ success: true });
     mockStopStream = vi.fn().mockResolvedValue({ success: true });
     mockGetStatus = vi.fn().mockResolvedValue({ hasBrowser: true, isStreaming: false });
@@ -33,22 +37,26 @@ describe('browser.handler', () => {
       agentManager: {} as any,
       memoryStore: {} as any,
     } as unknown as RpcContext;
+
+    mockContextWithoutBrowserManager = {
+      sessionManager: {} as any,
+      agentManager: {} as any,
+      memoryStore: {} as any,
+    };
   });
 
-  describe('handleBrowserStartStream', () => {
-    it('should return error when browserManager is not available', async () => {
+  describe('browser.startStream', () => {
+    it('should return NOT_AVAILABLE when browserManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'browser.startStream',
         params: { sessionId: 'session-123' },
       };
 
-      const contextWithoutBrowser = {} as RpcContext;
-      const response = await handleBrowserStartStream(request, contextWithoutBrowser);
+      const response = await registry.dispatch(request, mockContextWithoutBrowserManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Browser manager not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when sessionId is missing', async () => {
@@ -58,11 +66,11 @@ describe('browser.handler', () => {
         params: {},
       };
 
-      const response = await handleBrowserStartStream(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('sessionId is required');
+      expect(response.error?.message).toContain('sessionId');
     });
 
     it('should start stream successfully', async () => {
@@ -75,7 +83,7 @@ describe('browser.handler', () => {
       const mockResult = { success: true };
       mockStartStream.mockResolvedValue(mockResult);
 
-      const response = await handleBrowserStartStream(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -91,7 +99,7 @@ describe('browser.handler', () => {
 
       mockStartStream.mockRejectedValue(new Error('Browser not connected'));
 
-      const response = await handleBrowserStartStream(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('BROWSER_ERROR');
@@ -99,19 +107,18 @@ describe('browser.handler', () => {
     });
   });
 
-  describe('handleBrowserStopStream', () => {
-    it('should return error when browserManager is not available', async () => {
+  describe('browser.stopStream', () => {
+    it('should return NOT_AVAILABLE when browserManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'browser.stopStream',
         params: { sessionId: 'session-123' },
       };
 
-      const contextWithoutBrowser = {} as RpcContext;
-      const response = await handleBrowserStopStream(request, contextWithoutBrowser);
+      const response = await registry.dispatch(request, mockContextWithoutBrowserManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when sessionId is missing', async () => {
@@ -121,7 +128,7 @@ describe('browser.handler', () => {
         params: {},
       };
 
-      const response = await handleBrowserStopStream(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -137,7 +144,7 @@ describe('browser.handler', () => {
       const mockResult = { success: true };
       mockStopStream.mockResolvedValue(mockResult);
 
-      const response = await handleBrowserStopStream(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -152,26 +159,25 @@ describe('browser.handler', () => {
 
       mockStopStream.mockRejectedValue(new Error('Stream not found'));
 
-      const response = await handleBrowserStopStream(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('BROWSER_ERROR');
     });
   });
 
-  describe('handleBrowserGetStatus', () => {
-    it('should return error when browserManager is not available', async () => {
+  describe('browser.getStatus', () => {
+    it('should return NOT_AVAILABLE when browserManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'browser.getStatus',
         params: { sessionId: 'session-123' },
       };
 
-      const contextWithoutBrowser = {} as RpcContext;
-      const response = await handleBrowserGetStatus(request, contextWithoutBrowser);
+      const response = await registry.dispatch(request, mockContextWithoutBrowserManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when sessionId is missing', async () => {
@@ -181,7 +187,7 @@ describe('browser.handler', () => {
         params: {},
       };
 
-      const response = await handleBrowserGetStatus(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -197,7 +203,7 @@ describe('browser.handler', () => {
       const mockResult = { hasBrowser: true, isStreaming: true };
       mockGetStatus.mockResolvedValue(mockResult);
 
-      const response = await handleBrowserGetStatus(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -212,7 +218,7 @@ describe('browser.handler', () => {
 
       mockGetStatus.mockRejectedValue(new Error('Session not found'));
 
-      const response = await handleBrowserGetStatus(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('BROWSER_ERROR');
@@ -234,37 +240,6 @@ describe('browser.handler', () => {
         expect(reg.options?.requiredParams).toContain('sessionId');
         expect(reg.options?.requiredManagers).toContain('browserManager');
       }
-    });
-
-    it('should create handlers that return results on success', async () => {
-      const registrations = createBrowserHandlers();
-      const startHandler = registrations.find(r => r.method === 'browser.startStream')!.handler;
-
-      const mockResult = { success: true };
-      mockStartStream.mockResolvedValue(mockResult);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'browser.startStream',
-        params: { sessionId: 'session-123' },
-      };
-
-      const result = await startHandler(request, mockContext);
-
-      expect(result).toEqual(mockResult);
-    });
-
-    it('should create handlers that throw on error', async () => {
-      const registrations = createBrowserHandlers();
-      const handler = registrations[0].handler;
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'browser.startStream',
-        params: {},
-      };
-
-      await expect(handler(request, mockContext)).rejects.toThrow('sessionId is required');
     });
   });
 });

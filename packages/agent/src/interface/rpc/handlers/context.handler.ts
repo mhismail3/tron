@@ -9,13 +9,12 @@
  * - context.confirmCompaction: Confirm and execute compaction
  * - context.canAcceptTurn: Check if session can accept a turn
  * - context.clear: Clear session context
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
-import { RpcHandlerError } from '@core/utils/index.js';
+import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import type {
-  RpcRequest,
-  RpcResponse,
   ContextGetSnapshotParams,
   ContextGetDetailedSnapshotParams,
   ContextShouldCompactParams,
@@ -25,282 +24,28 @@ import type {
   ContextCanAcceptTurnParams,
   ContextClearParams,
 } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { SessionNotActiveError } from './base.js';
 
 const logger = createLogger('rpc:context');
 
-// =============================================================================
-// Handler Implementations
-// =============================================================================
-
 /**
- * Handle context.getSnapshot request
- *
- * Gets a snapshot of the context for a session.
+ * Wrap operations that may throw "not active" errors
  */
-export async function handleContextGetSnapshot(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextGetSnapshotParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
+async function withSessionActiveCheck<T>(
+  sessionId: string,
+  operation: string,
+  fn: () => T | Promise<T>
+): Promise<T> {
   try {
-    const result = context.contextManager.getContextSnapshot(params.sessionId);
-    return MethodRegistry.successResponse(request.id, result);
+    return await fn();
   } catch (error) {
     if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      throw new SessionNotActiveError(sessionId);
     }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getSnapshot' });
-    logger.error('Failed to get context snapshot', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: structured.category,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle context.getDetailedSnapshot request
- *
- * Gets a detailed snapshot of the context for a session.
- */
-export async function handleContextGetDetailedSnapshot(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextGetDetailedSnapshotParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = context.contextManager.getDetailedContextSnapshot(params.sessionId);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getDetailedSnapshot' });
-    logger.error('Failed to get detailed context snapshot', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: structured.category,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle context.shouldCompact request
- *
- * Checks if a session should be compacted.
- */
-export async function handleContextShouldCompact(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextShouldCompactParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const shouldCompact = context.contextManager.shouldCompact(params.sessionId);
-    const result: ContextShouldCompactResult = { shouldCompact };
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'shouldCompact' });
-    logger.error('Failed to check if session should compact', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: structured.category,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle context.previewCompaction request
- *
- * Previews the compaction result for a session.
- */
-export async function handleContextPreviewCompaction(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextPreviewCompactionParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = await context.contextManager.previewCompaction(params.sessionId);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'previewCompaction' });
-    logger.error('Failed to preview compaction', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: structured.category,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle context.confirmCompaction request
- *
- * Confirms and executes compaction for a session.
- */
-export async function handleContextConfirmCompaction(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextConfirmCompactionParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = await context.contextManager.confirmCompaction(
-      params.sessionId,
-      { editedSummary: params.editedSummary }
-    );
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'confirmCompaction' });
-    logger.error('Failed to confirm compaction', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: LogErrorCategory.COMPACTION,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle context.canAcceptTurn request
- *
- * Checks if a session can accept another turn.
- */
-export async function handleContextCanAcceptTurn(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextCanAcceptTurnParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-  if (params.estimatedResponseTokens === undefined) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'estimatedResponseTokens is required');
-  }
-
-  try {
-    const result = context.contextManager.canAcceptTurn(
-      params.sessionId,
-      { estimatedResponseTokens: params.estimatedResponseTokens }
-    );
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'canAcceptTurn' });
-    logger.error('Failed to check if session can accept turn', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: LogErrorCategory.TOKEN_LIMIT,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle context.clear request
- *
- * Clears the context for a session.
- */
-export async function handleContextClear(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.contextManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Context manager not available');
-  }
-
-  const params = request.params as ContextClearParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const result = await context.contextManager.clearContext(params.sessionId);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'clear' });
-    logger.error('Failed to clear context', {
-      sessionId: params.sessionId,
+    const structured = categorizeError(error, { sessionId, operation });
+    logger.error(`Failed to ${operation}`, {
+      sessionId,
       code: structured.code,
       category: structured.category,
       error: structured.message,
@@ -320,60 +65,59 @@ export async function handleContextClear(
  * @returns Array of method registrations for bulk registration
  */
 export function createContextHandlers(): MethodRegistration[] {
-  const getSnapshotHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextGetSnapshot(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getSnapshotHandler: MethodHandler<ContextGetSnapshotParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'getSnapshot', () =>
+      context.contextManager!.getContextSnapshot(params.sessionId)
+    );
   };
 
-  const getDetailedSnapshotHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextGetDetailedSnapshot(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getDetailedSnapshotHandler: MethodHandler<ContextGetDetailedSnapshotParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'getDetailedSnapshot', () =>
+      context.contextManager!.getDetailedContextSnapshot(params.sessionId)
+    );
   };
 
-  const shouldCompactHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextShouldCompact(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const shouldCompactHandler: MethodHandler<ContextShouldCompactParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'shouldCompact', () => {
+      const shouldCompact = context.contextManager!.shouldCompact(params.sessionId);
+      const result: ContextShouldCompactResult = { shouldCompact };
+      return result;
+    });
   };
 
-  const previewCompactionHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextPreviewCompaction(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const previewCompactionHandler: MethodHandler<ContextPreviewCompactionParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'previewCompaction', () =>
+      context.contextManager!.previewCompaction(params.sessionId)
+    );
   };
 
-  const confirmCompactionHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextConfirmCompaction(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const confirmCompactionHandler: MethodHandler<ContextConfirmCompactionParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'confirmCompaction', () =>
+      context.contextManager!.confirmCompaction(params.sessionId, {
+        editedSummary: params.editedSummary,
+      })
+    );
   };
 
-  const canAcceptTurnHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextCanAcceptTurn(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const canAcceptTurnHandler: MethodHandler<ContextCanAcceptTurnParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'canAcceptTurn', () =>
+      context.contextManager!.canAcceptTurn(params.sessionId, {
+        estimatedResponseTokens: params.estimatedResponseTokens,
+      })
+    );
   };
 
-  const clearHandler: MethodHandler = async (request, context) => {
-    const response = await handleContextClear(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const clearHandler: MethodHandler<ContextClearParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'clear', () =>
+      context.contextManager!.clearContext(params.sessionId)
+    );
   };
 
   return [

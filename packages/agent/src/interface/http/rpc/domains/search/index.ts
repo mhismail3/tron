@@ -2,16 +2,10 @@
  * @fileoverview Search domain - Content and event search
  *
  * Handles content and event search operations.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleSearchContent,
-  handleSearchEvents,
-  createSearchHandlers,
-} from '../../../../rpc/handlers/search.handler.js';
+// Re-export handler factory
+export { createSearchHandlers } from '@interface/rpc/handlers/search.handler.js';
 
 // Re-export types
 export type {
@@ -19,4 +13,4 @@ export type {
   SearchContentResult,
   SearchEventsParams,
   SearchEventsResult,
-} from '../../../../rpc/types/search.js';
+} from '@interface/rpc/types/search.js';

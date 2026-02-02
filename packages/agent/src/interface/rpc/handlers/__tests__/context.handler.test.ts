@@ -2,25 +2,18 @@
  * @fileoverview Tests for Context RPC Handlers
  *
  * Tests context.getSnapshot, context.getDetailedSnapshot, context.shouldCompact,
- * context.previewCompaction, context.confirmCompaction, context.canAcceptTurn, context.clear handlers.
+ * context.previewCompaction, context.confirmCompaction, context.canAcceptTurn, context.clear handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createContextHandlers,
-  handleContextGetSnapshot,
-  handleContextGetDetailedSnapshot,
-  handleContextShouldCompact,
-  handleContextPreviewCompaction,
-  handleContextConfirmCompaction,
-  handleContextCanAcceptTurn,
-  handleContextClear,
-} from '../context.handler.js';
+import { createContextHandlers } from '../context.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Context Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutContextManager: RpcContext;
   let mockGetContextSnapshot: ReturnType<typeof vi.fn>;
@@ -32,6 +25,9 @@ describe('Context Handlers', () => {
   let mockClearContext: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createContextHandlers());
+
     mockGetContextSnapshot = vi.fn().mockReturnValue({
       sessionId: 'sess-123',
       totalTokens: 50000,
@@ -96,7 +92,7 @@ describe('Context Handlers', () => {
     };
   });
 
-  describe('handleContextGetSnapshot', () => {
+  describe('context.getSnapshot', () => {
     it('should get context snapshot', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -104,7 +100,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextGetSnapshot(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetContextSnapshot).toHaveBeenCalledWith('sess-123');
@@ -119,7 +115,7 @@ describe('Context Handlers', () => {
         params: {},
       };
 
-      const response = await handleContextGetSnapshot(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -136,27 +132,27 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-inactive' },
       };
 
-      const response = await handleContextGetSnapshot(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SESSION_NOT_ACTIVE');
     });
 
-    it('should return NOT_SUPPORTED without contextManager', async () => {
+    it('should return NOT_AVAILABLE without contextManager', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'context.getSnapshot',
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextGetSnapshot(request, mockContextWithoutContextManager);
+      const response = await registry.dispatch(request, mockContextWithoutContextManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleContextGetDetailedSnapshot', () => {
+  describe('context.getDetailedSnapshot', () => {
     it('should get detailed context snapshot', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -164,7 +160,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextGetDetailedSnapshot(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetDetailedContextSnapshot).toHaveBeenCalledWith('sess-123');
@@ -179,14 +175,14 @@ describe('Context Handlers', () => {
         params: {},
       };
 
-      const response = await handleContextGetDetailedSnapshot(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
   });
 
-  describe('handleContextShouldCompact', () => {
+  describe('context.shouldCompact', () => {
     it('should check if should compact', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -194,7 +190,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextShouldCompact(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockShouldCompact).toHaveBeenCalledWith('sess-123');
@@ -211,7 +207,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-full' },
       };
 
-      const response = await handleContextShouldCompact(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { shouldCompact: boolean };
@@ -225,14 +221,14 @@ describe('Context Handlers', () => {
         params: {},
       };
 
-      const response = await handleContextShouldCompact(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
   });
 
-  describe('handleContextPreviewCompaction', () => {
+  describe('context.previewCompaction', () => {
     it('should preview compaction', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -240,7 +236,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextPreviewCompaction(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockPreviewCompaction).toHaveBeenCalledWith('sess-123');
@@ -255,14 +251,14 @@ describe('Context Handlers', () => {
         params: {},
       };
 
-      const response = await handleContextPreviewCompaction(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
   });
 
-  describe('handleContextConfirmCompaction', () => {
+  describe('context.confirmCompaction', () => {
     it('should confirm compaction', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -270,7 +266,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextConfirmCompaction(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockConfirmCompaction).toHaveBeenCalledWith('sess-123', { editedSummary: undefined });
@@ -285,7 +281,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123', editedSummary: 'Custom summary' },
       };
 
-      const response = await handleContextConfirmCompaction(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockConfirmCompaction).toHaveBeenCalledWith('sess-123', { editedSummary: 'Custom summary' });
@@ -298,14 +294,14 @@ describe('Context Handlers', () => {
         params: {},
       };
 
-      const response = await handleContextConfirmCompaction(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
   });
 
-  describe('handleContextCanAcceptTurn', () => {
+  describe('context.canAcceptTurn', () => {
     it('should check if can accept turn', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -313,7 +309,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123', estimatedResponseTokens: 5000 },
       };
 
-      const response = await handleContextCanAcceptTurn(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockCanAcceptTurn).toHaveBeenCalledWith('sess-123', { estimatedResponseTokens: 5000 });
@@ -328,7 +324,7 @@ describe('Context Handlers', () => {
         params: { estimatedResponseTokens: 5000 },
       };
 
-      const response = await handleContextCanAcceptTurn(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -342,7 +338,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextCanAcceptTurn(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -350,7 +346,7 @@ describe('Context Handlers', () => {
     });
   });
 
-  describe('handleContextClear', () => {
+  describe('context.clear', () => {
     it('should clear context', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -358,7 +354,7 @@ describe('Context Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleContextClear(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockClearContext).toHaveBeenCalledWith('sess-123');
@@ -373,7 +369,7 @@ describe('Context Handlers', () => {
         params: {},
       };
 
-      const response = await handleContextClear(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -410,29 +406,6 @@ describe('Context Handlers', () => {
 
       expect(canAcceptHandler?.options?.requiredParams).toContain('sessionId');
       expect(canAcceptHandler?.options?.requiredParams).toContain('estimatedResponseTokens');
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch context handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createContextHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('context.getSnapshot')).toBe(true);
-      expect(registry.has('context.shouldCompact')).toBe(true);
-      expect(registry.has('context.clear')).toBe(true);
-
-      // Test context.getSnapshot through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'context.getSnapshot',
-        params: { sessionId: 'sess-123' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('totalTokens');
     });
   });
 });

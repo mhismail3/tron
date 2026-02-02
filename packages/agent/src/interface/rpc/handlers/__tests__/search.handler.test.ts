@@ -1,25 +1,26 @@
 /**
  * @fileoverview Tests for Search RPC Handlers
  *
- * Tests search.content and search.events handlers.
+ * Tests search.content and search.events handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createSearchHandlers,
-  handleSearchContent,
-  handleSearchEvents,
-} from '../search.handler.js';
+import { createSearchHandlers } from '../search.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Search Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutEventStore: RpcContext;
   let mockSearchContent: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createSearchHandlers());
+
     mockSearchContent = vi.fn().mockResolvedValue({
       results: [
         { eventId: 'evt-1', content: 'Hello world', score: 0.95 },
@@ -52,7 +53,7 @@ describe('Search Handlers', () => {
     };
   });
 
-  describe('handleSearchContent', () => {
+  describe('search.content', () => {
     it('should search content', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -60,7 +61,7 @@ describe('Search Handlers', () => {
         params: { query: 'hello' },
       };
 
-      const response = await handleSearchContent(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSearchContent).toHaveBeenCalledWith('hello', {
@@ -86,7 +87,7 @@ describe('Search Handlers', () => {
         },
       };
 
-      const response = await handleSearchContent(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSearchContent).toHaveBeenCalledWith('test', {
@@ -104,28 +105,28 @@ describe('Search Handlers', () => {
         params: {},
       };
 
-      const response = await handleSearchContent(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('query');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'search.content',
         params: { query: 'test' },
       };
 
-      const response = await handleSearchContent(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleSearchEvents', () => {
+  describe('search.events', () => {
     it('should search events', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -133,7 +134,7 @@ describe('Search Handlers', () => {
         params: { query: 'hello' },
       };
 
-      const response = await handleSearchEvents(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockSearchContent).toHaveBeenCalledWith('hello', {
@@ -151,23 +152,23 @@ describe('Search Handlers', () => {
         params: {},
       };
 
-      const response = await handleSearchEvents(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'search.events',
         params: { query: 'test' },
       };
 
-      const response = await handleSearchEvents(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
@@ -195,28 +196,6 @@ describe('Search Handlers', () => {
       for (const handler of handlers) {
         expect(handler.options?.requiredParams).toContain('query');
       }
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch search handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createSearchHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('search.content')).toBe(true);
-      expect(registry.has('search.events')).toBe(true);
-
-      // Test search.content through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'search.content',
-        params: { query: 'test' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('results');
     });
   });
 });

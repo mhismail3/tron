@@ -7,218 +7,62 @@
  * - todo.getBacklog: Get backlogged tasks for a workspace
  * - todo.restore: Restore tasks from backlog to a session
  * - todo.getBacklogCount: Get count of unrestored backlogged tasks
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
-import { RpcHandlerError } from '@core/utils/index.js';
-import type { RpcRequest, RpcResponse } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { SessionNotActiveError, InvalidParamsError } from './base.js';
 
 const logger = createLogger('rpc:todo');
 
 // =============================================================================
-// Handler Implementations
+// Types
 // =============================================================================
 
+interface TodoListParams {
+  sessionId: string;
+}
+
+interface TodoGetSummaryParams {
+  sessionId: string;
+}
+
+interface TodoGetBacklogParams {
+  workspaceId: string;
+  includeRestored?: boolean;
+  limit?: number;
+}
+
+interface TodoRestoreParams {
+  sessionId: string;
+  taskIds: string[];
+}
+
+interface TodoGetBacklogCountParams {
+  workspaceId: string;
+}
+
 /**
- * Handle todo.list request
- *
- * Gets the current todo list for a session.
+ * Wrap operations that may throw "not active" errors
  */
-export async function handleTodoList(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.todoManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Todo manager not available');
-  }
-
-  const params = request.params as { sessionId?: string } | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
+async function withSessionActiveCheck<T>(
+  sessionId: string,
+  operation: string,
+  fn: () => T | Promise<T>
+): Promise<T> {
   try {
-    const todos = context.todoManager.getTodos(params.sessionId);
-    const summary = context.todoManager.getTodoSummary(params.sessionId);
-    return MethodRegistry.successResponse(request.id, { todos, summary });
+    return await fn();
   } catch (error) {
     if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
+      throw new SessionNotActiveError(sessionId);
     }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'list' });
-    logger.error('Failed to list todos', {
-      sessionId: params.sessionId,
+    const structured = categorizeError(error, { sessionId, operation });
+    logger.error(`Failed to ${operation}`, {
+      sessionId,
       code: structured.code,
       category: LogErrorCategory.SESSION_STATE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle todo.getSummary request
- *
- * Gets the todo summary string for a session.
- */
-export async function handleTodoGetSummary(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.todoManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Todo manager not available');
-  }
-
-  const params = request.params as { sessionId?: string } | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  try {
-    const summary = context.todoManager.getTodoSummary(params.sessionId);
-    return MethodRegistry.successResponse(request.id, { summary });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, operation: 'getSummary' });
-    logger.error('Failed to get todo summary', {
-      sessionId: params.sessionId,
-      code: structured.code,
-      category: LogErrorCategory.SESSION_STATE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle todo.getBacklog request
- *
- * Gets backlogged tasks for a workspace.
- */
-export async function handleTodoGetBacklog(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.todoManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Todo manager not available');
-  }
-
-  const params = request.params as {
-    workspaceId?: string;
-    includeRestored?: boolean;
-    limit?: number;
-  } | undefined;
-
-  if (!params?.workspaceId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'workspaceId is required');
-  }
-
-  try {
-    const tasks = context.todoManager.getBacklog(params.workspaceId, {
-      includeRestored: params.includeRestored,
-      limit: params.limit,
-    });
-    return MethodRegistry.successResponse(request.id, {
-      tasks,
-      totalCount: tasks.length,
-    });
-  } catch (error) {
-    const structured = categorizeError(error, { workspaceId: params.workspaceId, operation: 'getBacklog' });
-    logger.error('Failed to get backlog', {
-      workspaceId: params.workspaceId,
-      code: structured.code,
-      category: LogErrorCategory.DATABASE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle todo.restore request
- *
- * Restores tasks from backlog to a session.
- */
-export async function handleTodoRestore(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.todoManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Todo manager not available');
-  }
-
-  const params = request.params as {
-    sessionId?: string;
-    taskIds?: string[];
-  } | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-  if (!params?.taskIds || !Array.isArray(params.taskIds) || params.taskIds.length === 0) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'taskIds is required and must be a non-empty array');
-  }
-
-  try {
-    const restoredTodos = await context.todoManager.restoreFromBacklog(params.sessionId, params.taskIds);
-    return MethodRegistry.successResponse(request.id, {
-      restoredTodos,
-      restoredCount: restoredTodos.length,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
-      return MethodRegistry.errorResponse(request.id, 'SESSION_NOT_ACTIVE', 'Session is not active');
-    }
-    const structured = categorizeError(error, { sessionId: params.sessionId, taskIds: params.taskIds, operation: 'restore' });
-    logger.error('Failed to restore from backlog', {
-      sessionId: params.sessionId,
-      taskCount: params.taskIds?.length,
-      code: structured.code,
-      category: LogErrorCategory.SESSION_STATE,
-      error: structured.message,
-      retryable: structured.retryable,
-    });
-    throw error;
-  }
-}
-
-/**
- * Handle todo.getBacklogCount request
- *
- * Gets count of unrestored backlogged tasks for a workspace.
- */
-export async function handleTodoGetBacklogCount(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.todoManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Todo manager not available');
-  }
-
-  const params = request.params as { workspaceId?: string } | undefined;
-
-  if (!params?.workspaceId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'workspaceId is required');
-  }
-
-  try {
-    const count = context.todoManager.getBacklogCount(params.workspaceId);
-    return MethodRegistry.successResponse(request.id, { count });
-  } catch (error) {
-    const structured = categorizeError(error, { workspaceId: params.workspaceId, operation: 'getBacklogCount' });
-    logger.error('Failed to get backlog count', {
-      workspaceId: params.workspaceId,
-      code: structured.code,
-      category: LogErrorCategory.DATABASE,
       error: structured.message,
       retryable: structured.retryable,
     });
@@ -236,44 +80,80 @@ export async function handleTodoGetBacklogCount(
  * @returns Array of method registrations for bulk registration
  */
 export function createTodoHandlers(): MethodRegistration[] {
-  const listHandler: MethodHandler = async (request, context) => {
-    const response = await handleTodoList(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const listHandler: MethodHandler<TodoListParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'list todos', () => {
+      const todos = context.todoManager!.getTodos(params.sessionId);
+      const summary = context.todoManager!.getTodoSummary(params.sessionId);
+      return { todos, summary };
+    });
   };
 
-  const getSummaryHandler: MethodHandler = async (request, context) => {
-    const response = await handleTodoGetSummary(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getSummaryHandler: MethodHandler<TodoGetSummaryParams> = async (request, context) => {
+    const params = request.params!;
+    return withSessionActiveCheck(params.sessionId, 'get todo summary', () => {
+      const summary = context.todoManager!.getTodoSummary(params.sessionId);
+      return { summary };
+    });
   };
 
-  const getBacklogHandler: MethodHandler = async (request, context) => {
-    const response = await handleTodoGetBacklog(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const getBacklogHandler: MethodHandler<TodoGetBacklogParams> = async (request, context) => {
+    const params = request.params!;
+    try {
+      const tasks = context.todoManager!.getBacklog(params.workspaceId, {
+        includeRestored: params.includeRestored,
+        limit: params.limit,
+      });
+      return {
+        tasks,
+        totalCount: tasks.length,
+      };
+    } catch (error) {
+      const structured = categorizeError(error, { workspaceId: params.workspaceId, operation: 'getBacklog' });
+      logger.error('Failed to get backlog', {
+        workspaceId: params.workspaceId,
+        code: structured.code,
+        category: LogErrorCategory.DATABASE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      throw error;
     }
-    throw RpcHandlerError.fromResponse(response);
   };
 
-  const restoreHandler: MethodHandler = async (request, context) => {
-    const response = await handleTodoRestore(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const restoreHandler: MethodHandler<TodoRestoreParams> = async (request, context) => {
+    const params = request.params!;
+
+    // Additional validation for array
+    if (!Array.isArray(params.taskIds) || params.taskIds.length === 0) {
+      throw new InvalidParamsError('taskIds must be a non-empty array');
     }
-    throw RpcHandlerError.fromResponse(response);
+
+    return withSessionActiveCheck(params.sessionId, 'restore from backlog', async () => {
+      const restoredTodos = await context.todoManager!.restoreFromBacklog(params.sessionId, params.taskIds);
+      return {
+        restoredTodos,
+        restoredCount: restoredTodos.length,
+      };
+    });
   };
 
-  const getBacklogCountHandler: MethodHandler = async (request, context) => {
-    const response = await handleTodoGetBacklogCount(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const getBacklogCountHandler: MethodHandler<TodoGetBacklogCountParams> = async (request, context) => {
+    const params = request.params!;
+    try {
+      const count = context.todoManager!.getBacklogCount(params.workspaceId);
+      return { count };
+    } catch (error) {
+      const structured = categorizeError(error, { workspaceId: params.workspaceId, operation: 'getBacklogCount' });
+      logger.error('Failed to get backlog count', {
+        workspaceId: params.workspaceId,
+        code: structured.code,
+        category: LogErrorCategory.DATABASE,
+        error: structured.message,
+        retryable: structured.retryable,
+      });
+      throw error;
     }
-    throw RpcHandlerError.fromResponse(response);
   };
 
   return [

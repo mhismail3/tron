@@ -4,21 +4,15 @@
  * Handlers for git.* RPC methods:
  * - git.clone: Clone a Git repository to a target path
  *
- * These handlers interact with git via child_process.spawn.
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { spawn } from 'child_process';
-import { RpcHandlerError } from '@core/utils/index.js';
-import type {
-  RpcRequest,
-  RpcResponse,
-  GitCloneParams,
-  GitCloneResult,
-} from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { GitCloneParams, GitCloneResult } from '../types.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { RpcError, RpcErrorCode, InvalidParamsError } from './base.js';
 
 // =============================================================================
 // Constants
@@ -29,6 +23,34 @@ const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** Valid GitHub URL pattern */
 const GITHUB_URL_PATTERN = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/i;
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+class InvalidUrlError extends RpcError {
+  constructor(message: string) {
+    super('INVALID_URL' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
+  }
+}
+
+class AlreadyExistsError extends RpcError {
+  constructor(message: string) {
+    super('ALREADY_EXISTS' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
+  }
+}
+
+class ParentNotFoundError extends RpcError {
+  constructor(message: string) {
+    super('PARENT_NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
+  }
+}
+
+class CloneFailedError extends RpcError {
+  constructor(message: string) {
+    super('CLONE_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
+  }
+}
 
 // =============================================================================
 // Helper Functions
@@ -107,106 +129,6 @@ async function executeGitClone(
 }
 
 // =============================================================================
-// Handler Implementations
-// =============================================================================
-
-/**
- * Handle git.clone request
- *
- * Clones a GitHub repository to the specified target path.
- * Uses shallow clone (--depth 1) for faster cloning.
- */
-export async function handleGitClone(
-  request: RpcRequest,
-  _context: RpcContext
-): Promise<RpcResponse> {
-  const params = (request.params || {}) as GitCloneParams;
-
-  // Validate URL parameter
-  if (!params.url) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'url is required');
-  }
-
-  // Validate target path parameter
-  if (!params.targetPath) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'targetPath is required');
-  }
-
-  // Parse and validate GitHub URL
-  const parsed = parseGitHubUrl(params.url);
-  if (!parsed) {
-    return MethodRegistry.errorResponse(
-      request.id,
-      'INVALID_URL',
-      'Enter a valid GitHub URL (e.g., github.com/owner/repo)'
-    );
-  }
-
-  const { normalizedUrl, repoName } = parsed;
-  const targetPath = path.resolve(params.targetPath);
-
-  // Security: Reject path traversal
-  if (params.targetPath.includes('..')) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'Path traversal not allowed');
-  }
-
-  // Check if target already exists
-  try {
-    await fs.access(targetPath);
-    return MethodRegistry.errorResponse(
-      request.id,
-      'ALREADY_EXISTS',
-      'Folder already exists. Choose a different name.'
-    );
-  } catch {
-    // Path doesn't exist - good, continue
-  }
-
-  // Ensure parent directory exists
-  const parentDir = path.dirname(targetPath);
-  try {
-    await fs.access(parentDir);
-  } catch {
-    // Try to create parent directory
-    try {
-      await fs.mkdir(parentDir, { recursive: true });
-    } catch (mkdirErr) {
-      return MethodRegistry.errorResponse(
-        request.id,
-        'PARENT_NOT_FOUND',
-        `Parent directory does not exist and could not be created: ${parentDir}`
-      );
-    }
-  }
-
-  // Execute clone
-  const cloneResult = await executeGitClone(normalizedUrl, targetPath, CLONE_TIMEOUT_MS);
-
-  if (!cloneResult.success) {
-    // Clean error message for common cases
-    let errorMessage = cloneResult.error || 'Clone failed';
-
-    if (errorMessage.includes('Repository not found')) {
-      errorMessage = 'Repository not found. Check the URL and ensure the repo is public.';
-    } else if (errorMessage.includes('Could not resolve host')) {
-      errorMessage = 'Network error. Check your connection.';
-    } else if (errorMessage.includes('Authentication failed')) {
-      errorMessage = 'Authentication failed. This may be a private repository.';
-    }
-
-    return MethodRegistry.errorResponse(request.id, 'CLONE_FAILED', errorMessage);
-  }
-
-  const result: GitCloneResult = {
-    success: true,
-    path: targetPath,
-    repoName,
-  };
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-// =============================================================================
 // Handler Factory
 // =============================================================================
 
@@ -216,13 +138,73 @@ export async function handleGitClone(
  * @returns Array of method registrations for bulk registration
  */
 export function createGitHandlers(): MethodRegistration[] {
-  const cloneHandler: MethodHandler = async (request, context) => {
-    const response = await handleGitClone(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const cloneHandler: MethodHandler<GitCloneParams> = async (request) => {
+    const params = request.params!;  // Validated by registry via requiredParams
+
+    // Parse and validate GitHub URL
+    const parsed = parseGitHubUrl(params.url);
+    if (!parsed) {
+      throw new InvalidUrlError('Enter a valid GitHub URL (e.g., github.com/owner/repo)');
     }
-    // Re-throw with original error code info
-    throw RpcHandlerError.fromResponse(response);
+
+    const { normalizedUrl, repoName } = parsed;
+    const targetPath = path.resolve(params.targetPath);
+
+    // Security: Reject path traversal
+    if (params.targetPath.includes('..')) {
+      throw new InvalidParamsError('Path traversal not allowed');
+    }
+
+    // Check if target already exists
+    try {
+      await fs.access(targetPath);
+      throw new AlreadyExistsError('Folder already exists. Choose a different name.');
+    } catch (error) {
+      // Re-throw our typed errors
+      if (error instanceof RpcError) {
+        throw error;
+      }
+      // Path doesn't exist - good, continue
+    }
+
+    // Ensure parent directory exists
+    const parentDir = path.dirname(targetPath);
+    try {
+      await fs.access(parentDir);
+    } catch {
+      // Try to create parent directory
+      try {
+        await fs.mkdir(parentDir, { recursive: true });
+      } catch {
+        throw new ParentNotFoundError(`Parent directory does not exist and could not be created: ${parentDir}`);
+      }
+    }
+
+    // Execute clone
+    const cloneResult = await executeGitClone(normalizedUrl, targetPath, CLONE_TIMEOUT_MS);
+
+    if (!cloneResult.success) {
+      // Clean error message for common cases
+      let errorMessage = cloneResult.error || 'Clone failed';
+
+      if (errorMessage.includes('Repository not found')) {
+        errorMessage = 'Repository not found. Check the URL and ensure the repo is public.';
+      } else if (errorMessage.includes('Could not resolve host')) {
+        errorMessage = 'Network error. Check your connection.';
+      } else if (errorMessage.includes('Authentication failed')) {
+        errorMessage = 'Authentication failed. This may be a private repository.';
+      }
+
+      throw new CloneFailedError(errorMessage);
+    }
+
+    const result: GitCloneResult = {
+      success: true,
+      path: targetPath,
+      repoName,
+    };
+
+    return result;
   };
 
   return [

@@ -1,27 +1,28 @@
 /**
  * @fileoverview Tests for Agent RPC Handlers
  *
- * Tests agent.prompt, agent.abort, agent.getState handlers.
+ * Tests agent.prompt, agent.abort, agent.getState handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createAgentHandlers,
-  handleAgentPrompt,
-  handleAgentAbort,
-  handleAgentGetState,
-} from '../agent.handler.js';
+import { createAgentHandlers } from '../agent.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Agent Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutAgentManager: RpcContext;
   let mockPrompt: ReturnType<typeof vi.fn>;
   let mockAbort: ReturnType<typeof vi.fn>;
   let mockGetState: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createAgentHandlers());
+
     mockPrompt = vi.fn().mockResolvedValue({
       response: 'Hello! How can I help you?',
       tokensUsed: { input: 100, output: 50 },
@@ -48,9 +49,14 @@ describe('Agent Handlers', () => {
       } as any,
       memoryStore: {} as any,
     };
+
+    mockContextWithoutAgentManager = {
+      sessionManager: {} as any,
+      memoryStore: {} as any,
+    };
   });
 
-  describe('handleAgentPrompt', () => {
+  describe('agent.prompt', () => {
     it('should send a prompt to the agent', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -61,7 +67,7 @@ describe('Agent Handlers', () => {
         },
       };
 
-      const response = await handleAgentPrompt(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockPrompt).toHaveBeenCalledWith({
@@ -84,7 +90,7 @@ describe('Agent Handlers', () => {
         },
       };
 
-      const response = await handleAgentPrompt(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockPrompt).toHaveBeenCalledWith({
@@ -102,7 +108,7 @@ describe('Agent Handlers', () => {
         params: { prompt: 'Hello' },
       };
 
-      const response = await handleAgentPrompt(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -116,15 +122,28 @@ describe('Agent Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleAgentPrompt(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('prompt');
     });
+
+    it('should return NOT_AVAILABLE without agentManager', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'agent.prompt',
+        params: { sessionId: 'sess-123', prompt: 'Hello' },
+      };
+
+      const response = await registry.dispatch(request, mockContextWithoutAgentManager);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
+    });
   });
 
-  describe('handleAgentAbort', () => {
+  describe('agent.abort', () => {
     it('should abort the agent operation', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -132,7 +151,7 @@ describe('Agent Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleAgentAbort(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockAbort).toHaveBeenCalledWith('sess-123');
@@ -147,15 +166,28 @@ describe('Agent Handlers', () => {
         params: {},
       };
 
-      const response = await handleAgentAbort(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('sessionId');
     });
+
+    it('should return NOT_AVAILABLE without agentManager', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'agent.abort',
+        params: { sessionId: 'sess-123' },
+      };
+
+      const response = await registry.dispatch(request, mockContextWithoutAgentManager);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
+    });
   });
 
-  describe('handleAgentGetState', () => {
+  describe('agent.getState', () => {
     it('should get the agent state', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -163,7 +195,7 @@ describe('Agent Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleAgentGetState(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetState).toHaveBeenCalledWith('sess-123');
@@ -178,11 +210,24 @@ describe('Agent Handlers', () => {
         params: {},
       };
 
-      const response = await handleAgentGetState(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('sessionId');
+    });
+
+    it('should return NOT_AVAILABLE without agentManager', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'agent.getState',
+        params: { sessionId: 'sess-123' },
+      };
+
+      const response = await registry.dispatch(request, mockContextWithoutAgentManager);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
@@ -212,45 +257,6 @@ describe('Agent Handlers', () => {
       for (const handler of handlers) {
         expect(handler.options?.requiredManagers).toContain('agentManager');
       }
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch agent handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createAgentHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('agent.prompt')).toBe(true);
-      expect(registry.has('agent.abort')).toBe(true);
-      expect(registry.has('agent.getState')).toBe(true);
-
-      // Test agent.getState through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'agent.getState',
-        params: { sessionId: 'sess-123' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('isRunning');
-    });
-
-    it('should dispatch agent.prompt through registry', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createAgentHandlers();
-      registry.registerAll(handlers);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'agent.prompt',
-        params: { sessionId: 'sess-123', prompt: 'Hello' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('response');
     });
   });
 });

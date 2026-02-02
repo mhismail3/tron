@@ -2,16 +2,10 @@
  * @fileoverview Transcribe domain - Audio transcription
  *
  * Handles audio transcription and model listing.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
-// Re-export handlers
-export {
-  handleTranscribeAudio,
-  handleTranscribeListModels,
-  createTranscribeHandlers,
-} from '../../../../rpc/handlers/transcribe.handler.js';
+// Re-export handler factory
+export { createTranscribeHandlers } from '@interface/rpc/handlers/transcribe.handler.js';
 
 // Re-export types
 export type {
@@ -19,4 +13,4 @@ export type {
   TranscribeAudioResult,
   TranscribeListModelsParams,
   TranscribeListModelsResult,
-} from '../../../../rpc/types/transcription.js';
+} from '@interface/rpc/types/transcription.js';

@@ -1,21 +1,18 @@
 /**
  * @fileoverview Tests for Events RPC Handlers
  *
- * Tests events.getHistory, events.getSince, events.append handlers.
+ * Tests events.getHistory, events.getSince, events.append handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createEventsHandlers,
-  handleEventsGetHistory,
-  handleEventsGetSince,
-  handleEventsAppend,
-} from '../events.handler.js';
+import { createEventsHandlers } from '../events.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Events Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let mockContextWithoutEventStore: RpcContext;
   let mockGetEventHistory: ReturnType<typeof vi.fn>;
@@ -23,6 +20,9 @@ describe('Events Handlers', () => {
   let mockAppendEvent: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createEventsHandlers());
+
     mockGetEventHistory = vi.fn().mockResolvedValue({
       events: [
         { id: 'evt-1', type: 'message.user', payload: { content: 'Hello' } },
@@ -69,7 +69,7 @@ describe('Events Handlers', () => {
     };
   });
 
-  describe('handleEventsGetHistory', () => {
+  describe('events.getHistory', () => {
     it('should get event history for a session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -77,7 +77,7 @@ describe('Events Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleEventsGetHistory(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetEventHistory).toHaveBeenCalledWith('sess-123', {
@@ -101,7 +101,7 @@ describe('Events Handlers', () => {
         },
       };
 
-      const response = await handleEventsGetHistory(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetEventHistory).toHaveBeenCalledWith('sess-123', {
@@ -118,28 +118,28 @@ describe('Events Handlers', () => {
         params: {},
       };
 
-      const response = await handleEventsGetHistory(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('sessionId');
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'events.getHistory',
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleEventsGetHistory(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleEventsGetSince', () => {
+  describe('events.getSince', () => {
     it('should get events since a timestamp', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -147,7 +147,7 @@ describe('Events Handlers', () => {
         params: { afterTimestamp: '2024-01-15T10:00:00Z' },
       };
 
-      const response = await handleEventsGetSince(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetEventsSince).toHaveBeenCalledWith({
@@ -171,7 +171,7 @@ describe('Events Handlers', () => {
         },
       };
 
-      const response = await handleEventsGetSince(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockGetEventsSince).toHaveBeenCalledWith({
@@ -189,26 +189,26 @@ describe('Events Handlers', () => {
         method: 'events.getSince',
       };
 
-      const response = await handleEventsGetSince(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
     });
 
-    it('should return NOT_SUPPORTED without eventStore', async () => {
+    it('should return NOT_AVAILABLE without eventStore', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'events.getSince',
         params: {},
       };
 
-      const response = await handleEventsGetSince(request, mockContextWithoutEventStore);
+      const response = await registry.dispatch(request, mockContextWithoutEventStore);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
   });
 
-  describe('handleEventsAppend', () => {
+  describe('events.append', () => {
     it('should append an event', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -220,7 +220,7 @@ describe('Events Handlers', () => {
         },
       };
 
-      const response = await handleEventsAppend(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockAppendEvent).toHaveBeenCalledWith(
@@ -243,7 +243,7 @@ describe('Events Handlers', () => {
         },
       };
 
-      const response = await handleEventsAppend(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockAppendEvent).toHaveBeenCalledWith(
@@ -261,7 +261,7 @@ describe('Events Handlers', () => {
         params: { type: 'custom', payload: {} },
       };
 
-      const response = await handleEventsAppend(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -275,7 +275,7 @@ describe('Events Handlers', () => {
         params: { sessionId: 'sess-123', payload: {} },
       };
 
-      const response = await handleEventsAppend(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -289,7 +289,7 @@ describe('Events Handlers', () => {
         params: { sessionId: 'sess-123', type: 'custom' },
       };
 
-      const response = await handleEventsAppend(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -323,29 +323,6 @@ describe('Events Handlers', () => {
       expect(appendHandler?.options?.requiredParams).toContain('sessionId');
       expect(appendHandler?.options?.requiredParams).toContain('type');
       expect(appendHandler?.options?.requiredParams).toContain('payload');
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch events handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createEventsHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('events.getHistory')).toBe(true);
-      expect(registry.has('events.getSince')).toBe(true);
-      expect(registry.has('events.append')).toBe(true);
-
-      // Test events.getHistory through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'events.getHistory',
-        params: { sessionId: 'sess-123' },
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('events');
     });
   });
 });

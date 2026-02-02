@@ -1,26 +1,30 @@
 /**
- * Tests for file.handler.ts
+ * @fileoverview Tests for File RPC Handlers
+ *
+ * Tests file.read handler using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import {
-  handleFileRead,
-  createFileHandlers,
-} from '../file.handler.js';
-import type { RpcRequest, RpcResponse } from '../../types.js';
+import { createFileHandlers } from '../file.handler.js';
+import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
+import { MethodRegistry } from '../../registry.js';
 
 // Mock fs module
 vi.mock('fs/promises');
 
-describe('file.handler', () => {
+describe('File Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
   let homeDir: string;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createFileHandlers());
+
     mockContext = {} as RpcContext;
     homeDir = os.homedir();
     vi.clearAllMocks();
@@ -30,7 +34,7 @@ describe('file.handler', () => {
     vi.restoreAllMocks();
   });
 
-  describe('handleFileRead', () => {
+  describe('file.read', () => {
     it('should return error when path is missing', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -38,11 +42,11 @@ describe('file.handler', () => {
         params: {},
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('path is required');
+      expect(response.error?.message).toContain('path');
     });
 
     it('should return error when path is outside home directory', async () => {
@@ -52,7 +56,7 @@ describe('file.handler', () => {
         params: { path: '/etc/passwd' },
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('PERMISSION_DENIED');
@@ -67,7 +71,7 @@ describe('file.handler', () => {
         params: { path: maliciousPath },
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('PERMISSION_DENIED');
@@ -85,7 +89,7 @@ describe('file.handler', () => {
         params: { path: filePath },
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({ content: fileContent });
@@ -105,11 +109,11 @@ describe('file.handler', () => {
         params: { path: filePath },
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('FILE_NOT_FOUND');
-      expect(response.error?.message).toBe('File not found');
+      expect(response.error?.message).toContain('File not found');
     });
 
     it('should return FILE_ERROR for other read errors', async () => {
@@ -123,7 +127,7 @@ describe('file.handler', () => {
         params: { path: filePath },
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('FILE_ERROR');
@@ -143,7 +147,7 @@ describe('file.handler', () => {
         params: { path: filePath },
       };
 
-      const response = await handleFileRead(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual({ content: fileContent });
@@ -158,52 +162,6 @@ describe('file.handler', () => {
       expect(registrations[0].method).toBe('file.read');
       expect(registrations[0].options?.requiredParams).toContain('path');
       expect(registrations[0].options?.description).toBe('Read a file from the filesystem');
-    });
-
-    it('should create handler that returns result on success', async () => {
-      const registrations = createFileHandlers();
-      const handler = registrations[0].handler;
-
-      const filePath = path.join(homeDir, 'test.txt');
-      const fileContent = 'File content';
-
-      vi.mocked(fs.readFile).mockResolvedValue(fileContent);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'file.read',
-        params: { path: filePath },
-      };
-
-      const result = await handler(request, mockContext);
-
-      expect(result).toEqual({ content: fileContent });
-    });
-
-    it('should create handler that throws on error', async () => {
-      const registrations = createFileHandlers();
-      const handler = registrations[0].handler;
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'file.read',
-        params: {},
-      };
-
-      await expect(handler(request, mockContext)).rejects.toThrow('path is required');
-    });
-
-    it('should create handler that throws on permission denied', async () => {
-      const registrations = createFileHandlers();
-      const handler = registrations[0].handler;
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'file.read',
-        params: { path: '/etc/passwd' },
-      };
-
-      await expect(handler(request, mockContext)).rejects.toThrow('Can only read files within home directory');
     });
   });
 });

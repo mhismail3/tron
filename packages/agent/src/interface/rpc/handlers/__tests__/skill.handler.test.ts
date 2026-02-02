@@ -1,26 +1,29 @@
 /**
- * Tests for skill.handler.ts
+ * @fileoverview Tests for Skill RPC Handlers
+ *
+ * Tests skill.list, skill.get, skill.refresh, skill.remove handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  handleSkillList,
-  handleSkillGet,
-  handleSkillRefresh,
-  handleSkillRemove,
-  createSkillHandlers,
-} from '../skill.handler.js';
+import { createSkillHandlers } from '../skill.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
+import { MethodRegistry } from '../../registry.js';
 
-describe('skill.handler', () => {
+describe('Skill Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutSkillManager: RpcContext;
   let mockListSkills: ReturnType<typeof vi.fn>;
   let mockGetSkill: ReturnType<typeof vi.fn>;
   let mockRefreshSkills: ReturnType<typeof vi.fn>;
   let mockRemoveSkill: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createSkillHandlers());
+
     mockListSkills = vi.fn();
     mockGetSkill = vi.fn();
     mockRefreshSkills = vi.fn();
@@ -34,22 +37,22 @@ describe('skill.handler', () => {
         removeSkill: mockRemoveSkill,
       },
     } as unknown as RpcContext;
+
+    mockContextWithoutSkillManager = {} as RpcContext;
   });
 
-  describe('handleSkillList', () => {
-    it('should return error when skillManager is not available', async () => {
+  describe('skill.list', () => {
+    it('should return NOT_AVAILABLE when skillManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'skill.list',
         params: {},
       };
 
-      const contextWithoutSkillManager = {} as RpcContext;
-      const response = await handleSkillList(request, contextWithoutSkillManager);
+      const response = await registry.dispatch(request, mockContextWithoutSkillManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
-      expect(response.error?.message).toBe('Skill manager not available');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should list skills successfully', async () => {
@@ -69,7 +72,7 @@ describe('skill.handler', () => {
       };
       mockListSkills.mockResolvedValue(mockResult);
 
-      const response = await handleSkillList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -85,26 +88,25 @@ describe('skill.handler', () => {
 
       mockListSkills.mockRejectedValue(new Error('Database error'));
 
-      const response = await handleSkillList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SKILL_ERROR');
     });
   });
 
-  describe('handleSkillGet', () => {
-    it('should return error when skillManager is not available', async () => {
+  describe('skill.get', () => {
+    it('should return NOT_AVAILABLE when skillManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'skill.get',
         params: { name: 'test-skill' },
       };
 
-      const contextWithoutSkillManager = {} as RpcContext;
-      const response = await handleSkillGet(request, contextWithoutSkillManager);
+      const response = await registry.dispatch(request, mockContextWithoutSkillManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when name is missing', async () => {
@@ -114,11 +116,11 @@ describe('skill.handler', () => {
         params: {},
       };
 
-      const response = await handleSkillGet(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('name is required');
+      expect(response.error?.message).toContain('name');
     });
 
     it('should get skill successfully', async () => {
@@ -143,7 +145,7 @@ describe('skill.handler', () => {
       };
       mockGetSkill.mockResolvedValue(mockResult);
 
-      const response = await handleSkillGet(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -159,26 +161,25 @@ describe('skill.handler', () => {
 
       mockGetSkill.mockRejectedValue(new Error('Skill not found'));
 
-      const response = await handleSkillGet(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SKILL_ERROR');
     });
   });
 
-  describe('handleSkillRefresh', () => {
-    it('should return error when skillManager is not available', async () => {
+  describe('skill.refresh', () => {
+    it('should return NOT_AVAILABLE when skillManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'skill.refresh',
         params: {},
       };
 
-      const contextWithoutSkillManager = {} as RpcContext;
-      const response = await handleSkillRefresh(request, contextWithoutSkillManager);
+      const response = await registry.dispatch(request, mockContextWithoutSkillManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should refresh skills successfully', async () => {
@@ -191,7 +192,7 @@ describe('skill.handler', () => {
       const mockResult = { success: true, skillCount: 5 };
       mockRefreshSkills.mockResolvedValue(mockResult);
 
-      const response = await handleSkillRefresh(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -207,26 +208,25 @@ describe('skill.handler', () => {
 
       mockRefreshSkills.mockRejectedValue(new Error('Refresh failed'));
 
-      const response = await handleSkillRefresh(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SKILL_ERROR');
     });
   });
 
-  describe('handleSkillRemove', () => {
-    it('should return error when skillManager is not available', async () => {
+  describe('skill.remove', () => {
+    it('should return NOT_AVAILABLE when skillManager is not available', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'skill.remove',
         params: { sessionId: 'session-123', skillName: 'test-skill' },
       };
 
-      const contextWithoutSkillManager = {} as RpcContext;
-      const response = await handleSkillRemove(request, contextWithoutSkillManager);
+      const response = await registry.dispatch(request, mockContextWithoutSkillManager);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('NOT_SUPPORTED');
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
     });
 
     it('should return error when sessionId is missing', async () => {
@@ -236,11 +236,11 @@ describe('skill.handler', () => {
         params: { skillName: 'test-skill' },
       };
 
-      const response = await handleSkillRemove(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('sessionId is required');
+      expect(response.error?.message).toContain('sessionId');
     });
 
     it('should return error when skillName is missing', async () => {
@@ -250,11 +250,11 @@ describe('skill.handler', () => {
         params: { sessionId: 'session-123' },
       };
 
-      const response = await handleSkillRemove(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-      expect(response.error?.message).toBe('skillName is required');
+      expect(response.error?.message).toContain('skillName');
     });
 
     it('should remove skill successfully', async () => {
@@ -267,7 +267,7 @@ describe('skill.handler', () => {
       const mockResult = { success: true };
       mockRemoveSkill.mockResolvedValue(mockResult);
 
-      const response = await handleSkillRemove(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(response.result).toEqual(mockResult);
@@ -286,7 +286,7 @@ describe('skill.handler', () => {
 
       mockRemoveSkill.mockRejectedValue(new Error('Skill not found'));
 
-      const response = await handleSkillRemove(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SKILL_ERROR');
@@ -315,37 +315,6 @@ describe('skill.handler', () => {
       const removeHandler = registrations.find(r => r.method === 'skill.remove');
       expect(removeHandler?.options?.requiredParams).toContain('sessionId');
       expect(removeHandler?.options?.requiredParams).toContain('skillName');
-    });
-
-    it('should create handlers that return results on success', async () => {
-      const registrations = createSkillHandlers();
-      const listHandler = registrations.find(r => r.method === 'skill.list')!.handler;
-
-      const mockResult = { skills: [], totalCount: 0, autoInjectCount: 0 };
-      mockListSkills.mockResolvedValue(mockResult);
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'skill.list',
-        params: {},
-      };
-
-      const result = await listHandler(request, mockContext);
-
-      expect(result).toEqual(mockResult);
-    });
-
-    it('should create handlers that throw on error', async () => {
-      const registrations = createSkillHandlers();
-      const getHandler = registrations.find(r => r.method === 'skill.get')!.handler;
-
-      const request: RpcRequest = {
-        id: '1',
-        method: 'skill.get',
-        params: {},
-      };
-
-      await expect(getHandler(request, mockContext)).rejects.toThrow('name is required');
     });
   });
 });

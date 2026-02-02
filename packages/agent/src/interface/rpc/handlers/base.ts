@@ -22,7 +22,11 @@ export {
   ManagerNotAvailableError,
   InvalidParamsError,
   FileNotFoundError,
+  FileError,
+  PermissionDeniedError,
   InternalError,
+  BrowserError,
+  SkillError,
 } from '@core/errors/rpc-errors.js';
 
 // =============================================================================

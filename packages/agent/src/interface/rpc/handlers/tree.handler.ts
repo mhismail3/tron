@@ -6,12 +6,11 @@
  * - tree.getBranches: Get branches for a session
  * - tree.getSubtree: Get subtree from an event
  * - tree.getAncestors: Get ancestors of an event
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { RpcHandlerError } from '@core/utils/index.js';
-import type { RpcRequest, RpcResponse } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
 
 // =============================================================================
 // Types
@@ -38,110 +37,6 @@ interface TreeGetAncestorsParams {
 }
 
 // =============================================================================
-// Handler Implementations
-// =============================================================================
-
-/**
- * Handle tree.getVisualization request
- *
- * Gets a tree visualization for a session's event history.
- */
-export async function handleTreeGetVisualization(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
-  }
-
-  const params = request.params as TreeGetVisualizationParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  const result = await context.eventStore.getTreeVisualization(params.sessionId, {
-    maxDepth: params.maxDepth,
-    messagesOnly: params.messagesOnly,
-  });
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle tree.getBranches request
- *
- * Gets branch information for a session.
- */
-export async function handleTreeGetBranches(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
-  }
-
-  const params = request.params as TreeGetBranchesParams | undefined;
-
-  if (!params?.sessionId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'sessionId is required');
-  }
-
-  const result = await context.eventStore.getBranches(params.sessionId);
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle tree.getSubtree request
- *
- * Gets a subtree starting from a specific event.
- */
-export async function handleTreeGetSubtree(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
-  }
-
-  const params = request.params as TreeGetSubtreeParams | undefined;
-
-  if (!params?.eventId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'eventId is required');
-  }
-
-  const result = await context.eventStore.getSubtree(params.eventId, {
-    maxDepth: params.maxDepth,
-    direction: params.direction,
-  });
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle tree.getAncestors request
- *
- * Gets all ancestors of a specific event.
- */
-export async function handleTreeGetAncestors(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
-  }
-
-  const params = request.params as TreeGetAncestorsParams | undefined;
-
-  if (!params?.eventId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'eventId is required');
-  }
-
-  const result = await context.eventStore.getAncestors(params.eventId);
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-// =============================================================================
 // Handler Factory
 // =============================================================================
 
@@ -151,36 +46,30 @@ export async function handleTreeGetAncestors(
  * @returns Array of method registrations for bulk registration
  */
 export function createTreeHandlers(): MethodRegistration[] {
-  const getVisualizationHandler: MethodHandler = async (request, context) => {
-    const response = await handleTreeGetVisualization(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getVisualizationHandler: MethodHandler<TreeGetVisualizationParams> = async (request, context) => {
+    const params = request.params!;
+    return context.eventStore!.getTreeVisualization(params.sessionId, {
+      maxDepth: params.maxDepth,
+      messagesOnly: params.messagesOnly,
+    });
   };
 
-  const getBranchesHandler: MethodHandler = async (request, context) => {
-    const response = await handleTreeGetBranches(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getBranchesHandler: MethodHandler<TreeGetBranchesParams> = async (request, context) => {
+    const params = request.params!;
+    return context.eventStore!.getBranches(params.sessionId);
   };
 
-  const getSubtreeHandler: MethodHandler = async (request, context) => {
-    const response = await handleTreeGetSubtree(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getSubtreeHandler: MethodHandler<TreeGetSubtreeParams> = async (request, context) => {
+    const params = request.params!;
+    return context.eventStore!.getSubtree(params.eventId, {
+      maxDepth: params.maxDepth,
+      direction: params.direction,
+    });
   };
 
-  const getAncestorsHandler: MethodHandler = async (request, context) => {
-    const response = await handleTreeGetAncestors(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const getAncestorsHandler: MethodHandler<TreeGetAncestorsParams> = async (request, context) => {
+    const params = request.params!;
+    return context.eventStore!.getAncestors(params.eventId);
   };
 
   return [

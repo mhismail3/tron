@@ -3,42 +3,20 @@
  *
  * Handlers for canvas.* RPC methods:
  * - canvas.get: Get a canvas artifact by ID
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import type { RpcRequest, CanvasGetParams } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
-
-// =============================================================================
-// Handler Implementations
-// =============================================================================
+import type { CanvasGetParams } from '../types.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
+import { RpcError, RpcErrorCode } from './base.js';
 
 /**
- * Handle canvas.get request
- *
- * Retrieves a canvas artifact from the server's disk storage.
- * Used by iOS clients to load canvas data on session resume.
+ * Canvas error
  */
-export async function handleCanvasGet(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<ReturnType<typeof MethodRegistry.successResponse | typeof MethodRegistry.errorResponse>> {
-  if (!context.canvasManager) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'Canvas manager not available');
-  }
-
-  const params = request.params as CanvasGetParams | undefined;
-
-  if (!params?.canvasId) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'canvasId is required');
-  }
-
-  try {
-    const result = await context.canvasManager.getCanvas(params.canvasId);
-    return MethodRegistry.successResponse(request.id, result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to get canvas';
-    return MethodRegistry.errorResponse(request.id, 'CANVAS_ERROR', message);
+class CanvasError extends RpcError {
+  constructor(message: string) {
+    super('CANVAS_ERROR' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
   }
 }
 
@@ -52,14 +30,15 @@ export async function handleCanvasGet(
  * @returns Array of method registrations for bulk registration
  */
 export function createCanvasHandlers(): MethodRegistration[] {
-  const getHandler: MethodHandler = async (request, context) => {
-    const response = await handleCanvasGet(request, context);
-    if (response.success && response.result) {
-      return response.result;
+  const getHandler: MethodHandler<CanvasGetParams> = async (request, context) => {
+    const params = request.params!;
+
+    try {
+      return await context.canvasManager!.getCanvas(params.canvasId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to get canvas';
+      throw new CanvasError(message);
     }
-    const err = new Error(response.error?.message || 'Unknown error');
-    (err as Error & { code?: string }).code = response.error?.code;
-    throw err;
   };
 
   return [

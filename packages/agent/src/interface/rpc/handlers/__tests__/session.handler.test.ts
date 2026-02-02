@@ -1,24 +1,20 @@
 /**
  * @fileoverview Tests for Session RPC Handlers
  *
- * Tests session.create, session.resume, session.list, session.delete, session.fork handlers.
+ * Tests session.create, session.resume, session.list, session.delete, session.fork handlers
+ * using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  createSessionHandlers,
-  handleSessionCreate,
-  handleSessionResume,
-  handleSessionList,
-  handleSessionDelete,
-  handleSessionFork,
-} from '../session.handler.js';
+import { createSessionHandlers } from '../session.handler.js';
 import type { RpcRequest } from '../../types.js';
 import type { RpcContext } from '../../handler.js';
 import { MethodRegistry } from '../../registry.js';
 
 describe('Session Handlers', () => {
+  let registry: MethodRegistry;
   let mockContext: RpcContext;
+  let mockContextWithoutSessionManager: RpcContext;
   let mockCreateSession: ReturnType<typeof vi.fn>;
   let mockResumeSession: ReturnType<typeof vi.fn>;
   let mockListSessions: ReturnType<typeof vi.fn>;
@@ -26,6 +22,9 @@ describe('Session Handlers', () => {
   let mockForkSession: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    registry = new MethodRegistry();
+    registry.registerAll(createSessionHandlers());
+
     mockCreateSession = vi.fn().mockResolvedValue({
       sessionId: 'sess-new-123',
       workingDirectory: '/projects/myapp',
@@ -96,9 +95,14 @@ describe('Session Handlers', () => {
       agentManager: {} as any,
       memoryStore: {} as any,
     };
+
+    mockContextWithoutSessionManager = {
+      agentManager: {} as any,
+      memoryStore: {} as any,
+    };
   });
 
-  describe('handleSessionCreate', () => {
+  describe('session.create', () => {
     it('should create a new session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -109,7 +113,7 @@ describe('Session Handlers', () => {
         },
       };
 
-      const response = await handleSessionCreate(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockCreateSession).toHaveBeenCalledWith({
@@ -127,15 +131,28 @@ describe('Session Handlers', () => {
         params: { model: 'claude-sonnet-4-20250514' },
       };
 
-      const response = await handleSessionCreate(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
       expect(response.error?.message).toContain('workingDirectory');
     });
+
+    it('should return NOT_AVAILABLE without sessionManager', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'session.create',
+        params: { workingDirectory: '/projects/myapp' },
+      };
+
+      const response = await registry.dispatch(request, mockContextWithoutSessionManager);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('NOT_AVAILABLE');
+    });
   });
 
-  describe('handleSessionResume', () => {
+  describe('session.resume', () => {
     it('should resume an existing session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -143,7 +160,7 @@ describe('Session Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleSessionResume(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockResumeSession).toHaveBeenCalledWith('sess-123');
@@ -159,7 +176,7 @@ describe('Session Handlers', () => {
         params: {},
       };
 
-      const response = await handleSessionResume(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -175,21 +192,21 @@ describe('Session Handlers', () => {
         params: { sessionId: 'nonexistent' },
       };
 
-      const response = await handleSessionResume(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('SESSION_NOT_FOUND');
     });
   });
 
-  describe('handleSessionList', () => {
+  describe('session.list', () => {
     it('should list all sessions', async () => {
       const request: RpcRequest = {
         id: '1',
         method: 'session.list',
       };
 
-      const response = await handleSessionList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListSessions).toHaveBeenCalledWith({});
@@ -204,7 +221,7 @@ describe('Session Handlers', () => {
         params: { workingDirectory: '/projects/app1' },
       };
 
-      const response = await handleSessionList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockListSessions).toHaveBeenCalledWith({ workingDirectory: '/projects/app1' });
@@ -216,7 +233,7 @@ describe('Session Handlers', () => {
         method: 'session.list',
       };
 
-      const response = await handleSessionList(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       const result = response.result as { sessions: any[] };
@@ -229,7 +246,7 @@ describe('Session Handlers', () => {
     });
   });
 
-  describe('handleSessionDelete', () => {
+  describe('session.delete', () => {
     it('should delete a session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -237,7 +254,7 @@ describe('Session Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleSessionDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockDeleteSession).toHaveBeenCalledWith('sess-123');
@@ -252,14 +269,14 @@ describe('Session Handlers', () => {
         params: {},
       };
 
-      const response = await handleSessionDelete(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
     });
   });
 
-  describe('handleSessionFork', () => {
+  describe('session.fork', () => {
     it('should fork a session', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -267,7 +284,7 @@ describe('Session Handlers', () => {
         params: { sessionId: 'sess-123' },
       };
 
-      const response = await handleSessionFork(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockForkSession).toHaveBeenCalledWith('sess-123', undefined);
@@ -282,7 +299,7 @@ describe('Session Handlers', () => {
         params: { sessionId: 'sess-123', fromEventId: 'evt-456' },
       };
 
-      const response = await handleSessionFork(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(true);
       expect(mockForkSession).toHaveBeenCalledWith('sess-123', 'evt-456');
@@ -295,7 +312,7 @@ describe('Session Handlers', () => {
         params: {},
       };
 
-      const response = await handleSessionFork(request, mockContext);
+      const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
@@ -329,30 +346,6 @@ describe('Session Handlers', () => {
       for (const handler of handlers) {
         expect(handler.options?.requiredManagers).toContain('sessionManager');
       }
-    });
-  });
-
-  describe('Registry Integration', () => {
-    it('should register and dispatch session handlers', async () => {
-      const registry = new MethodRegistry();
-      const handlers = createSessionHandlers();
-      registry.registerAll(handlers);
-
-      expect(registry.has('session.create')).toBe(true);
-      expect(registry.has('session.resume')).toBe(true);
-      expect(registry.has('session.list')).toBe(true);
-      expect(registry.has('session.delete')).toBe(true);
-      expect(registry.has('session.fork')).toBe(true);
-
-      // Test session.list through registry
-      const request: RpcRequest = {
-        id: '1',
-        method: 'session.list',
-      };
-
-      const response = await registry.dispatch(request, mockContext);
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('sessions');
     });
   });
 });

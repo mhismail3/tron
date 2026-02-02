@@ -2,29 +2,16 @@
  * @fileoverview Filesystem domain - File operations
  *
  * Groups file, filesystem, and git handlers into a single domain.
- *
- * @migration Re-exports from rpc/handlers during transition
  */
 
 // File handlers
-export {
-  handleFileRead,
-  createFileHandlers,
-} from '../../../../rpc/handlers/file.handler.js';
+export { createFileHandlers } from '@interface/rpc/handlers/file.handler.js';
 
 // Filesystem handlers
-export {
-  handleFilesystemListDir,
-  handleFilesystemGetHome,
-  handleFilesystemCreateDir,
-  createFilesystemHandlers,
-} from '../../../../rpc/handlers/filesystem.handler.js';
+export { createFilesystemHandlers } from '@interface/rpc/handlers/filesystem.handler.js';
 
 // Git handlers
-export {
-  handleGitClone,
-  createGitHandlers,
-} from '../../../../rpc/handlers/git.handler.js';
+export { createGitHandlers } from '@interface/rpc/handlers/git.handler.js';
 
 // Re-export types
 export type {
@@ -33,9 +20,9 @@ export type {
   FilesystemGetHomeResult,
   FilesystemCreateDirParams,
   FilesystemCreateDirResult,
-} from '../../../../rpc/types/filesystem.js';
+} from '@interface/rpc/types/filesystem.js';
 
 export type {
   GitCloneParams,
   GitCloneResult,
-} from '../../../../rpc/types/git.js';
+} from '@interface/rpc/types/git.js';

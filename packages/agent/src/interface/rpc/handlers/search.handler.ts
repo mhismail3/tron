@@ -4,12 +4,11 @@
  * Handlers for search.* RPC methods:
  * - search.content: Search content in events
  * - search.events: Search events (alias for search.content)
+ *
+ * Validation is handled by the registry via requiredParams/requiredManagers options.
  */
 
-import { RpcHandlerError } from '@core/utils/index.js';
-import type { RpcRequest, RpcResponse } from '../types.js';
-import type { RpcContext } from '../context-types.js';
-import { MethodRegistry, type MethodRegistration, type MethodHandler } from '../registry.js';
+import type { MethodRegistration, MethodHandler } from '../registry.js';
 
 // =============================================================================
 // Types
@@ -24,52 +23,6 @@ interface SearchParams {
 }
 
 // =============================================================================
-// Handler Implementations
-// =============================================================================
-
-/**
- * Handle search.content request
- *
- * Searches content within events.
- */
-export async function handleSearchContent(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  if (!context.eventStore) {
-    return MethodRegistry.errorResponse(request.id, 'NOT_SUPPORTED', 'EventStore not available');
-  }
-
-  const params = request.params as SearchParams | undefined;
-
-  if (!params?.query) {
-    return MethodRegistry.errorResponse(request.id, 'INVALID_PARAMS', 'query is required');
-  }
-
-  const result = await context.eventStore.searchContent(params.query, {
-    sessionId: params.sessionId,
-    workspaceId: params.workspaceId,
-    types: params.types,
-    limit: params.limit,
-  });
-
-  return MethodRegistry.successResponse(request.id, result);
-}
-
-/**
- * Handle search.events request
- *
- * Searches events (alias for search.content).
- */
-export async function handleSearchEvents(
-  request: RpcRequest,
-  context: RpcContext
-): Promise<RpcResponse> {
-  // Delegate to handleSearchContent since they're functionally identical
-  return handleSearchContent(request, context);
-}
-
-// =============================================================================
 // Handler Factory
 // =============================================================================
 
@@ -79,16 +32,18 @@ export async function handleSearchEvents(
  * @returns Array of method registrations for bulk registration
  */
 export function createSearchHandlers(): MethodRegistration[] {
-  const contentHandler: MethodHandler = async (request, context) => {
-    const response = await handleSearchContent(request, context);
-    if (response.success && response.result) {
-      return response.result;
-    }
-    throw RpcHandlerError.fromResponse(response);
+  const contentHandler: MethodHandler<SearchParams> = async (request, context) => {
+    const params = request.params!;
+    return context.eventStore!.searchContent(params.query, {
+      sessionId: params.sessionId,
+      workspaceId: params.workspaceId,
+      types: params.types,
+      limit: params.limit,
+    });
   };
 
-  // Events handler delegates to content handler since they're functionally identical
-  const eventsHandler: MethodHandler = contentHandler;
+  // Events handler is same as content handler
+  const eventsHandler = contentHandler;
 
   return [
     {
