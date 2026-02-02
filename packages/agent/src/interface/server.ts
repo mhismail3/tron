@@ -12,6 +12,7 @@ import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from '@runt
 import { HealthServer, type HealthServerConfig } from './gateway/health.js';
 import { ensureTranscriptionSidecar, stopTranscriptionSidecar } from '@platform/transcription/index.js';
 import { createRpcContext } from './gateway/rpc/index.js';
+import { createEventEnvelope } from './events/index.js';
 
 const logger = createLogger('server');
 
@@ -129,154 +130,122 @@ export class TronServer {
     if (!this.orchestrator || !this.wsServer) return;
 
     this.orchestrator.on('session_created', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'session.created',
-        timestamp: new Date().toISOString(),
-        data,
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope('session.created', data as Record<string, unknown>));
     });
 
     this.orchestrator.on('session_ended', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'session.ended',
-        timestamp: new Date().toISOString(),
-        data,
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope('session.ended', data as Record<string, unknown>));
     });
 
     this.orchestrator.on('session_forked', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'session.forked',
-        timestamp: new Date().toISOString(),
-        data,
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope('session.forked', data as Record<string, unknown>));
     });
 
     this.orchestrator.on('session_rewound', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'session.rewound',
-        timestamp: new Date().toISOString(),
-        data,
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope('session.rewound', data as Record<string, unknown>));
     });
 
     this.orchestrator.on('agent_turn', (event) => {
-      this.wsServer?.broadcastEvent({
-        type: 'agent.turn',
-        sessionId: event.sessionId,
-        timestamp: event.timestamp,
-        data: event.data,
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'agent.turn',
+        { ...event.data, timestamp: event.timestamp } as Record<string, unknown>,
+        event.sessionId
+      ));
     });
 
     this.orchestrator.on('agent_event', (event) => {
-      this.wsServer?.broadcastEvent({
-        type: event.type,
-        sessionId: event.sessionId,
-        timestamp: event.timestamp,
-        data: event.data,
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        event.type,
+        { ...event.data, timestamp: event.timestamp } as Record<string, unknown>,
+        event.sessionId
+      ));
     });
 
     this.orchestrator.on('event_new', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'event.new',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: { event: data.event },
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'event.new',
+        { event: data.event },
+        data.sessionId
+      ));
 
       // Also broadcast message.deleted events with specific type for iOS
       if (data.event.type === 'message.deleted') {
         const payload = data.event.payload as { targetEventId: string; targetType: string; targetTurn?: number; reason?: string };
-        this.wsServer?.broadcastEvent({
-          type: 'agent.message_deleted',
-          sessionId: data.sessionId,
-          timestamp: new Date().toISOString(),
-          data: {
+        this.wsServer?.broadcastEvent(createEventEnvelope(
+          'agent.message_deleted',
+          {
             targetEventId: payload.targetEventId,
             targetType: payload.targetType,
             targetTurn: payload.targetTurn,
             reason: payload.reason,
           },
-        });
+          data.sessionId
+        ));
       }
     });
 
     this.orchestrator.on('context_cleared', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'agent.context_cleared',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'agent.context_cleared',
+        {
           tokensBefore: data.tokensBefore,
           tokensAfter: data.tokensAfter,
         },
-      });
+        data.sessionId
+      ));
     });
 
     this.orchestrator.on('compaction_completed', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'agent.compaction',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'agent.compaction',
+        {
           tokensBefore: data.tokensBefore,
           tokensAfter: data.tokensAfter,
           reason: 'manual',
           summary: data.summary,
         },
-      });
+        data.sessionId
+      ));
     });
 
     this.orchestrator.on('skill_removed', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'agent.skill_removed',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
-          skillName: data.skillName,
-        },
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'agent.skill_removed',
+        { skillName: data.skillName },
+        data.sessionId
+      ));
     });
 
     // Forward browser frame events for live streaming
     this.orchestrator.on('browser.frame', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'browser.frame',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'browser.frame',
+        {
           sessionId: data.sessionId,
           data: data.data,
           frameId: data.frameId,
           timestamp: data.timestamp,
           metadata: data.metadata,
         },
-      });
+        data.sessionId
+      ));
     });
 
     // Forward browser closed events
     this.orchestrator.on('browser.closed', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'browser.closed',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {},
-      });
+      this.wsServer?.broadcastEvent(createEventEnvelope('browser.closed', {}, data.sessionId));
     });
 
     // Forward todo update events
     this.orchestrator.on('todos_updated', (data) => {
-      this.wsServer?.broadcastEvent({
-        type: 'agent.todos_updated',
-        sessionId: data.sessionId,
-        timestamp: new Date().toISOString(),
-        data: {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        'agent.todos_updated',
+        {
           todos: data.todos,
           restoredCount: data.restoredCount,
         },
-      });
+        data.sessionId
+      ));
     });
   }
 
