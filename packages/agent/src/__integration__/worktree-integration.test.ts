@@ -19,8 +19,8 @@ import {
   createWorktreeCoordinator,
 } from '../index.js';
 import { createMockEventStore, type MockEventStoreWithTracking } from '../__fixtures__/mocks/index.js';
-import type { SessionId, EventId } from '../events/types.js';
-import type { EventStore } from '../events/event-store.js';
+import type { SessionId, EventId } from '@infrastructure/events/types.js';
+import type { EventStore } from '@infrastructure/events/event-store.js';
 
 // =============================================================================
 // Test Helpers

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { SessionEvent, SessionId, WorkspaceId, EventId } from '../../../events/types.js';
+import type { SessionEvent, SessionId, WorkspaceId, EventId } from '@infrastructure/events/types.js';
 import {
   createSessionStartEvent,
   createSessionEndEvent,

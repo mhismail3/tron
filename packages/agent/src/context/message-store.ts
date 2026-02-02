@@ -5,7 +5,7 @@
  * Extracted from ContextManager to provide focused message operations.
  */
 
-import type { Message } from '../types/index.js';
+import type { Message } from '@core/types/index.js';
 import { estimateMessageTokens } from './token-estimator.js';
 
 // =============================================================================

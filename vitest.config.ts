@@ -41,7 +41,16 @@ export default defineConfig({
     alias: {
       '@tron/agent': resolve(__dirname, 'packages/agent/src'),
       '@tron/agent/browser': resolve(__dirname, 'packages/agent/src/browser.ts'),
-      '@tron/tui': resolve(__dirname, 'packages/tui/src')
+      '@tron/tui': resolve(__dirname, 'packages/tui/src'),
+      // Internal agent package aliases
+      '@core': resolve(__dirname, 'packages/agent/src/core'),
+      '@infrastructure': resolve(__dirname, 'packages/agent/src/infrastructure'),
+      '@llm': resolve(__dirname, 'packages/agent/src/llm'),
+      '@context': resolve(__dirname, 'packages/agent/src/context'),
+      '@runtime': resolve(__dirname, 'packages/agent/src/runtime'),
+      '@capabilities': resolve(__dirname, 'packages/agent/src/capabilities'),
+      '@interface': resolve(__dirname, 'packages/agent/src/interface'),
+      '@platform': resolve(__dirname, 'packages/agent/src/platform'),
     }
   },
   esbuild: {

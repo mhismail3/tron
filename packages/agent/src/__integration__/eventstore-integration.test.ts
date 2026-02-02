@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EventStore } from '../index.js';
-import { EventId, SessionId, type SessionState, type Message } from '../events/types.js';
+import { EventId, SessionId, type SessionState, type Message } from '@infrastructure/events/types.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

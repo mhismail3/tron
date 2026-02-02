@@ -13,7 +13,7 @@ import {
   type MockEventStoreOptions,
 } from '../event-store.js';
 import type { EventStoreMethods } from '../event-store.js';
-import type { SessionEvent, SessionId, EventId, WorkspaceId, Message } from '../../../events/types.js';
+import type { SessionEvent, SessionId, EventId, WorkspaceId, Message } from '@infrastructure/events/types.js';
 
 describe('event-store mock factories', () => {
   describe('createMockEventStore', () => {

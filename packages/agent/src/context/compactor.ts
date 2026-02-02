@@ -28,9 +28,9 @@
  * @see ContextManager for the recommended compaction API
  * @see Summarizer for the summarization interface
  */
-import type { Message } from '../types/index.js';
-import { getSettings } from '../settings/index.js';
-import type { CompactorSettings } from '../settings/types.js';
+import type { Message } from '@core/types/index.js';
+import { getSettings } from '@infrastructure/settings/index.js';
+import type { CompactorSettings } from '@infrastructure/settings/types.js';
 
 /**
  * Get default compactor settings from the global settings.

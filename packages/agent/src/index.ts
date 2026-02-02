@@ -8,47 +8,47 @@
  */
 
 // Re-export all types
-export * from './types/index.js';
+export * from './core/types/index.js';
 
 // Re-export settings (must be early for other modules to use)
-export * from './settings/index.js';
+export * from './infrastructure/settings/index.js';
 
 // Re-export dependency injection utilities
-export * from './di/index.js';
+export * from './core/di/index.js';
 
 // Feature flags are now exported through settings module
 
 // Re-export logging
-export * from './logging/index.js';
+export * from './infrastructure/logging/index.js';
 
 // Re-export auth
-export * from './auth/index.js';
+export * from './infrastructure/auth/index.js';
 
 // Re-export providers
-export * from './providers/index.js';
+export * from './llm/providers/index.js';
 
 // Re-export tools
-export * from './tools/index.js';
+export * from './capabilities/tools/index.js';
 
 // Memory types are now exported through types module
 
 // Re-export hooks
-export * from './hooks/index.js';
+export * from './capabilities/extensions/hooks/index.js';
 
 // Re-export agent
-export * from './agent/index.js';
+export * from './runtime/agent/index.js';
 
 // Re-export RPC
-export * from './rpc/index.js';
+export * from './interface/rpc/index.js';
 
 // Re-export session
-export * from './session/index.js';
+export * from './platform/session/index.js';
 
 // Re-export productivity
-export * from './productivity/index.js';
+export * from './platform/productivity/index.js';
 
 // Re-export commands
-export * from './commands/index.js';
+export * from './capabilities/extensions/commands/index.js';
 
 // Tmux support is now exported through session module
 
@@ -56,31 +56,31 @@ export * from './commands/index.js';
 export * from './context/index.js';
 
 // Re-export skills
-export * from './skills/index.js';
+export * from './capabilities/extensions/skills/index.js';
 
 // Subagent tracker is now exported through tools module
 
 // Re-export events (Event Sourcing system)
-export * from './events/index.js';
+export * from './infrastructure/events/index.js';
 
 // Re-export todos (Task management)
-export * from './todos/index.js';
+export * from './capabilities/todos/index.js';
 
 // Re-export guardrails
-export * from './guardrails/index.js';
+export * from './capabilities/guardrails/index.js';
 
 // Re-export UI (RenderAppUI component types and schema)
-export * from './ui/index.js';
+export * from './interface/ui/index.js';
 
 // Re-export utilities (error handling, clipboard, etc.)
-export * from './utils/index.js';
+export * from './core/utils/index.js';
 
 // Re-export usage tracking (tokens, costs)
-export * from './usage/index.js';
+export * from './infrastructure/usage/index.js';
 
 // Re-export server components
-export { TronServer, type TronServerConfig } from './server.js';
-export { EventStoreOrchestrator } from './orchestrator/persistence/event-store-orchestrator.js';
+export { TronServer, type TronServerConfig } from './interface/server.js';
+export { EventStoreOrchestrator } from './runtime/orchestrator/persistence/event-store-orchestrator.js';
 export type {
   EventStoreOrchestratorConfig,
   ActiveSession,
@@ -89,10 +89,10 @@ export type {
   CreateSessionOptions,
   SessionInfo,
   ForkResult,
-} from './orchestrator/persistence/event-store-orchestrator.js';
+} from './runtime/orchestrator/persistence/event-store-orchestrator.js';
 
 // Re-export gateway components
-export * from './gateway/index.js';
+export * from './interface/gateway/index.js';
 
 // Re-export services (explicit to avoid type conflicts)
 export {
@@ -107,7 +107,7 @@ export {
   type TurnValidationOptions,
   type ClearContextResult,
   type OrchestrationService,
-} from './services/index.js';
+} from './runtime/services/index.js';
 
 // Re-export orchestrator modules (explicit to avoid type conflicts)
 export {
@@ -174,7 +174,7 @@ export {
   type ContextOpsConfig,
   type AgentFactoryConfig,
   type AuthProviderConfig,
-} from './orchestrator/index.js';
+} from './runtime/orchestrator/index.js';
 
 // Version info (re-exported from constants to avoid circular deps)
-export { VERSION, NAME } from './constants.js';
+export { VERSION, NAME } from './core/constants.js';

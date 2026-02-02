@@ -10,14 +10,14 @@ import type {
   PlanModeEnteredEvent,
   PlanModeExitedEvent,
   SessionEvent,
-} from '../events/types/index.js';
+} from '@infrastructure/events/types/index.js';
 import {
   isPlanModeEnteredEvent,
   isPlanModeExitedEvent,
   EventId,
   SessionId as SessionIdConstructor,
   WorkspaceId,
-} from '../events/types/index.js';
+} from '@infrastructure/events/types/index.js';
 
 // Mock types for the plan mode manager we'll implement
 interface PlanModeState {
@@ -419,8 +419,8 @@ describe('Plan Mode Enforcement', () => {
 // Orchestrator Integration Tests
 // =============================================================================
 
-import { EventStore } from '../events/event-store.js';
-import { EventStoreOrchestrator } from '../orchestrator/persistence/event-store-orchestrator.js';
+import { EventStore } from '@infrastructure/events/event-store.js';
+import { EventStoreOrchestrator } from '@runtime/orchestrator/persistence/event-store-orchestrator.js';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';

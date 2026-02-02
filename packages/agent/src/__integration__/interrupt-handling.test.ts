@@ -10,11 +10,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventStore, SessionId, EventId, type EventSessionState, type EventMessage } from '../index.js';
-import type { MessageWithEventId } from '../events/types/state.js';
+import type { MessageWithEventId } from '@infrastructure/events/types/state.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
-import { EventStoreOrchestrator } from '../orchestrator/persistence/event-store-orchestrator.js';
+import { EventStoreOrchestrator } from '@runtime/orchestrator/persistence/event-store-orchestrator.js';
 
 /** Helper to extract messages array from SessionState (for easier test assertions) */
 function getMessages(state: EventSessionState): EventMessage[] {

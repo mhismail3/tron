@@ -1,20 +1,12 @@
 /**
  * @fileoverview Error types and handling utilities
  *
- * Provides:
- * - Standardized error codes
- * - Error categorization
- * - Error boundary utilities
- *
- * @migration This consolidates error handling from various modules.
+ * Re-exports error handling from utils/errors.ts and provides
+ * standardized error codes used across the system.
  */
 
-// Re-export logging error utilities during migration
-export {
-  categorizeError,
-  LogErrorCategory,
-  type StructuredError,
-} from '../../logging/index.js';
+// Re-export all error utilities from utils
+export * from '../utils/errors.js';
 
 // Error codes used across the system
 export const ErrorCodes = {

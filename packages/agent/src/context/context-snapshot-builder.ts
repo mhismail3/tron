@@ -9,7 +9,7 @@
  * Extracted from ContextManager to provide focused snapshot operations.
  */
 
-import type { Message, Tool } from '../types/index.js';
+import type { Message, Tool } from '@core/types/index.js';
 import {
   THRESHOLDS,
   type ThresholdLevel,

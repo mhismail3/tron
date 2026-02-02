@@ -10,9 +10,9 @@
  * - Model switching with revalidation
  */
 
-import type { Message, Tool } from '../types/index.js';
-import { getContextLimit } from '../usage/index.js';
-import { detectProviderFromModel, type ProviderType } from '../providers/index.js';
+import type { Message, Tool } from '@core/types/index.js';
+import { getContextLimit } from '@infrastructure/usage/index.js';
+import { detectProviderFromModel, type ProviderType } from '@llm/providers/index.js';
 import type { Summarizer } from './summarizer.js';
 import {
   buildSystemPrompt,

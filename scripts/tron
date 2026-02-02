@@ -198,7 +198,7 @@ build_production() {
     # External: native modules that can't be bundled (require .node binaries)
     local BANNER='const _importMetaUrl = require("url").pathToFileURL(__filename).href;'
 
-    ./node_modules/.bin/esbuild packages/agent/dist/server.js \
+    ./node_modules/.bin/esbuild packages/agent/dist/interface/server.js \
         --bundle \
         --platform=node \
         --target=node20 \
@@ -942,13 +942,13 @@ cmd_dev() {
         echo ""
         echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        exec node packages/agent/dist/server.js
+        exec node packages/agent/dist/interface/server.js
     else
         # Background mode (default)
         echo ""
         echo -e "${CYAN}Starting Beta Server (background)${NC}"
 
-        node packages/agent/dist/server.js >/dev/null 2>&1 &
+        node packages/agent/dist/interface/server.js >/dev/null 2>&1 &
         local pid=$!
 
         sleep 2

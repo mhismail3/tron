@@ -36,8 +36,8 @@ import type {
   SessionId,
   WorkspaceId,
   ContentBlock,
-} from '../../events/types.js';
-import type { HookType, HookAction } from '../../hooks/types.js';
+} from '@infrastructure/events/types.js';
+import type { HookType, HookAction } from '@capabilities/extensions/hooks/types.js';
 
 // =============================================================================
 // ID Generators

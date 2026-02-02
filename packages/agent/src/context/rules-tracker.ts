@@ -10,7 +10,7 @@ import type {
   RulesLoadedPayload,
   RulesFileInfo,
   RulesLevel,
-} from '../events/types.js';
+} from '@infrastructure/events/types.js';
 
 /**
  * Information about a tracked rules file

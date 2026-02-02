@@ -17,7 +17,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
-import { MAX_TOOL_RESULT_SIZE, MAX_TOOL_INPUT_SIZE } from '../utils/content-normalizer.js';
+import { MAX_TOOL_RESULT_SIZE, MAX_TOOL_INPUT_SIZE } from '@core/utils/content-normalizer.js';
 
 // Generate test data of specific sizes
 function generateBase64Data(sizeInBytes: number): string {
@@ -62,7 +62,7 @@ function getOriginalSizeFromTruncationNotice(content: string): number | null {
 describe('BrowseTheWebTool - Full Screenshot Data', () => {
   it('should return concise text content but include full screenshot in details', async () => {
     // Import dynamically to allow mocking
-    const { BrowseTheWebTool } = await import('../tools/browser/browse-the-web.js');
+    const { BrowseTheWebTool } = await import('../capabilities/tools/browser/browse-the-web.js');
 
     const fullScreenshot = generateLargeScreenshot();
 
@@ -97,7 +97,7 @@ describe('BrowseTheWebTool - Full Screenshot Data', () => {
   });
 
   it('should include full screenshot in result.details for separate access', async () => {
-    const { BrowseTheWebTool } = await import('../tools/browser/browse-the-web.js');
+    const { BrowseTheWebTool } = await import('../capabilities/tools/browser/browse-the-web.js');
 
     const fullScreenshot = generateLargeScreenshot();
 
@@ -120,7 +120,7 @@ describe('BrowseTheWebTool - Full Screenshot Data', () => {
   });
 
   it('should NOT include details for non-screenshot actions', async () => {
-    const { BrowseTheWebTool } = await import('../tools/browser/browse-the-web.js');
+    const { BrowseTheWebTool } = await import('../capabilities/tools/browser/browse-the-web.js');
 
     const mockDelegate = {
       execute: vi.fn().mockResolvedValue({
@@ -148,7 +148,7 @@ describe('Content Normalizer - Truncation for Persistence', () => {
   let truncateString: (str: string, maxLength: number) => string;
 
   beforeEach(async () => {
-    const module = await import('../utils/content-normalizer.js');
+    const module = await import('../core/utils/content-normalizer.js');
     normalizeContentBlock = module.normalizeContentBlock;
     truncateString = module.truncateString;
   });

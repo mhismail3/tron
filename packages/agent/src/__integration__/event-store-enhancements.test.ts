@@ -14,7 +14,7 @@ import {
   isToolCallEvent,
   isToolResultEvent,
   isErrorEvent,
-} from '../events/types/index.js';
+} from '@infrastructure/events/types/index.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';

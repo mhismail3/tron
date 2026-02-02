@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { TronWebSocketServer } from '../gateway/websocket.js';
+import { TronWebSocketServer } from '@interface/gateway/websocket.js';
 import type { RpcContext } from '../index.js';
 
 // Mock ws module

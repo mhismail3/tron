@@ -14,8 +14,8 @@
  */
 
 import { vi, type Mock } from 'vitest';
-import type { EventStore, CreateSessionOptions, CreateSessionResult, AppendEventOptions, ForkResult } from '../../events/event-store.js';
-import type { SessionRow } from '../../events/sqlite/facade.js';
+import type { EventStore, CreateSessionOptions, CreateSessionResult, AppendEventOptions, ForkResult } from '@infrastructure/events/event-store.js';
+import type { SessionRow } from '@infrastructure/events/sqlite/facade.js';
 import type {
   SessionEvent,
   SessionId,
@@ -25,7 +25,7 @@ import type {
   Message,
   SessionState,
   MessageWithEventId,
-} from '../../events/types.js';
+} from '@infrastructure/events/types.js';
 
 // =============================================================================
 // Helper Types

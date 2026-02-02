@@ -19,7 +19,7 @@
  */
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { createLogger } from '../logging/index.js';
+import { createLogger } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('context:loader');
 

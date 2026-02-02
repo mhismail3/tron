@@ -8,7 +8,7 @@
  * - Turn validation types
  */
 
-import type { Message, Tool } from '../types/index.js';
+import type { Message, Tool } from '@core/types/index.js';
 import type { ExtractedData } from './summarizer.js';
 
 // =============================================================================

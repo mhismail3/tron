@@ -16,7 +16,7 @@
  * - Minimum 85 tokens per image
  * - Default 1500 tokens for URL images (typical 1024x1024)
  */
-import type { Message, Tool } from '../types/index.js';
+import type { Message, Tool } from '@core/types/index.js';
 
 // =============================================================================
 // Constants

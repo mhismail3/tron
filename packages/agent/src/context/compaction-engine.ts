@@ -9,10 +9,10 @@
  * Extracted from ContextManager to provide focused compaction operations.
  */
 
-import type { Message } from '../types/index.js';
+import type { Message } from '@core/types/index.js';
 import type { Summarizer, ExtractedData } from './summarizer.js';
 import type { CompactionPreview, CompactionResult } from './types.js';
-import { createLogger } from '../logging/index.js';
+import { createLogger } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('compaction-engine');
 

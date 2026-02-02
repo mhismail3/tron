@@ -26,7 +26,7 @@ export type {
   StreamEvent,
   TronEvent,
   TronEventType,
-} from './types/index.js';
+} from './core/types/index.js';
 
 // Re-export RPC types (protocol only, no handler)
 export type {
@@ -91,7 +91,7 @@ export type {
   WorktreeMergeResult,
   WorktreeListParams,
   WorktreeListResult,
-} from './rpc/types.js';
+} from './interface/rpc/types.js';
 
 // Re-export model catalog (browser-safe)
 export {
@@ -107,7 +107,7 @@ export {
   isValidModelId,
   type ModelInfo,
   type ModelCategory,
-} from './providers/models.js';
+} from './llm/providers/models.js';
 
 // Re-export feature flags types
-export type { FeatureFlags } from './settings/feature-flags.js';
+export type { FeatureFlags } from './infrastructure/settings/feature-flags.js';

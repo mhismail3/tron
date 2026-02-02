@@ -5,7 +5,7 @@
  * LLM-based summarization (production) or mock summarization (testing).
  */
 
-import type { Message } from '../types/index.js';
+import type { Message } from '@core/types/index.js';
 
 // =============================================================================
 // Extracted Data Structure

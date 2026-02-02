@@ -6,7 +6,18 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@infrastructure/*": ["./src/infrastructure/*"],
+      "@llm/*": ["./src/llm/*"],
+      "@context/*": ["./src/context/*"],
+      "@runtime/*": ["./src/runtime/*"],
+      "@capabilities/*": ["./src/capabilities/*"],
+      "@interface/*": ["./src/interface/*"],
+      "@platform/*": ["./src/platform/*"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**", "**/__helpers__/**", "**/__fixtures__/**", "**/__integration__/**"]

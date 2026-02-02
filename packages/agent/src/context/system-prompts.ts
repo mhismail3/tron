@@ -13,8 +13,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ProviderType } from '../providers/index.js';
-import { createLogger } from '../logging/index.js';
+import type { ProviderType } from '@llm/providers/index.js';
+import { createLogger } from '@infrastructure/logging/index.js';
 
 // Re-export prompts from the system-prompts directory
 export { TRON_CORE_PROMPT, WORKING_DIRECTORY_SUFFIX } from './system-prompts/index.js';

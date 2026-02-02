@@ -39,31 +39,96 @@ The agent package (`@tron/agent`) is the core backend for Tron. It handles:
 
 ## Package Structure
 
+The package is organized into 8 top-level directories following a layered architecture:
+
 ```
 src/
-├── agent/           # TronAgent, turn execution
-├── providers/       # LLM adapters (modular directories)
-│   ├── anthropic/   # Anthropic Claude provider
-│   ├── google/      # Google Gemini provider
-│   ├── base/        # Shared provider infrastructure
-│   └── *.ts         # OpenAI, factory, models, etc.
-├── tools/           # read, write, edit, bash, grep, find, subagent
-│   ├── fs/          # Filesystem tools
-│   ├── browser/     # Browser automation
-│   ├── subagent/    # Sub-agent spawning
-│   ├── ui/          # User interaction (ask, notify, todo)
-│   └── system/      # Bash, thinking
-├── events/          # Event store, SQLite backend, reconstruction
-├── context/         # AGENTS.md loader, system prompts, compaction
-├── orchestrator/    # Session lifecycle, turn management
-├── gateway/         # WebSocket server, RPC handlers
-├── hooks/           # PreToolUse, PostToolUse hooks
-├── skills/          # Skill loader, registry
-├── session/         # Session management, worktree isolation
-│   └── worktree/    # Worktree module (isolation, lifecycle, merge)
-├── di/              # Dependency injection infrastructure
-├── rpc/             # RPC protocol, handlers, schemas
-└── __fixtures__/    # Test utilities (mock factories, event fixtures)
+├── core/                    # Foundation Layer
+│   ├── types/               # Shared type definitions
+│   ├── di/                  # Dependency injection infrastructure
+│   ├── utils/               # Shared utilities
+│   ├── errors/              # Error types and handling
+│   └── constants.ts         # Version, name constants
+│
+├── infrastructure/          # Cross-Cutting Concerns
+│   ├── logging/             # Pino-based logging with SQLite transport
+│   ├── settings/            # Configuration, feature flags
+│   ├── auth/                # API key management
+│   ├── communication/       # Inter-agent messaging bus
+│   ├── usage/               # Token/cost tracking
+│   └── events/              # Event store, SQLite backend
+│
+├── llm/                     # LLM Provider Layer
+│   └── providers/           # LLM adapters
+│       ├── anthropic/       # Claude provider
+│       ├── google/          # Gemini provider
+│       ├── openai/          # GPT/o1/o3 provider
+│       └── base/            # Shared infrastructure
+│
+├── context/                 # Context Management
+│   ├── system-prompts/      # System prompt templates
+│   ├── rules-tracker.ts     # AGENTS.md/rules tracking
+│   └── compaction/          # Context compaction
+│
+├── runtime/                 # Agent Execution
+│   ├── agent/               # TronAgent, turn execution
+│   ├── orchestrator/        # Multi-session orchestration
+│   │   ├── persistence/     # Event store orchestrator
+│   │   ├── session/         # Session context, managers
+│   │   └── controllers/     # Browser, notification, worktree
+│   └── services/            # Session, context services
+│
+├── capabilities/            # Agent Capabilities
+│   ├── tools/               # Tool implementations
+│   │   ├── fs/              # Filesystem (read, write, edit)
+│   │   ├── browser/         # Browser automation
+│   │   ├── subagent/        # Sub-agent spawning
+│   │   ├── ui/              # User interaction (ask, notify, todo)
+│   │   ├── system/          # Bash, thinking
+│   │   └── search/          # Code search
+│   ├── extensions/          # Extensibility
+│   │   ├── hooks/           # PreToolUse, PostToolUse hooks
+│   │   ├── skills/          # Skill loader, registry
+│   │   └── commands/        # Custom commands
+│   ├── guardrails/          # Safety guardrails
+│   └── todos/               # Task management
+│
+├── interface/               # External Interfaces
+│   ├── server.ts            # TronServer entry point
+│   ├── http/                # HTTP server (Hono)
+│   ├── gateway/             # WebSocket gateway
+│   ├── rpc/                 # RPC protocol, handlers
+│   └── ui/                  # RenderAppUI components
+│
+├── platform/                # Platform Integrations
+│   ├── session/             # Session, worktree management
+│   │   └── worktree/        # Git worktree isolation
+│   ├── external/            # External services
+│   │   ├── browser/         # Playwright browser service
+│   │   └── apns/            # Apple Push Notifications
+│   ├── deployment/          # Self-deployment
+│   ├── productivity/        # Canvas, task tools
+│   └── transcription/       # Speech-to-text
+│
+└── __fixtures__/            # Test utilities
+```
+
+### Dependency Flow
+
+```
+interface/  ← Entry points (server, gateway, rpc)
+    │
+runtime/    ← Agent execution
+    │
+    ├── capabilities/  (tools, extensions)
+    ├── context/       (message management)
+    └── platform/      (session, external)
+    │
+llm/        ← LLM providers
+    │
+infrastructure/  ← Logging, events, settings
+    │
+core/       ← Types, utilities
 ```
 
 ## Event Sourcing
