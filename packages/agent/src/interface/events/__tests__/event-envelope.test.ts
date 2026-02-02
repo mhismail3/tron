@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createEventEnvelope } from '../event-envelope.js';
+import { createEventEnvelope, BroadcastEventType, type BroadcastEventTypeValue } from '../event-envelope.js';
 
 describe('createEventEnvelope', () => {
   beforeEach(() => {
@@ -66,5 +66,44 @@ describe('createEventEnvelope', () => {
   it('returns undefined sessionId when not provided anywhere', () => {
     const envelope = createEventEnvelope('system.startup', { version: '1.0' });
     expect(envelope.sessionId).toBeUndefined();
+  });
+});
+
+describe('BroadcastEventType', () => {
+  it('contains all session event types', () => {
+    expect(BroadcastEventType.SESSION_CREATED).toBe('session.created');
+    expect(BroadcastEventType.SESSION_ENDED).toBe('session.ended');
+    expect(BroadcastEventType.SESSION_FORKED).toBe('session.forked');
+    expect(BroadcastEventType.SESSION_REWOUND).toBe('session.rewound');
+  });
+
+  it('contains all agent event types', () => {
+    expect(BroadcastEventType.AGENT_TURN).toBe('agent.turn');
+    expect(BroadcastEventType.AGENT_MESSAGE_DELETED).toBe('agent.message_deleted');
+    expect(BroadcastEventType.AGENT_CONTEXT_CLEARED).toBe('agent.context_cleared');
+    expect(BroadcastEventType.AGENT_COMPACTION).toBe('agent.compaction');
+    expect(BroadcastEventType.AGENT_SKILL_REMOVED).toBe('agent.skill_removed');
+    expect(BroadcastEventType.AGENT_TODOS_UPDATED).toBe('agent.todos_updated');
+  });
+
+  it('contains all browser event types', () => {
+    expect(BroadcastEventType.BROWSER_FRAME).toBe('browser.frame');
+    expect(BroadcastEventType.BROWSER_CLOSED).toBe('browser.closed');
+  });
+
+  it('contains event.new type', () => {
+    expect(BroadcastEventType.EVENT_NEW).toBe('event.new');
+  });
+
+  it('allows type-safe usage with createEventEnvelope', () => {
+    const envelope = createEventEnvelope(BroadcastEventType.SESSION_CREATED, { name: 'test' });
+    expect(envelope.type).toBe('session.created');
+  });
+
+  it('provides compile-time type checking', () => {
+    // This test verifies that BroadcastEventTypeValue is a union type
+    // If this compiles, the type system is working
+    const validType: BroadcastEventTypeValue = 'session.created';
+    expect(validType).toBe('session.created');
   });
 });

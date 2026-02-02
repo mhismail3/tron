@@ -5,6 +5,47 @@
  * eliminating duplicate timestamp/sessionId extraction across handlers.
  */
 
+// =============================================================================
+// Type-Safe Broadcast Event Types
+// =============================================================================
+
+/**
+ * Known broadcast event types for WebSocket events.
+ * Use these constants instead of raw strings for compile-time validation.
+ */
+export const BroadcastEventType = {
+  // Session events
+  SESSION_CREATED: 'session.created',
+  SESSION_ENDED: 'session.ended',
+  SESSION_FORKED: 'session.forked',
+  SESSION_REWOUND: 'session.rewound',
+
+  // Agent events
+  AGENT_TURN: 'agent.turn',
+  AGENT_MESSAGE_DELETED: 'agent.message_deleted',
+  AGENT_CONTEXT_CLEARED: 'agent.context_cleared',
+  AGENT_COMPACTION: 'agent.compaction',
+  AGENT_SKILL_REMOVED: 'agent.skill_removed',
+  AGENT_TODOS_UPDATED: 'agent.todos_updated',
+
+  // Browser events
+  BROWSER_FRAME: 'browser.frame',
+  BROWSER_CLOSED: 'browser.closed',
+
+  // Event store events
+  EVENT_NEW: 'event.new',
+} as const;
+
+/**
+ * Union type of all known broadcast event types.
+ * Provides compile-time validation for event type strings.
+ */
+export type BroadcastEventTypeValue = (typeof BroadcastEventType)[keyof typeof BroadcastEventType];
+
+// =============================================================================
+// Event Envelope
+// =============================================================================
+
 /**
  * Standard event envelope for WebSocket broadcasts
  */

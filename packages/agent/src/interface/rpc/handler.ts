@@ -8,7 +8,7 @@
  * See handlers/ directory for individual handler implementations.
  */
 import { EventEmitter } from 'events';
-import { createLogger } from '@infrastructure/logging/index.js';
+import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import type { RpcRequest, RpcResponse, RpcEvent, RpcError } from './types.js';
 
 // Import and re-export context types for backward compatibility
@@ -133,12 +133,23 @@ export class RpcHandler extends EventEmitter {
       const chain = this.buildMiddlewareChain();
       return await chain(request);
     } catch (error) {
-      // Top-level error handling
-      logger.error('Request handling error', error instanceof Error ? error : new Error(String(error)));
+      // Top-level error handling with structured categorization
+      const structured = categorizeError(error, {
+        method: request.method,
+        requestId: request.id,
+        operation: 'rpc_request',
+      });
+      logger.error('Request handling error', {
+        code: structured.code,
+        category: structured.category,
+        error: structured.message,
+        method: request.method,
+        retryable: structured.retryable,
+      });
       return this.errorResponse(
         request.id,
         'INTERNAL_ERROR',
-        error instanceof Error ? error.message : 'Unknown error'
+        structured.message
       );
     }
   }
@@ -188,11 +199,22 @@ export class RpcHandler extends EventEmitter {
       // All methods are now handled by the registry
       return this.registry.dispatch(request, this.context);
     } catch (error) {
-      logger.error('Handler error', error instanceof Error ? error : new Error(String(error)));
+      const structured = categorizeError(error, {
+        method: request.method,
+        requestId: request.id,
+        operation: 'rpc_dispatch',
+      });
+      logger.error('Handler dispatch error', {
+        code: structured.code,
+        category: structured.category,
+        error: structured.message,
+        method: request.method,
+        retryable: structured.retryable,
+      });
       return this.errorResponse(
         request.id,
         'INTERNAL_ERROR',
-        error instanceof Error ? error.message : 'Unknown error'
+        structured.message
       );
     }
   }

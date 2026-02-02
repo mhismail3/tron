@@ -135,6 +135,7 @@ export class HookEngine {
         const structured = categorizeError(error, { hookName: hook.name, hookType: type });
         logger.error('Hook execution error', {
           name: hook.name,
+          sessionId: context.sessionId,
           code: LogErrorCodes.HOOK_ERROR,
           category: LogErrorCategory.HOOK_EXECUTION,
           error: structured.message,
@@ -326,6 +327,7 @@ export class HookEngine {
         const structured = categorizeError(error, { hookName: hook.name, hookType: context.hookType });
         logger.error('Hook execution error', {
           name: hook.name,
+          sessionId: context.sessionId,
           code: LogErrorCodes.HOOK_ERROR,
           category: LogErrorCategory.HOOK_EXECUTION,
           error: structured.message,
@@ -420,6 +422,7 @@ export class HookEngine {
         logger.error('Background hook execution error', {
           name: hook.name,
           executionId,
+          sessionId: context.sessionId,
           code: LogErrorCodes.HOOK_ERROR,
           category: LogErrorCategory.HOOK_EXECUTION,
           error: structured.message,
@@ -445,6 +448,7 @@ export class HookEngine {
 
     logger.info('Background hooks completed', {
       executionId,
+      sessionId: context.sessionId,
       hookCount: hooks.length,
       result: hasError ? 'error' : 'continue',
       duration,

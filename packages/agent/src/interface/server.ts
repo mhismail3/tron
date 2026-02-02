@@ -12,7 +12,7 @@ import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from '@runt
 import { HealthServer, type HealthServerConfig } from './gateway/health.js';
 import { ensureTranscriptionSidecar, stopTranscriptionSidecar } from '@platform/transcription/index.js';
 import { createRpcContext } from './gateway/rpc/index.js';
-import { createEventEnvelope } from './events/index.js';
+import { createEventEnvelope, BroadcastEventType } from './events/index.js';
 
 const logger = createLogger('server');
 
@@ -130,24 +130,24 @@ export class TronServer {
     if (!this.orchestrator || !this.wsServer) return;
 
     this.orchestrator.on('session_created', (data) => {
-      this.wsServer?.broadcastEvent(createEventEnvelope('session.created', data as Record<string, unknown>));
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_CREATED, data as Record<string, unknown>));
     });
 
     this.orchestrator.on('session_ended', (data) => {
-      this.wsServer?.broadcastEvent(createEventEnvelope('session.ended', data as Record<string, unknown>));
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_ENDED, data as Record<string, unknown>));
     });
 
     this.orchestrator.on('session_forked', (data) => {
-      this.wsServer?.broadcastEvent(createEventEnvelope('session.forked', data as Record<string, unknown>));
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_FORKED, data as Record<string, unknown>));
     });
 
     this.orchestrator.on('session_rewound', (data) => {
-      this.wsServer?.broadcastEvent(createEventEnvelope('session.rewound', data as Record<string, unknown>));
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_REWOUND, data as Record<string, unknown>));
     });
 
     this.orchestrator.on('agent_turn', (event) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'agent.turn',
+        BroadcastEventType.AGENT_TURN,
         { ...event.data, timestamp: event.timestamp } as Record<string, unknown>,
         event.sessionId
       ));
@@ -163,7 +163,7 @@ export class TronServer {
 
     this.orchestrator.on('event_new', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'event.new',
+        BroadcastEventType.EVENT_NEW,
         { event: data.event },
         data.sessionId
       ));
@@ -172,7 +172,7 @@ export class TronServer {
       if (data.event.type === 'message.deleted') {
         const payload = data.event.payload as { targetEventId: string; targetType: string; targetTurn?: number; reason?: string };
         this.wsServer?.broadcastEvent(createEventEnvelope(
-          'agent.message_deleted',
+          BroadcastEventType.AGENT_MESSAGE_DELETED,
           {
             targetEventId: payload.targetEventId,
             targetType: payload.targetType,
@@ -186,7 +186,7 @@ export class TronServer {
 
     this.orchestrator.on('context_cleared', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'agent.context_cleared',
+        BroadcastEventType.AGENT_CONTEXT_CLEARED,
         {
           tokensBefore: data.tokensBefore,
           tokensAfter: data.tokensAfter,
@@ -197,7 +197,7 @@ export class TronServer {
 
     this.orchestrator.on('compaction_completed', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'agent.compaction',
+        BroadcastEventType.AGENT_COMPACTION,
         {
           tokensBefore: data.tokensBefore,
           tokensAfter: data.tokensAfter,
@@ -210,7 +210,7 @@ export class TronServer {
 
     this.orchestrator.on('skill_removed', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'agent.skill_removed',
+        BroadcastEventType.AGENT_SKILL_REMOVED,
         { skillName: data.skillName },
         data.sessionId
       ));
@@ -219,7 +219,7 @@ export class TronServer {
     // Forward browser frame events for live streaming
     this.orchestrator.on('browser.frame', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'browser.frame',
+        BroadcastEventType.BROWSER_FRAME,
         {
           sessionId: data.sessionId,
           data: data.data,
@@ -233,13 +233,13 @@ export class TronServer {
 
     // Forward browser closed events
     this.orchestrator.on('browser.closed', (data) => {
-      this.wsServer?.broadcastEvent(createEventEnvelope('browser.closed', {}, data.sessionId));
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.BROWSER_CLOSED, {}, data.sessionId));
     });
 
     // Forward todo update events
     this.orchestrator.on('todos_updated', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
-        'agent.todos_updated',
+        BroadcastEventType.AGENT_TODOS_UPDATED,
         {
           todos: data.todos,
           restoredCount: data.restoredCount,
