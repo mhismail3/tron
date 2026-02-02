@@ -1,7 +1,8 @@
 /**
  * @fileoverview Tests for HookEventHandler
  *
- * TDD: Tests for hook event persistence to the event store.
+ * HookEventHandler uses EventContext for automatic metadata injection.
+ * It persists hook lifecycle events (triggered/completed) to the event store.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -12,6 +13,7 @@ import {
   type InternalHookTriggeredEvent,
   type InternalHookCompletedEvent,
 } from '../hook-event-handler.js';
+import { createTestEventContext, type TestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
 import type { ActiveSession } from '../../../types.js';
 
@@ -20,11 +22,7 @@ import type { ActiveSession } from '../../../types.js';
 // =============================================================================
 
 function createMockDeps(): HookEventHandlerDeps {
-  return {
-    getActiveSession: vi.fn(),
-    appendEventLinearized: vi.fn(),
-    emit: vi.fn(),
-  };
+  return {};
 }
 
 function createMockActiveSession(overrides: Partial<ActiveSession> = {}): ActiveSession {
@@ -37,6 +35,18 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
     } as unknown as ActiveSession['sessionContext'],
     ...overrides,
   } as ActiveSession;
+}
+
+function createTestContext(options: {
+  sessionId?: SessionId;
+  runId?: string;
+  active?: ActiveSession;
+} = {}): TestEventContext {
+  return createTestEventContext({
+    sessionId: options.sessionId ?? ('test-session' as SessionId),
+    runId: options.runId,
+    active: options.active,
+  });
 }
 
 // =============================================================================
@@ -54,33 +64,33 @@ describe('HookEventHandler', () => {
   });
 
   describe('handleHookTriggered', () => {
-    it('should persist hook.triggered event for active session', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+    it('should persist hook.triggered event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookTriggeredEvent = {
         type: 'hook_triggered',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['builtin:pre-tool-use'],
         hookEvent: 'PreToolUse',
       };
 
-      handler.handleHookTriggered(event);
+      handler.handleHookTriggered(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.triggered',
-        expect.objectContaining({
+      expect(ctx.persistCalls).toHaveLength(1);
+      expect(ctx.persistCalls[0]).toEqual({
+        type: 'hook.triggered',
+        payload: expect.objectContaining({
           hookNames: ['builtin:pre-tool-use'],
           hookEvent: 'PreToolUse',
+          runId: 'run-123',
         }),
-        undefined
-      );
+      });
     });
 
-    it('should skip persistence when session not found', () => {
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    it('should skip persistence when no active session', () => {
+      const ctx = createTestContext(); // No active session
 
       const event: InternalHookTriggeredEvent = {
         type: 'hook_triggered',
@@ -90,129 +100,114 @@ describe('HookEventHandler', () => {
         hookEvent: 'PreToolUse',
       };
 
-      handler.handleHookTriggered(event);
+      handler.handleHookTriggered(ctx, event);
 
-      expect(deps.appendEventLinearized).not.toHaveBeenCalled();
+      expect(ctx.persistCalls).toHaveLength(0);
     });
 
     it('should include tool context for PreToolUse hooks', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookTriggeredEvent = {
         type: 'hook_triggered',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['security-check'],
         hookEvent: 'PreToolUse',
         toolName: 'Bash',
         toolCallId: 'call_123',
       };
 
-      handler.handleHookTriggered(event);
+      handler.handleHookTriggered(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.triggered',
-        expect.objectContaining({
-          toolName: 'Bash',
-          toolCallId: 'call_123',
-        }),
-        undefined
-      );
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        toolName: 'Bash',
+        toolCallId: 'call_123',
+      });
     });
 
     it('should include tool context for PostToolUse hooks', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookTriggeredEvent = {
         type: 'hook_triggered',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['audit-hook'],
         hookEvent: 'PostToolUse',
         toolName: 'Read',
         toolCallId: 'call_456',
       };
 
-      handler.handleHookTriggered(event);
+      handler.handleHookTriggered(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.triggered',
-        expect.objectContaining({
-          hookEvent: 'PostToolUse',
-          toolName: 'Read',
-          toolCallId: 'call_456',
-        }),
-        undefined
-      );
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        hookEvent: 'PostToolUse',
+        toolName: 'Read',
+        toolCallId: 'call_456',
+      });
     });
 
     it('should handle multiple hook names', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-000' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookTriggeredEvent = {
         type: 'hook_triggered',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['hook-1', 'hook-2', 'hook-3'],
         hookEvent: 'SessionStart',
       };
 
-      handler.handleHookTriggered(event);
+      handler.handleHookTriggered(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.triggered',
-        expect.objectContaining({
-          hookNames: ['hook-1', 'hook-2', 'hook-3'],
-        }),
-        undefined
-      );
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        hookNames: ['hook-1', 'hook-2', 'hook-3'],
+      });
     });
   });
 
   describe('handleHookCompleted', () => {
     it('should persist hook.completed with result and duration', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookCompletedEvent = {
         type: 'hook_completed',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['builtin:pre-tool-use'],
         hookEvent: 'PreToolUse',
         result: 'continue',
         duration: 42,
       };
 
-      handler.handleHookCompleted(event);
+      handler.handleHookCompleted(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.completed',
-        expect.objectContaining({
+      expect(ctx.persistCalls).toHaveLength(1);
+      expect(ctx.persistCalls[0]).toEqual({
+        type: 'hook.completed',
+        payload: expect.objectContaining({
           hookNames: ['builtin:pre-tool-use'],
           hookEvent: 'PreToolUse',
           result: 'continue',
           duration: 42,
+          runId: 'run-123',
         }),
-        undefined
-      );
+      });
     });
 
     it('should persist block result with reason', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookCompletedEvent = {
         type: 'hook_completed',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['security-check'],
         hookEvent: 'PreToolUse',
         result: 'block',
@@ -220,47 +215,37 @@ describe('HookEventHandler', () => {
         duration: 15,
       };
 
-      handler.handleHookCompleted(event);
+      handler.handleHookCompleted(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.completed',
-        expect.objectContaining({
-          result: 'block',
-          reason: 'Dangerous command detected',
-        }),
-        undefined
-      );
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        result: 'block',
+        reason: 'Dangerous command detected',
+      });
     });
 
     it('should persist modify result', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookCompletedEvent = {
         type: 'hook_completed',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['path-transformer'],
         hookEvent: 'PreToolUse',
         result: 'modify',
         duration: 5,
       };
 
-      handler.handleHookCompleted(event);
+      handler.handleHookCompleted(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.completed',
-        expect.objectContaining({
-          result: 'modify',
-        }),
-        undefined
-      );
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        result: 'modify',
+      });
     });
 
-    it('should skip persistence when session not found', () => {
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    it('should skip persistence when no active session', () => {
+      const ctx = createTestContext(); // No active session
 
       const event: InternalHookCompletedEvent = {
         type: 'hook_completed',
@@ -271,19 +256,19 @@ describe('HookEventHandler', () => {
         result: 'continue',
       };
 
-      handler.handleHookCompleted(event);
+      handler.handleHookCompleted(ctx, event);
 
-      expect(deps.appendEventLinearized).not.toHaveBeenCalled();
+      expect(ctx.persistCalls).toHaveLength(0);
     });
 
     it('should include tool context for tool-related hooks', () => {
-      const session = createMockActiveSession();
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(session);
+      const mockActive = createMockActiveSession({ currentRunId: 'run-000' });
+      const ctx = createTestContext({ active: mockActive });
 
       const event: InternalHookCompletedEvent = {
         type: 'hook_completed',
-        sessionId: 'test-session',
-        timestamp: new Date().toISOString(),
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         hookNames: ['audit-hook'],
         hookEvent: 'PostToolUse',
         result: 'continue',
@@ -291,17 +276,12 @@ describe('HookEventHandler', () => {
         toolCallId: 'call_789',
       };
 
-      handler.handleHookCompleted(event);
+      handler.handleHookCompleted(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        'test-session',
-        'hook.completed',
-        expect.objectContaining({
-          toolName: 'Write',
-          toolCallId: 'call_789',
-        }),
-        undefined
-      );
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        toolName: 'Write',
+        toolCallId: 'call_789',
+      });
     });
   });
 

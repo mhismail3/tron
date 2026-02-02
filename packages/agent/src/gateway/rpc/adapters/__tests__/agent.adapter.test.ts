@@ -100,22 +100,25 @@ describe('AgentAdapter', () => {
         prompt: 'Hello, world!',
       });
 
-      expect(result).toEqual({ acknowledged: true });
+      expect(result.acknowledged).toBe(true);
+      expect(result.runId).toBeDefined();
+      expect(typeof result.runId).toBe('string');
       expect(mockOrchestrator.agent!.run).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: 'sess-123',
           prompt: 'Hello, world!',
+          runId: result.runId, // runId should be passed through
           skillLoader: expect.any(Function),
         }),
       );
     });
 
-    it('should pass skills and skill loader to agent', async () => {
+    it('should pass skills, skill loader, and runId to agent', async () => {
       const adapter = createAgentAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
       });
 
-      await adapter.prompt({
+      const result = await adapter.prompt({
         sessionId: 'sess-123',
         prompt: 'Test prompt',
         skills: [{ name: 'test-skill', source: 'project' }],
@@ -128,6 +131,7 @@ describe('AgentAdapter', () => {
           prompt: 'Test prompt',
           skills: [{ name: 'test-skill', source: 'project' }],
           reasoningLevel: 'high',
+          runId: result.runId, // runId should be passed through
           skillLoader: expect.any(Function),
         }),
       );
@@ -145,17 +149,19 @@ describe('AgentAdapter', () => {
         prompt: 'Test',
       });
 
-      // Should still return acknowledged
-      expect(result).toEqual({ acknowledged: true });
+      // Should still return acknowledged with runId
+      expect(result.acknowledged).toBe(true);
+      expect(result.runId).toBeDefined();
 
       // Wait for the rejected promise to be handled
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Verify structured error was logged
+      // Verify structured error was logged with runId
       expect(mockLogger.error).toHaveBeenCalledWith(
         'Agent run error',
         expect.objectContaining({
           sessionId: 'sess-123',
+          runId: result.runId, // Error log should include runId
           code: 'TEST_ERROR',
           error: 'Agent error',
         }),

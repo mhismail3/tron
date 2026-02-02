@@ -7,12 +7,13 @@
  * Broadcasts compaction status to clients and persists boundary events
  * for session resume support.
  *
- * Extracted from AgentEventHandler to improve modularity and testability.
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
 import { createLogger } from '../../../logging/index.js';
 import type { TronEvent } from '../../../types/index.js';
-import type { SessionId, EventType } from '../../../events/index.js';
+import type { EventType } from '../../../events/index.js';
+import type { EventContext } from '../event-context.js';
 
 const logger = createLogger('compaction-event-handler');
 
@@ -21,17 +22,13 @@ const logger = createLogger('compaction-event-handler');
 // =============================================================================
 
 /**
- * Dependencies for CompactionEventHandler
+ * Dependencies for CompactionEventHandler.
+ *
+ * Note: No longer needs getActiveSession, appendEventLinearized, or emit
+ * since EventContext provides all of these.
  */
 export interface CompactionEventHandlerDeps {
-  /** Append event to session (fire-and-forget) */
-  appendEventLinearized: (
-    sessionId: SessionId,
-    type: EventType,
-    payload: Record<string, unknown>
-  ) => void;
-  /** Emit event to orchestrator */
-  emit: (event: string, data: unknown) => void;
+  // No dependencies needed - EventContext provides everything
 }
 
 // =============================================================================
@@ -40,19 +37,22 @@ export interface CompactionEventHandlerDeps {
 
 /**
  * Handles context compaction events.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in events
+ * - Consistent timestamp across related events
+ * - Simplified emit/persist API
  */
 export class CompactionEventHandler {
-  constructor(private deps: CompactionEventHandlerDeps) {}
+  constructor(_deps: CompactionEventHandlerDeps) {
+    // No deps needed - EventContext provides everything
+  }
 
   /**
    * Handle compaction_complete event.
    * Broadcasts to clients and persists boundary event for session resume.
    */
-  handleCompactionComplete(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
+  handleCompactionComplete(ctx: EventContext, event: TronEvent): void {
     const compactionEvent = event as {
       tokensBefore?: number;
       tokensAfter?: number;
@@ -65,23 +65,18 @@ export class CompactionEventHandler {
     const reason = compactionEvent.reason || 'auto';
 
     // Broadcast streaming event for live clients
-    this.deps.emit('agent_event', {
-      type: 'agent.compaction',
-      sessionId,
-      timestamp,
-      data: {
-        tokensBefore: compactionEvent.tokensBefore,
-        tokensAfter: compactionEvent.tokensAfter,
-        compressionRatio: compactionEvent.compressionRatio,
-        reason,
-        summary: compactionEvent.summary,
-      },
+    ctx.emit('agent.compaction', {
+      tokensBefore: compactionEvent.tokensBefore,
+      tokensAfter: compactionEvent.tokensAfter,
+      compressionRatio: compactionEvent.compressionRatio,
+      reason,
+      summary: compactionEvent.summary,
     });
 
     // Persist compact.boundary event so it shows up on session resume
     // Only persist successful compactions
     if (compactionEvent.success !== false) {
-      this.deps.appendEventLinearized(sessionId, 'compact.boundary' as EventType, {
+      ctx.persist('compact.boundary' as EventType, {
         originalTokens: compactionEvent.tokensBefore,
         compactedTokens: compactionEvent.tokensAfter,
         compressionRatio: compactionEvent.compressionRatio,
@@ -90,7 +85,7 @@ export class CompactionEventHandler {
       });
 
       logger.debug('Persisted compact.boundary event', {
-        sessionId,
+        sessionId: ctx.sessionId,
         tokensBefore: compactionEvent.tokensBefore,
         tokensAfter: compactionEvent.tokensAfter,
         reason,

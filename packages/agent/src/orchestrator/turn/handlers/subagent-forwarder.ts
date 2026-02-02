@@ -10,22 +10,24 @@
  * - tool_execution_end → tool_end
  * - turn_start/turn_end
  *
- * Extracted from AgentEventHandler to improve modularity and testability.
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
 import type { TronEvent } from '../../../types/index.js';
 import type { SessionId } from '../../../events/index.js';
+import type { EventContext } from '../event-context.js';
 
 // =============================================================================
 // Types
 // =============================================================================
 
 /**
- * Dependencies for SubagentForwarder
+ * Dependencies for SubagentForwarder.
+ *
+ * Note: No longer needs emit since EventContext provides this.
  */
 export interface SubagentForwarderDeps {
-  /** Emit event to orchestrator */
-  emit: (event: string, data: unknown) => void;
+  // No dependencies needed - EventContext provides everything
 }
 
 // =============================================================================
@@ -34,6 +36,11 @@ export interface SubagentForwarderDeps {
 
 /**
  * Forwards streaming events from subagent sessions to parent sessions.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in events
+ * - Consistent timestamp across related events
+ * - Simplified emit API
  */
 export class SubagentForwarder {
   /** Event types that should be forwarded to parent sessions */
@@ -45,23 +52,28 @@ export class SubagentForwarder {
     'turn_end',
   ];
 
-  constructor(private deps: SubagentForwarderDeps) {}
+  constructor(_deps: SubagentForwarderDeps) {
+    // No deps needed - EventContext provides everything
+  }
 
   /**
    * Forward an event from a subagent to its parent session.
    * Maps event types to iOS-friendly format for detail sheet display.
+   *
+   * @param ctx - EventContext scoped to the parent session
+   * @param subagentSessionId - Session ID of the subagent
+   * @param event - Event from the subagent
    */
   forwardToParent(
+    ctx: EventContext,
     subagentSessionId: SessionId,
-    parentSessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
+    event: TronEvent
   ): void {
     if (!SubagentForwarder.FORWARDABLE_TYPES.includes(event.type)) {
       return;
     }
 
-    const mapped = this.mapEvent(event, subagentSessionId, parentSessionId, timestamp);
+    const mapped = this.mapEvent(event, subagentSessionId, ctx.timestamp);
     if (!mapped) {
       return;
     }
@@ -70,21 +82,16 @@ export class SubagentForwarder {
 
     // Emit status update if needed (for turn_start)
     if (statusUpdate) {
-      this.deps.emit('agent_event', statusUpdate);
+      ctx.emit('agent.subagent_status', statusUpdate);
     }
 
     // Emit the forwarded event to parent session
-    this.deps.emit('agent_event', {
-      type: 'agent.subagent_event',
-      sessionId: parentSessionId,
-      timestamp,
-      data: {
-        subagentSessionId,
-        event: {
-          type: eventType,
-          data: eventData,
-          timestamp,
-        },
+    ctx.emit('agent.subagent_event', {
+      subagentSessionId,
+      event: {
+        type: eventType,
+        data: eventData,
+        timestamp: ctx.timestamp,
       },
     });
   }
@@ -95,9 +102,8 @@ export class SubagentForwarder {
   private mapEvent(
     event: TronEvent,
     subagentSessionId: SessionId,
-    parentSessionId: SessionId,
-    timestamp: string
-  ): { eventType: string; eventData: unknown; statusUpdate?: unknown } | null {
+    _timestamp: string
+  ): { eventType: string; eventData: unknown; statusUpdate?: Record<string, unknown> } | null {
     switch (event.type) {
       case 'message_update': {
         const msgEvent = event as { content?: string };
@@ -152,14 +158,9 @@ export class SubagentForwarder {
           eventType: 'turn_start',
           eventData: { turn: turnEvent.turn },
           statusUpdate: {
-            type: 'agent.subagent_status',
-            sessionId: parentSessionId,
-            timestamp,
-            data: {
-              subagentSessionId,
-              status: 'running',
-              currentTurn: turnEvent.turn ?? 1,
-            },
+            subagentSessionId,
+            status: 'running',
+            currentTurn: turnEvent.turn ?? 1,
           },
         };
       }

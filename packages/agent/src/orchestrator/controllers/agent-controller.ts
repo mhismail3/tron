@@ -80,14 +80,18 @@ export class AgentController {
     active.lastActivity = new Date();
     active.sessionContext.setProcessing(true);
 
+    // Set currentRunId for event correlation (event handlers access this from active session)
+    active.currentRunId = options.runId;
+
     try {
       // Delegate to AgentRunner for all execution logic
       // AgentRunner handles: context injection, content building, agent execution,
       // interrupt handling, completion handling, error handling, and event emission
       return await this.agentRunner.run(active, options) as TurnResult[];
     } finally {
-      // Clear processing state
+      // Clear processing state and runId
       active.sessionContext.setProcessing(false);
+      active.currentRunId = undefined;
     }
   }
 

@@ -9,12 +9,12 @@
  *
  * These events manage session state transitions and error handling.
  *
- * Extracted from AgentEventHandler to improve modularity and testability.
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
 import type { TronEvent } from '../../../types/index.js';
-import type { SessionId, EventType } from '../../../events/index.js';
-import type { ActiveSession } from '../../types.js';
+import type { EventType } from '../../../events/index.js';
+import type { EventContext } from '../event-context.js';
 import type { UIRenderHandler } from '../../ui-render-handler.js';
 
 // =============================================================================
@@ -22,21 +22,14 @@ import type { UIRenderHandler } from '../../ui-render-handler.js';
 // =============================================================================
 
 /**
- * Dependencies for LifecycleEventHandler
+ * Dependencies for LifecycleEventHandler.
+ *
+ * Note: No longer needs getActiveSession, appendEventLinearized, or emit
+ * since EventContext provides all of these.
  */
 export interface LifecycleEventHandlerDeps {
   /** Default provider for error events */
   defaultProvider: string;
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  /** Append event to session (fire-and-forget) */
-  appendEventLinearized: (
-    sessionId: SessionId,
-    type: EventType,
-    payload: Record<string, unknown>
-  ) => void;
-  /** Emit event to orchestrator */
-  emit: (event: string, data: unknown) => void;
   /** UI render handler for cleanup on agent_end */
   uiRenderHandler: UIRenderHandler;
 }
@@ -47,6 +40,12 @@ export interface LifecycleEventHandlerDeps {
 
 /**
  * Handles agent lifecycle events.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in events
+ * - Consistent timestamp across related events
+ * - Access to active session for state updates
+ * - Simplified emit/persist API
  */
 export class LifecycleEventHandler {
   constructor(private deps: LifecycleEventHandlerDeps) {}
@@ -55,34 +54,25 @@ export class LifecycleEventHandler {
    * Handle agent_start event.
    * Clears accumulation for fresh tracking and emits turn_start signal.
    */
-  handleAgentStart(
-    sessionId: SessionId,
-    timestamp: string,
-    active: ActiveSession | undefined
-  ): void {
+  handleAgentStart(ctx: EventContext): void {
     // Clear accumulation at the start of a new agent run
     // This ensures fresh tracking for the new runAgent call
-    if (active) {
-      active.sessionContext!.onAgentStart();
+    if (ctx.active) {
+      ctx.active.sessionContext!.onAgentStart();
     }
 
-    this.deps.emit('agent_event', {
-      type: 'agent.turn_start',
-      sessionId,
-      timestamp,
-      data: {},
-    });
+    ctx.emit('agent.turn_start', {});
   }
 
   /**
    * Handle agent_end event.
    * Clears accumulation and cleans up UI render state.
    */
-  handleAgentEnd(active: ActiveSession | undefined): void {
+  handleAgentEnd(ctx: EventContext): void {
     // Clear accumulation when agent run completes
     // Content is now persisted in EventStore, no need for catch-up tracking
-    if (active) {
-      active.sessionContext!.onAgentEnd();
+    if (ctx.active) {
+      ctx.active.sessionContext!.onAgentEnd();
     }
 
     // Clean up any orphaned UI render tracking state
@@ -97,22 +87,13 @@ export class LifecycleEventHandler {
    * Handle agent_interrupted event.
    * Emits completion event with interrupted status.
    */
-  handleAgentInterrupted(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
+  handleAgentInterrupted(ctx: EventContext, event: TronEvent): void {
     const interruptedEvent = event as { partialContent?: unknown };
 
-    this.deps.emit('agent_event', {
-      type: 'agent.complete',
-      sessionId,
-      timestamp,
-      data: {
-        success: false,
-        interrupted: true,
-        partialContent: interruptedEvent.partialContent,
-      },
+    ctx.emit('agent.complete', {
+      success: false,
+      interrupted: true,
+      partialContent: interruptedEvent.partialContent,
     });
   }
 
@@ -120,14 +101,14 @@ export class LifecycleEventHandler {
    * Handle api_retry event.
    * Persists provider error event for retryable errors.
    */
-  handleApiRetry(sessionId: SessionId, event: TronEvent): void {
+  handleApiRetry(ctx: EventContext, event: TronEvent): void {
     const retryEvent = event as {
       errorMessage?: string;
       errorCategory?: string;
       delayMs?: number;
     };
 
-    this.deps.appendEventLinearized(sessionId, 'error.provider' as EventType, {
+    ctx.persist('error.provider' as EventType, {
       provider: this.deps.defaultProvider,
       error: retryEvent.errorMessage,
       code: retryEvent.errorCategory,

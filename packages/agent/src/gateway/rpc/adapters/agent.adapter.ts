@@ -6,6 +6,7 @@
  * and state retrieval.
  */
 
+import { randomUUID } from 'crypto';
 import { createLogger, categorizeError, LogErrorCategory } from '../../../logging/index.js';
 import { SkillRegistry } from '../../../skills/index.js';
 import type { AdapterDependencies, AgentManagerAdapter } from '../types.js';
@@ -103,9 +104,14 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
      * Start an agent prompt (fire-and-forget, response streamed via events)
      */
     async prompt(params) {
+      // Generate unique runId for this agent run
+      // This correlates all events emitted during this run
+      const runId = randomUUID();
+
       // Log incoming prompt params for debugging skills/spells
       logger.info('[RPC] agent.prompt received', {
         sessionId: params.sessionId,
+        runId,
         promptLength: params.prompt?.length ?? 0,
         hasSkills: !!params.skills,
         skillCount: params.skills?.length ?? 0,
@@ -128,10 +134,12 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         skills: params.skills,
         spells: params.spells,
         skillLoader,
+        runId, // Pass runId for event correlation
       }).catch(err => {
-        const structured = categorizeError(err, { sessionId: params.sessionId, operation: 'agent_run' });
+        const structured = categorizeError(err, { sessionId: params.sessionId, runId, operation: 'agent_run' });
         logger.error('Agent run error', {
           sessionId: params.sessionId,
+          runId,
           code: structured.code,
           category: LogErrorCategory.SESSION_STATE,
           error: structured.message,
@@ -139,8 +147,8 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         });
       });
 
-      // Return acknowledgement immediately
-      return { acknowledged: true };
+      // Return acknowledgement with runId for event correlation
+      return { acknowledged: true, runId };
     },
 
     /**

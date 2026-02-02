@@ -1,23 +1,36 @@
 /**
  * @fileoverview Tests for SubagentForwarder
+ *
+ * SubagentForwarder uses EventContext for automatic metadata injection.
+ * It forwards streaming events from subagent sessions to their parent sessions.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   SubagentForwarder,
   createSubagentForwarder,
   type SubagentForwarderDeps,
 } from '../subagent-forwarder.js';
+import { createTestEventContext, type TestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
+import type { TronEvent } from '../../../../types/events.js';
 
 // =============================================================================
 // Test Helpers
 // =============================================================================
 
 function createMockDeps(): SubagentForwarderDeps {
-  return {
-    emit: vi.fn(),
-  };
+  return {};
+}
+
+function createTestContext(options: {
+  sessionId?: SessionId;
+  runId?: string;
+} = {}): TestEventContext {
+  return createTestEventContext({
+    sessionId: options.sessionId ?? ('parent-456' as SessionId),
+    runId: options.runId,
+  });
 }
 
 // =============================================================================
@@ -37,44 +50,40 @@ describe('SubagentForwarder', () => {
     const subagentSessionId = 'subagent-123' as SessionId;
     const parentSessionId = 'parent-456' as SessionId;
 
-    it('should forward message_update as text_delta', () => {
-      const timestamp = new Date().toISOString();
-      const event = { type: 'message_update', content: 'Hello world', sessionId: subagentSessionId, timestamp } as const;
+    it('should forward message_update as text_delta via context', () => {
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-123' });
+      const event = { type: 'message_update', content: 'Hello world' } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.subagent_event',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           event: {
             type: 'text_delta',
             data: { delta: 'Hello world' },
-            timestamp,
+            timestamp: ctx.timestamp,
           },
         },
       });
     });
 
-    it('should forward tool_execution_start as tool_start', () => {
-      const timestamp = new Date().toISOString();
+    it('should forward tool_execution_start as tool_start via context', () => {
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-456' });
       const event = {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
-        sessionId: subagentSessionId,
-        timestamp,
-      } as const;
+      } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.subagent_event',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           event: {
@@ -84,14 +93,14 @@ describe('SubagentForwarder', () => {
               toolName: 'Read',
               arguments: { file_path: '/test.txt' },
             },
-            timestamp,
+            timestamp: ctx.timestamp,
           },
         },
       });
     });
 
-    it('should forward tool_execution_end as tool_end', () => {
-      const timestamp = new Date().toISOString();
+    it('should forward tool_execution_end as tool_end via context', () => {
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-789' });
       const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
@@ -99,16 +108,13 @@ describe('SubagentForwarder', () => {
         result: 'file contents',
         isError: false,
         duration: 150,
-        sessionId: subagentSessionId,
-        timestamp,
-      } as const;
+      } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.subagent_event',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           event: {
@@ -120,54 +126,48 @@ describe('SubagentForwarder', () => {
               result: 'file contents',
               duration: 150,
             },
-            timestamp,
+            timestamp: ctx.timestamp,
           },
         },
       });
     });
 
     it('should stringify non-string tool results', () => {
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-000' });
       const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents', lines: 10 },
         isError: false,
-        sessionId: subagentSessionId,
-        timestamp,
-      } as const;
+      } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
-        type: 'agent.subagent_event',
-        sessionId: parentSessionId,
-        timestamp,
-        data: {
-          subagentSessionId,
-          event: {
-            type: 'tool_end',
-            data: expect.objectContaining({
-              result: JSON.stringify({ content: 'file contents', lines: 10 }),
-            }),
-            timestamp,
-          },
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].data).toMatchObject({
+        subagentSessionId,
+        event: {
+          type: 'tool_end',
+          data: expect.objectContaining({
+            result: JSON.stringify({ content: 'file contents', lines: 10 }),
+          }),
         },
       });
     });
 
-    it('should forward turn_start with status update', () => {
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_start', turn: 2, sessionId: subagentSessionId, timestamp } as const;
+    it('should forward turn_start with status update via context', () => {
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-111' });
+      const event = { type: 'turn_start', turn: 2 } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      // Should emit status update
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      // Should emit 2 events: status update and forwarded event
+      expect(ctx.emitCalls).toHaveLength(2);
+
+      // Status update
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.subagent_status',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           status: 'running',
@@ -175,32 +175,29 @@ describe('SubagentForwarder', () => {
         },
       });
 
-      // Should also emit forwarded event
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      // Forwarded event
+      expect(ctx.emitCalls[1]).toEqual({
         type: 'agent.subagent_event',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           event: {
             type: 'turn_start',
             data: { turn: 2 },
-            timestamp,
+            timestamp: ctx.timestamp,
           },
         },
       });
     });
 
     it('should default turn to 1 for status update', () => {
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_start', sessionId: subagentSessionId, timestamp } as const;
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-222' });
+      const event = { type: 'turn_start' } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(2);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.subagent_status',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           status: 'running',
@@ -209,60 +206,57 @@ describe('SubagentForwarder', () => {
       });
     });
 
-    it('should forward turn_end', () => {
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_end', turn: 3, sessionId: subagentSessionId, timestamp } as const;
+    it('should forward turn_end via context', () => {
+      const ctx = createTestContext({ sessionId: parentSessionId, runId: 'run-333' });
+      const event = { type: 'turn_end', turn: 3 } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.subagent_event',
-        sessionId: parentSessionId,
-        timestamp,
         data: {
           subagentSessionId,
           event: {
             type: 'turn_end',
             data: { turn: 3 },
-            timestamp,
+            timestamp: ctx.timestamp,
           },
         },
       });
     });
 
     it('should not forward non-forwardable events', () => {
-      const timestamp = new Date().toISOString();
-      const event = { type: 'thinking_delta', delta: 'thinking...', sessionId: subagentSessionId, timestamp } as const;
+      const ctx = createTestContext({ sessionId: parentSessionId });
+      const event = { type: 'thinking_delta', delta: 'thinking...' } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).not.toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(0);
     });
 
     it('should not forward agent_start', () => {
-      const timestamp = new Date().toISOString();
-      const event = { type: 'agent_start', sessionId: subagentSessionId, timestamp } as const;
+      const ctx = createTestContext({ sessionId: parentSessionId });
+      const event = { type: 'agent_start' } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).not.toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(0);
     });
 
     it('should not forward compaction_complete', () => {
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext({ sessionId: parentSessionId });
       const event = {
         type: 'compaction_complete',
         tokensBefore: 100000,
         tokensAfter: 50000,
         success: true,
         compressionRatio: 0.5,
-        sessionId: subagentSessionId,
-        timestamp,
-      } as const;
+      } as unknown as TronEvent;
 
-      forwarder.forwardToParent(subagentSessionId, parentSessionId, event as any, timestamp);
+      forwarder.forwardToParent(ctx, subagentSessionId, event);
 
-      expect(deps.emit).not.toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(0);
     });
   });
 

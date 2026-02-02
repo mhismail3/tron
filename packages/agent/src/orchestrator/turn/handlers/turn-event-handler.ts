@@ -6,15 +6,15 @@
  * - turn_end: End of a turn with message creation and token tracking
  * - response_complete: LLM streaming finished (before tools)
  *
- * Extracted from AgentEventHandler to improve modularity and testability.
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
 import { createLogger } from '../../../logging/index.js';
 import { calculateCost } from '../../../usage/index.js';
 import type { TronEvent } from '../../../types/index.js';
-import type { SessionId, EventType, TronSessionEvent } from '../../../events/index.js';
+import type { EventType } from '../../../events/index.js';
 import { normalizeContentBlocks } from '../../../utils/index.js';
-import type { ActiveSession } from '../../types.js';
+import type { EventContext } from '../event-context.js';
 import type { NormalizedTokenUsage } from '../turn-content-tracker.js';
 
 const logger = createLogger('turn-event-handler');
@@ -24,20 +24,13 @@ const logger = createLogger('turn-event-handler');
 // =============================================================================
 
 /**
- * Dependencies for TurnEventHandler
+ * Dependencies for TurnEventHandler.
+ *
+ * Note: No longer needs getActiveSession, appendEventLinearized, or emit
+ * since EventContext provides all of these.
  */
 export interface TurnEventHandlerDeps {
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  /** Append event to session (fire-and-forget) */
-  appendEventLinearized: (
-    sessionId: SessionId,
-    type: EventType,
-    payload: Record<string, unknown>,
-    onCreated?: (event: TronSessionEvent) => void
-  ) => void;
-  /** Emit event to orchestrator */
-  emit: (event: string, data: unknown) => void;
+  // No dependencies needed - EventContext provides everything
 }
 
 // =============================================================================
@@ -46,52 +39,41 @@ export interface TurnEventHandlerDeps {
 
 /**
  * Handles turn lifecycle events.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in events
+ * - Consistent timestamp across related events
+ * - Access to active session for state updates
+ * - Simplified emit/persist API
  */
 export class TurnEventHandler {
-  constructor(private deps: TurnEventHandlerDeps) {}
+  constructor(_deps: TurnEventHandlerDeps) {
+    // No deps needed - EventContext provides everything
+  }
 
   /**
    * Handle turn_start event.
    * Updates turn tracking and emits WebSocket event.
    */
-  handleTurnStart(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
-    const active = this.deps.getActiveSession(sessionId);
+  handleTurnStart(ctx: EventContext, event: TronEvent): void {
     const turnStartEvent = event as { turn?: number };
 
     // Update current turn for tool event tracking
-    if (active && turnStartEvent.turn !== undefined) {
-      active.sessionContext!.startTurn(turnStartEvent.turn);
+    if (ctx.active && turnStartEvent.turn !== undefined) {
+      ctx.active.sessionContext!.startTurn(turnStartEvent.turn);
     }
 
-    this.deps.emit('agent_event', {
-      type: 'agent.turn_start',
-      sessionId,
-      timestamp,
-      data: { turn: turnStartEvent.turn },
-    });
+    ctx.emit('agent.turn_start', { turn: turnStartEvent.turn });
 
     // Store turn start event (linearized to prevent spurious branches)
-    this.deps.appendEventLinearized(
-      sessionId,
-      'stream.turn_start' as EventType,
-      { turn: turnStartEvent.turn }
-    );
+    ctx.persist('stream.turn_start' as EventType, { turn: turnStartEvent.turn });
   }
 
   /**
    * Handle turn_end event.
    * Creates message.assistant event, calculates cost, and persists stream.turn_end.
    */
-  handleTurnEnd(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
-    const active = this.deps.getActiveSession(sessionId);
+  handleTurnEnd(ctx: EventContext, event: TronEvent): void {
     const turnEndEvent = event as {
       turn?: number;
       duration?: number;
@@ -112,21 +94,21 @@ export class TurnEventHandler {
     // Only create message.assistant here if:
     // 1. No pre-tool content was flushed (no tools in this turn), OR
     // 2. This is a simple text-only response (no tools)
-    if (active) {
+    if (ctx.active) {
       // Check if pre-tool content was already flushed (tools were called this turn)
-      const wasPreToolFlushed = active.sessionContext!.hasPreToolContentFlushed();
+      const wasPreToolFlushed = ctx.active.sessionContext!.hasPreToolContentFlushed();
 
       // Use SessionContext for turn end
       // Token usage was already set via setResponseTokenUsage when response_complete fired
       // This returns built content blocks, clears per-turn tracking, and includes normalizedUsage
-      const turnStartTime = active.sessionContext!.getTurnStartTime();
-      turnResult = active.sessionContext!.endTurn();
+      const turnStartTime = ctx.active.sessionContext!.getTurnStartTime();
+      turnResult = ctx.active.sessionContext!.endTurn();
 
       // Sync API token count to ContextManager for consistent RPC responses
       // This ensures context sheet and progress bar show the same value
       const normalizedUsage = turnResult?.normalizedUsage as NormalizedTokenUsage | undefined;
       if (normalizedUsage?.contextWindowTokens !== undefined) {
-        active.agent.getContextManager().setApiContextTokens(
+        ctx.active.agent.getContextManager().setApiContextTokens(
           normalizedUsage.contextWindowTokens
         );
       }
@@ -134,39 +116,28 @@ export class TurnEventHandler {
       // Only create message.assistant if we didn't already flush content for tools
       // If wasPreToolFlushed is true, the content was already emitted at tool_execution_start
       if (!wasPreToolFlushed && turnResult.content.length > 0) {
-        this.createMessageAssistantEvent(
-          sessionId,
-          active,
-          turnResult,
-          turnStartTime,
-          turnEndEvent.duration
-        );
+        this.createMessageAssistantEvent(ctx, turnResult, turnStartTime, turnEndEvent.duration);
       } else if (wasPreToolFlushed) {
         logger.debug('Skipped message.assistant at turn_end (content already flushed for tools)', {
-          sessionId,
+          sessionId: ctx.sessionId,
           turn: turnResult.turn,
         });
       }
     }
 
     // Calculate cost if not provided by agent (or is 0) but tokenUsage is available
-    const turnCost = this.calculateTurnCost(turnEndEvent, active);
+    const turnCost = this.calculateTurnCost(turnEndEvent, ctx.active);
 
-    this.deps.emit('agent_event', {
-      type: 'agent.turn_end',
-      sessionId,
-      timestamp,
-      data: {
-        turn: turnEndEvent.turn,
-        duration: turnEndEvent.duration,
-        tokenUsage: turnEndEvent.tokenUsage,
-        normalizedUsage: turnResult?.normalizedUsage,
-        cost: turnCost,
-      },
+    ctx.emit('agent.turn_end', {
+      turn: turnEndEvent.turn,
+      duration: turnEndEvent.duration,
+      tokenUsage: turnEndEvent.tokenUsage,
+      normalizedUsage: turnResult?.normalizedUsage,
+      cost: turnCost,
     });
 
     // Store turn end event with token usage, normalized usage, and cost (linearized)
-    this.persistStreamTurnEnd(sessionId, turnEndEvent, turnResult, turnCost);
+    this.persistStreamTurnEnd(ctx, turnEndEvent, turnResult, turnCost);
   }
 
   /**
@@ -174,12 +145,8 @@ export class TurnEventHandler {
    * Fires when LLM streaming finishes, BEFORE tools execute.
    * Captures token usage early so message.assistant events always include it.
    */
-  handleResponseComplete(
-    sessionId: SessionId,
-    event: TronEvent
-  ): void {
-    const active = this.deps.getActiveSession(sessionId);
-    if (!active?.sessionContext) {
+  handleResponseComplete(ctx: EventContext, event: TronEvent): void {
+    if (!ctx.active?.sessionContext) {
       return;
     }
 
@@ -196,12 +163,12 @@ export class TurnEventHandler {
     // Set token usage immediately - this computes normalizedUsage
     // before any tool execution starts
     if (responseEvent.tokenUsage) {
-      active.sessionContext.setResponseTokenUsage(responseEvent.tokenUsage);
+      ctx.active.sessionContext.setResponseTokenUsage(responseEvent.tokenUsage);
 
-      const normalizedUsage = active.sessionContext.getLastNormalizedUsage();
+      const normalizedUsage = ctx.active.sessionContext.getLastNormalizedUsage();
 
       logger.info('[TOKEN-FLOW] 2. handleResponseComplete - setResponseTokenUsage called', {
-        sessionId,
+        sessionId: ctx.sessionId,
         turn: responseEvent.turn,
         rawTokenUsage: {
           inputTokens: responseEvent.tokenUsage.inputTokens,
@@ -219,7 +186,7 @@ export class TurnEventHandler {
       });
     } else {
       logger.warn('[TOKEN-FLOW] 2. handleResponseComplete - NO tokenUsage in event', {
-        sessionId,
+        sessionId: ctx.sessionId,
         turn: responseEvent.turn,
       });
     }
@@ -233,8 +200,7 @@ export class TurnEventHandler {
    * Create and persist message.assistant event for a turn without tools.
    */
   private createMessageAssistantEvent(
-    sessionId: SessionId,
-    active: ActiveSession,
+    ctx: EventContext,
     turnResult: { turn: number; content: unknown[]; normalizedUsage?: unknown; tokenUsage?: unknown },
     turnStartTime: number | undefined,
     eventDuration: number | undefined
@@ -255,25 +221,17 @@ export class TurnEventHandler {
       return;
     }
 
-    this.deps.appendEventLinearized(
-      sessionId,
+    ctx.persist(
       'message.assistant' as EventType,
       {
         content: normalizedContent,
         tokenUsage: turnResult.tokenUsage,
         normalizedUsage: turnResult.normalizedUsage,
         turn: turnResult.turn,
-        model: active.model,
+        model: ctx.active!.model,
         stopReason: 'end_turn',
         latency: turnLatency,
         hasThinking,
-      },
-      (evt) => {
-        // Track eventId for context manager message via SessionContext
-        const currentActive = this.deps.getActiveSession(sessionId);
-        if (currentActive?.sessionContext) {
-          currentActive.sessionContext.addMessageEventId(evt.id);
-        }
       }
     );
 
@@ -281,7 +239,7 @@ export class TurnEventHandler {
     const normalizedForLog = turnResult.normalizedUsage as NormalizedTokenUsage | undefined;
 
     logger.info('[TOKEN-FLOW] 3b. Turn-end message.assistant created (no tools case)', {
-      sessionId,
+      sessionId: ctx.sessionId,
       turn: turnResult.turn,
       contentBlocks: normalizedContent.length,
       tokenUsage: tokenUsageForLog
@@ -315,7 +273,7 @@ export class TurnEventHandler {
         cacheCreationTokens?: number;
       };
     },
-    active: ActiveSession | undefined
+    active: EventContext['active']
   ): number | undefined {
     let turnCost = turnEndEvent.cost;
 
@@ -339,7 +297,7 @@ export class TurnEventHandler {
    * Persist stream.turn_end event with token and cost data.
    */
   private persistStreamTurnEnd(
-    sessionId: SessionId,
+    ctx: EventContext,
     turnEndEvent: { turn?: number; tokenUsage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } },
     turnResult: { normalizedUsage?: unknown } | undefined,
     turnCost: number | undefined
@@ -347,7 +305,7 @@ export class TurnEventHandler {
     const normalizedUsage = turnResult?.normalizedUsage as NormalizedTokenUsage | undefined;
 
     logger.info('[TOKEN-FLOW] 4. stream.turn_end persisted', {
-      sessionId,
+      sessionId: ctx.sessionId,
       turn: turnEndEvent.turn,
       tokenUsage: turnEndEvent.tokenUsage
         ? {
@@ -366,16 +324,12 @@ export class TurnEventHandler {
       cost: turnCost,
     });
 
-    this.deps.appendEventLinearized(
-      sessionId,
-      'stream.turn_end' as EventType,
-      {
-        turn: turnEndEvent.turn,
-        tokenUsage: turnEndEvent.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
-        normalizedUsage: turnResult?.normalizedUsage,
-        cost: turnCost,
-      }
-    );
+    ctx.persist('stream.turn_end' as EventType, {
+      turn: turnEndEvent.turn,
+      tokenUsage: turnEndEvent.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
+      normalizedUsage: turnResult?.normalizedUsage,
+      cost: turnCost,
+    });
   }
 }
 

@@ -10,13 +10,12 @@
  * but not persisted individually. Content is accumulated and persisted
  * as part of message.assistant events at turn end.
  *
- * Extracted from AgentEventHandler to improve modularity and testability.
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
 import { createLogger } from '../../../logging/index.js';
 import type { TronEvent } from '../../../types/index.js';
-import type { SessionId } from '../../../events/index.js';
-import type { ActiveSession } from '../../types.js';
+import type { EventContext } from '../event-context.js';
 import type { UIRenderHandler } from '../../ui-render-handler.js';
 
 const logger = createLogger('streaming-event-handler');
@@ -26,13 +25,12 @@ const logger = createLogger('streaming-event-handler');
 // =============================================================================
 
 /**
- * Dependencies for StreamingEventHandler
+ * Dependencies for StreamingEventHandler.
+ *
+ * Note: No longer needs getActiveSession, appendEventLinearized, or emit
+ * since EventContext provides all of these.
  */
 export interface StreamingEventHandlerDeps {
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  /** Emit event to orchestrator */
-  emit: (event: string, data: unknown) => void;
   /** UI render handler for tool call delta processing */
   uiRenderHandler: UIRenderHandler;
 }
@@ -43,6 +41,11 @@ export interface StreamingEventHandlerDeps {
 
 /**
  * Handles real-time streaming events for UI updates.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in events
+ * - Consistent timestamp across related events
+ * - Access to active session for state updates
  */
 export class StreamingEventHandler {
   constructor(private deps: StreamingEventHandlerDeps) {}
@@ -51,12 +54,7 @@ export class StreamingEventHandler {
    * Handle message_update event.
    * Accumulates text deltas for persistence and emits for real-time streaming.
    */
-  handleMessageUpdate(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string,
-    active: ActiveSession | undefined
-  ): void {
+  handleMessageUpdate(ctx: EventContext, event: TronEvent): void {
     const msgEvent = event as { content?: string };
 
     // STREAMING ONLY - NOT PERSISTED TO EVENT STORE
@@ -67,27 +65,18 @@ export class StreamingEventHandler {
     //
     // Individual deltas are ephemeral by design - high frequency, low reconstruction value.
     // The source of truth is the message.assistant event created at turn_end.
-    if (active && typeof msgEvent.content === 'string') {
-      active.sessionContext!.addTextDelta(msgEvent.content);
+    if (ctx.active && typeof msgEvent.content === 'string') {
+      ctx.active.sessionContext!.addTextDelta(msgEvent.content);
     }
 
-    this.deps.emit('agent_event', {
-      type: 'agent.text_delta',
-      sessionId,
-      timestamp,
-      data: { delta: msgEvent.content },
-    });
+    ctx.emit('agent.text_delta', { delta: msgEvent.content });
   }
 
   /**
    * Handle toolcall_delta event.
    * Streams tool call arguments for progressive UI rendering (e.g., RenderAppUI).
    */
-  handleToolCallDelta(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
+  handleToolCallDelta(ctx: EventContext, event: TronEvent): void {
     const delta = event as {
       toolCallId: string;
       toolName?: string;
@@ -96,11 +85,12 @@ export class StreamingEventHandler {
 
     // Delegate to UIRenderHandler which handles RenderAppUI-specific processing
     this.deps.uiRenderHandler.handleToolCallDelta(
-      sessionId,
+      ctx.sessionId,
       delta.toolCallId,
       delta.toolName,
       delta.argumentsDelta,
-      timestamp
+      ctx.timestamp,
+      ctx.runId
     );
   }
 
@@ -108,74 +98,53 @@ export class StreamingEventHandler {
    * Handle thinking_start event.
    * Emits WebSocket event for real-time UI streaming.
    */
-  handleThinkingStart(sessionId: SessionId, timestamp: string): void {
-    logger.debug('Received thinking_start', { sessionId });
-
-    this.deps.emit('agent_event', {
-      type: 'agent.thinking_start',
-      sessionId,
-      timestamp,
-    });
+  handleThinkingStart(ctx: EventContext): void {
+    logger.debug('Received thinking_start', { sessionId: ctx.sessionId, runId: ctx.runId });
+    ctx.emit('agent.thinking_start');
   }
 
   /**
    * Handle thinking_delta event.
    * Accumulates thinking content for persistence and emits for real-time streaming.
    */
-  handleThinkingDelta(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string,
-    active: ActiveSession | undefined
-  ): void {
+  handleThinkingDelta(ctx: EventContext, event: TronEvent): void {
     const delta = event as { delta: string };
 
     // Accumulate thinking content in TurnContentTracker for persistence
     // This ensures thinking is included in the message.assistant event at turn end
-    if (active) {
-      active.sessionContext!.addThinkingDelta(delta.delta);
+    if (ctx.active) {
+      ctx.active.sessionContext!.addThinkingDelta(delta.delta);
     }
 
     // Emit WebSocket event for real-time UI streaming
     // Thinking deltas are NOT persisted individually (like text deltas)
     // They're accumulated and persisted as part of message.assistant at turn end
-    this.deps.emit('agent_event', {
-      type: 'agent.thinking_delta',
-      sessionId,
-      timestamp,
-      data: { delta: delta.delta },
-    });
+    ctx.emit('agent.thinking_delta', { delta: delta.delta });
   }
 
   /**
    * Handle thinking_end event.
    * Stores signature for API compliance and emits completion event.
    */
-  handleThinkingEnd(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
+  handleThinkingEnd(ctx: EventContext, event: TronEvent): void {
     const thinkingEnd = event as { thinking: string; signature?: string };
 
     logger.debug('Received thinking_end', {
-      sessionId,
+      sessionId: ctx.sessionId,
+      runId: ctx.runId,
       thinkingLength: thinkingEnd.thinking.length,
       hasSignature: !!thinkingEnd.signature,
     });
 
     // Store the signature in TurnContentTracker for persistence
     // IMPORTANT: API requires signature when sending thinking blocks back
-    const active = this.deps.getActiveSession(sessionId);
-    if (active && thinkingEnd.signature) {
-      active.sessionContext!.setThinkingSignature(thinkingEnd.signature);
+    if (ctx.active && thinkingEnd.signature) {
+      ctx.active.sessionContext!.setThinkingSignature(thinkingEnd.signature);
     }
 
-    this.deps.emit('agent_event', {
-      type: 'agent.thinking_end',
-      sessionId,
-      timestamp,
-      data: { thinking: thinkingEnd.thinking, signature: thinkingEnd.signature },
+    ctx.emit('agent.thinking_end', {
+      thinking: thinkingEnd.thinking,
+      signature: thinkingEnd.signature,
     });
   }
 }

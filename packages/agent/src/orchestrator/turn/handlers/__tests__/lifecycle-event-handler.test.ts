@@ -1,5 +1,8 @@
 /**
  * @fileoverview Tests for LifecycleEventHandler
+ *
+ * LifecycleEventHandler uses EventContext for automatic metadata injection.
+ * It handles agent lifecycle events: start, end, interrupted, and api_retry.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -8,6 +11,7 @@ import {
   createLifecycleEventHandler,
   type LifecycleEventHandlerDeps,
 } from '../lifecycle-event-handler.js';
+import { createTestEventContext, type TestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
 import type { ActiveSession } from '../../../types.js';
 
@@ -27,9 +31,6 @@ function createMockUIRenderHandler() {
 function createMockDeps(): LifecycleEventHandlerDeps {
   return {
     defaultProvider: 'anthropic',
-    getActiveSession: vi.fn(),
-    appendEventLinearized: vi.fn(),
-    emit: vi.fn(),
     uiRenderHandler: createMockUIRenderHandler() as unknown as LifecycleEventHandlerDeps['uiRenderHandler'],
   };
 }
@@ -47,6 +48,18 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
   } as ActiveSession;
 }
 
+function createTestContext(options: {
+  sessionId?: SessionId;
+  runId?: string;
+  active?: ActiveSession;
+} = {}): TestEventContext {
+  return createTestEventContext({
+    sessionId: options.sessionId ?? ('test-session' as SessionId),
+    runId: options.runId,
+    active: options.active,
+  });
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -62,92 +75,94 @@ describe('LifecycleEventHandler', () => {
 
   describe('handleAgentStart', () => {
     it('should call onAgentStart on session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
 
-      handler.handleAgentStart(sessionId, timestamp, mockActive);
+      handler.handleAgentStart(ctx);
 
       expect(mockActive.sessionContext!.onAgentStart).toHaveBeenCalled();
     });
 
-    it('should emit agent.turn_start event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should emit agent.turn_start event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
 
-      handler.handleAgentStart(sessionId, timestamp, undefined);
+      handler.handleAgentStart(ctx);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.turn_start',
-        sessionId,
-        timestamp,
         data: {},
       });
     });
 
     it('should handle undefined active session', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext(); // No active session
 
-      handler.handleAgentStart(sessionId, timestamp, undefined);
+      handler.handleAgentStart(ctx);
 
       // Should still emit event
-      expect(deps.emit).toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.turn_start');
     });
   });
 
   describe('handleAgentEnd', () => {
     it('should call onAgentEnd on session context', () => {
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
 
-      handler.handleAgentEnd(mockActive);
+      handler.handleAgentEnd(ctx);
 
       expect(mockActive.sessionContext!.onAgentEnd).toHaveBeenCalled();
     });
 
     it('should cleanup UI render handler', () => {
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
 
-      handler.handleAgentEnd(mockActive);
+      handler.handleAgentEnd(ctx);
 
       expect(deps.uiRenderHandler.cleanup).toHaveBeenCalled();
     });
 
     it('should handle undefined active session', () => {
-      handler.handleAgentEnd(undefined);
+      const ctx = createTestContext(); // No active session
+
+      handler.handleAgentEnd(ctx);
 
       // Should still cleanup UI render handler
       expect(deps.uiRenderHandler.cleanup).toHaveBeenCalled();
     });
 
     it('should not emit agent.complete (emitted elsewhere)', () => {
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
 
-      handler.handleAgentEnd(mockActive);
+      handler.handleAgentEnd(ctx);
 
       // agent.complete is emitted in runAgent() AFTER all events are persisted
-      expect(deps.emit).not.toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(0);
     });
   });
 
   describe('handleAgentInterrupted', () => {
-    it('should emit agent.complete with interrupted status', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should emit agent.complete with interrupted status via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'agent_interrupted',
-        sessionId,
-        timestamp,
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         turn: 1,
         partialContent: 'partial text',
       } as const;
 
-      handler.handleAgentInterrupted(sessionId, event, timestamp);
+      handler.handleAgentInterrupted(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.complete',
-        sessionId,
-        timestamp,
         data: {
           success: false,
           interrupted: true,
@@ -157,21 +172,19 @@ describe('LifecycleEventHandler', () => {
     });
 
     it('should handle missing partialContent', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext(); // No active session
       const event = {
         type: 'agent_interrupted',
-        sessionId,
-        timestamp,
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         turn: 1,
       } as const;
 
-      handler.handleAgentInterrupted(sessionId, event, timestamp);
+      handler.handleAgentInterrupted(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.complete',
-        sessionId,
-        timestamp,
         data: {
           success: false,
           interrupted: true,
@@ -182,13 +195,13 @@ describe('LifecycleEventHandler', () => {
   });
 
   describe('handleApiRetry', () => {
-    it('should persist error.provider event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should persist error.provider event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'api_retry',
-        sessionId,
-        timestamp,
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         attempt: 1,
         maxRetries: 3,
         errorMessage: 'Rate limit exceeded',
@@ -196,28 +209,28 @@ describe('LifecycleEventHandler', () => {
         delayMs: 5000,
       } as const;
 
-      handler.handleApiRetry(sessionId, event);
+      handler.handleApiRetry(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'error.provider',
-        {
+      expect(ctx.persistCalls).toHaveLength(1);
+      expect(ctx.persistCalls[0]).toEqual({
+        type: 'error.provider',
+        payload: {
           provider: 'anthropic',
           error: 'Rate limit exceeded',
           code: 'rate_limit',
           retryable: true,
           retryAfter: 5000,
-        }
-      );
+          runId: 'run-123',
+        },
+      });
     });
 
     it('should handle missing error details', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext(); // No active session
       const event = {
         type: 'api_retry',
-        sessionId,
-        timestamp,
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
         attempt: 1,
         maxRetries: 3,
         delayMs: 0,
@@ -225,19 +238,20 @@ describe('LifecycleEventHandler', () => {
         errorMessage: '',
       } as const;
 
-      handler.handleApiRetry(sessionId, event);
+      handler.handleApiRetry(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'error.provider',
-        {
+      expect(ctx.persistCalls).toHaveLength(1);
+      expect(ctx.persistCalls[0]).toEqual({
+        type: 'error.provider',
+        payload: {
           provider: 'anthropic',
           error: '',
           code: '',
           retryable: true,
           retryAfter: 0,
-        }
-      );
+          runId: undefined,
+        },
+      });
     });
   });
 

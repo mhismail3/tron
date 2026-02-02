@@ -1,5 +1,8 @@
 /**
  * @fileoverview Tests for StreamingEventHandler
+ *
+ * StreamingEventHandler uses EventContext for automatic metadata injection.
+ * It only emits events (no persistence) - streaming events are ephemeral.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -8,8 +11,10 @@ import {
   createStreamingEventHandler,
   type StreamingEventHandlerDeps,
 } from '../streaming-event-handler.js';
+import { createTestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
 import type { ActiveSession } from '../../../types.js';
+import type { EventContext } from '../../event-context.js';
 
 // =============================================================================
 // Test Helpers
@@ -26,8 +31,6 @@ function createMockUIRenderHandler() {
 
 function createMockDeps(): StreamingEventHandlerDeps {
   return {
-    getActiveSession: vi.fn(),
-    emit: vi.fn(),
     uiRenderHandler: createMockUIRenderHandler() as unknown as StreamingEventHandlerDeps['uiRenderHandler'],
   };
 }
@@ -46,6 +49,18 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
   } as ActiveSession;
 }
 
+function createTestContext(options: {
+  sessionId?: SessionId;
+  runId?: string;
+  active?: ActiveSession;
+} = {}) {
+  return createTestEventContext({
+    sessionId: options.sessionId ?? ('test-session' as SessionId),
+    runId: options.runId,
+    active: options.active,
+  });
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -61,232 +76,239 @@ describe('StreamingEventHandler', () => {
 
   describe('handleMessageUpdate', () => {
     it('should accumulate text delta in session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'message_update' as const, content: 'Hello world', sessionId, timestamp };
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'message_update' as const, content: 'Hello world' };
 
-      handler.handleMessageUpdate(sessionId, event, timestamp, mockActive);
+      handler.handleMessageUpdate(ctx, event);
 
       expect(mockActive.sessionContext!.addTextDelta).toHaveBeenCalledWith('Hello world');
     });
 
-    it('should emit agent.text_delta event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'message_update' as const, content: 'Hello', sessionId, timestamp };
+    it('should emit agent.text_delta event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'message_update' as const, content: 'Hello' };
 
-      handler.handleMessageUpdate(sessionId, event, timestamp, undefined);
+      handler.handleMessageUpdate(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.text_delta',
-        sessionId,
-        timestamp,
         data: { delta: 'Hello' },
       });
     });
 
     it('should handle undefined active session', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'message_update' as const, content: 'Hello', sessionId, timestamp };
+      const ctx = createTestContext(); // No active session
+      const event = { type: 'message_update' as const, content: 'Hello' };
 
-      handler.handleMessageUpdate(sessionId, event, timestamp, undefined);
+      handler.handleMessageUpdate(ctx, event);
 
       // Should still emit event
-      expect(deps.emit).toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.text_delta');
     });
 
-    it('should accumulate all string content deltas', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'message_update' as const, content: 'Test', sessionId, timestamp };
+    it('should handle non-string content', () => {
       const mockActive = createMockActiveSession();
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'message_update' as const, content: undefined };
 
-      handler.handleMessageUpdate(sessionId, event, timestamp, mockActive);
+      handler.handleMessageUpdate(ctx, event);
 
-      expect(mockActive.sessionContext!.addTextDelta).toHaveBeenCalledWith('Test');
+      // Should not call addTextDelta for non-string content
+      expect(mockActive.sessionContext!.addTextDelta).not.toHaveBeenCalled();
+      // But should still emit
+      expect(ctx.emitCalls).toHaveLength(1);
     });
   });
 
   describe('handleToolCallDelta', () => {
-    it('should delegate to UIRenderHandler', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should delegate to UIRenderHandler with runId from context', () => {
+      const ctx = createTestContext({ runId: 'run-123' });
       const event = {
         type: 'toolcall_delta' as const,
         toolCallId: 'call-1',
         toolName: 'RenderAppUI',
         argumentsDelta: '{"html": "<div',
-        sessionId,
-        timestamp,
       };
 
-      handler.handleToolCallDelta(sessionId, event, timestamp);
+      handler.handleToolCallDelta(ctx, event);
 
       expect(deps.uiRenderHandler.handleToolCallDelta).toHaveBeenCalledWith(
-        sessionId,
+        ctx.sessionId,
         'call-1',
         'RenderAppUI',
         '{"html": "<div',
-        timestamp
+        ctx.timestamp,
+        'run-123'
       );
     });
 
     it('should handle missing toolName', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext({ runId: 'run-456' });
       const event = {
         type: 'toolcall_delta' as const,
         toolCallId: 'call-1',
         argumentsDelta: '{}',
-        sessionId,
-        timestamp,
       };
 
-      handler.handleToolCallDelta(sessionId, event, timestamp);
+      handler.handleToolCallDelta(ctx, event);
 
       expect(deps.uiRenderHandler.handleToolCallDelta).toHaveBeenCalledWith(
-        sessionId,
+        ctx.sessionId,
         'call-1',
         undefined,
         '{}',
-        timestamp
+        ctx.timestamp,
+        'run-456'
+      );
+    });
+
+    it('should handle undefined runId', () => {
+      const ctx = createTestContext(); // No runId
+      const event = {
+        type: 'toolcall_delta' as const,
+        toolCallId: 'call-1',
+        toolName: 'RenderAppUI',
+        argumentsDelta: '{}',
+      };
+
+      handler.handleToolCallDelta(ctx, event);
+
+      expect(deps.uiRenderHandler.handleToolCallDelta).toHaveBeenCalledWith(
+        ctx.sessionId,
+        'call-1',
+        'RenderAppUI',
+        '{}',
+        ctx.timestamp,
+        undefined
       );
     });
   });
 
   describe('handleThinkingStart', () => {
-    it('should emit agent.thinking_start event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should emit agent.thinking_start event via context', () => {
+      const ctx = createTestContext({ runId: 'run-123' });
 
-      handler.handleThinkingStart(sessionId, timestamp);
+      handler.handleThinkingStart(ctx);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.thinking_start',
-        sessionId,
-        timestamp,
+        data: undefined,
       });
+    });
+
+    it('should work without runId', () => {
+      const ctx = createTestContext(); // No runId
+
+      handler.handleThinkingStart(ctx);
+
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.thinking_start');
     });
   });
 
   describe('handleThinkingDelta', () => {
     it('should accumulate thinking delta in session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'thinking_delta' as const, delta: 'Let me think...', sessionId, timestamp };
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'thinking_delta' as const, delta: 'Let me think...' };
 
-      handler.handleThinkingDelta(sessionId, event, timestamp, mockActive);
+      handler.handleThinkingDelta(ctx, event);
 
       expect(mockActive.sessionContext!.addThinkingDelta).toHaveBeenCalledWith('Let me think...');
     });
 
-    it('should emit agent.thinking_delta event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'thinking_delta' as const, delta: 'Analyzing...', sessionId, timestamp };
+    it('should emit agent.thinking_delta event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'thinking_delta' as const, delta: 'Analyzing...' };
 
-      handler.handleThinkingDelta(sessionId, event, timestamp, undefined);
+      handler.handleThinkingDelta(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.thinking_delta',
-        sessionId,
-        timestamp,
         data: { delta: 'Analyzing...' },
       });
     });
 
     it('should handle undefined active session', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'thinking_delta' as const, delta: 'Thinking...', sessionId, timestamp };
+      const ctx = createTestContext(); // No active session
+      const event = { type: 'thinking_delta' as const, delta: 'Thinking...' };
 
-      handler.handleThinkingDelta(sessionId, event, timestamp, undefined);
+      handler.handleThinkingDelta(ctx, event);
 
       // Should still emit event
-      expect(deps.emit).toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.thinking_delta');
     });
   });
 
   describe('handleThinkingEnd', () => {
     it('should store signature in session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'thinking_end' as const,
         thinking: 'Complete analysis...',
         signature: 'sig123',
-        sessionId,
-        timestamp,
       };
-      const mockActive = createMockActiveSession();
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleThinkingEnd(sessionId, event, timestamp);
+      handler.handleThinkingEnd(ctx, event);
 
       expect(mockActive.sessionContext!.setThinkingSignature).toHaveBeenCalledWith('sig123');
     });
 
     it('should emit agent.thinking_end event with signature', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'thinking_end' as const,
         thinking: 'My analysis...',
         signature: 'sig456',
-        sessionId,
-        timestamp,
       };
 
-      handler.handleThinkingEnd(sessionId, event, timestamp);
+      handler.handleThinkingEnd(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.thinking_end',
-        sessionId,
-        timestamp,
         data: { thinking: 'My analysis...', signature: 'sig456' },
       });
     });
 
     it('should handle missing signature', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'thinking_end' as const, thinking: 'Done thinking', sessionId, timestamp };
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'thinking_end' as const, thinking: 'Done thinking' };
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleThinkingEnd(sessionId, event, timestamp);
+      handler.handleThinkingEnd(ctx, event);
 
       expect(mockActive.sessionContext!.setThinkingSignature).not.toHaveBeenCalled();
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.thinking_end',
-        sessionId,
-        timestamp,
         data: { thinking: 'Done thinking', signature: undefined },
       });
     });
 
     it('should handle no active session', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext(); // No active session
       const event = {
         type: 'thinking_end' as const,
         thinking: 'Completed',
         signature: 'sig789',
-        sessionId,
-        timestamp,
       };
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
-
-      handler.handleThinkingEnd(sessionId, event, timestamp);
+      handler.handleThinkingEnd(ctx, event);
 
       // Should still emit event
-      expect(deps.emit).toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.thinking_end');
     });
   });
 

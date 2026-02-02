@@ -1,9 +1,13 @@
 /**
  * @fileoverview Tests for ToolEventHandler
+ *
+ * ToolEventHandler uses EventContext for automatic metadata injection.
+ * It handles tool execution events: tool_use_batch, tool_execution_start, tool_execution_end.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ToolEventHandler, createToolEventHandler, type ToolEventHandlerDeps } from '../tool-event-handler.js';
+import { createTestEventContext, type TestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
 import type { TronEvent } from '../../../../types/events.js';
 import type { ActiveSession } from '../../../types.js';
@@ -21,22 +25,8 @@ function createMockUIRenderHandler() {
   };
 }
 
-function createTestEvent(
-  sessionId: SessionId,
-  overrides: Record<string, unknown> = {}
-): TronEvent {
-  return {
-    sessionId,
-    timestamp: new Date().toISOString(),
-    ...overrides,
-  } as unknown as TronEvent;
-}
-
 function createMockDeps(): ToolEventHandlerDeps {
   return {
-    getActiveSession: vi.fn(),
-    appendEventLinearized: vi.fn(),
-    emit: vi.fn(),
     uiRenderHandler: createMockUIRenderHandler() as unknown as ToolEventHandlerDeps['uiRenderHandler'],
   };
 }
@@ -65,6 +55,18 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
   } as ActiveSession;
 }
 
+function createTestContext(options: {
+  sessionId?: SessionId;
+  runId?: string;
+  active?: ActiveSession;
+} = {}): TestEventContext {
+  return createTestEventContext({
+    sessionId: options.sessionId ?? ('test-session' as SessionId),
+    runId: options.runId,
+    active: options.active,
+  });
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -80,19 +82,17 @@ describe('ToolEventHandler', () => {
 
   describe('handleToolUseBatch', () => {
     it('should register tool intents when active session exists', () => {
-      const sessionId = 'test-session' as SessionId;
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_use_batch',
         toolCalls: [
           { id: 'call-1', name: 'Read', arguments: { file_path: '/test.txt' } },
           { id: 'call-2', name: 'Write', arguments: { file_path: '/out.txt', content: 'hello' } },
         ],
-      });
-      const mockActive = createMockActiveSession();
+      } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleToolUseBatch(sessionId, event);
+      handler.handleToolUseBatch(ctx, event);
 
       expect(mockActive.sessionContext!.registerToolIntents).toHaveBeenCalledWith([
         { id: 'call-1', name: 'Read', arguments: { file_path: '/test.txt' } },
@@ -101,18 +101,16 @@ describe('ToolEventHandler', () => {
     });
 
     it('should handle input field as arguments', () => {
-      const sessionId = 'test-session' as SessionId;
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_use_batch',
         toolCalls: [
           { id: 'call-1', name: 'Read', input: { file_path: '/test.txt' } },
         ],
-      });
-      const mockActive = createMockActiveSession();
+      } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleToolUseBatch(sessionId, event);
+      handler.handleToolUseBatch(ctx, event);
 
       expect(mockActive.sessionContext!.registerToolIntents).toHaveBeenCalledWith([
         { id: 'call-1', name: 'Read', arguments: { file_path: '/test.txt' } },
@@ -120,38 +118,35 @@ describe('ToolEventHandler', () => {
     });
 
     it('should do nothing when no active session', () => {
-      const sessionId = 'test-session' as SessionId;
-      const event = createTestEvent(sessionId, {
+      const ctx = createTestContext(); // No active session
+      const event = {
         type: 'tool_use_batch',
         toolCalls: [{ id: 'call-1', name: 'Read', arguments: {} }],
-      });
+      } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+      handler.handleToolUseBatch(ctx, event);
 
-      handler.handleToolUseBatch(sessionId, event);
-
-      // Should not throw
-      expect(deps.emit).not.toHaveBeenCalled();
+      // Should not throw, no emits
+      expect(ctx.emitCalls).toHaveLength(0);
     });
   });
 
   describe('handleToolExecutionStart', () => {
-    it('should emit agent.tool_start event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+    it('should emit agent.tool_start event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
-      });
+      } as unknown as TronEvent;
 
-      handler.handleToolExecutionStart(sessionId, event, timestamp);
+      handler.handleToolExecutionStart(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.tool_start',
-        sessionId,
-        timestamp,
         data: {
           toolCallId: 'call-1',
           toolName: 'Read',
@@ -160,43 +155,40 @@ describe('ToolEventHandler', () => {
       });
     });
 
-    it('should persist tool.call event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+    it('should persist tool.call event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionStart(ctx, event);
+
+      // Find the tool.call persist call
+      const toolCallPersist = ctx.persistCalls.find(c => c.type === 'tool.call');
+      expect(toolCallPersist).toBeDefined();
+      expect(toolCallPersist!.payload).toMatchObject({
+        toolCallId: 'call-1',
+        name: 'Read',
+        arguments: { file_path: '/test.txt' },
+        runId: 'run-456',
       });
-
-      handler.handleToolExecutionStart(sessionId, event, timestamp);
-
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'tool.call',
-        expect.objectContaining({
-          toolCallId: 'call-1',
-          name: 'Read',
-          arguments: { file_path: '/test.txt' },
-        })
-      );
     });
 
     it('should track tool call on session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'Read',
         arguments: { file_path: '/test.txt' },
-      });
-      const mockActive = createMockActiveSession();
+      } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleToolExecutionStart(sessionId, event, timestamp);
+      handler.handleToolExecutionStart(ctx, event);
 
       expect(mockActive.sessionContext!.startToolCall).toHaveBeenCalledWith(
         'call-1',
@@ -206,72 +198,84 @@ describe('ToolEventHandler', () => {
     });
 
     it('should flush pre-tool content when it exists', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
-        type: 'tool_execution_start',
-        toolCallId: 'call-1',
-        toolName: 'Read',
-        arguments: {},
-      });
-      const mockActive = createMockActiveSession();
-
+      const mockActive = createMockActiveSession({ currentRunId: 'run-000' });
       // Return content to flush
       (mockActive.sessionContext!.flushPreToolContent as ReturnType<typeof vi.fn>).mockReturnValue([
         { type: 'text', text: 'Analyzing the file...' },
       ]);
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
+        type: 'tool_execution_start',
+        toolCallId: 'call-1',
+        toolName: 'Read',
+        arguments: {},
+      } as unknown as TronEvent;
 
-      handler.handleToolExecutionStart(sessionId, event, timestamp);
+      handler.handleToolExecutionStart(ctx, event);
 
       // Should create message.assistant before tool.call
-      expect(deps.appendEventLinearized).toHaveBeenCalledTimes(2);
-      const calls = (deps.appendEventLinearized as ReturnType<typeof vi.fn>).mock.calls;
-      expect(calls[0][1]).toBe('message.assistant');
-      expect(calls[1][1]).toBe('tool.call');
+      expect(ctx.persistCalls).toHaveLength(2);
+      expect(ctx.persistCalls[0].type).toBe('message.assistant');
+      expect(ctx.persistCalls[1].type).toBe('tool.call');
     });
 
     it('should delegate RenderAppUI to UIRenderHandler', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-111' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_start',
         toolCallId: 'call-1',
         toolName: 'RenderAppUI',
         arguments: { component: 'test' },
-      });
+      } as unknown as TronEvent;
 
-      handler.handleToolExecutionStart(sessionId, event, timestamp);
+      handler.handleToolExecutionStart(ctx, event);
 
       expect(deps.uiRenderHandler.handleToolStart).toHaveBeenCalledWith(
-        sessionId,
+        ctx.sessionId,
         'call-1',
         { component: 'test' },
-        timestamp
+        ctx.timestamp,
+        'run-111'
       );
+    });
+
+    it('should handle undefined active session', () => {
+      const ctx = createTestContext(); // No active session
+      const event = {
+        type: 'tool_execution_start',
+        toolCallId: 'call-1',
+        toolName: 'Read',
+        arguments: {},
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionStart(ctx, event);
+
+      // Should still emit and persist
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.persistCalls).toHaveLength(1);
     });
   });
 
   describe('handleToolExecutionEnd', () => {
-    it('should emit agent.tool_end event on success', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+    it('should emit agent.tool_end event on success via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents here' },
         isError: false,
         duration: 150,
-      });
+      } as unknown as TronEvent;
 
-      handler.handleToolExecutionEnd(sessionId, event, timestamp);
+      handler.handleToolExecutionEnd(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.tool_end',
-        sessionId,
-        timestamp,
         data: expect.objectContaining({
           toolCallId: 'call-1',
           toolName: 'Read',
@@ -282,24 +286,23 @@ describe('ToolEventHandler', () => {
       });
     });
 
-    it('should emit agent.tool_end event on error', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+    it('should emit agent.tool_end event on error via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'File not found' },
         isError: true,
         duration: 50,
-      });
+      } as unknown as TronEvent;
 
-      handler.handleToolExecutionEnd(sessionId, event, timestamp);
+      handler.handleToolExecutionEnd(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.tool_end',
-        sessionId,
-        timestamp,
         data: expect.objectContaining({
           toolCallId: 'call-1',
           toolName: 'Read',
@@ -310,48 +313,46 @@ describe('ToolEventHandler', () => {
       });
     });
 
-    it('should persist tool.result event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+    it('should persist tool.result event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents' },
         isError: false,
         duration: 100,
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionEnd(ctx, event);
+
+      // Find the tool.result persist call
+      const toolResultPersist = ctx.persistCalls.find(c => c.type === 'tool.result');
+      expect(toolResultPersist).toBeDefined();
+      expect(toolResultPersist!.payload).toMatchObject({
+        toolCallId: 'call-1',
+        content: 'file contents',
+        isError: false,
+        runId: 'run-789',
       });
-
-      handler.handleToolExecutionEnd(sessionId, event, timestamp);
-
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'tool.result',
-        expect.objectContaining({
-          toolCallId: 'call-1',
-          content: 'file contents',
-          isError: false,
-        }),
-        expect.any(Function)
-      );
+      // Should have callback for event ID tracking
+      expect(toolResultPersist!.onCreated).toBeDefined();
     });
 
     it('should track tool result on session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-000' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
         result: { content: 'file contents' },
         isError: false,
         duration: 100,
-      });
-      const mockActive = createMockActiveSession();
+      } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleToolExecutionEnd(sessionId, event, timestamp);
+      handler.handleToolExecutionEnd(ctx, event);
 
       expect(mockActive.sessionContext!.endToolCall).toHaveBeenCalledWith(
         'call-1',
@@ -361,9 +362,9 @@ describe('ToolEventHandler', () => {
     });
 
     it('should extract content from array blocks', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-111' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'Read',
@@ -376,12 +377,9 @@ describe('ToolEventHandler', () => {
         },
         isError: false,
         duration: 100,
-      });
-      const mockActive = createMockActiveSession();
+      } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleToolExecutionEnd(sessionId, event, timestamp);
+      handler.handleToolExecutionEnd(ctx, event);
 
       expect(mockActive.sessionContext!.endToolCall).toHaveBeenCalledWith(
         'call-1',
@@ -391,27 +389,46 @@ describe('ToolEventHandler', () => {
     });
 
     it('should delegate RenderAppUI to UIRenderHandler', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = createTestEvent(sessionId, {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-222' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
         type: 'tool_execution_end',
         toolCallId: 'call-1',
         toolName: 'RenderAppUI',
         result: { content: 'success', details: { html: '<div/>' } },
         isError: false,
         duration: 100,
-      });
+      } as unknown as TronEvent;
 
-      handler.handleToolExecutionEnd(sessionId, event, timestamp);
+      handler.handleToolExecutionEnd(ctx, event);
 
       expect(deps.uiRenderHandler.handleToolEnd).toHaveBeenCalledWith(
-        sessionId,
+        ctx.sessionId,
         'call-1',
         'success',
         false,
         { html: '<div/>' },
-        timestamp
+        ctx.timestamp,
+        'run-222'
       );
+    });
+
+    it('should handle undefined active session', () => {
+      const ctx = createTestContext(); // No active session
+      const event = {
+        type: 'tool_execution_end',
+        toolCallId: 'call-1',
+        toolName: 'Read',
+        result: { content: 'file contents' },
+        isError: false,
+        duration: 100,
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionEnd(ctx, event);
+
+      // Should still emit and persist
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.persistCalls).toHaveLength(1);
     });
   });
 

@@ -6,19 +6,19 @@
  * - tool_execution_start: Individual tool execution starts
  * - tool_execution_end: Individual tool execution completes
  *
- * Extracted from AgentEventHandler to improve modularity and testability.
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
 import { createLogger } from '../../../logging/index.js';
 import type { TronEvent } from '../../../types/index.js';
-import type { SessionId, EventType, TronSessionEvent } from '../../../events/index.js';
+import type { EventType } from '../../../events/index.js';
 import {
   normalizeContentBlocks,
   truncateString,
   MAX_TOOL_RESULT_SIZE,
 } from '../../../utils/index.js';
-import type { ActiveSession } from '../../types.js';
 import type { UIRenderHandler, ToolStartArgs, ToolEndDetails } from '../../ui-render-handler.js';
+import type { EventContext } from '../event-context.js';
 
 const logger = createLogger('tool-event-handler');
 
@@ -27,20 +27,12 @@ const logger = createLogger('tool-event-handler');
 // =============================================================================
 
 /**
- * Dependencies for ToolEventHandler
+ * Dependencies for ToolEventHandler.
+ *
+ * Note: No longer needs getActiveSession, appendEventLinearized, or emit
+ * since EventContext provides all of these.
  */
 export interface ToolEventHandlerDeps {
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  /** Append event to session (fire-and-forget) */
-  appendEventLinearized: (
-    sessionId: SessionId,
-    type: EventType,
-    payload: Record<string, unknown>,
-    onCreated?: (event: TronSessionEvent) => void
-  ) => void;
-  /** Emit event to orchestrator */
-  emit: (event: string, data: unknown) => void;
   /** UI render handler for RenderAppUI tool */
   uiRenderHandler: UIRenderHandler;
 }
@@ -51,6 +43,12 @@ export interface ToolEventHandlerDeps {
 
 /**
  * Handles tool execution events.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in events
+ * - Consistent timestamp across related events
+ * - Access to active session for state updates
+ * - Simplified emit/persist API
  */
 export class ToolEventHandler {
   constructor(private deps: ToolEventHandlerDeps) {}
@@ -60,11 +58,7 @@ export class ToolEventHandler {
    * Registers all tool_use intents BEFORE any execution starts.
    * This enables linear event ordering by knowing all tools upfront.
    */
-  handleToolUseBatch(
-    sessionId: SessionId,
-    event: TronEvent
-  ): void {
-    const active = this.deps.getActiveSession(sessionId);
+  handleToolUseBatch(ctx: EventContext, event: TronEvent): void {
     const batchEvent = event as {
       toolCalls?: Array<{
         name: string;
@@ -74,17 +68,17 @@ export class ToolEventHandler {
       }>;
     };
 
-    if (active && batchEvent.toolCalls && Array.isArray(batchEvent.toolCalls)) {
+    if (ctx.active && batchEvent.toolCalls && Array.isArray(batchEvent.toolCalls)) {
       // Transform tool calls to expected format (input may come as input or arguments)
       const normalizedToolCalls = batchEvent.toolCalls.map((tc) => ({
         id: tc.id,
         name: tc.name,
         arguments: (tc.arguments ?? tc.input ?? {}) as Record<string, unknown>,
       }));
-      active.sessionContext!.registerToolIntents(normalizedToolCalls);
+      ctx.active.sessionContext!.registerToolIntents(normalizedToolCalls);
 
       logger.debug('Registered tool_use batch', {
-        sessionId,
+        sessionId: ctx.sessionId,
         toolCount: batchEvent.toolCalls.length,
         toolNames: batchEvent.toolCalls.map((tc) => tc.name),
       });
@@ -95,12 +89,7 @@ export class ToolEventHandler {
    * Handle tool_execution_start event.
    * Tracks tool call for resume support and handles linear event ordering.
    */
-  handleToolExecutionStart(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
-    const active = this.deps.getActiveSession(sessionId);
+  handleToolExecutionStart(ctx: EventContext, event: TronEvent): void {
     const toolStartEvent = event as {
       toolCallId: string;
       toolName: string;
@@ -108,8 +97,8 @@ export class ToolEventHandler {
     };
 
     // Track tool call for resume support (across ALL turns)
-    if (active) {
-      active.sessionContext!.startToolCall(
+    if (ctx.active) {
+      ctx.active.sessionContext!.startToolCall(
         toolStartEvent.toolCallId,
         toolStartEvent.toolName,
         toolStartEvent.arguments ?? {}
@@ -118,53 +107,40 @@ export class ToolEventHandler {
       // LINEAR EVENT ORDERING: Flush accumulated content as message.assistant BEFORE tool.call
       // This ensures correct order: message.assistant (with tool_use) → tool.call → tool.result
       // The flush only happens once per turn (first tool_execution_start)
-      this.flushPreToolContent(sessionId, active);
+      this.flushPreToolContent(ctx);
     }
 
-    this.deps.emit('agent_event', {
-      type: 'agent.tool_start',
-      sessionId,
-      timestamp,
-      data: {
-        toolCallId: toolStartEvent.toolCallId,
-        toolName: toolStartEvent.toolName,
-        arguments: toolStartEvent.arguments,
-      },
+    ctx.emit('agent.tool_start', {
+      toolCallId: toolStartEvent.toolCallId,
+      toolName: toolStartEvent.toolName,
+      arguments: toolStartEvent.arguments,
     });
 
     // Delegate RenderAppUI handling to UIRenderHandler
     if (toolStartEvent.toolName === 'RenderAppUI' && toolStartEvent.arguments) {
       this.deps.uiRenderHandler.handleToolStart(
-        sessionId,
+        ctx.sessionId,
         toolStartEvent.toolCallId,
         toolStartEvent.arguments as ToolStartArgs,
-        timestamp
+        ctx.timestamp,
+        ctx.runId
       );
     }
 
     // Store discrete tool.call event (linearized)
-    this.deps.appendEventLinearized(
-      sessionId,
-      'tool.call' as EventType,
-      {
-        toolCallId: toolStartEvent.toolCallId,
-        name: toolStartEvent.toolName,
-        arguments: toolStartEvent.arguments ?? {},
-        turn: active?.sessionContext?.getCurrentTurn() ?? 0,
-      }
-    );
+    ctx.persist('tool.call' as EventType, {
+      toolCallId: toolStartEvent.toolCallId,
+      name: toolStartEvent.toolName,
+      arguments: toolStartEvent.arguments ?? {},
+      turn: ctx.active?.sessionContext?.getCurrentTurn() ?? 0,
+    });
   }
 
   /**
    * Handle tool_execution_end event.
    * Updates tool tracking and persists tool.result event.
    */
-  handleToolExecutionEnd(
-    sessionId: SessionId,
-    event: TronEvent,
-    timestamp: string
-  ): void {
-    const active = this.deps.getActiveSession(sessionId);
+  handleToolExecutionEnd(ctx: EventContext, event: TronEvent): void {
     const toolEndEvent = event as {
       toolCallId: string;
       toolName: string;
@@ -177,8 +153,8 @@ export class ToolEventHandler {
     const resultContent = this.extractResultContent(toolEndEvent.result);
 
     // Update tool call tracking for resume support (across ALL turns)
-    if (active) {
-      active.sessionContext!.endToolCall(
+    if (ctx.active) {
+      ctx.active.sessionContext!.endToolCall(
         toolEndEvent.toolCallId,
         resultContent,
         toolEndEvent.isError ?? false
@@ -191,38 +167,33 @@ export class ToolEventHandler {
         ? (toolEndEvent.result as { details?: unknown }).details
         : undefined;
 
-    this.deps.emit('agent_event', {
-      type: 'agent.tool_end',
-      sessionId,
-      timestamp,
-      data: {
-        toolCallId: toolEndEvent.toolCallId,
-        toolName: toolEndEvent.toolName,
-        success: !toolEndEvent.isError,
-        output: toolEndEvent.isError ? undefined : resultContent,
-        error: toolEndEvent.isError ? resultContent : undefined,
-        duration: toolEndEvent.duration,
-        // Include details for clients that need full binary data (e.g., iOS screenshots)
-        // This is NOT persisted to event store to avoid bloating storage
-        details: resultDetails,
-      },
+    ctx.emit('agent.tool_end', {
+      toolCallId: toolEndEvent.toolCallId,
+      toolName: toolEndEvent.toolName,
+      success: !toolEndEvent.isError,
+      output: toolEndEvent.isError ? undefined : resultContent,
+      error: toolEndEvent.isError ? resultContent : undefined,
+      duration: toolEndEvent.duration,
+      // Include details for clients that need full binary data (e.g., iOS screenshots)
+      // This is NOT persisted to event store to avoid bloating storage
+      details: resultDetails,
     });
 
     // Delegate RenderAppUI handling to UIRenderHandler
     if (toolEndEvent.toolName === 'RenderAppUI') {
       this.deps.uiRenderHandler.handleToolEnd(
-        sessionId,
+        ctx.sessionId,
         toolEndEvent.toolCallId,
         resultContent,
         toolEndEvent.isError ?? false,
         resultDetails as ToolEndDetails | undefined,
-        timestamp
+        ctx.timestamp,
+        ctx.runId
       );
     }
 
     // Store discrete tool.result event (linearized)
-    this.deps.appendEventLinearized(
-      sessionId,
+    ctx.persist(
       'tool.result' as EventType,
       {
         toolCallId: toolEndEvent.toolCallId,
@@ -233,9 +204,8 @@ export class ToolEventHandler {
       },
       (evt) => {
         // Track eventId for context manager message (tool result) via SessionContext
-        const currentActive = this.deps.getActiveSession(sessionId);
-        if (currentActive?.sessionContext) {
-          currentActive.sessionContext.addMessageEventId(evt.id);
+        if (ctx.active?.sessionContext) {
+          ctx.active.sessionContext.addMessageEventId(evt.id);
         }
       }
     );
@@ -249,8 +219,12 @@ export class ToolEventHandler {
    * Flush pre-tool content as message.assistant event.
    * Ensures correct linear event ordering.
    */
-  private flushPreToolContent(sessionId: SessionId, active: ActiveSession): void {
-    const preToolContent = active.sessionContext!.flushPreToolContent();
+  private flushPreToolContent(ctx: EventContext): void {
+    if (!ctx.active) {
+      return;
+    }
+
+    const preToolContent = ctx.active.sessionContext!.flushPreToolContent();
     if (!preToolContent || preToolContent.length === 0) {
       return;
     }
@@ -260,7 +234,7 @@ export class ToolEventHandler {
       return;
     }
 
-    const turnStartTime = active.sessionContext!.getTurnStartTime();
+    const turnStartTime = ctx.active.sessionContext!.getTurnStartTime();
     const turnLatency = turnStartTime ? Date.now() - turnStartTime : 0;
 
     // Detect if content has thinking blocks
@@ -269,34 +243,32 @@ export class ToolEventHandler {
     );
 
     // Get token usage captured from response_complete
-    const tokenUsage = active.sessionContext!.getLastTurnTokenUsage();
-    const normalizedUsage = active.sessionContext!.getLastNormalizedUsage();
+    const tokenUsage = ctx.active.sessionContext!.getLastTurnTokenUsage();
+    const normalizedUsage = ctx.active.sessionContext!.getLastNormalizedUsage();
 
-    this.deps.appendEventLinearized(
-      sessionId,
+    ctx.persist(
       'message.assistant' as EventType,
       {
         content: normalizedContent,
         tokenUsage,
         normalizedUsage,
-        turn: active.sessionContext!.getCurrentTurn(),
-        model: active.model,
+        turn: ctx.active.sessionContext!.getCurrentTurn(),
+        model: ctx.active.model,
         stopReason: 'tool_use', // Indicates tools are being called
         latency: turnLatency,
         hasThinking,
       },
       (evt) => {
         // Track eventId for context manager message via SessionContext
-        const currentActive = this.deps.getActiveSession(sessionId);
-        if (currentActive?.sessionContext) {
-          currentActive.sessionContext.addMessageEventId(evt.id);
+        if (ctx.active?.sessionContext) {
+          ctx.active.sessionContext.addMessageEventId(evt.id);
         }
       }
     );
 
     logger.info('[TOKEN-FLOW] 3a. Pre-tool message.assistant created (tools case)', {
-      sessionId,
-      turn: active.sessionContext!.getCurrentTurn(),
+      sessionId: ctx.sessionId,
+      turn: ctx.active.sessionContext!.getCurrentTurn(),
       contentBlocks: normalizedContent.length,
       tokenUsage: tokenUsage
         ? {

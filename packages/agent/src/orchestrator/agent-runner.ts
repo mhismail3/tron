@@ -473,6 +473,7 @@ export class AgentRunner {
         type: 'turn_interrupted',
         sessionId: options.sessionId,
         timestamp: new Date().toISOString(),
+        runId: options.runId,
         data: {
           interrupted: true,
           partialContent: runResult.partialContent,
@@ -590,10 +591,10 @@ export class AgentRunner {
     });
 
     // Emit turn completion event
-    this.emitTurnComplete(active.sessionId, runResult, options.onEvent);
+    this.emitTurnComplete(active.sessionId, runResult, options.onEvent, options.runId);
 
     // Emit agent.complete AFTER all linearized events are persisted
-    this.emitAgentComplete(options.sessionId, !runResult.error, runResult.error);
+    this.emitAgentComplete(options.sessionId, !runResult.error, runResult.error, options.runId);
 
     return [runResult];
   }
@@ -647,6 +648,7 @@ export class AgentRunner {
         type: 'error.persistence',
         sessionId: options.sessionId,
         timestamp: new Date().toISOString(),
+        runId: options.runId,
         data: {
           message: 'Failed to persist error event',
           eventType: 'error.agent',
@@ -661,12 +663,13 @@ export class AgentRunner {
         type: 'error',
         sessionId: options.sessionId,
         timestamp: new Date().toISOString(),
+        runId: options.runId,
         data: { message: error instanceof Error ? error.message : 'Unknown error' },
       });
     }
 
     // Emit agent.complete for error case
-    this.emitAgentComplete(options.sessionId, false, error instanceof Error ? error.message : String(error));
+    this.emitAgentComplete(options.sessionId, false, error instanceof Error ? error.message : String(error), options.runId);
 
     throw error;
   }
@@ -681,12 +684,14 @@ export class AgentRunner {
   private emitTurnComplete(
     sessionId: string,
     runResult: RunResult,
-    onEvent?: (event: AgentEvent) => void
+    onEvent?: (event: AgentEvent) => void,
+    runId?: string
   ): void {
     const event = {
       type: 'turn_complete',
       sessionId,
       timestamp: new Date().toISOString(),
+      runId,
       data: runResult,
     };
 
@@ -701,11 +706,12 @@ export class AgentRunner {
    * Emit agent.complete event.
    * Called after all linearized events are persisted.
    */
-  private emitAgentComplete(sessionId: string, success: boolean, error?: string): void {
+  private emitAgentComplete(sessionId: string, success: boolean, error?: string, runId?: string): void {
     this.config.emit('agent_event', {
       type: 'agent.complete',
       sessionId,
       timestamp: new Date().toISOString(),
+      runId,
       data: {
         success,
         error,

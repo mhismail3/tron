@@ -37,6 +37,7 @@ interface UIRenderState {
   canvasId: string | null;
   accumulatedJson: string;
   startEmitted: boolean;
+  runId?: string;
 }
 
 /**
@@ -93,12 +94,14 @@ export class UIRenderHandler {
    * @param toolCallId - The tool call ID
    * @param args - The tool arguments
    * @param timestamp - Event timestamp
+   * @param runId - The run ID for event correlation
    */
   handleToolStart(
     sessionId: SessionId,
     toolCallId: string,
     args: ToolStartArgs,
-    timestamp: string
+    timestamp: string,
+    runId?: string
   ): void {
     const existingRender = this.activeRenders.get(toolCallId);
 
@@ -108,6 +111,7 @@ export class UIRenderHandler {
         type: 'agent.ui_render_start',
         sessionId,
         timestamp,
+        runId,
         data: {
           canvasId: args.canvasId,
           title: args.title,
@@ -139,6 +143,7 @@ export class UIRenderHandler {
    * @param isError - Whether the tool execution failed
    * @param details - The result details object
    * @param timestamp - Event timestamp
+   * @param runId - The run ID for event correlation
    */
   handleToolEnd(
     sessionId: SessionId,
@@ -146,7 +151,8 @@ export class UIRenderHandler {
     resultContent: string,
     isError: boolean,
     details: ToolEndDetails | undefined,
-    timestamp: string
+    timestamp: string,
+    runId?: string
   ): void {
     // Get tracking state before cleanup (may have canvasId from streaming)
     const renderState = this.activeRenders.get(toolCallId);
@@ -159,19 +165,19 @@ export class UIRenderHandler {
 
     // Check if this is a retry case (validation failed, turn continues)
     if (details?.needsRetry && canvasId) {
-      this.emitRetry(sessionId, canvasId, details.attempt ?? 1, resultContent, timestamp);
+      this.emitRetry(sessionId, canvasId, details.attempt ?? 1, resultContent, timestamp, runId);
       // Don't emit complete or error - turn continues for retry
       return;
     }
 
     if (isError) {
-      this.emitError(sessionId, canvasId, resultContent, timestamp);
+      this.emitError(sessionId, canvasId, resultContent, timestamp, runId);
       return;
     }
 
     // Success case
     if (canvasId && details?.ui) {
-      this.emitComplete(sessionId, canvasId, details, timestamp);
+      this.emitComplete(sessionId, canvasId, details, timestamp, runId);
     }
   }
 
@@ -184,6 +190,7 @@ export class UIRenderHandler {
    * @param toolName - The tool name (may be undefined for early deltas)
    * @param argumentsDelta - The JSON chunk
    * @param timestamp - Event timestamp
+   * @param runId - The run ID for event correlation
    * @returns true if this was a RenderAppUI delta that was handled
    */
   handleToolCallDelta(
@@ -191,7 +198,8 @@ export class UIRenderHandler {
     toolCallId: string,
     toolName: string | undefined,
     argumentsDelta: string,
-    timestamp: string
+    timestamp: string,
+    runId?: string
   ): boolean {
     logger.debug('Received toolcall_delta', {
       sessionId,
@@ -224,6 +232,7 @@ export class UIRenderHandler {
         canvasId: null,
         accumulatedJson: '',
         startEmitted: false,
+        runId,
       });
     }
 
@@ -247,6 +256,7 @@ export class UIRenderHandler {
           type: 'agent.ui_render_start',
           sessionId,
           timestamp,
+          runId: render.runId,
           data: {
             canvasId: render.canvasId,
             toolCallId,
@@ -274,6 +284,7 @@ export class UIRenderHandler {
         type: 'agent.ui_render_chunk',
         sessionId,
         timestamp,
+        runId: render.runId,
         data: {
           canvasId: render.canvasId,
           chunk: argumentsDelta,
@@ -321,12 +332,14 @@ export class UIRenderHandler {
     canvasId: string,
     attempt: number,
     errors: string,
-    timestamp: string
+    timestamp: string,
+    runId?: string
   ): void {
     this.emit('agent_event', {
       type: 'agent.ui_render_retry',
       sessionId,
       timestamp,
+      runId,
       data: {
         canvasId,
         attempt,
@@ -345,7 +358,8 @@ export class UIRenderHandler {
     sessionId: SessionId,
     canvasId: string | null | undefined,
     error: string,
-    timestamp: string
+    timestamp: string,
+    runId?: string
   ): void {
     if (!canvasId) return;
 
@@ -353,6 +367,7 @@ export class UIRenderHandler {
       type: 'agent.ui_render_error',
       sessionId,
       timestamp,
+      runId,
       data: {
         canvasId,
         error,
@@ -370,12 +385,14 @@ export class UIRenderHandler {
     sessionId: SessionId,
     canvasId: string,
     details: ToolEndDetails,
-    timestamp: string
+    timestamp: string,
+    runId?: string
   ): void {
     this.emit('agent_event', {
       type: 'agent.ui_render_complete',
       sessionId,
       timestamp,
+      runId,
       data: {
         canvasId,
         ui: details.ui,

@@ -3,11 +3,12 @@
  *
  * Handles hook_triggered and hook_completed events from the agent,
  * persisting them to the event store for linearized audit logging.
+ *
+ * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
  */
 
-import type { SessionId, EventType, SessionEvent as TronSessionEvent } from '../../../events/types.js';
-import type { ActiveSession } from '../../types.js';
 import type { HookType, HookAction } from '../../../hooks/types.js';
+import type { EventContext } from '../event-context.js';
 import { createLogger } from '../../../logging/index.js';
 
 const logger = createLogger('hook-event-handler');
@@ -16,15 +17,14 @@ const logger = createLogger('hook-event-handler');
 // Types
 // =============================================================================
 
+/**
+ * Dependencies for HookEventHandler.
+ *
+ * Note: No longer needs getActiveSession, appendEventLinearized, or emit
+ * since EventContext provides all of these.
+ */
 export interface HookEventHandlerDeps {
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  appendEventLinearized: (
-    sessionId: SessionId,
-    type: EventType,
-    payload: Record<string, unknown>,
-    onCreated?: (event: TronSessionEvent) => void
-  ) => void;
-  emit: (event: string, data: unknown) => void;
+  // No dependencies needed - EventContext provides everything
 }
 
 /**
@@ -63,69 +63,60 @@ export interface InternalHookCompletedEvent {
 /**
  * Handles hook lifecycle events, persisting them to the event store.
  * Follows fail-open pattern - errors are logged but don't stop execution.
+ *
+ * Uses EventContext for:
+ * - Automatic runId inclusion in persisted events
+ * - Access to active session for validation
+ * - Simplified persist API
  */
 export class HookEventHandler {
-  private deps: HookEventHandlerDeps;
-
-  constructor(deps: HookEventHandlerDeps) {
-    this.deps = deps;
+  constructor(_deps: HookEventHandlerDeps) {
+    // No deps needed - EventContext provides everything
   }
 
   /**
    * Handle hook triggered event - persist to event store
    */
-  handleHookTriggered(event: InternalHookTriggeredEvent): void {
-    const session = this.deps.getActiveSession(event.sessionId);
-    if (!session) {
-      logger.debug('Skipping hook.triggered - session not found', {
-        sessionId: event.sessionId,
+  handleHookTriggered(ctx: EventContext, event: InternalHookTriggeredEvent): void {
+    if (!ctx.active) {
+      logger.debug('Skipping hook.triggered - no active session', {
+        sessionId: ctx.sessionId,
         hookNames: event.hookNames,
       });
       return;
     }
 
-    this.deps.appendEventLinearized(
-      event.sessionId as SessionId,
-      'hook.triggered',
-      {
-        hookNames: event.hookNames,
-        hookEvent: event.hookEvent,
-        toolName: event.toolName,
-        toolCallId: event.toolCallId,
-        timestamp: event.timestamp,
-      },
-      undefined
-    );
+    ctx.persist('hook.triggered', {
+      hookNames: event.hookNames,
+      hookEvent: event.hookEvent,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      timestamp: event.timestamp,
+    });
   }
 
   /**
    * Handle hook completed event - persist to event store
    */
-  handleHookCompleted(event: InternalHookCompletedEvent): void {
-    const session = this.deps.getActiveSession(event.sessionId);
-    if (!session) {
-      logger.debug('Skipping hook.completed - session not found', {
-        sessionId: event.sessionId,
+  handleHookCompleted(ctx: EventContext, event: InternalHookCompletedEvent): void {
+    if (!ctx.active) {
+      logger.debug('Skipping hook.completed - no active session', {
+        sessionId: ctx.sessionId,
         hookNames: event.hookNames,
       });
       return;
     }
 
-    this.deps.appendEventLinearized(
-      event.sessionId as SessionId,
-      'hook.completed',
-      {
-        hookNames: event.hookNames,
-        hookEvent: event.hookEvent,
-        result: event.result,
-        duration: event.duration,
-        reason: event.reason,
-        toolName: event.toolName,
-        toolCallId: event.toolCallId,
-        timestamp: event.timestamp,
-      },
-      undefined
-    );
+    ctx.persist('hook.completed', {
+      hookNames: event.hookNames,
+      hookEvent: event.hookEvent,
+      result: event.result,
+      duration: event.duration,
+      reason: event.reason,
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      timestamp: event.timestamp,
+    });
   }
 }
 

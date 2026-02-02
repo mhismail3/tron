@@ -4,6 +4,19 @@
  * Routes agent events to focused handlers. This is a pure coordinator with
  * no business logic - all event handling is delegated to specialized handlers.
  *
+ * ## EventContext Pattern
+ *
+ * The coordinator creates an EventContext at the start of each event dispatch.
+ * This context is passed to all handlers and provides:
+ * - sessionId: The session this event belongs to
+ * - timestamp: Consistent timestamp across all related events
+ * - runId: Current run ID for correlation
+ * - active: Active session for state updates
+ * - emit(): Emit WebSocket events with automatic metadata
+ * - persist(): Persist events with automatic metadata
+ *
+ * This eliminates "shotgun surgery" when adding cross-cutting concerns.
+ *
  * ## Event Routing
  *
  * | Event Type            | Handler             |
@@ -50,6 +63,7 @@ import {
   type InternalHookTriggeredEvent,
   type InternalHookCompletedEvent,
 } from './handlers/index.js';
+import { createEventContext, type EventContext } from './event-context.js';
 
 // =============================================================================
 // Types
@@ -81,6 +95,9 @@ export interface AgentEventHandlerConfig {
 /**
  * Coordinates agent event handling by delegating to focused handlers.
  * Extracted from EventStoreOrchestrator to improve modularity.
+ *
+ * Uses EventContext to provide scoped context for each event dispatch,
+ * eliminating the need for handlers to manually include metadata.
  */
 export class AgentEventHandler {
   private config: AgentEventHandlerConfig;
@@ -130,136 +147,136 @@ export class AgentEventHandler {
     this.config = config;
     this.uiRenderHandler = createUIRenderHandler(config.emit);
 
-    // Create focused handlers
-    this.turnHandler = createTurnEventHandler({
-      getActiveSession: config.getActiveSession,
-      appendEventLinearized: config.appendEventLinearized,
-      emit: config.emit,
-    });
+    // Create focused handlers with simplified dependencies
+    // Most handlers now only need their specific deps since EventContext
+    // provides getActiveSession, emit, and appendEventLinearized
+    this.turnHandler = createTurnEventHandler({});
 
     this.toolHandler = createToolEventHandler({
-      getActiveSession: config.getActiveSession,
-      appendEventLinearized: config.appendEventLinearized,
-      emit: config.emit,
       uiRenderHandler: this.uiRenderHandler,
     });
 
     this.streamingHandler = createStreamingEventHandler({
-      getActiveSession: config.getActiveSession,
-      emit: config.emit,
       uiRenderHandler: this.uiRenderHandler,
     });
 
     this.lifecycleHandler = createLifecycleEventHandler({
       defaultProvider: config.defaultProvider,
-      getActiveSession: config.getActiveSession,
-      appendEventLinearized: config.appendEventLinearized,
-      emit: config.emit,
       uiRenderHandler: this.uiRenderHandler,
     });
 
-    this.compactionHandler = createCompactionEventHandler({
-      appendEventLinearized: config.appendEventLinearized,
-      emit: config.emit,
-    });
+    this.compactionHandler = createCompactionEventHandler({});
 
-    this.subagentForwarder = createSubagentForwarder({
-      emit: config.emit,
-    });
+    this.subagentForwarder = createSubagentForwarder({});
 
-    this.hookHandler = createHookEventHandler({
-      getActiveSession: config.getActiveSession,
-      appendEventLinearized: config.appendEventLinearized,
-      emit: config.emit,
-    });
+    this.hookHandler = createHookEventHandler({});
   }
 
   /**
    * Forward an agent event for processing.
    * Handles turn lifecycle, streaming, tool execution, and other event types.
+   *
+   * Creates an EventContext scoped to this event dispatch, which provides:
+   * - Automatic sessionId, timestamp, runId inclusion
+   * - Access to active session
+   * - Simplified emit/persist API
    */
   forwardEvent(sessionId: SessionId, event: TronEvent): void {
-    const timestamp = new Date().toISOString();
-    const active = this.config.getActiveSession(sessionId);
+    // Create EventContext ONCE at the start of event dispatch
+    // All handlers receive this context for consistent metadata
+    const ctx = this.createEventContext(sessionId);
 
     // If this is a subagent session, forward streaming events to parent
-    if (active?.parentSessionId) {
-      this.subagentForwarder.forwardToParent(sessionId, active.parentSessionId, event, timestamp);
+    if (ctx.active?.parentSessionId) {
+      const parentCtx = this.createEventContext(ctx.active.parentSessionId);
+      this.subagentForwarder.forwardToParent(parentCtx, sessionId, event);
     }
 
     switch (event.type) {
       case 'turn_start':
-        this.turnHandler.handleTurnStart(sessionId, event, timestamp);
+        this.turnHandler.handleTurnStart(ctx, event);
         break;
 
       case 'turn_end':
-        this.turnHandler.handleTurnEnd(sessionId, event, timestamp);
+        this.turnHandler.handleTurnEnd(ctx, event);
         break;
 
       case 'response_complete':
-        this.turnHandler.handleResponseComplete(sessionId, event);
+        this.turnHandler.handleResponseComplete(ctx, event);
         break;
 
       case 'message_update':
-        this.streamingHandler.handleMessageUpdate(sessionId, event, timestamp, active);
+        this.streamingHandler.handleMessageUpdate(ctx, event);
         break;
 
       case 'tool_use_batch':
-        this.toolHandler.handleToolUseBatch(sessionId, event);
+        this.toolHandler.handleToolUseBatch(ctx, event);
         break;
 
       case 'tool_execution_start':
-        this.toolHandler.handleToolExecutionStart(sessionId, event, timestamp);
+        this.toolHandler.handleToolExecutionStart(ctx, event);
         break;
 
       case 'tool_execution_end':
-        this.toolHandler.handleToolExecutionEnd(sessionId, event, timestamp);
+        this.toolHandler.handleToolExecutionEnd(ctx, event);
         break;
 
       case 'api_retry':
-        this.lifecycleHandler.handleApiRetry(sessionId, event);
+        this.lifecycleHandler.handleApiRetry(ctx, event);
         break;
 
       case 'agent_start':
-        this.lifecycleHandler.handleAgentStart(sessionId, timestamp, active);
+        this.lifecycleHandler.handleAgentStart(ctx);
         break;
 
       case 'agent_end':
-        this.lifecycleHandler.handleAgentEnd(active);
+        this.lifecycleHandler.handleAgentEnd(ctx);
         break;
 
       case 'agent_interrupted':
-        this.lifecycleHandler.handleAgentInterrupted(sessionId, event, timestamp);
+        this.lifecycleHandler.handleAgentInterrupted(ctx, event);
         break;
 
       case 'compaction_complete':
-        this.compactionHandler.handleCompactionComplete(sessionId, event, timestamp);
+        this.compactionHandler.handleCompactionComplete(ctx, event);
         break;
 
       case 'toolcall_delta':
-        this.streamingHandler.handleToolCallDelta(sessionId, event, timestamp);
+        this.streamingHandler.handleToolCallDelta(ctx, event);
         break;
 
       case 'thinking_start':
-        this.streamingHandler.handleThinkingStart(sessionId, timestamp);
+        this.streamingHandler.handleThinkingStart(ctx);
         break;
 
       case 'thinking_delta':
-        this.streamingHandler.handleThinkingDelta(sessionId, event, timestamp, active);
+        this.streamingHandler.handleThinkingDelta(ctx, event);
         break;
 
       case 'thinking_end':
-        this.streamingHandler.handleThinkingEnd(sessionId, event, timestamp);
+        this.streamingHandler.handleThinkingEnd(ctx, event);
         break;
 
       case 'hook_triggered':
-        this.hookHandler.handleHookTriggered(event as unknown as InternalHookTriggeredEvent);
+        this.hookHandler.handleHookTriggered(ctx, event as unknown as InternalHookTriggeredEvent);
         break;
 
       case 'hook_completed':
-        this.hookHandler.handleHookCompleted(event as unknown as InternalHookCompletedEvent);
+        this.hookHandler.handleHookCompleted(ctx, event as unknown as InternalHookCompletedEvent);
         break;
     }
+  }
+
+  /**
+   * Create an EventContext for a session.
+   * This provides scoped access to session metadata and event methods.
+   */
+  private createEventContext(sessionId: SessionId): EventContext {
+    return createEventContext(sessionId, {
+      getActiveSession: this.config.getActiveSession,
+      appendEventLinearized: this.config.appendEventLinearized,
+      emit: this.config.emit,
+    });
   }
 }
 

@@ -1,9 +1,13 @@
 /**
  * @fileoverview Tests for TurnEventHandler
+ *
+ * TurnEventHandler uses EventContext for automatic metadata injection.
+ * It handles turn lifecycle: turn_start, turn_end, response_complete.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TurnEventHandler, createTurnEventHandler, type TurnEventHandlerDeps } from '../turn-event-handler.js';
+import { createTestEventContext, type TestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
 import type { ActiveSession } from '../../../types.js';
 import type { TronEvent } from '../../../../types/index.js';
@@ -13,11 +17,7 @@ import type { TronEvent } from '../../../../types/index.js';
 // =============================================================================
 
 function createMockDeps(): TurnEventHandlerDeps {
-  return {
-    getActiveSession: vi.fn(),
-    appendEventLinearized: vi.fn(),
-    emit: vi.fn(),
-  };
+  return {};
 }
 
 function createMockActiveSession(overrides: Partial<ActiveSession> = {}): ActiveSession {
@@ -50,6 +50,18 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
   } as ActiveSession;
 }
 
+function createTestContext(options: {
+  sessionId?: SessionId;
+  runId?: string;
+  active?: ActiveSession;
+} = {}): TestEventContext {
+  return createTestEventContext({
+    sessionId: options.sessionId ?? ('test-session' as SessionId),
+    runId: options.runId,
+    active: options.active,
+  });
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -64,119 +76,110 @@ describe('TurnEventHandler', () => {
   });
 
   describe('handleTurnStart', () => {
-    it('should emit agent.turn_start event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_start', turn: 1, sessionId, timestamp } as unknown as TronEvent;
+    it('should emit agent.turn_start event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'turn_start', turn: 1 } as unknown as TronEvent;
 
-      handler.handleTurnStart(sessionId, event, timestamp);
+      handler.handleTurnStart(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', {
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
         type: 'agent.turn_start',
-        sessionId,
-        timestamp,
         data: { turn: 1 },
       });
     });
 
-    it('should persist stream.turn_start event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_start', turn: 1, sessionId, timestamp } as unknown as TronEvent;
+    it('should persist stream.turn_start event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'turn_start', turn: 1 } as unknown as TronEvent;
 
-      handler.handleTurnStart(sessionId, event, timestamp);
+      handler.handleTurnStart(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'stream.turn_start',
-        { turn: 1 }
-      );
+      expect(ctx.persistCalls).toHaveLength(1);
+      expect(ctx.persistCalls[0]).toEqual({
+        type: 'stream.turn_start',
+        payload: { turn: 1, runId: 'run-456' },
+      });
     });
 
     it('should call startTurn on session context when active session exists', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_start', turn: 2, sessionId, timestamp } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'turn_start', turn: 2 } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleTurnStart(sessionId, event, timestamp);
+      handler.handleTurnStart(ctx, event);
 
       expect(mockActive.sessionContext!.startTurn).toHaveBeenCalledWith(2);
     });
 
     it('should not call startTurn when turn is undefined', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = { type: 'turn_start', sessionId, timestamp } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-000' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = { type: 'turn_start' } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleTurnStart(sessionId, event, timestamp);
+      handler.handleTurnStart(ctx, event);
 
       expect(mockActive.sessionContext!.startTurn).not.toHaveBeenCalled();
+    });
+
+    it('should handle undefined active session', () => {
+      const ctx = createTestContext(); // No active session
+      const event = { type: 'turn_start', turn: 1 } as unknown as TronEvent;
+
+      handler.handleTurnStart(ctx, event);
+
+      // Should still emit and persist
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.persistCalls).toHaveLength(1);
     });
   });
 
   describe('handleTurnEnd', () => {
-    it('should emit agent.turn_end event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should emit agent.turn_end event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'turn_end',
         turn: 1,
         duration: 1000,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
 
-      handler.handleTurnEnd(sessionId, event, timestamp);
+      handler.handleTurnEnd(ctx, event);
 
-      expect(deps.emit).toHaveBeenCalledWith('agent_event', expect.objectContaining({
-        type: 'agent.turn_end',
-        sessionId,
-        timestamp,
-      }));
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.turn_end');
+      expect(ctx.emitCalls[0].data).toMatchObject({
+        turn: 1,
+        duration: 1000,
+      });
     });
 
-    it('should persist stream.turn_end event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+    it('should persist stream.turn_end event via context', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
 
-      handler.handleTurnEnd(sessionId, event, timestamp);
+      handler.handleTurnEnd(ctx, event);
 
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'stream.turn_end',
-        expect.objectContaining({
-          turn: 1,
-          tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        })
-      );
+      // Find the stream.turn_end persist call
+      const turnEndCall = ctx.persistCalls.find(c => c.type === 'stream.turn_end');
+      expect(turnEndCall).toBeDefined();
+      expect(turnEndCall!.payload).toMatchObject({
+        turn: 1,
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+        runId: 'run-456',
+      });
     });
 
     it('should create message.assistant when content exists and not pre-flushed', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
-      const event = {
-        type: 'turn_end',
-        turn: 1,
-        tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        sessionId,
-        timestamp,
-      } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
-
+      const mockActive = createMockActiveSession({ currentRunId: 'run-789' });
       // Mock endTurn to return content
       (mockActive.sessionContext!.endTurn as ReturnType<typeof vi.fn>).mockReturnValue({
         turn: 1,
@@ -184,35 +187,28 @@ describe('TurnEventHandler', () => {
         normalizedUsage: { newInputTokens: 100, contextWindowTokens: 1000, outputTokens: 50 },
       });
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleTurnEnd(sessionId, event, timestamp);
-
-      // Should call appendEventLinearized twice: message.assistant and stream.turn_end
-      expect(deps.appendEventLinearized).toHaveBeenCalledTimes(2);
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'message.assistant',
-        expect.objectContaining({
-          turn: 1,
-          stopReason: 'end_turn',
-        }),
-        expect.any(Function)
-      );
-    });
-
-    it('should skip message.assistant when content was pre-flushed for tools', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
 
+      handler.handleTurnEnd(ctx, event);
+
+      // Should have message.assistant and stream.turn_end persist calls
+      expect(ctx.persistCalls).toHaveLength(2);
+      const messageCall = ctx.persistCalls.find(c => c.type === 'message.assistant');
+      expect(messageCall).toBeDefined();
+      expect(messageCall!.payload).toMatchObject({
+        turn: 1,
+        stopReason: 'end_turn',
+        runId: 'run-789',
+      });
+    });
+
+    it('should skip message.assistant when content was pre-flushed for tools', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-000' });
       // Mark as pre-flushed (tools were called)
       (mockActive.sessionContext!.hasPreToolContentFlushed as ReturnType<typeof vi.fn>).mockReturnValue(true);
       (mockActive.sessionContext!.endTurn as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -221,32 +217,23 @@ describe('TurnEventHandler', () => {
         normalizedUsage: { newInputTokens: 100, contextWindowTokens: 1000, outputTokens: 50 },
       });
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleTurnEnd(sessionId, event, timestamp);
-
-      // Should only call appendEventLinearized once for stream.turn_end
-      expect(deps.appendEventLinearized).toHaveBeenCalledTimes(1);
-      expect(deps.appendEventLinearized).toHaveBeenCalledWith(
-        sessionId,
-        'stream.turn_end',
-        expect.any(Object)
-      );
-    });
-
-    it('should sync context tokens to ContextManager', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'turn_end',
         turn: 1,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
-      const mockSetApiContextTokens = vi.fn();
 
+      handler.handleTurnEnd(ctx, event);
+
+      // Should only have stream.turn_end persist call
+      expect(ctx.persistCalls).toHaveLength(1);
+      expect(ctx.persistCalls[0].type).toBe('stream.turn_end');
+    });
+
+    it('should sync context tokens to ContextManager', () => {
+      const mockSetApiContextTokens = vi.fn();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-111' });
       (mockActive.agent.getContextManager as ReturnType<typeof vi.fn>).mockReturnValue({
         setApiContextTokens: mockSetApiContextTokens,
       });
@@ -256,38 +243,50 @@ describe('TurnEventHandler', () => {
         normalizedUsage: { contextWindowTokens: 5000 },
       });
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
+        type: 'turn_end',
+        turn: 1,
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+      } as unknown as TronEvent;
 
-      handler.handleTurnEnd(sessionId, event, timestamp);
+      handler.handleTurnEnd(ctx, event);
 
       expect(mockSetApiContextTokens).toHaveBeenCalledWith(5000);
+    });
+
+    it('should handle undefined active session', () => {
+      const ctx = createTestContext(); // No active session
+      const event = {
+        type: 'turn_end',
+        turn: 1,
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+      } as unknown as TronEvent;
+
+      handler.handleTurnEnd(ctx, event);
+
+      // Should still emit and persist stream.turn_end
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.persistCalls).toHaveLength(1);
     });
   });
 
   describe('handleResponseComplete', () => {
     it('should set response token usage on session context', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'response_complete',
         turn: 1,
-        stopReason: 'end_turn',
-        hasToolCalls: false,
-        toolCallCount: 0,
         tokenUsage: {
           inputTokens: 100,
           outputTokens: 50,
           cacheReadTokens: 10,
           cacheCreationTokens: 5,
         },
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleResponseComplete(sessionId, event);
+      handler.handleResponseComplete(ctx, event);
 
       expect(mockActive.sessionContext!.setResponseTokenUsage).toHaveBeenCalledWith({
         inputTokens: 100,
@@ -298,44 +297,29 @@ describe('TurnEventHandler', () => {
     });
 
     it('should do nothing when no active session', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const ctx = createTestContext(); // No active session
       const event = {
         type: 'response_complete',
         turn: 1,
-        stopReason: 'end_turn',
-        hasToolCalls: false,
-        toolCallCount: 0,
         tokenUsage: { inputTokens: 100, outputTokens: 50 },
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
-
       // Should not throw
-      handler.handleResponseComplete(sessionId, event);
+      handler.handleResponseComplete(ctx, event);
 
-      expect(deps.emit).not.toHaveBeenCalled();
+      expect(ctx.emitCalls).toHaveLength(0);
+      expect(ctx.persistCalls).toHaveLength(0);
     });
 
     it('should do nothing when no token usage in event', () => {
-      const sessionId = 'test-session' as SessionId;
-      const timestamp = new Date().toISOString();
+      const mockActive = createMockActiveSession({ currentRunId: 'run-456' });
+      const ctx = createTestContext({ active: mockActive });
       const event = {
         type: 'response_complete',
         turn: 1,
-        stopReason: 'end_turn',
-        hasToolCalls: false,
-        toolCallCount: 0,
-        sessionId,
-        timestamp,
       } as unknown as TronEvent;
-      const mockActive = createMockActiveSession();
 
-      (deps.getActiveSession as ReturnType<typeof vi.fn>).mockReturnValue(mockActive);
-
-      handler.handleResponseComplete(sessionId, event);
+      handler.handleResponseComplete(ctx, event);
 
       expect(mockActive.sessionContext!.setResponseTokenUsage).not.toHaveBeenCalled();
     });
