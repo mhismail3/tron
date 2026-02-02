@@ -90,7 +90,7 @@ export async function refreshTokens(
   };
 
   // Persist refreshed tokens to disk
-  await saveProviderOAuthTokens('openai', newTokens);
+  await saveProviderOAuthTokens('openai-codex', newTokens);
   logger.info('Persisted refreshed OpenAI OAuth tokens');
 
   return newTokens;

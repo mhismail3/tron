@@ -16,8 +16,11 @@ const logger = createLogger('openai-auth');
 // Constants
 // =============================================================================
 
-/** OpenAI token URL for refresh (if needed in future) */
-const OPENAI_TOKEN_URL = 'https://oauth.openai.com/v1/token';
+/** OpenAI token URL for refresh */
+const OPENAI_TOKEN_URL = 'https://auth.openai.com/oauth/token';
+
+/** OpenAI OAuth client ID (from Codex CLI) */
+const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 
 // =============================================================================
 // Token Refresh (for future use)
@@ -37,12 +40,13 @@ export async function refreshOpenAIToken(
   const response = await fetch(OPENAI_TOKEN_URL, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: new URLSearchParams({
+    body: JSON.stringify({
       grant_type: 'refresh_token',
+      client_id: OPENAI_CLIENT_ID,
       refresh_token: refreshToken,
-    }).toString(),
+    }),
   });
 
   if (!response.ok) {
