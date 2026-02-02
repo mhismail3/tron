@@ -132,6 +132,23 @@ struct TokenUsage: Decodable, Equatable {
     var formattedInput: String { inputTokens.formattedTokenCount }
     var formattedOutput: String { outputTokens.formattedTokenCount }
     var formattedTotal: String { totalTokens.formattedTokenCount }
+
+    /// Format server-provided cache read tokens (e.g., 20000 → "20k"). Returns nil if not provided or zero.
+    var formattedCacheRead: String? {
+        guard let tokens = cacheReadTokens, tokens > 0 else { return nil }
+        return tokens.formattedTokenCount
+    }
+
+    /// Format server-provided cache write tokens. Returns nil if not provided or zero.
+    var formattedCacheWrite: String? {
+        guard let tokens = cacheCreationTokens, tokens > 0 else { return nil }
+        return tokens.formattedTokenCount
+    }
+
+    /// Check if server provided any cache tokens to display
+    var hasCacheActivity: Bool {
+        (cacheReadTokens ?? 0) > 0 || (cacheCreationTokens ?? 0) > 0
+    }
 }
 
 /// Server-calculated normalized token usage

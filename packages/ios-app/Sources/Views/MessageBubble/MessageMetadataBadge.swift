@@ -7,6 +7,7 @@ struct TokenBadge: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // Input/Output tokens
             HStack(spacing: 2) {
                 Image(systemName: "arrow.down")
                     .font(TronTypography.labelSM)
@@ -17,6 +18,32 @@ struct TokenBadge: View {
                 Image(systemName: "arrow.up")
                     .font(TronTypography.labelSM)
                 Text(usage.formattedOutput)
+            }
+
+            // Cache section (if any cache activity)
+            if usage.hasCacheActivity {
+                Text("\u{2022}")
+                    .foregroundStyle(.tronTextMuted)
+
+                // Cache read
+                if let cacheRead = usage.formattedCacheRead {
+                    HStack(spacing: 2) {
+                        Image(systemName: "bolt.fill")
+                            .font(TronTypography.labelSM)
+                        Text(cacheRead)
+                    }
+                    .foregroundStyle(.tronCyan)
+                }
+
+                // Cache write
+                if let cacheWrite = usage.formattedCacheWrite {
+                    HStack(spacing: 2) {
+                        Image(systemName: "pencil")
+                            .font(TronTypography.labelSM)
+                        Text(cacheWrite)
+                    }
+                    .foregroundStyle(.tronAmber)
+                }
             }
         }
         .font(TronTypography.codeSM)

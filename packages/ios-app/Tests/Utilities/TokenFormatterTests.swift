@@ -76,4 +76,49 @@ final class TokenFormatterTests: XCTestCase {
         XCTAssertEqual(500.formattedTokensWithSuffix, "500 tokens")
         XCTAssertEqual(1500.formattedTokensWithSuffix, "1.5K tokens")
     }
+
+    // MARK: - TokenUsage Cache Properties Tests
+
+    func test_tokenUsage_formattedCacheRead_returnsNil_whenNilOrZero() {
+        let usageNil = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: nil)
+        XCTAssertNil(usageNil.formattedCacheRead)
+
+        let usageZero = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: nil)
+        XCTAssertNil(usageZero.formattedCacheRead)
+    }
+
+    func test_tokenUsage_formattedCacheRead_returnsFormatted_whenPositive() {
+        let usage = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: 20000, cacheCreationTokens: nil)
+        XCTAssertEqual(usage.formattedCacheRead, "20.0k")
+    }
+
+    func test_tokenUsage_formattedCacheWrite_returnsFormatted_whenPositive() {
+        let usage = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: 8000)
+        XCTAssertEqual(usage.formattedCacheWrite, "8.0k")
+    }
+
+    func test_tokenUsage_hasCacheActivity_returnsFalse_whenNoCacheTokens() {
+        let usageNil = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: nil)
+        XCTAssertFalse(usageNil.hasCacheActivity)
+
+        let usageZero = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheCreationTokens: 0)
+        XCTAssertFalse(usageZero.hasCacheActivity)
+    }
+
+    func test_tokenUsage_hasCacheActivity_returnsTrue_whenCacheRead() {
+        let usage = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: 20000, cacheCreationTokens: nil)
+        XCTAssertTrue(usage.hasCacheActivity)
+    }
+
+    func test_tokenUsage_hasCacheActivity_returnsTrue_whenCacheWrite() {
+        let usage = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: 5000)
+        XCTAssertTrue(usage.hasCacheActivity)
+    }
+
+    func test_tokenUsage_hasCacheActivity_returnsTrue_whenBothCacheReadAndWrite() {
+        let usage = TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: 18000, cacheCreationTokens: 2000)
+        XCTAssertTrue(usage.hasCacheActivity)
+        XCTAssertEqual(usage.formattedCacheRead, "18.0k")
+        XCTAssertEqual(usage.formattedCacheWrite, "2.0k")
+    }
 }
