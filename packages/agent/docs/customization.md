@@ -171,6 +171,7 @@ project/
 ```
 ~/.tron/
 ├── settings.json       # Global settings
+├── auth.json           # API keys and OAuth tokens
 ├── SYSTEM.md           # Global system prompt
 ├── skills/             # Global skills
 │   └── my-skill/
@@ -186,7 +187,44 @@ project/
 
 ## Hooks
 
-Hooks allow custom logic before/after tool execution.
+Hooks allow custom logic at key points in agent execution. The hook system consists of three components:
+
+- **HookEngine** - Orchestrates hook execution
+- **HookRegistry** - Manages registration and priority sorting
+- **BackgroundTracker** - Tracks async background hook execution
+
+### Hook Types
+
+| Type | Mode | Description |
+|------|------|-------------|
+| `PreToolUse` | Blocking | Before tool execution. Can block or modify. |
+| `PostToolUse` | Background | After tool completion. For logging/observation. |
+| `UserPromptSubmit` | Blocking | Before processing user input. Can validate/transform. |
+| `PreCompact` | Blocking | Before context compaction. |
+| `SessionStart` | Background | On session creation. |
+| `SessionEnd` | Background | On session termination. |
+| `Stop` | Background | On agent turn completion. |
+| `SubagentStop` | Background | On subagent completion. |
+
+**Blocking hooks** must complete before the operation continues. They can return control signals.
+
+**Background hooks** run asynchronously and don't block the main flow. Errors are logged but don't fail the operation (fail-open design).
+
+### Hook Priority
+
+Hooks execute in priority order (highest first). Default priority is 0.
+
+```typescript
+// High priority hook runs first
+hookEngine.register({
+  name: 'security-check',
+  type: 'PreToolUse',
+  priority: 100,
+  handler: async (context) => {
+    // Runs before default priority hooks
+  },
+});
+```
 
 ### PreToolUse
 
@@ -194,21 +232,103 @@ Runs before a tool executes. Can block or modify the call.
 
 ```typescript
 // In .claude/hooks/pre-tool-use.ts
-export default async function(tool: ToolCall) {
-  if (tool.name === 'bash' && tool.arguments.command.includes('rm -rf')) {
+export default async function(context) {
+  const { toolName, toolInput, sessionId } = context;
+
+  if (toolName === 'bash' && toolInput.command.includes('rm -rf')) {
     return { blocked: true, reason: 'Dangerous command blocked' };
   }
+
+  // Modify input
+  if (toolName === 'bash') {
+    return {
+      proceed: true,
+      modifiedInput: { ...toolInput, timeout: 30000 }
+    };
+  }
+
   return { proceed: true };
 }
 ```
 
 ### PostToolUse
 
-Runs after a tool completes. Can log or transform results.
+Runs after a tool completes. For logging or observation.
 
 ```typescript
 // In .claude/hooks/post-tool-use.ts
-export default async function(tool: ToolCall, result: ToolResult) {
-  console.log(`Tool ${tool.name} completed in ${result.duration}ms`);
+export default async function(context) {
+  const { toolName, toolResult, duration, sessionId } = context;
+
+  // Log to external service
+  await analytics.track('tool_execution', {
+    tool: toolName,
+    duration,
+    success: !toolResult.isError,
+    sessionId,
+  });
 }
+```
+
+### UserPromptSubmit
+
+Runs before processing user input. Can validate or transform.
+
+```typescript
+// In .claude/hooks/user-prompt-submit.ts
+export default async function(context) {
+  const { content, sessionId } = context;
+
+  // Block certain inputs
+  if (content.includes('SECRET_TOKEN')) {
+    return { blocked: true, reason: 'Sensitive content detected' };
+  }
+
+  return { proceed: true };
+}
+```
+
+### Hook Context
+
+Each hook type receives a typed context with relevant data:
+
+```typescript
+// PreToolUse context
+interface PreToolHookContext {
+  hookType: 'PreToolUse';
+  sessionId: string;
+  timestamp: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+  data: Record<string, unknown>;
+}
+
+// PostToolUse context
+interface PostToolHookContext {
+  hookType: 'PostToolUse';
+  sessionId: string;
+  timestamp: string;
+  toolName: string;
+  toolResult: ToolResult;
+  duration: number;
+  data: Record<string, unknown>;
+}
+```
+
+### Error Handling
+
+Hooks use fail-open error handling. If a hook throws:
+- Error is logged with session context
+- Operation continues (for background hooks)
+- Blocking hooks may block if they throw
+
+This ensures extension failures don't crash the agent.
+
+### Waiting for Background Hooks
+
+Before shutdown, drain pending background hooks:
+
+```typescript
+// Wait up to 5 seconds for background hooks to complete
+await hookEngine.waitForBackgroundHooks(5000);
 ```

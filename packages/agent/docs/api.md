@@ -29,7 +29,7 @@ All messages use JSON-RPC 2.0:
   jsonrpc: "2.0",
   id: string,
   result?: unknown,
-  error?: { code: number, message: string }
+  error?: { code: number, message: string, data?: unknown }
 }
 
 // Notification (server → client)
@@ -39,6 +39,37 @@ All messages use JSON-RPC 2.0:
   params: Record<string, unknown>
 }
 ```
+
+## RPC Architecture
+
+### Method Registry
+
+RPC methods are registered via the `MethodRegistry` with automatic validation:
+
+```typescript
+registry.register('session.create', handler, {
+  requiredParams: ['workingDirectory'],
+  requiredManagers: ['sessionManager'],
+});
+```
+
+The registry:
+- Validates required parameters before handler execution
+- Checks manager availability
+- Maps typed errors to proper RPC error codes
+- Supports middleware for cross-cutting concerns
+- Organizes methods by namespace (e.g., `session.*`, `agent.*`)
+
+### Method Namespaces
+
+| Namespace | Purpose |
+|-----------|---------|
+| `session` | Session lifecycle management |
+| `agent` | Agent control and messaging |
+| `model` | Model selection and switching |
+| `context` | Context management and compaction |
+| `events` | Event querying and sync |
+| `system` | Health, status, and diagnostics |
 
 ## RPC Methods
 
@@ -83,7 +114,25 @@ All messages use JSON-RPC 2.0:
 
 ## Event Notifications
 
-Server sends notifications for real-time updates:
+Server sends notifications for real-time updates via WebSocket.
+
+### Broadcast Event Types
+
+Events use typed enums for compile-time safety:
+
+| Type | Description |
+|------|-------------|
+| `SESSION_CREATED` | New session created |
+| `SESSION_ENDED` | Session terminated |
+| `SESSION_FORKED` | Session forked |
+| `SESSION_REWOUND` | Session rewound to earlier state |
+| `AGENT_TURN` | Agent turn state change |
+| `AGENT_MESSAGE_DELETED` | Message deleted |
+| `AGENT_CONTEXT_CLEARED` | Context cleared |
+| `AGENT_COMPACTION` | Context compacted |
+| `BROWSER_FRAME` | Browser frame update |
+| `BROWSER_CLOSED` | Browser closed |
+| `EVENT_NEW` | New event recorded |
 
 ### Streaming Events
 
@@ -165,7 +214,30 @@ Response: { status: "ok", version: "1.0.0" }
 
 Currently uses local-only connections. Future versions will support API keys.
 
+Authentication storage is managed via `~/.tron/auth.json`:
+
+```typescript
+interface AuthStorage {
+  version: 1;
+  providers: {
+    [provider: string]: {
+      oauth?: OAuthTokens;
+      apiKey?: string;
+    };
+  };
+  services?: {
+    [service: string]: {
+      apiKey?: string;
+      apiKeys?: string[];
+    };
+  };
+  lastUpdated: string;
+}
+```
+
 ## Error Codes
+
+### Standard JSON-RPC Errors
 
 | Code | Meaning |
 |------|---------|
@@ -174,6 +246,39 @@ Currently uses local-only connections. Future versions will support API keys.
 | -32601 | Method not found |
 | -32602 | Invalid params |
 | -32603 | Internal error |
-| -32000 | Session not found |
-| -32001 | Agent busy |
-| -32002 | Context overflow |
+
+### Application Errors
+
+| Code | Type | Meaning |
+|------|------|---------|
+| -32000 | `SessionNotFoundError` | Session not found |
+| -32001 | `SessionNotActiveError` | Session not active |
+| -32002 | `ManagerNotAvailableError` | Required manager unavailable |
+| -32003 | `AgentBusyError` | Agent busy (already processing) |
+| -32004 | `ContextOverflowError` | Context overflow |
+
+### Error Response Format
+
+```typescript
+{
+  jsonrpc: "2.0",
+  id: "request-id",
+  error: {
+    code: -32000,
+    message: "Session not found: sess_abc123",
+    data: {
+      category: "client_error",
+      retryable: false,
+      sessionId: "sess_abc123"
+    }
+  }
+}
+```
+
+### Error Categories
+
+| Category | Description | Retryable |
+|----------|-------------|-----------|
+| `client_error` | Client-side issue (bad params, not found) | No |
+| `server_error` | Server-side issue (internal error) | Sometimes |
+| `transient_error` | Temporary issue (busy, timeout) | Yes |

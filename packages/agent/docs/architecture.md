@@ -10,31 +10,538 @@ The agent package (`@tron/agent`) is the core backend for Tron. It handles:
 - Sub-agent spawning and coordination
 - WebSocket server for clients
 
+## System Architecture
+
+### High-Level Overview
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Event Store Orchestrator                          │
-│   - Multi-session management                                         │
-│   - Agent lifecycle (spawn, run, abort)                              │
-│   - Event routing and persistence                                    │
-└─────────────────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        TronAgent Core                                │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│   │   Provider  │  │    Tools    │  │   Context   │                 │
-│   │  (LLM API)  │  │ read/write/ │  │   loader    │                 │
-│   │             │  │ edit/bash   │  │             │                 │
-│   └─────────────┘  └─────────────┘  └─────────────┘                 │
-└─────────────────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     Event Store (SQLite)                             │
-│   - Immutable event log with tree structure                          │
-│   - Session state reconstruction via ancestor traversal              │
-│   - Fork/rewind operations                                           │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                      CLIENTS                                             │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │
+│  │    iOS App      │  │    TUI CLI      │  │    Web Chat     │  │   External API  │    │
+│  │  (SwiftUI)      │  │  (Ink/React)    │  │    (React)      │  │    Consumers    │    │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘    │
+└───────────┼─────────────────────┼─────────────────────┼─────────────────────┼───────────┘
+            │                     │                     │                     │
+            └──────────────────────┬──────────────────────┬────────────────────┘
+                                   │ WebSocket / HTTP     │
+                                   ▼                      ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              INTERFACE LAYER                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                           TronServer (server.ts)                                 │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐  │   │
+│  │  │  HTTP Server    │  │ WebSocket       │  │      RPC Handler                │  │   │
+│  │  │  (Hono)         │  │ Gateway         │  │  ┌─────────────────────────┐    │  │   │
+│  │  │  - /health      │  │ - Connection    │  │  │    MethodRegistry       │    │  │   │
+│  │  │  - /api/*       │  │   management    │  │  │  - Validation           │    │  │   │
+│  │  │                 │  │ - Event         │  │  │  - Middleware chain     │    │  │   │
+│  │  │                 │  │   broadcasting  │  │  │  - Namespace routing    │    │  │   │
+│  │  └─────────────────┘  └─────────────────┘  │  └─────────────────────────┘    │  │   │
+│  │                                            │  ┌─────────────────────────┐    │  │   │
+│  │                                            │  │   Domain Handlers       │    │  │   │
+│  │                                            │  │  - session.*            │    │  │   │
+│  │                                            │  │  - agent.*              │    │  │   │
+│  │                                            │  │  - model.*              │    │  │   │
+│  │                                            │  │  - context.*            │    │  │   │
+│  │                                            │  │  - events.*             │    │  │   │
+│  │                                            │  └─────────────────────────┘    │  │   │
+│  │                                            └─────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────┬─────────────────────────────────────────┘
+                                                │
+                                                ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              RUNTIME LAYER                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                      Event Store Orchestrator                                    │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐  │   │
+│  │  │ Session Manager │  │  Agent Manager  │  │      Controllers                │  │   │
+│  │  │ - create/fork   │  │ - spawn agents  │  │  - BrowserController            │  │   │
+│  │  │ - resume/delete │  │ - abort/status  │  │  - NotificationController       │  │   │
+│  │  │ - list/get      │  │ - message queue │  │  - WorktreeController           │  │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                │                                        │
+│                                                ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                           TronAgent (Agent Runner)                               │   │
+│  │  ┌───────────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │                          Turn Execution Loop                               │  │   │
+│  │  │                                                                            │  │   │
+│  │  │   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐           │  │   │
+│  │  │   │ Context  │───▶│ LLM Call │───▶│ Response │───▶│  Tool    │──┐        │  │   │
+│  │  │   │ Assembly │    │          │    │ Parse    │    │ Executor │  │        │  │   │
+│  │  │   └──────────┘    └──────────┘    └──────────┘    └──────────┘  │        │  │   │
+│  │  │        ▲                                               │         │        │  │   │
+│  │  │        └───────────────────────────────────────────────┘         │        │  │   │
+│  │  │                         (loop until done)                        │        │  │   │
+│  │  │                                                                  ▼        │  │   │
+│  │  │                                                          ┌──────────┐    │  │   │
+│  │  │                                                          │  Event   │    │  │   │
+│  │  │                                                          │ Recording│    │  │   │
+│  │  │                                                          └──────────┘    │  │   │
+│  │  └───────────────────────────────────────────────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────┬─────────────────────────────────────────┘
+                                                │
+            ┌───────────────────────────────────┼───────────────────────────────────┐
+            │                                   │                                   │
+            ▼                                   ▼                                   ▼
+┌───────────────────────┐       ┌───────────────────────┐       ┌───────────────────────┐
+│   CAPABILITIES        │       │      LLM LAYER        │       │   CONTEXT LAYER       │
+│  ┌─────────────────┐  │       │  ┌─────────────────┐  │       │  ┌─────────────────┐  │
+│  │     Tools       │  │       │  │    Providers    │  │       │  │  System Prompt  │  │
+│  │  ┌───────────┐  │  │       │  │  ┌───────────┐  │  │       │  │  Templates      │  │
+│  │  │ fs/       │  │  │       │  │  │ Anthropic │  │  │       │  └─────────────────┘  │
+│  │  │ browser/  │  │  │       │  │  │ Google    │  │  │       │  ┌─────────────────┐  │
+│  │  │ subagent/ │  │  │       │  │  │ OpenAI    │  │  │       │  │  Rules Tracker  │  │
+│  │  │ ui/       │  │  │       │  │  └───────────┘  │  │       │  │  (AGENTS.md)    │  │
+│  │  │ system/   │  │  │       │  │  ┌───────────┐  │  │       │  └─────────────────┘  │
+│  │  │ search/   │  │  │       │  │  │ Token     │  │  │       │  ┌─────────────────┐  │
+│  │  └───────────┘  │  │       │  │  │ Normalizer│  │  │       │  │  Compaction     │  │
+│  └─────────────────┘  │       │  │  └───────────┘  │  │       │  │  Engine         │  │
+│  ┌─────────────────┐  │       │  └─────────────────┘  │       │  └─────────────────┘  │
+│  │   Extensions    │  │       └───────────────────────┘       └───────────────────────┘
+│  │  ┌───────────┐  │  │
+│  │  │ Hooks     │  │  │
+│  │  │ Skills    │  │  │
+│  │  │ Commands  │  │  │
+│  │  └───────────┘  │  │
+│  └─────────────────┘  │
+│  ┌─────────────────┐  │
+│  │   Guardrails    │  │
+│  └─────────────────┘  │
+└───────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                            INFRASTRUCTURE LAYER                                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
+│  │   Logging   │  │  Settings   │  │    Auth     │  │   Events    │  │    Usage    │   │
+│  │   (Pino +   │  │  Provider   │  │  (Unified   │  │   Factory   │  │  Tracking   │   │
+│  │   SQLite)   │  │             │  │  sync/async)│  │             │  │             │   │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
+                                                │
+                                                ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              PERSISTENCE LAYER                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
+│  │                         Event Store (SQLite)                                     │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐  │   │
+│  │  │    events       │  │    sessions     │  │         workspaces              │  │   │
+│  │  │  - id           │  │  - id           │  │  - id                           │  │   │
+│  │  │  - parent_id    │  │  - head_event_id│  │  - path                         │  │   │
+│  │  │  - session_id   │  │  - root_event_id│  │  - name                         │  │   │
+│  │  │  - sequence     │  │  - status       │  │                                 │  │   │
+│  │  │  - type         │  │  - model        │  │                                 │  │   │
+│  │  │  - payload      │  │  - provider     │  │                                 │  │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────────────────┘  │   │
+│  └─────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                         │
+│  Location: ~/.tron/db/{prod,dev,test}.db                                               │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Request Flow (Turn Execution)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              COMPLETE REQUEST FLOW                                       │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+  Client                    Server                     Agent                    LLM
+    │                         │                         │                        │
+    │  1. agent.message       │                         │                        │
+    │  {sessionId, content}   │                         │                        │
+    │ ───────────────────────▶│                         │                        │
+    │                         │                         │                        │
+    │                         │  2. Validate request    │                        │
+    │                         │     (MethodRegistry)    │                        │
+    │                         │                         │                        │
+    │                         │  3. UserPromptSubmit    │                        │
+    │                         │     hook (blocking)     │                        │
+    │                         │                         │                        │
+    │                         │  4. Queue message       │                        │
+    │                         │ ───────────────────────▶│                        │
+    │                         │                         │                        │
+    │                         │                         │  5. Record             │
+    │                         │                         │     message.user       │
+    │                         │                         │     event              │
+    │                         │                         │                        │
+    │                         │                         │  6. Build context      │
+    │                         │                         │     - System prompt    │
+    │                         │                         │     - AGENTS.md rules  │
+    │                         │                         │     - Skills           │
+    │                         │                         │     - History          │
+    │                         │                         │                        │
+    │                         │                         │  7. Call LLM           │
+    │                         │                         │ ──────────────────────▶│
+    │                         │                         │                        │
+    │                         │                         │  8. Stream response    │
+    │  9. text_delta events   │                         │◀──────────────────────│
+    │◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│                        │
+    │                         │                         │                        │
+    │                         │                         │  10. Parse tool calls  │
+    │                         │                         │      (if any)          │
+    │                         │                         │                        │
+    │                         │                         │  ┌──────────────────┐  │
+    │                         │                         │  │ FOR EACH TOOL:   │  │
+    │                         │                         │  │                  │  │
+    │  11. tool_start event   │                         │  │ a. PreToolUse    │  │
+    │◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│  │    hook          │  │
+    │                         │                         │  │    (blocking)    │  │
+    │                         │                         │  │                  │  │
+    │                         │                         │  │ b. Execute tool  │  │
+    │                         │                         │  │                  │  │
+    │                         │                         │  │ c. Record        │  │
+    │                         │                         │  │    tool.call +   │  │
+    │                         │                         │  │    tool.result   │  │
+    │                         │                         │  │                  │  │
+    │  12. tool_end event     │                         │  │ d. PostToolUse   │  │
+    │◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│◀─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│  │    hook (bg)     │  │
+    │                         │                         │  └──────────────────┘  │
+    │                         │                         │                        │
+    │                         │                         │  13. Loop to step 7    │
+    │                         │                         │      if more tools     │
+    │                         │                         │                        │
+    │                         │                         │  14. Record            │
+    │                         │                         │      message.assistant │
+    │                         │                         │                        │
+    │                         │                         │  15. Stop hook (bg)    │
+    │                         │                         │                        │
+    │  16. turn_complete      │                         │                        │
+    │◀─────────────────────────────────────────────────│                        │
+    │                         │                         │                        │
+```
+
+### Hook System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              HOOK SYSTEM ARCHITECTURE                                    │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+                              ┌─────────────────────────────────────┐
+                              │           HookEngine                │
+                              │         (Orchestrator)              │
+                              │                                     │
+                              │  • execute(type, context)           │
+                              │  • executeWithEvents(...)           │
+                              │  • waitForBackgroundHooks()         │
+                              └───────────────┬─────────────────────┘
+                                              │
+                        ┌─────────────────────┴─────────────────────┐
+                        │                                           │
+                        ▼                                           ▼
+          ┌─────────────────────────────┐           ┌─────────────────────────────┐
+          │       HookRegistry          │           │     BackgroundTracker       │
+          │                             │           │                             │
+          │  • register(definition)     │           │  • track(id, promise)       │
+          │  • unregister(name)         │           │  • getPendingCount()        │
+          │  • getByType(type)          │           │  • waitForAll(timeout)      │
+          │    → sorted by priority     │           │                             │
+          └─────────────────────────────┘           └─────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                HOOK EXECUTION FLOW                                       │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+  BLOCKING HOOKS                                    BACKGROUND HOOKS
+  (must complete before continuing)                 (fire-and-forget, fail-open)
+
+  ┌─────────────────────────────────┐              ┌─────────────────────────────────┐
+  │ PreToolUse                      │              │ PostToolUse                     │
+  │ UserPromptSubmit                │              │ SessionStart                    │
+  │ PreCompact                      │              │ SessionEnd                      │
+  │                                 │              │ Stop                            │
+  │ Returns:                        │              │ SubagentStop                    │
+  │ • { proceed: true }             │              │                                 │
+  │ • { blocked: true, reason }     │              │ Errors: logged but don't fail   │
+  │ • { proceed: true, modified }   │              │ the operation                   │
+  └─────────────────────────────────┘              └─────────────────────────────────┘
+
+  Priority Ordering (highest first):
+
+  ┌──────────────────────────────────────────────────────────────────────────────────────┐
+  │  priority: 100  │  security-check     │  ──▶  Runs first                             │
+  │  priority: 50   │  audit-logger       │  ──▶  Runs second                            │
+  │  priority: 0    │  default-handler    │  ──▶  Runs third (default)                   │
+  │  priority: -10  │  cleanup-hook       │  ──▶  Runs last                              │
+  └──────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Event Sourcing Model
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              EVENT SOURCING MODEL                                        │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+  SESSION STATE = f(events from root to head)
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                                EVENT TREE                                            │
+  │                                                                                      │
+  │                     [session.start]  ◀─── rootEventId (Session A)                   │
+  │                           │                                                          │
+  │                           │ parentId                                                 │
+  │                           ▼                                                          │
+  │                     [message.user]                                                   │
+  │                     "Hello, help me"                                                 │
+  │                           │                                                          │
+  │                           │ parentId                                                 │
+  │                           ▼                                                          │
+  │                   [message.assistant]                                                │
+  │                   "I'll help you..."                                                 │
+  │                           │                                                          │
+  │                           │ parentId                                                 │
+  │                           ▼                                                          │
+  │                     [message.user]  ◀─── FORK POINT                                 │
+  │                     "Read file.ts"                                                   │
+  │                           │                                                          │
+  │           ┌───────────────┴───────────────┐                                         │
+  │           │ parentId                      │ parentId                                │
+  │           ▼                               ▼                                          │
+  │   [message.assistant]              [session.fork]  ◀─── rootEventId (Session B)     │
+  │   "Let me read that"               sourceEventId ──────▶                            │
+  │           │                               │                                          │
+  │           │ parentId                      │ parentId                                │
+  │           ▼                               ▼                                          │
+  │      [tool.call]                   [message.user]                                   │
+  │      name: "Read"                  "Actually, read other.ts"                        │
+  │           │                               │                                          │
+  │           │ parentId                      │ parentId                                │
+  │           ▼                               ▼                                          │
+  │     [tool.result]                 [message.assistant]                               │
+  │     content: "..."                "Reading other.ts..."                             │
+  │           │                               │                                          │
+  │           ▼                               ▼                                          │
+  │   [message.assistant]  ◀─── headEventId (A)                                         │
+  │   "Here's the file..."            [tool.call]  ◀─── headEventId (B)                │
+  │                                                                                      │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                           SESSION POINTERS                                           │
+  │                                                                                      │
+  │   Session A:                           Session B:                                    │
+  │   ┌────────────────────────┐           ┌────────────────────────┐                   │
+  │   │ id: sess_abc123        │           │ id: sess_def456        │                   │
+  │   │ rootEventId: evt_001   │           │ rootEventId: evt_fork  │                   │
+  │   │ headEventId: evt_007   │           │ headEventId: evt_010   │                   │
+  │   │ status: active         │           │ status: active         │                   │
+  │   └────────────────────────┘           └────────────────────────┘                   │
+  │                                                                                      │
+  │   State Reconstruction:                                                              │
+  │   1. Start at headEventId                                                            │
+  │   2. Walk parentId chain to root                                                     │
+  │   3. Reverse to get chronological order                                              │
+  │   4. Apply events to build message history                                           │
+  │                                                                                      │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                           OPERATIONS                                                 │
+  │                                                                                      │
+  │   FORK:                                  REWIND:                                     │
+  │   ┌─────────────────────────────┐       ┌─────────────────────────────┐             │
+  │   │ 1. Create session.fork event│       │ 1. Move headEventId back    │             │
+  │   │    with parentId pointing   │       │ 2. Events after head become │             │
+  │   │    to branch point          │       │    orphaned (still in DB)   │             │
+  │   │ 2. New session root = fork  │       │ 3. Can fork from new head   │             │
+  │   │ 3. Original unchanged       │       │    to explore alternatives  │             │
+  │   └─────────────────────────────┘       └─────────────────────────────┘             │
+  │                                                                                      │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### RPC Handler Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              RPC HANDLER ARCHITECTURE                                    │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                              METHOD REGISTRY                                         │
+  │                                                                                      │
+  │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
+  │   │                         Registration                                         │   │
+  │   │                                                                              │   │
+  │   │   registry.register('session.create', handler, {                            │   │
+  │   │     requiredParams: ['workingDirectory'],        ◀── Validated before call  │   │
+  │   │     requiredManagers: ['sessionManager'],        ◀── Checked for existence  │   │
+  │   │     description: 'Create a new session',                                     │   │
+  │   │   });                                                                        │   │
+  │   │                                                                              │   │
+  │   └─────────────────────────────────────────────────────────────────────────────┘   │
+  │                                                                                      │
+  │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
+  │   │                         Dispatch Flow                                        │   │
+  │   │                                                                              │   │
+  │   │   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐             │   │
+  │   │   │  Find    │───▶│ Validate │───▶│Middleware│───▶│ Execute  │             │   │
+  │   │   │ Handler  │    │  Params  │    │  Chain   │    │ Handler  │             │   │
+  │   │   └──────────┘    └──────────┘    └──────────┘    └──────────┘             │   │
+  │   │        │               │               │               │                    │   │
+  │   │        ▼               ▼               ▼               ▼                    │   │
+  │   │   -32601 if      -32602 if       Cross-cutting    Returns result           │   │
+  │   │   not found      missing         concerns          directly                 │   │
+  │   │                                  (logging,etc)                              │   │
+  │   └─────────────────────────────────────────────────────────────────────────────┘   │
+  │                                                                                      │
+  │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
+  │   │                         Namespace Organization                               │   │
+  │   │                                                                              │   │
+  │   │   session.*                          agent.*                                 │   │
+  │   │   ├── session.create                 ├── agent.message                       │   │
+  │   │   ├── session.get                    ├── agent.abort                         │   │
+  │   │   ├── session.list                   └── agent.respond                       │   │
+  │   │   ├── session.fork                                                           │   │
+  │   │   └── session.delete                 model.*                                 │   │
+  │   │                                      ├── model.list                          │   │
+  │   │   context.*                          └── model.switch                        │   │
+  │   │   ├── context.get                                                            │   │
+  │   │   └── context.compact                events.*                                │   │
+  │   │                                      ├── events.list                         │   │
+  │   │                                      └── events.sync                         │   │
+  │   └─────────────────────────────────────────────────────────────────────────────┘   │
+  │                                                                                      │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │                              ERROR HIERARCHY                                         │
+  │                                                                                      │
+  │                                   RpcError                                           │
+  │                                      │                                               │
+  │            ┌─────────────┬───────────┼───────────┬─────────────┐                    │
+  │            │             │           │           │             │                    │
+  │            ▼             ▼           ▼           ▼             ▼                    │
+  │   ┌─────────────┐ ┌───────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐              │
+  │   │SessionNot   │ │SessionNot │ │Manager  │ │AgentBusy│ │Validation │              │
+  │   │FoundError   │ │ActiveError│ │NotAvail │ │Error    │ │Error      │              │
+  │   │  -32000     │ │  -32001   │ │ -32002  │ │ -32003  │ │ -32602    │              │
+  │   └─────────────┘ └───────────┘ └─────────┘ └─────────┘ └───────────┘              │
+  │                                                                                      │
+  │   Error Response:                                                                    │
+  │   {                                                                                  │
+  │     error: {                                                                         │
+  │       code: -32000,                                                                  │
+  │       message: "Session not found: sess_abc",                                        │
+  │       data: { category: "client_error", retryable: false }                          │
+  │     }                                                                                │
+  │   }                                                                                  │
+  │                                                                                      │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Tool Execution Detail
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              TOOL EXECUTION FLOW                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+  LLM Response with tool_use block:
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │  {                                                                                   │
+  │    "type": "tool_use",                                                               │
+  │    "id": "toolu_abc123",                                                             │
+  │    "name": "Read",                                                                   │
+  │    "input": { "file_path": "/path/to/file.ts" }                                     │
+  │  }                                                                                   │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │  1. PRE-TOOL-USE HOOK (Blocking)                                                     │
+  │                                                                                      │
+  │  Context created via HookContextFactory:                                             │
+  │  ┌───────────────────────────────────────┐                                          │
+  │  │ {                                     │                                          │
+  │  │   hookType: 'PreToolUse',             │                                          │
+  │  │   sessionId: 'sess_abc',              │                                          │
+  │  │   timestamp: '2026-02-01T...',        │  ◀── Auto-generated                      │
+  │  │   toolName: 'Read',                   │                                          │
+  │  │   toolInput: { file_path: '...' },    │                                          │
+  │  │   toolId: 'toolu_abc123'              │                                          │
+  │  │ }                                     │                                          │
+  │  └───────────────────────────────────────┘                                          │
+  │                                                                                      │
+  │  Possible returns:                                                                   │
+  │  • { proceed: true }                       → Continue to execution                   │
+  │  • { blocked: true, reason: '...' }        → Skip tool, return block message         │
+  │  • { proceed: true, modifiedInput: {...} } → Execute with modified args              │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │  2. TOOL EXECUTION                                                                   │
+  │                                                                                      │
+  │  Tool Lookup:                                                                        │
+  │  ┌────────────────────────────────────────────────────────────────────────────────┐ │
+  │  │ tools/                                                                          │ │
+  │  │ ├── fs/         → Read, Write, Edit, Glob, Grep                                │ │
+  │  │ ├── browser/    → Browser automation tools                                      │ │
+  │  │ ├── subagent/   → Task (spawn subagent)                                        │ │
+  │  │ ├── ui/         → AskUser, Notify, TodoWrite                                   │ │
+  │  │ ├── system/     → Bash, Thinking                                               │ │
+  │  │ └── search/     → Code search tools                                            │ │
+  │  └────────────────────────────────────────────────────────────────────────────────┘ │
+  │                                                                                      │
+  │  Execute with context:                                                               │
+  │  • AbortSignal for cancellation                                                      │
+  │  • Session context (working directory, etc.)                                         │
+  │  • Tool-specific options from settings                                               │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │  3. EVENT RECORDING                                                                  │
+  │                                                                                      │
+  │  Events created via EventFactory:                                                    │
+  │                                                                                      │
+  │  tool.call event:                        tool.result event:                          │
+  │  ┌──────────────────────────┐           ┌──────────────────────────┐                │
+  │  │ id: evt_xxx (generated)  │           │ id: evt_yyy (generated)  │                │
+  │  │ parentId: evt_prev       │           │ parentId: evt_xxx        │                │
+  │  │ type: 'tool.call'        │           │ type: 'tool.result'      │                │
+  │  │ timestamp: (generated)   │           │ timestamp: (generated)   │                │
+  │  │ payload: {               │           │ payload: {               │                │
+  │  │   name: 'Read',          │           │   toolId: 'toolu_abc',   │                │
+  │  │   arguments: {...},      │           │   content: '...',        │                │
+  │  │   toolId: 'toolu_abc'    │           │   isError: false,        │                │
+  │  │ }                        │           │   duration: 45           │                │
+  │  └──────────────────────────┘           └──────────────────────────┘                │
+  │                                                                                      │
+  │  NOTE: tool.result recorded BEFORE message.assistant                                 │
+  │        (required for proper message reconstruction)                                  │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+  ┌─────────────────────────────────────────────────────────────────────────────────────┐
+  │  4. POST-TOOL-USE HOOK (Background)                                                  │
+  │                                                                                      │
+  │  Context:                                                                            │
+  │  ┌───────────────────────────────────────┐                                          │
+  │  │ {                                     │                                          │
+  │  │   hookType: 'PostToolUse',            │                                          │
+  │  │   sessionId: 'sess_abc',              │                                          │
+  │  │   timestamp: '...',                   │                                          │
+  │  │   toolName: 'Read',                   │                                          │
+  │  │   toolResult: { content, isError },   │                                          │
+  │  │   duration: 45                        │                                          │
+  │  │ }                                     │                                          │
+  │  └───────────────────────────────────────┘                                          │
+  │                                                                                      │
+  │  Execution: Async, fire-and-forget, errors logged but don't fail                    │
+  │  Use cases: Logging, metrics, external integrations                                  │
+  └─────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+                              Return to LLM with tool_result
 ```
 
 ## Package Structure
@@ -53,10 +560,10 @@ src/
 ├── infrastructure/          # Cross-Cutting Concerns
 │   ├── logging/             # Pino-based logging with SQLite transport
 │   ├── settings/            # Configuration, feature flags
-│   ├── auth/                # API key management
+│   ├── auth/                # API key management (unified sync/async)
 │   ├── communication/       # Inter-agent messaging bus
 │   ├── usage/               # Token/cost tracking
-│   └── events/              # Event store, SQLite backend
+│   └── events/              # Event store, SQLite backend, EventFactory
 │
 ├── llm/                     # LLM Provider Layer
 │   └── providers/           # LLM adapters
@@ -87,7 +594,7 @@ src/
 │   │   ├── system/          # Bash, thinking
 │   │   └── search/          # Code search
 │   ├── extensions/          # Extensibility
-│   │   ├── hooks/           # PreToolUse, PostToolUse hooks
+│   │   ├── hooks/           # HookEngine, HookRegistry, BackgroundTracker
 │   │   ├── skills/          # Skill loader, registry
 │   │   └── commands/        # Custom commands
 │   ├── guardrails/          # Safety guardrails
@@ -97,7 +604,7 @@ src/
 │   ├── server.ts            # TronServer entry point
 │   ├── http/                # HTTP server (Hono)
 │   ├── gateway/             # WebSocket gateway
-│   ├── rpc/                 # RPC protocol, handlers
+│   ├── rpc/                 # RPC protocol, handlers, MethodRegistry
 │   └── ui/                  # RenderAppUI components
 │
 ├── platform/                # Platform Integrations
@@ -131,64 +638,84 @@ infrastructure/  ← Logging, events, settings
 core/       ← Types, utilities
 ```
 
-## Event Sourcing
+## Key Architectural Patterns
 
-All state is stored as immutable events forming a tree via `parentId` references.
+### Registry Pattern
 
-### Event Structure
+The RPC system uses a registry pattern for method dispatch with automatic validation:
 
 ```typescript
-interface BaseEvent {
-  id: string;              // UUID v7 (time-sortable)
-  parentId: string | null; // Previous event (null for root)
-  sessionId: string;
-  sequence: number;        // Monotonic within session
-  type: string;            // Discriminator
-  timestamp: string;       // ISO 8601
-  payload: Record<string, unknown>;
-}
+// Handler registration with validation rules
+registry.register('session.create', handler, {
+  requiredParams: ['workingDirectory'],
+  requiredManagers: ['sessionManager'],
+});
+
+// Dispatch handles validation automatically
+const response = await registry.dispatch(request, context);
 ```
 
-### Event Tree
+**Benefits:**
+- Eliminates repeated validation boilerplate across handlers
+- Centralized error handling with typed RPC errors
+- Middleware support for cross-cutting concerns
+- Namespace-based method organization
 
+**Key files:** `interface/rpc/registry.ts`, `interface/rpc/handlers/`
+
+### Factory Pattern
+
+Factories ensure consistent object construction with automatic field generation:
+
+**EventFactory** (`infrastructure/events/event-factory.ts`):
+```typescript
+const factory = createEventFactory({ sessionId, workspaceId });
+const event = factory.createSessionStart({
+  parentId,
+  sequence,
+  payload: { workingDirectory, model, provider },
+});
+// Auto-generates: id (evt_xxx), timestamp (ISO 8601)
 ```
-[session.start] ← root (parentId=null)
-      │
-[message.user]
-      │
-[message.assistant]
-      │
-[message.user]  ← FORK POINT
-      │         \
-[message.a]    [session.fork] ← New branch
+
+**HookContextFactory** (`capabilities/extensions/hooks/context-factory.ts`):
+```typescript
+const factory = createHookContextFactory({ sessionId });
+const context = factory.createPreToolContext({
+  toolName: 'bash',
+  toolInput: { command: 'ls' },
+});
+// Auto-generates: timestamp, hookType, sessionId
 ```
 
-### Sessions as Pointers
+### Component Extraction
 
-Sessions don't store messages directly. They hold:
-- `rootEventId`: First event (session.start)
-- `headEventId`: Current position
+Large classes are decomposed into focused components:
 
-State is reconstructed by walking ancestors from head to root.
+**HookEngine decomposition:**
+```
+HookEngine (orchestration)
+    ├── HookRegistry (registration, lookup, priority sorting)
+    └── BackgroundTracker (pending background hook tracking)
+```
 
-### Key Event Types
+**Key principle:** Each component has a single responsibility. The parent class delegates to components rather than containing all logic.
 
-| Type | Payload |
-|------|---------|
-| `session.start` | workingDirectory, model, provider |
-| `session.end` | reason, summary |
-| `message.user` | content, turn |
-| `message.assistant` | content, tokenUsage |
-| `tool.call` | name, arguments |
-| `tool.result` | content, isError, duration |
-| `subagent.spawn` | sessionId, task, model |
-| `subagent.complete` | sessionId, result, tokenUsage |
+### Type-Safe Event Broadcasting
 
-### Operations
+Event broadcasting uses typed enums to prevent string typos:
 
-**Fork:** Create new session branching from any event. New session's root = fork event with parentId pointing to branch point.
+```typescript
+import { BroadcastEventType } from './event-envelope.js';
 
-**Rewind:** Move session's headEventId back. Events after become orphaned (preserved in DB).
+// Type-safe event creation
+const envelope = createEventEnvelope(
+  BroadcastEventType.SESSION_CREATED,
+  { sessionId, workingDirectory },
+);
+```
+
+**Available types:** `SESSION_CREATED`, `SESSION_ENDED`, `AGENT_TURN`, `TOOL_START`, `TOOL_END`, etc.
 
 ## Database Schema
 
@@ -221,20 +748,6 @@ CREATE TABLE workspaces (
   path TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL
 );
-```
-
-## Tool Execution Flow
-
-```
-User message → TronAgent.run() → LLM generates response
-                                        │
-                    ├── Text only → Return response
-                    │
-                    └── Tool calls → For each tool:
-                        ├── PreToolUse hook (can block)
-                        ├── Execute tool
-                        ├── PostToolUse hook
-                        └── Loop back to LLM
 ```
 
 ## Context Loading
@@ -284,3 +797,7 @@ This enables testing with mock settings and avoids global state issues.
 | Event sourcing | Auditability, fork/rewind, reproducibility |
 | Multi-directory | Support both Claude Code and Tron conventions |
 | WebSocket | Bidirectional, real-time streaming |
+| Registry pattern | Eliminate handler boilerplate, centralize validation |
+| Factory pattern | Consistent object construction, reduce duplication |
+| Component extraction | Single responsibility, testable units |
+| Type-safe enums | Compile-time validation, prevent string typos |

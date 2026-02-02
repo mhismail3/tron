@@ -125,6 +125,76 @@ describe('MyFeature', () => {
 });
 ```
 
+### Testing RPC Handlers
+
+RPC handlers use the registry pattern. Test via `registry.dispatch()`:
+
+```typescript
+import { describe, it, expect, beforeEach } from 'vitest';
+import { registry } from '../registry.js';
+import { createMockRpcContext } from '../../__fixtures__/index.js';
+
+describe('session.create handler', () => {
+  beforeEach(() => {
+    registry.clear();
+    // Register handlers
+  });
+
+  it('validates required params', async () => {
+    const context = createMockRpcContext();
+    const response = await registry.dispatch(
+      { jsonrpc: '2.0', id: '1', method: 'session.create', params: {} },
+      context
+    );
+
+    expect(response.error?.code).toBe(-32602); // Invalid params
+  });
+
+  it('validates required managers', async () => {
+    const context = createMockRpcContext({ sessionManager: undefined });
+    const response = await registry.dispatch(
+      { jsonrpc: '2.0', id: '1', method: 'session.create', params: { workingDirectory: '/tmp' } },
+      context
+    );
+
+    expect(response.error?.code).toBe(-32002); // Manager not available
+  });
+});
+```
+
+### Testing Hooks
+
+Test hook registration and execution:
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { HookEngine } from '../hooks/engine.js';
+
+describe('HookEngine', () => {
+  it('executes hooks in priority order', async () => {
+    const engine = new HookEngine();
+    const order: string[] = [];
+
+    engine.register({
+      name: 'low-priority',
+      type: 'PreToolUse',
+      priority: 0,
+      handler: async () => { order.push('low'); return { proceed: true }; },
+    });
+
+    engine.register({
+      name: 'high-priority',
+      type: 'PreToolUse',
+      priority: 100,
+      handler: async () => { order.push('high'); return { proceed: true }; },
+    });
+
+    await engine.execute('PreToolUse', { /* context */ });
+    expect(order).toEqual(['high', 'low']);
+  });
+});
+```
+
 ### Writing Tests
 
 ```typescript
@@ -148,6 +218,7 @@ describe('MyFeature', () => {
 | `~/.tron/db/` | SQLite databases |
 | `~/.tron/skills/` | Global skills |
 | `~/.tron/settings.json` | User settings |
+| `~/.tron/auth.json` | API keys and OAuth tokens |
 
 ## Debugging
 
@@ -207,6 +278,34 @@ See `adding-tools.md` for the complete checklist.
 3. Handle in `src/events/message-reconstructor.ts` if affects messages
 4. Emit via `eventStore.appendEvent()`
 
+### Adding an RPC Handler
+
+1. Create handler in `src/interface/rpc/handlers/<domain>/`:
+   ```typescript
+   export const myHandler: MethodHandler = async (request, context) => {
+     // Handler returns result directly - no wrapping needed
+     return context.manager.doSomething(request.params);
+   };
+   ```
+
+2. Register in domain index file:
+   ```typescript
+   registry.register('domain.method', myHandler, {
+     requiredParams: ['param1', 'param2'],
+     requiredManagers: ['myManager'],
+   });
+   ```
+
+3. Write tests using `registry.dispatch()` (not direct handler calls)
+
+### Adding a Hook Type
+
+1. Add type to `HookType` union in `hooks/types.ts`
+2. Add context interface in same file
+3. Add factory method in `hooks/context-factory.ts`
+4. If blocking, add to `FORCED_BLOCKING_TYPES` in registry
+5. Call `engine.execute()` at appropriate point in code
+
 ### Adding a Provider
 
 For complex providers, use the modular directory structure:
@@ -226,3 +325,52 @@ For complex providers, use the modular directory structure:
 6. Add token normalization in `src/providers/token-normalizer.ts`
 
 For simpler providers, a single file may suffice (see `openai.ts`).
+
+## Architectural Patterns
+
+### Registry Pattern
+
+Use for centralized dispatch with validation:
+
+```typescript
+// Registration
+registry.register('method.name', handler, {
+  requiredParams: ['param1'],
+  requiredManagers: ['manager1'],
+});
+
+// Dispatch (handles validation automatically)
+const response = await registry.dispatch(request, context);
+```
+
+### Factory Pattern
+
+Use for consistent object construction:
+
+```typescript
+// Session-scoped factory
+const factory = createEventFactory({ sessionId, workspaceId });
+
+// Consistent event creation
+const event = factory.createSessionStart({ parentId, sequence, payload });
+```
+
+### Component Extraction
+
+When a class exceeds ~300 lines, extract focused components:
+
+```typescript
+// Before: monolithic class
+class BigEngine {
+  private registrations = new Map();
+  private pending = new Map();
+  // 500+ lines of mixed concerns
+}
+
+// After: focused components
+class Engine {
+  private registry = new Registry();  // Registration/lookup
+  private tracker = new Tracker();    // Background tracking
+  // Orchestration only
+}
+```
