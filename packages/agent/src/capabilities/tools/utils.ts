@@ -11,21 +11,29 @@
 import * as path from 'path';
 import type { TronToolResult } from '@core/types/index.js';
 
-const CHARS_PER_TOKEN = 4;
+const DEFAULT_CHARS_PER_TOKEN = 4;
 
 /**
  * Estimate tokens from character count.
  * This is a conservative estimate; real tokenization often produces fewer tokens.
+ *
+ * @param chars - Number of characters to estimate tokens for
+ * @param charsPerToken - Characters per token estimate (default: 4)
+ * @returns Estimated token count
  */
-export function estimateTokens(chars: number): number {
-  return Math.ceil(chars / CHARS_PER_TOKEN);
+export function estimateTokens(chars: number, charsPerToken = DEFAULT_CHARS_PER_TOKEN): number {
+  return Math.ceil(chars / charsPerToken);
 }
 
 /**
  * Convert token limit to character limit.
+ *
+ * @param tokens - Number of tokens to convert
+ * @param charsPerToken - Characters per token estimate (default: 4)
+ * @returns Estimated character count
  */
-export function tokensToChars(tokens: number): number {
-  return tokens * CHARS_PER_TOKEN;
+export function tokensToChars(tokens: number, charsPerToken = DEFAULT_CHARS_PER_TOKEN): number {
+  return tokens * charsPerToken;
 }
 
 export interface TruncateOptions {

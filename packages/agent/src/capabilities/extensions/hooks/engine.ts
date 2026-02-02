@@ -88,75 +88,7 @@ export class HookEngine {
 
     logger.debug('Executing hooks', { type, count: hooks.length });
 
-    const collectedModifications: Record<string, unknown> = {};
-    const messages: string[] = [];
-
-    for (const hook of hooks) {
-      try {
-        // Apply filter if present
-        if (hook.filter && !hook.filter(context)) {
-          logger.debug('Hook filtered out', { name: hook.name });
-          continue;
-        }
-
-        const result = await this.executeHook(hook, context);
-
-        // Collect messages
-        if (result.message) {
-          messages.push(result.message);
-        }
-
-        // Handle result based on action
-        switch (result.action) {
-          case 'block':
-            logger.warn('Hook blocked execution', {
-              name: hook.name,
-              reason: result.reason,
-            });
-            return {
-              action: 'block',
-              reason: result.reason,
-              message: messages.join('\n'),
-            };
-
-          case 'modify':
-            // Collect modifications
-            if (result.modifications) {
-              Object.assign(collectedModifications, result.modifications);
-            }
-            break;
-
-          case 'continue':
-            // Continue to next hook
-            break;
-        }
-      } catch (error) {
-        // Log error but continue (fail-open)
-        const structured = categorizeError(error, { hookName: hook.name, hookType: type });
-        logger.error('Hook execution error', {
-          name: hook.name,
-          sessionId: context.sessionId,
-          code: LogErrorCodes.HOOK_ERROR,
-          category: LogErrorCategory.HOOK_EXECUTION,
-          error: structured.message,
-          retryable: structured.retryable,
-        });
-      }
-    }
-
-    // Return collected modifications if any
-    if (Object.keys(collectedModifications).length > 0) {
-      return {
-        action: 'modify',
-        modifications: collectedModifications,
-        message: messages.join('\n') || undefined,
-      };
-    }
-
-    return {
-      action: 'continue',
-      message: messages.join('\n') || undefined,
-    };
+    return this.runHooksSequentially(hooks, context, type);
   }
 
   /**
@@ -280,6 +212,18 @@ export class HookEngine {
       return { action: 'continue' };
     }
 
+    return this.runHooksSequentially(hooks, context, context.hookType);
+  }
+
+  /**
+   * Run hooks sequentially with shared execution logic.
+   * Handles filtering, modification collection, blocking, and fail-open error handling.
+   */
+  private async runHooksSequentially(
+    hooks: RegisteredHook[],
+    context: AnyHookContext,
+    hookType: HookType
+  ): Promise<HookResult> {
     const collectedModifications: Record<string, unknown> = {};
     const messages: string[] = [];
 
@@ -324,7 +268,7 @@ export class HookEngine {
         }
       } catch (error) {
         // Log error but continue (fail-open)
-        const structured = categorizeError(error, { hookName: hook.name, hookType: context.hookType });
+        const structured = categorizeError(error, { hookName: hook.name, hookType });
         logger.error('Hook execution error', {
           name: hook.name,
           sessionId: context.sessionId,

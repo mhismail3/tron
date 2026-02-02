@@ -6,33 +6,14 @@
  */
 
 import type { ContentTruncateResult, ContentTruncatorConfig } from './types.js';
+import { estimateTokens, tokensToChars } from '../utils.js';
+
+// Re-export for backwards compatibility
+export { estimateTokens, tokensToChars };
 
 const DEFAULT_MAX_TOKENS = 50000;
 const DEFAULT_PRESERVE_START_LINES = 100;
 const DEFAULT_CHARS_PER_TOKEN = 4;
-
-/**
- * Estimate token count from text
- *
- * @param text - Text to estimate
- * @param charsPerToken - Characters per token (default: 4)
- * @returns Estimated token count
- */
-export function estimateTokens(textLength: number, charsPerToken = DEFAULT_CHARS_PER_TOKEN): number {
-  if (textLength === 0) return 0;
-  return Math.ceil(textLength / charsPerToken);
-}
-
-/**
- * Convert tokens to characters
- *
- * @param tokens - Token count
- * @param charsPerToken - Characters per token (default: 4)
- * @returns Character count
- */
-export function tokensToChars(tokens: number, charsPerToken = DEFAULT_CHARS_PER_TOKEN): number {
-  return tokens * charsPerToken;
-}
 
 /**
  * Truncate content to stay within token budget while preserving structure

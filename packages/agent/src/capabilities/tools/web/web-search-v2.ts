@@ -22,6 +22,7 @@ import type {
   BraveImageResult,
   BraveVideoResult,
 } from './brave-types.js';
+import { extractDomain, domainMatches } from './domain-utils.js';
 
 const logger = createLogger('tool:web-search-v2');
 
@@ -354,15 +355,15 @@ Tips:
     // Apply domain filters
     if (allowedDomains.length > 0) {
       formatted = formatted.filter((r) => {
-        const domain = this.extractDomain(r.url);
-        return domain && allowedDomains.some((allowed) => this.domainMatches(domain, allowed));
+        const domain = extractDomain(r.url);
+        return domain && allowedDomains.some((allowed) => domainMatches(domain, allowed));
       });
     }
 
     if (blockedDomains.length > 0) {
       formatted = formatted.filter((r) => {
-        const domain = this.extractDomain(r.url);
-        return !domain || !blockedDomains.some((blocked) => this.domainMatches(domain, blocked));
+        const domain = extractDomain(r.url);
+        return !domain || !blockedDomains.some((blocked) => domainMatches(domain, blocked));
       });
     }
 
@@ -378,7 +379,7 @@ Tips:
       url: r.url,
       snippet: r.description,
       age: r.age,
-      domain: this.extractDomain(r.url),
+      domain: extractDomain(r.url),
     }));
   }
 
@@ -391,7 +392,7 @@ Tips:
       url: r.url,
       snippet: r.description,
       age: r.age,
-      domain: this.extractDomain(r.url),
+      domain: extractDomain(r.url),
       source: r.source,
     }));
   }
@@ -404,7 +405,7 @@ Tips:
       title: r.title,
       url: r.url,
       snippet: r.src, // Use image URL as snippet
-      domain: this.extractDomain(r.url),
+      domain: extractDomain(r.url),
       dimensions: r.width && r.height ? `${r.width}x${r.height}` : undefined,
     }));
   }
@@ -418,7 +419,7 @@ Tips:
       url: r.url,
       snippet: r.description,
       age: r.age,
-      domain: this.extractDomain(r.url),
+      domain: extractDomain(r.url),
       duration: r.duration,
     }));
   }
@@ -467,33 +468,4 @@ Tips:
     return lines.join('\n');
   }
 
-  /**
-   * Extract domain from URL.
-   */
-  private extractDomain(url: string): string | undefined {
-    try {
-      const parsed = new URL(url);
-      return parsed.hostname.toLowerCase();
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Check if a hostname matches a domain pattern (including subdomains).
-   */
-  private domainMatches(hostname: string, domain: string): boolean {
-    const normalizedHost = hostname.toLowerCase();
-    const normalizedDomain = domain.toLowerCase();
-
-    // Exact match
-    if (normalizedHost === normalizedDomain) {
-      return true;
-    }
-    // Subdomain match
-    if (normalizedHost.endsWith(`.${normalizedDomain}`)) {
-      return true;
-    }
-    return false;
-  }
 }

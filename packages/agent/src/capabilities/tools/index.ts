@@ -134,12 +134,9 @@ export {
   type ExaClientConfig,
   type ExaSearchType,
   type ExaCategory,
-  // WebSearch v2 - Brave-only (legacy, use UnifiedSearchTool)
+  // WebSearchToolV2 - Brave-only with full API support
   WebSearchToolV2,
   type WebSearchV2Config,
-  // Legacy WebSearch - deprecated
-  WebSearchTool,
-  type WebSearchToolConfig,
   type WebSearchParams,
   type WebSearchResult,
   type SearchResultItem,
@@ -181,9 +178,9 @@ export {
   type HtmlParserConfig,
   WebCache,
   type WebCacheConfig,
-  // Legacy Brave client - deprecated, use BraveMultiClient
-  BraveSearchClient,
-  type BraveSearchClientConfig,
+  // Domain utilities
+  extractDomain,
+  domainMatches,
 } from './web/index.js';
 
 // Communication tools
