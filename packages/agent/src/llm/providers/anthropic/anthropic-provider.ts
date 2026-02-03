@@ -19,7 +19,7 @@ import type {
 import { createLogger } from '@infrastructure/logging/index.js';
 import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '@infrastructure/auth/oauth.js';
 import { parseError, formatError } from '@core/utils/errors.js';
-import { calculateBackoffDelay, type RetryConfig } from '@core/utils/retry.js';
+import { calculateBackoffDelay, extractRetryAfterFromError, sleepWithAbort, type RetryConfig } from '@core/utils/retry.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { AnthropicConfig, StreamOptions, SystemPromptBlock, AnthropicProviderSettings } from './types.js';
 import { convertMessages, convertTools, convertResponse } from './message-converter.js';
@@ -418,7 +418,7 @@ export class AnthropicProvider {
           this.retryConfig.jitterFactor
         );
 
-        const retryAfter = this.extractRetryAfter(error);
+        const retryAfter = extractRetryAfterFromError(error);
         const actualDelay = retryAfter !== null ? Math.max(delayMs, retryAfter) : delayMs;
 
         logger.info('Retrying stream after error', {
@@ -437,7 +437,7 @@ export class AnthropicProvider {
           error: parsed,
         } as StreamEvent;
 
-        await this.sleep(actualDelay);
+        await sleepWithAbort(actualDelay);
       }
     }
   }
@@ -501,40 +501,4 @@ export class AnthropicProvider {
     }
   }
 
-  private extractRetryAfter(error: unknown): number | null {
-    if (!error || typeof error !== 'object') return null;
-
-    const errorObj = error as {
-      headers?: Record<string, string>;
-      response?: { headers?: Record<string, string> };
-    };
-
-    const headers = errorObj.headers ?? errorObj.response?.headers;
-    if (!headers) return null;
-
-    const retryAfterKey = Object.keys(headers).find(
-      (k) => k.toLowerCase() === 'retry-after'
-    );
-    if (!retryAfterKey) return null;
-
-    const value = headers[retryAfterKey];
-    if (!value) return null;
-
-    const seconds = parseInt(value, 10);
-    if (!isNaN(seconds)) {
-      return seconds * 1000;
-    }
-
-    const date = new Date(value);
-    if (!isNaN(date.getTime())) {
-      const delayMs = date.getTime() - Date.now();
-      return delayMs > 0 ? delayMs : 0;
-    }
-
-    return null;
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 }

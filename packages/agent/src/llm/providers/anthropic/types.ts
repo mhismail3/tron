@@ -82,7 +82,11 @@ export interface StreamOptions {
 // =============================================================================
 
 /**
- * Claude model information
+ * Claude model information for API interactions.
+ *
+ * NOTE: This registry is for API-level metadata (context window, costs).
+ * For UI display metadata (tier, family, description), see ANTHROPIC_MODELS in models.ts.
+ * Both should be kept in sync when adding new models.
  */
 export interface ClaudeModelInfo {
   name: string;

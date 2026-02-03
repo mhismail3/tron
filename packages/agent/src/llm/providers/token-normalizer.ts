@@ -47,6 +47,7 @@
 
 import type { TokenUsage, ProviderType } from '@core/types/messages.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { detectProviderFromModel } from './factory.js';
 
 const logger = createLogger('token-normalizer');
 
@@ -140,29 +141,12 @@ export function normalizeTokenUsage(
  * Detect provider type from model ID.
  * Used when providerType is not explicitly set on TokenUsage.
  *
+ * Re-exports detectProviderFromModel from factory.ts with the expected name.
+ * This avoids code duplication while maintaining the expected API.
+ *
  * @param modelId - The model identifier
  * @returns The detected provider type
  */
 export function detectProviderType(modelId: string): ProviderType {
-  const lowerModel = modelId.toLowerCase();
-
-  if (lowerModel.includes('claude')) {
-    return 'anthropic';
-  }
-
-  if (lowerModel.includes('codex') || lowerModel.includes('o1') || lowerModel.includes('o3') || lowerModel.includes('o4')) {
-    return 'openai-codex';
-  }
-
-  if (lowerModel.includes('gpt') || lowerModel.startsWith('openai/')) {
-    return 'openai';
-  }
-
-  if (lowerModel.includes('gemini') || lowerModel.startsWith('google/')) {
-    return 'google';
-  }
-
-  // Default to anthropic (most common case)
-  logger.debug('Unknown model, defaulting to anthropic provider type', { modelId });
-  return 'anthropic';
+  return detectProviderFromModel(modelId);
 }

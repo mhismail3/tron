@@ -6,7 +6,7 @@
  */
 
 import { createLogger } from '@infrastructure/logging/index.js';
-import { mapGoogleStopReason } from '../base/index.js';
+import { mapGoogleStopReason, parseSSELines } from '../base/index.js';
 import type {
   AssistantMessage,
   StreamEvent,
@@ -68,50 +68,21 @@ export function createStreamState(): StreamState {
 
 /**
  * Parse SSE stream and yield StreamEvents
+ *
+ * Uses shared SSE parser utility for consistent line parsing,
+ * then processes Google-specific Gemini event format.
  */
 export async function* parseSSEStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState
 ): AsyncGenerator<StreamEvent> {
-  const decoder = new TextDecoder();
-  let buffer = '';
   let receivedDone = false;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // Process complete lines
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-
-      const data = line.slice(6);
-      if (!data.trim()) continue;
-
-      for (const event of processChunk(data, state)) {
-        if (event.type === 'done') receivedDone = true;
-        yield event;
-      }
-    }
-  }
-
-  // Process any remaining buffer content after stream ends
-  if (buffer.trim()) {
-    const remainingLines = buffer.split('\n');
-    for (const line of remainingLines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (!data.trim()) continue;
-
-      for (const event of processChunk(data, state)) {
-        if (event.type === 'done') receivedDone = true;
-        yield event;
-      }
+  // Google streams may have remaining buffer content (processRemainingBuffer: true by default)
+  for await (const data of parseSSELines(reader)) {
+    for (const event of processChunk(data, state)) {
+      if (event.type === 'done') receivedDone = true;
+      yield event;
     }
   }
 

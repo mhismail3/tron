@@ -47,3 +47,11 @@ export {
   remapToolCallId,
   collectToolCallsFromMessages,
 } from './id-remapping.js';
+
+// SSE parsing utilities
+export type { SSEParserOptions } from './sse-parser.js';
+export { parseSSELines, parseSSEData } from './sse-parser.js';
+
+// Tool call parsing utilities
+export type { ToolCallContext } from './tool-parsing.js';
+export { parseToolCallArguments, isValidToolCallArguments } from './tool-parsing.js';

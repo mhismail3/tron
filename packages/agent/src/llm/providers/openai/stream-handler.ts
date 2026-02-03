@@ -13,6 +13,8 @@ import type {
   ToolCall,
 } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { parseSSELines } from '../base/sse-parser.js';
+import { parseToolCallArguments } from '../base/tool-parsing.js';
 import type { ResponsesStreamEvent } from './types.js';
 
 const logger = createLogger('openai-stream');
@@ -290,17 +292,11 @@ function* processCompletedResponse(
         argsLength: tc.args.length,
         argsPreview: tc.args.substring(0, 200),
       });
-      let parsedArgs: Record<string, unknown> = {};
-      try {
-        parsedArgs = JSON.parse(tc.args || '{}');
-      } catch {
-        logger.warn('Failed to parse tool call arguments', { args: tc.args });
-      }
       const toolCall: ToolCall = {
         type: 'tool_use',
         id: tc.id,
         name: tc.name,
-        arguments: parsedArgs,
+        arguments: parseToolCallArguments(tc.args, { toolCallId: tc.id, toolName: tc.name, provider: 'openai' }),
       };
       yield { type: 'toolcall_end', toolCall };
     }
@@ -326,17 +322,11 @@ function buildDoneEvent(state: StreamState): StreamEvent {
 
   for (const [, tc] of state.toolCalls) {
     if (tc.id && tc.name) {
-      let parsedArgs: Record<string, unknown> = {};
-      try {
-        parsedArgs = JSON.parse(tc.args || '{}');
-      } catch {
-        // Already logged above
-      }
       content.push({
         type: 'tool_use',
         id: tc.id,
         name: tc.name,
-        arguments: parsedArgs,
+        arguments: parseToolCallArguments(tc.args, { toolCallId: tc.id, toolName: tc.name, provider: 'openai' }),
       });
     }
   }
@@ -361,36 +351,21 @@ function buildDoneEvent(state: StreamState): StreamEvent {
 
 /**
  * Parse SSE stream and yield events
+ *
+ * Uses shared SSE parser utility for consistent line parsing,
+ * then processes OpenAI-specific event format.
  */
 export async function* parseSSEStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   state: StreamState
 ): AsyncGenerator<StreamEvent> {
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // Process complete lines
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-
-      const data = line.slice(6).trim();
-      if (!data || data === '[DONE]') continue;
-
-      try {
-        const event = JSON.parse(data) as ResponsesStreamEvent;
-        yield* processStreamEvent(event, state);
-      } catch (e) {
-        logger.warn('Failed to parse OpenAI event', { data, error: e });
-      }
+  // OpenAI doesn't need to process remaining buffer (has explicit [DONE])
+  for await (const data of parseSSELines(reader, { processRemainingBuffer: false })) {
+    try {
+      const event = JSON.parse(data) as ResponsesStreamEvent;
+      yield* processStreamEvent(event, state);
+    } catch (e) {
+      logger.warn('Failed to parse OpenAI event', { data, error: e });
     }
   }
 }

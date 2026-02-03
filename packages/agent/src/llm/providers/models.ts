@@ -89,6 +89,13 @@ export interface ModelCategory {
 // Anthropic Claude Models - Latest (4.5 Family)
 // =============================================================================
 
+/**
+ * Anthropic model catalog for UI display.
+ *
+ * NOTE: This array is for UI display metadata (tier, family, description).
+ * For API-level metadata (context window, costs), see CLAUDE_MODELS in anthropic/types.ts.
+ * Both should be kept in sync when adding new models.
+ */
 export const ANTHROPIC_MODELS: ModelInfo[] = [
   // Claude 4.5 (Latest - Current Generation)
   {

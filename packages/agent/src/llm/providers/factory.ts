@@ -130,22 +130,41 @@ export function getModelsForProvider(provider: ProviderType) {
 
 /**
  * Detect provider from model ID
+ *
+ * Handles various naming patterns including:
+ * - Direct model names: claude-sonnet-4, gpt-4o, gemini-2.5-flash
+ * - Prefixed names: openai/gpt-4, google/gemini-pro
+ * - O-series reasoning models: o1-preview, o3-mini, o4-mini
  */
 export function detectProviderFromModel(modelId: string): ProviderType {
-  if (modelId.startsWith('claude') || modelId.includes('claude')) {
+  const lowerModel = modelId.toLowerCase();
+
+  // Anthropic Claude models
+  if (lowerModel.includes('claude')) {
     return 'anthropic';
   }
+
   // OpenAI Codex models (use Responses API with fixed instructions)
-  if (modelId.includes('codex')) {
+  // Check for codex first since it could be gpt-5.2-codex
+  if (lowerModel.includes('codex')) {
     return 'openai-codex';
   }
-  // Other OpenAI models (GPT, o-series)
-  if (modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4')) {
+
+  // OpenAI o-series reasoning models (o1, o3, o4) - use Codex provider
+  if (lowerModel.includes('o1') || lowerModel.includes('o3') || lowerModel.includes('o4')) {
+    return 'openai-codex';
+  }
+
+  // Other OpenAI models (GPT series)
+  if (lowerModel.includes('gpt') || lowerModel.startsWith('openai/')) {
     return 'openai';
   }
-  if (modelId.startsWith('gemini')) {
+
+  // Google Gemini models
+  if (lowerModel.includes('gemini') || lowerModel.startsWith('google/')) {
     return 'google';
   }
+
   // Default to Anthropic
   return 'anthropic';
 }
@@ -315,16 +334,33 @@ function createGoogleProvider(config: ProviderConfig): Provider {
 }
 
 /**
- * Validate that a model is supported by a provider
+ * Validate that a model is supported by a provider.
+ *
+ * Returns true if the model is in the known registry for the provider,
+ * or if the model ID follows expected naming patterns for the provider.
  */
 export function isModelSupported(provider: ProviderType, modelId: string): boolean {
   const models = PROVIDER_MODELS[provider];
-  // Check for exact match or known model patterns
+
+  // Check for exact match in registry
   if (modelId in models) {
     return true;
   }
-  // Allow any model string for flexibility (custom/new models)
-  return true;
+
+  // Check for provider-specific naming patterns
+  // This allows new models to work without code changes
+  switch (provider) {
+    case 'anthropic':
+      return modelId.startsWith('claude') || modelId.includes('claude');
+    case 'openai':
+      return modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4');
+    case 'openai-codex':
+      return modelId.includes('codex');
+    case 'google':
+      return modelId.startsWith('gemini');
+    default:
+      return false;
+  }
 }
 
 /**
