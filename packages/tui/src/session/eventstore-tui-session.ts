@@ -34,13 +34,11 @@ import {
   ContextLoader,
   ContextAudit,
   createContextAudit,
-  ContextCompactor,
-  createContextCompactor,
+  estimateMessagesTokens,
   type Message,
   type TokenUsage,
   type LoadedContext,
   type ContextAuditData,
-  type CompactResult,
   type SessionId,
   type EventId,
   type TronSessionEvent,
@@ -103,6 +101,14 @@ export interface EventStoreCompactionConfig {
   maxTokens: number;
   threshold: number;
   targetTokens: number;
+}
+
+export interface CompactResult {
+  compacted: boolean;
+  messages: Message[];
+  summary: string;
+  originalTokens: number;
+  newTokens: number;
 }
 
 export interface EventStoreInitializeResult {
@@ -187,9 +193,6 @@ export class EventStoreTuiSession {
   // Context audit for traceability
   private contextAudit: ContextAudit | null = null;
 
-  // Compaction
-  private compactor: ContextCompactor;
-
   // In-memory cache for ephemeral mode and performance
   private cachedMessages: Message[] = [];
   private cachedTokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
@@ -205,13 +208,6 @@ export class EventStoreTuiSession {
     };
 
     this.eventStore = config.eventStore;
-
-    // Initialize compactor
-    this.compactor = createContextCompactor({
-      maxTokens: this.config.compactionMaxTokens,
-      compactionThreshold: this.config.compactionThreshold,
-      targetTokens: this.config.compactionTargetTokens,
-    });
   }
 
   /**
@@ -541,7 +537,10 @@ export class EventStoreTuiSession {
    * Check if compaction is needed
    */
   needsCompaction(): boolean {
-    return this.compactor.shouldCompact(this.cachedMessages);
+    const currentTokens = estimateMessagesTokens(this.cachedMessages);
+    const maxTokens = this.config.compactionMaxTokens ?? 25000;
+    const threshold = this.config.compactionThreshold ?? 0.85;
+    return currentTokens >= maxTokens * threshold;
   }
 
   /**
@@ -557,48 +556,121 @@ export class EventStoreTuiSession {
 
   /**
    * Perform compaction
+   *
+   * Note: This is a simplified compaction that preserves recent messages
+   * and generates a basic summary. For LLM-based summarization, use ContextManager.
    */
   async compact(): Promise<CompactResult> {
+    const originalTokens = estimateMessagesTokens(this.cachedMessages);
+
     if (!this.needsCompaction()) {
       return {
         compacted: false,
         messages: this.cachedMessages,
         summary: '',
-        originalTokens: this.compactor.estimateTokens(this.cachedMessages),
-        newTokens: this.compactor.estimateTokens(this.cachedMessages),
+        originalTokens,
+        newTokens: originalTokens,
       };
     }
 
-    const result = await this.compactor.compact(this.cachedMessages);
+    // Preserve recent messages (2 pairs = 4 messages)
+    const preserveCount = 4;
+    const recentMessages = this.cachedMessages.slice(-preserveCount);
+    const oldMessages = this.cachedMessages.slice(0, -preserveCount);
 
-    if (result.compacted) {
-      // Update cached messages
-      this.cachedMessages = result.messages;
+    // Generate simple summary of old messages
+    const summary = this.generateCompactionSummary(oldMessages);
 
-      // Record compaction events
-      if (!this.isEphemeral() && this.sessionId) {
-        await this.eventStore.append({
-          sessionId: this.sessionId,
-          type: 'compact.boundary',
-          payload: {
-            originalTokens: result.originalTokens,
-            timestamp: new Date().toISOString(),
-          },
-        });
+    // Build compacted messages with summary as context
+    const compactedMessages: Message[] = [];
+    if (oldMessages.length > 0 && summary) {
+      compactedMessages.push({
+        role: 'user',
+        content: `[Context from earlier in this conversation]\n${summary}`,
+      });
+      compactedMessages.push({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'I understand the previous context. Let me continue helping you.' }],
+      });
+    }
+    compactedMessages.push(...recentMessages);
 
-        await this.eventStore.append({
-          sessionId: this.sessionId,
-          type: 'compact.summary',
-          payload: {
-            summary: result.summary,
-            newTokens: result.newTokens,
-            timestamp: new Date().toISOString(),
-          },
-        });
+    const newTokens = estimateMessagesTokens(compactedMessages);
+
+    // Update cached messages
+    this.cachedMessages = compactedMessages;
+
+    // Record compaction events
+    if (!this.isEphemeral() && this.sessionId) {
+      await this.eventStore.append({
+        sessionId: this.sessionId,
+        type: 'compact.boundary',
+        payload: {
+          originalTokens,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      await this.eventStore.append({
+        sessionId: this.sessionId,
+        type: 'compact.summary',
+        payload: {
+          summary,
+          newTokens,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
+    return {
+      compacted: true,
+      messages: compactedMessages,
+      summary,
+      originalTokens,
+      newTokens,
+    };
+  }
+
+  /**
+   * Generate a simple summary for compaction
+   */
+  private generateCompactionSummary(messages: Message[]): string {
+    if (messages.length === 0) return '';
+
+    const toolsUsed = new Set<string>();
+    const keyPoints: string[] = [];
+
+    for (const message of messages) {
+      if (message.role === 'assistant' && Array.isArray(message.content)) {
+        for (const block of message.content) {
+          if (typeof block === 'object' && 'type' in block && block.type === 'tool_use') {
+            const toolUse = block as { name: string };
+            if (toolUse.name) {
+              toolsUsed.add(toolUse.name);
+            }
+          } else if (typeof block === 'object' && 'type' in block && block.type === 'text') {
+            const text = (block as { text: string }).text;
+            if (text.length > 20) {
+              const sentence = text.split(/[.!?]/).filter(s => s.trim())[0];
+              if (sentence) {
+                keyPoints.push(sentence.trim().slice(0, 100));
+              }
+            }
+          }
+        }
       }
     }
 
-    return result;
+    const parts: string[] = [];
+    if (toolsUsed.size > 0) {
+      parts.push(`Tools used: ${[...toolsUsed].join(', ')}`);
+    }
+    if (keyPoints.length > 0) {
+      parts.push(`Key points: ${keyPoints.slice(0, 3).join('; ')}`);
+    }
+    parts.push(`(${messages.length} messages summarized)`);
+
+    return parts.join('\n');
   }
 
   // ===========================================================================
@@ -766,7 +838,7 @@ export class EventStoreTuiSession {
    * Get current token estimate for tracked messages
    */
   getTokenEstimate(): number {
-    return this.compactor.estimateTokens(this.cachedMessages);
+    return estimateMessagesTokens(this.cachedMessages);
   }
 
   /**

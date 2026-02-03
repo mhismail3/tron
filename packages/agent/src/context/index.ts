@@ -23,19 +23,6 @@ export {
   type ToolEntry,
 } from './audit.js';
 
-// @deprecated - Use ContextManager.previewCompaction() and executeCompaction() instead
-export {
-  /** @deprecated Use ContextManager instead */
-  ContextCompactor,
-  /** @deprecated Use createContextManager instead */
-  createContextCompactor,
-  getDefaultCompactorSettings,
-  type CompactorConfig,
-  type CompactResult,
-  type BeforeCompactInfo,
-  type AfterCompactInfo,
-} from './compactor.js';
-
 export {
   ContextManager,
   createContextManager,

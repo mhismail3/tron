@@ -266,8 +266,8 @@ describe('estimateMessageTokens', () => {
         role: 'assistant',
         content: [{ type: 'text', text: 'I can help you with that.' }],
       };
-      // role (9) + overhead (10) + text (26)
-      expect(estimateMessageTokens(message)).toBe(Math.ceil(45 / 4));
+      // role (9) + overhead (10) + text (25) = 44
+      expect(estimateMessageTokens(message)).toBe(Math.ceil(44 / 4));
     });
 
     it('estimates tokens for response with tool_use', () => {

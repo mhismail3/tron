@@ -121,6 +121,8 @@ export class ContextLoader {
         logger.debug('Returning cached context', { dir });
         return cached;
       }
+      // Cache is stale, remove it explicitly
+      this.cache.delete(cacheKey);
     }
 
     const files: ContextFile[] = [];

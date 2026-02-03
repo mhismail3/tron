@@ -51,6 +51,61 @@ export interface ImageSource {
 // =============================================================================
 
 /**
+ * Estimate character count for a content block.
+ * Used internally to avoid precision loss from double conversion.
+ *
+ * @param block - Content block (from message.content array)
+ * @returns Estimated character count
+ */
+function estimateBlockChars(block: unknown): number {
+  if (typeof block !== 'object' || block === null) {
+    return 0;
+  }
+
+  const b = block as Record<string, unknown>;
+
+  // Text block
+  if (b.type === 'text' && typeof b.text === 'string') {
+    return b.text.length;
+  }
+
+  // Thinking block
+  if (b.type === 'thinking' && typeof b.thinking === 'string') {
+    return b.thinking.length;
+  }
+
+  // Tool use block
+  if (b.type === 'tool_use') {
+    let chars = 0;
+    if (typeof b.id === 'string') chars += b.id.length;
+    if (typeof b.name === 'string') chars += b.name.length;
+
+    // Handle both 'input' and 'arguments' formats
+    const inputData = b.input ?? b.arguments ?? {};
+    chars += JSON.stringify(inputData).length;
+
+    return chars;
+  }
+
+  // Tool result block
+  if (b.type === 'tool_result') {
+    let chars = 0;
+    if (typeof b.tool_use_id === 'string') chars += b.tool_use_id.length;
+    if (typeof b.content === 'string') chars += b.content.length;
+    return chars;
+  }
+
+  // Image block - return equivalent chars for tokens
+  if (b.type === 'image') {
+    const source = b.source as ImageSource | undefined;
+    return estimateImageTokens(source) * CHARS_PER_TOKEN;
+  }
+
+  // Unknown type - fall back to JSON serialization
+  return JSON.stringify(block).length;
+}
+
+/**
  * Estimate tokens for a content block.
  *
  * Handles:
@@ -64,51 +119,7 @@ export interface ImageSource {
  * @returns Estimated token count
  */
 export function estimateBlockTokens(block: unknown): number {
-  if (typeof block !== 'object' || block === null) {
-    return 0;
-  }
-
-  const b = block as Record<string, unknown>;
-
-  // Text block
-  if (b.type === 'text' && typeof b.text === 'string') {
-    return Math.ceil(b.text.length / CHARS_PER_TOKEN);
-  }
-
-  // Thinking block
-  if (b.type === 'thinking' && typeof b.thinking === 'string') {
-    return Math.ceil(b.thinking.length / CHARS_PER_TOKEN);
-  }
-
-  // Tool use block
-  if (b.type === 'tool_use') {
-    let chars = 0;
-    if (typeof b.id === 'string') chars += b.id.length;
-    if (typeof b.name === 'string') chars += b.name.length;
-
-    // Handle both 'input' and 'arguments' formats
-    const inputData = b.input ?? b.arguments ?? {};
-    chars += JSON.stringify(inputData).length;
-
-    return Math.ceil(chars / CHARS_PER_TOKEN);
-  }
-
-  // Tool result block
-  if (b.type === 'tool_result') {
-    let chars = 0;
-    if (typeof b.tool_use_id === 'string') chars += b.tool_use_id.length;
-    if (typeof b.content === 'string') chars += b.content.length;
-    return Math.ceil(chars / CHARS_PER_TOKEN);
-  }
-
-  // Image block
-  if (b.type === 'image') {
-    const source = b.source as ImageSource | undefined;
-    return estimateImageTokens(source);
-  }
-
-  // Unknown type - fall back to JSON serialization
-  return Math.ceil(JSON.stringify(block).length / CHARS_PER_TOKEN);
+  return Math.ceil(estimateBlockChars(block) / CHARS_PER_TOKEN);
 }
 
 // =============================================================================
@@ -172,7 +183,7 @@ export function estimateMessageTokens(message: Message): number {
       chars += message.content.length;
     } else if (Array.isArray(message.content)) {
       for (const block of message.content) {
-        chars += estimateBlockTokens(block) * CHARS_PER_TOKEN;
+        chars += estimateBlockChars(block);
       }
     }
   } else if (typeof message.content === 'string') {
@@ -181,7 +192,7 @@ export function estimateMessageTokens(message: Message): number {
   } else if (Array.isArray(message.content)) {
     // Array of content blocks
     for (const block of message.content) {
-      chars += estimateBlockTokens(block) * CHARS_PER_TOKEN;
+      chars += estimateBlockChars(block);
     }
   }
 

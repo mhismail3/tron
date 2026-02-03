@@ -239,8 +239,7 @@ export class ContextManager {
    */
   setRulesContent(content: string | undefined): void {
     this.rulesContent = content;
-    // Invalidate system prompt cache since rules affect total size
-    this.cachedSystemPromptTokens = null;
+    this.invalidateSystemPromptCache();
   }
 
   /**
@@ -255,7 +254,7 @@ export class ContextManager {
    */
   setWorkingDirectory(dir: string): void {
     this.workingDirectory = dir;
-    this.cachedSystemPromptTokens = null; // Invalidate cache
+    this.invalidateSystemPromptCache();
   }
 
   /**
@@ -365,9 +364,7 @@ export class ContextManager {
     this.model = newModel;
     this.providerType = detectProviderFromModel(newModel);
     this.contextLimit = getContextLimit(newModel);
-
-    // Invalidate system prompt cache since provider may have changed
-    this.cachedSystemPromptTokens = null;
+    this.invalidateSystemPromptCache();
 
     // Check if we now need compaction
     this.compactionEngine.triggerIfNeeded();
@@ -476,6 +473,14 @@ export class ContextManager {
   // ===========================================================================
   // Private Helpers
   // ===========================================================================
+
+  /**
+   * Invalidate cached system prompt tokens.
+   * Called when rules content, working directory, or model changes.
+   */
+  private invalidateSystemPromptCache(): void {
+    this.cachedSystemPromptTokens = null;
+  }
 
   private estimateSystemPromptTokens(): number {
     if (this.cachedSystemPromptTokens !== null) {

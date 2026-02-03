@@ -127,16 +127,20 @@ export class ContextSnapshotBuilder {
   // ===========================================================================
 
   /**
+   * Truncate text to a maximum length with ellipsis.
+   */
+  private summarizeContent(text: string, maxLength = 100): string {
+    return text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
+  }
+
+  /**
    * Build detailed message information for all messages.
    */
   private buildDetailedMessages(): DetailedMessageInfo[] {
     const messages = this.deps.getMessages();
     const detailedMessages: DetailedMessageInfo[] = [];
 
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      if (!msg) continue;
-
+    for (const [i, msg] of messages.entries()) {
       const tokens = this.deps.getMessageTokens(msg);
       const detailedInfo = this.buildMessageInfo(msg, i, tokens);
       if (detailedInfo) {
@@ -186,7 +190,7 @@ export class ContextSnapshotBuilder {
       index,
       role: 'user',
       tokens,
-      summary: content.length > 100 ? content.slice(0, 100) + '...' : content,
+      summary: this.summarizeContent(content),
       content,
     };
   }
@@ -223,9 +227,7 @@ export class ContextSnapshotBuilder {
     const summary =
       toolCalls.length > 0
         ? `${toolCalls.map((t) => t.name).join(', ')}${content ? ' + text' : ''}`
-        : content.length > 100
-          ? content.slice(0, 100) + '...'
-          : content;
+        : this.summarizeContent(content);
 
     return {
       index,
@@ -256,7 +258,7 @@ export class ContextSnapshotBuilder {
       index,
       role: 'toolResult',
       tokens,
-      summary: content.length > 100 ? content.slice(0, 100) + '...' : content,
+      summary: this.summarizeContent(content),
       content,
       toolCallId: msg.toolCallId,
       isError: msg.isError,

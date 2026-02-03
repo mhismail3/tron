@@ -67,7 +67,7 @@ export interface SimulatedSession {
 // Constants
 // =============================================================================
 
-/** Chars per token estimate (matches compactor) */
+/** Chars per token estimate (matches token-estimator.ts) */
 const CHARS_PER_TOKEN = 4;
 
 /** Sample file paths for realistic tool calls */
@@ -84,7 +84,7 @@ const SAMPLE_FILES = [
   '/src/index.ts',
   '/src/types/index.ts',
   '/src/context/loader.ts',
-  '/src/context/compactor.ts',
+  '/src/context/context-manager.ts',
   '/src/agent/tron-agent.ts',
   '/docs/api.md',
 ];
@@ -457,7 +457,7 @@ export ${this.rng.randomElement(['function', 'class', 'const'])} ${this.rng.rand
   }
 
   // ===========================================================================
-  // Token Estimation (matches ContextCompactor logic)
+  // Token Estimation (matches token-estimator.ts logic)
   // ===========================================================================
 
   private estimateTokens(message: Message): number {
