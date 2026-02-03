@@ -22,14 +22,14 @@ import type { TokenUsage, Cost } from '@core/types/messages.js';
  * Pricing tiers per million tokens
  * Source: https://www.anthropic.com/pricing (2025)
  */
-export interface PricingTier {
+interface PricingTier {
   inputPerMillion: number;
   outputPerMillion: number;
   cacheWriteMultiplier: number;  // 1.25x for 5-min, 2x for 1-hour
   cacheReadMultiplier: number;   // 0.1x (90% discount)
 }
 
-export const CLAUDE_PRICING: Record<string, PricingTier> = {
+const CLAUDE_PRICING: Record<string, PricingTier> = {
   // Claude 4.5 models (Current Generation)
   // Source: https://platform.claude.com/docs/en/about-claude/models/overview
   'claude-opus-4-5-20251101': {
@@ -86,7 +86,7 @@ export const CLAUDE_PRICING: Record<string, PricingTier> = {
   },
 };
 
-export const OPENAI_PRICING: Record<string, PricingTier> = {
+const OPENAI_PRICING: Record<string, PricingTier> = {
   'gpt-4o': {
     inputPerMillion: 2.5,
     outputPerMillion: 10,
@@ -107,7 +107,7 @@ export const OPENAI_PRICING: Record<string, PricingTier> = {
   },
 };
 
-export const GOOGLE_PRICING: Record<string, PricingTier> = {
+const GOOGLE_PRICING: Record<string, PricingTier> = {
   // Gemini 3 models (preview)
   'gemini-3-pro-preview': {
     inputPerMillion: 1.25,

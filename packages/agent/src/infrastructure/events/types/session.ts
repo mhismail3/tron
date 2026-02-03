@@ -1,10 +1,10 @@
 /**
  * @fileoverview Session Lifecycle Events
  *
- * Events for session start, end, fork, and branch operations.
+ * Events for session start, end, and fork operations.
  */
 
-import type { EventId, SessionId, BranchId } from './branded.js';
+import type { EventId, SessionId } from './branded.js';
 import type { BaseEvent } from './base.js';
 import type { TokenUsage } from './token-usage.js';
 
@@ -63,14 +63,3 @@ export interface SessionForkEvent extends BaseEvent {
   };
 }
 
-/**
- * Named branch creation
- */
-export interface SessionBranchEvent extends BaseEvent {
-  type: 'session.branch';
-  payload: {
-    branchId: BranchId;
-    name: string;
-    description?: string;
-  };
-}

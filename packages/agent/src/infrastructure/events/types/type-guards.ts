@@ -17,6 +17,7 @@ import type { RulesLoadedEvent } from './rules.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
+import type { SkillAddedEvent, SkillRemovedEvent } from './skill.js';
 import type {
   HookTriggeredEvent,
   HookCompletedEvent,
@@ -162,4 +163,16 @@ export function isHookBackgroundCompletedEvent(event: SessionEvent): event is Ho
 
 export function isHookEvent(event: SessionEvent): event is HookTriggeredEvent | HookCompletedEvent | HookBackgroundStartedEvent | HookBackgroundCompletedEvent {
   return event.type.startsWith('hook.');
+}
+
+export function isSkillAddedEvent(event: SessionEvent): event is SkillAddedEvent {
+  return event.type === 'skill.added';
+}
+
+export function isSkillRemovedEvent(event: SessionEvent): event is SkillRemovedEvent {
+  return event.type === 'skill.removed';
+}
+
+export function isSkillEvent(event: SessionEvent): event is SkillAddedEvent | SkillRemovedEvent {
+  return event.type === 'skill.added' || event.type === 'skill.removed';
 }

@@ -5,11 +5,11 @@
  * without requiring a client secret.
  */
 
-import crypto from 'crypto';
 import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import type { AnthropicApiSettings } from '../settings/types.js';
 import { createTokenExpiration } from './token-expiration.js';
+import { generatePKCE as generatePKCEBase, type PKCEPair } from './pkce.js';
 
 const logger = createLogger('oauth');
 
@@ -34,13 +34,8 @@ export interface OAuthTokens {
   expiresAt: number;
 }
 
-/**
- * PKCE challenge/verifier pair
- */
-export interface PKCEPair {
-  verifier: string;
-  challenge: string;
-}
+// Re-export PKCEPair for backward compatibility
+export type { PKCEPair };
 
 /**
  * OAuth error response
@@ -96,25 +91,14 @@ function getRedirectUri(): string {
 
 /**
  * Generate a cryptographically secure PKCE verifier and challenge
- *
- * The verifier is a random string, and the challenge is its SHA256 hash
- * encoded as base64url (no padding).
  */
 export function generatePKCE(): PKCEPair {
-  // Generate 32 bytes of random data for the verifier
-  const randomBytes = crypto.randomBytes(32);
-  const verifier = randomBytes.toString('base64url');
-
-  // Create SHA256 hash of verifier
-  const hash = crypto.createHash('sha256').update(verifier).digest();
-  const challenge = hash.toString('base64url');
-
+  const pkce = generatePKCEBase();
   logger.debug('Generated PKCE pair', {
-    verifierLength: verifier.length,
-    challengeLength: challenge.length,
+    verifierLength: pkce.verifier.length,
+    challengeLength: pkce.challenge.length,
   });
-
-  return { verifier, challenge };
+  return pkce;
 }
 
 // =============================================================================
@@ -324,16 +308,6 @@ export function isOAuthToken(token: string): boolean {
 
 import { loadAuthStorage, saveProviderOAuthTokens } from './unified.js';
 import type { ServerAuth } from './types.js';
-
-/**
- * Stored auth format in ~/.tron/auth.json
- * @deprecated Use UnifiedAuth from types.ts instead
- */
-export interface StoredAuth {
-  tokens?: OAuthTokens;
-  apiKey?: string;
-  lastUpdated: string;
-}
 
 // Re-export ServerAuth for backward compatibility
 export type { ServerAuth };

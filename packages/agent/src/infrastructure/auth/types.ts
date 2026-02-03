@@ -88,26 +88,3 @@ export type ServerAuth =
   | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number }
   | { type: 'api_key'; apiKey: string };
 
-// =============================================================================
-// Legacy Types (For Reference / Migration)
-// =============================================================================
-
-/**
- * Legacy auth.json schema (pre-unified)
- * @deprecated Use UnifiedAuth instead
- */
-export interface LegacyAnthropicAuth {
-  tokens?: OAuthTokens;
-  apiKey?: string;
-  lastUpdated: string;
-}
-
-/**
- * Legacy codex-tokens.json schema (pre-unified)
- * @deprecated Use UnifiedAuth with 'openai-codex' provider instead
- */
-export interface LegacyCodexTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}

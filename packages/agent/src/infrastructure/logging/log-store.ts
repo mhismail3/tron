@@ -10,21 +10,10 @@
  */
 
 import type Database from 'better-sqlite3';
+import { LOG_LEVEL_NUM, type LogLevel } from './types.js';
 
-// =============================================================================
-// Types
-// =============================================================================
-
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
-
-const LOG_LEVEL_NUM: Record<LogLevel, number> = {
-  trace: 10,
-  debug: 20,
-  info: 30,
-  warn: 40,
-  error: 50,
-  fatal: 60,
-};
+// Re-export LogLevel for backward compatibility
+export type { LogLevel };
 
 export interface LogEntry {
   id: number;

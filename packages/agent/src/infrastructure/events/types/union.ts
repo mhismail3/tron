@@ -4,7 +4,7 @@
  * Union of all session event types.
  */
 
-import type { SessionStartEvent, SessionEndEvent, SessionForkEvent, SessionBranchEvent } from './session.js';
+import type { SessionStartEvent, SessionEndEvent, SessionForkEvent } from './session.js';
 import type { UserMessageEvent, AssistantMessageEvent, SystemMessageEvent } from './message.js';
 import type { ToolCallEvent, ToolResultEvent } from './tool.js';
 import type { StreamTurnStartEvent, StreamTurnEndEvent, StreamTextDeltaEvent, StreamThinkingDeltaEvent } from './streaming.js';
@@ -20,6 +20,7 @@ import type { RulesLoadedEvent } from './rules.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
+import type { SkillAddedEvent, SkillRemovedEvent } from './skill.js';
 import type {
   HookTriggeredEvent,
   HookCompletedEvent,
@@ -36,7 +37,6 @@ export type SessionEvent =
   | SessionStartEvent
   | SessionEndEvent
   | SessionForkEvent
-  | SessionBranchEvent
   // Messages
   | UserMessageEvent
   | AssistantMessageEvent
@@ -81,6 +81,9 @@ export type SessionEvent =
   | SubagentFailedEvent
   // Todos
   | TodoWriteEvent
+  // Skills
+  | SkillAddedEvent
+  | SkillRemovedEvent
   // Errors
   | ErrorAgentEvent
   | ErrorToolEvent

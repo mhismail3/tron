@@ -53,7 +53,6 @@ export type {
   SessionStartEvent,
   SessionEndEvent,
   SessionForkEvent,
-  SessionBranchEvent,
 } from './session.js';
 
 // =============================================================================
@@ -178,6 +177,20 @@ export type { TodoItemPayload, TodoWriteEvent } from './todo.js';
 export type { TurnFailedEvent } from './turn.js';
 
 // =============================================================================
+// Skill Events
+// =============================================================================
+
+export type {
+  SkillSource,
+  SkillAddMethod,
+  SkillRemoveReason,
+  SkillAddedPayload,
+  SkillRemovedPayload,
+  SkillAddedEvent,
+  SkillRemovedEvent,
+} from './skill.js';
+
+// =============================================================================
 // Hook Events
 // =============================================================================
 
@@ -233,6 +246,9 @@ export {
   isHookBackgroundStartedEvent,
   isHookBackgroundCompletedEvent,
   isHookEvent,
+  isSkillAddedEvent,
+  isSkillRemovedEvent,
+  isSkillEvent,
 } from './type-guards.js';
 
 // =============================================================================

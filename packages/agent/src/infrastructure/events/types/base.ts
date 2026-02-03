@@ -15,7 +15,6 @@ export type EventType =
   | 'session.start'
   | 'session.end'
   | 'session.fork'
-  | 'session.branch'
   // Conversation
   | 'message.user'
   | 'message.assistant'

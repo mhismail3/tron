@@ -9,12 +9,12 @@
  * Based on Gemini CLI and Pi Coding Agent OAuth patterns.
  */
 
-import crypto from 'crypto';
 import { createLogger } from '../logging/index.js';
 import { getSettings } from '../settings/index.js';
 import type { GoogleApiSettings } from '../settings/types.js';
 import { loadAuthStorage, saveProviderOAuthTokens, getProviderAuth, saveProviderAuth } from './unified.js';
 import type { OAuthTokens, GoogleProviderAuth } from './types.js';
+import { generatePKCE as generatePKCEBase, type PKCEPair } from './pkce.js';
 
 const logger = createLogger('google-oauth');
 
@@ -45,12 +45,9 @@ export interface GoogleOAuthConfig {
 }
 
 /**
- * PKCE challenge/verifier pair
+ * PKCE challenge/verifier pair (alias for backward compatibility)
  */
-export interface GooglePKCEPair {
-  verifier: string;
-  challenge: string;
-}
+export type GooglePKCEPair = PKCEPair;
 
 /**
  * OAuth error response
@@ -254,25 +251,14 @@ export async function getGoogleOAuthConfig(
 
 /**
  * Generate a cryptographically secure PKCE verifier and challenge
- *
- * The verifier is a random string, and the challenge is its SHA256 hash
- * encoded as base64url (no padding).
  */
 export function generateGooglePKCE(): GooglePKCEPair {
-  // Generate 32 bytes of random data for the verifier
-  const randomBytes = crypto.randomBytes(32);
-  const verifier = randomBytes.toString('base64url');
-
-  // Create SHA256 hash of verifier
-  const hash = crypto.createHash('sha256').update(verifier).digest();
-  const challenge = hash.toString('base64url');
-
+  const pkce = generatePKCEBase();
   logger.debug('Generated Google PKCE pair', {
-    verifierLength: verifier.length,
-    challengeLength: challenge.length,
+    verifierLength: pkce.verifier.length,
+    challengeLength: pkce.challenge.length,
   });
-
-  return { verifier, challenge };
+  return pkce;
 }
 
 // =============================================================================

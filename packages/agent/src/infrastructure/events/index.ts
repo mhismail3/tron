@@ -24,7 +24,6 @@ export {
   type SessionStartEvent,
   type SessionEndEvent,
   type SessionForkEvent,
-  type SessionBranchEvent,
   type UserMessageEvent,
   type AssistantMessageEvent,
   type SystemMessageEvent,

@@ -166,6 +166,47 @@ export class SQLiteTransport {
   }
 
   /**
+   * Write a batch of entries to the database in a transaction
+   */
+  private _writeBatch(entries: LogEntry[]): void {
+    if (entries.length === 0 || !this.insertLogStmt || !this.insertFtsStmt) {
+      return;
+    }
+
+    this.db.transaction(() => {
+      for (const entry of entries) {
+        const result = this.insertLogStmt!.run(
+          entry.timestamp,
+          entry.level,
+          entry.levelNum,
+          entry.component,
+          entry.message,
+          entry.sessionId,
+          entry.workspaceId,
+          entry.eventId,
+          entry.turn,
+          entry.traceId,
+          entry.parentTraceId,
+          entry.depth,
+          entry.data,
+          entry.errorMessage,
+          entry.errorStack
+        );
+
+        const logId = result.lastInsertRowid as number;
+
+        this.insertFtsStmt!.run(
+          logId,
+          entry.sessionId,
+          entry.component,
+          entry.message,
+          entry.errorMessage
+        );
+      }
+    })();
+  }
+
+  /**
    * Flush pending logs to database
    */
   async flush(): Promise<void> {
@@ -184,38 +225,7 @@ export class SQLiteTransport {
         throw new Error('Failed to prepare statements - tables may not exist');
       }
 
-      // Execute in a transaction for atomicity and performance
-      this.db.transaction(() => {
-        for (const entry of toFlush) {
-          const result = this.insertLogStmt!.run(
-            entry.timestamp,
-            entry.level,
-            entry.levelNum,
-            entry.component,
-            entry.message,
-            entry.sessionId,
-            entry.workspaceId,
-            entry.eventId,
-            entry.turn,
-            entry.traceId,
-            entry.parentTraceId,
-            entry.depth,
-            entry.data,
-            entry.errorMessage,
-            entry.errorStack
-          );
-
-          const logId = result.lastInsertRowid as number;
-
-          this.insertFtsStmt!.run(
-            logId,
-            entry.sessionId,
-            entry.component,
-            entry.message,
-            entry.errorMessage
-          );
-        }
-      })();
+      this._writeBatch(toFlush);
     } catch (error) {
       // Log to stderr, don't rethrow
       console.error('[LOG_FLUSH_ERROR]', error, `Lost ${toFlush.length} logs`);
@@ -236,39 +246,7 @@ export class SQLiteTransport {
 
     // Synchronous flush on close
     try {
-      if (this.batch.length > 0 && this.insertLogStmt && this.insertFtsStmt) {
-        this.db.transaction(() => {
-          for (const entry of this.batch) {
-            const result = this.insertLogStmt!.run(
-              entry.timestamp,
-              entry.level,
-              entry.levelNum,
-              entry.component,
-              entry.message,
-              entry.sessionId,
-              entry.workspaceId,
-              entry.eventId,
-              entry.turn,
-              entry.traceId,
-              entry.parentTraceId,
-              entry.depth,
-              entry.data,
-              entry.errorMessage,
-              entry.errorStack
-            );
-
-            const logId = result.lastInsertRowid as number;
-
-            this.insertFtsStmt!.run(
-              logId,
-              entry.sessionId,
-              entry.component,
-              entry.message,
-              entry.errorMessage
-            );
-          }
-        })();
-      }
+      this._writeBatch(this.batch);
     } catch {
       // Ignore close errors
     }

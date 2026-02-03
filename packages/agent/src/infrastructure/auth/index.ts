@@ -14,8 +14,6 @@ export {
   getDefaultAnthropicOAuthSettings,
   OAuthError,
   type PKCEPair,
-  /** @deprecated Use UnifiedAuth from types.ts */
-  type StoredAuth,
 } from './oauth.js';
 
 // Google OAuth functions
@@ -47,7 +45,6 @@ export {
 // OpenAI/Codex auth functions
 export {
   loadOpenAIServerAuth,
-  loadOpenAIServerAuthSync,
   refreshOpenAIToken,
 } from './openai-auth.js';
 
@@ -67,7 +64,6 @@ export type {
   ServiceAuth,
   AuthStorage,
   ServerAuth,
-  // NOTE: LegacyAnthropicAuth and LegacyCodexTokens removed - no longer needed
 } from './types.js';
 
 // Unified auth functions

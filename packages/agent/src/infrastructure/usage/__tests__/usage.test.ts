@@ -15,29 +15,23 @@ import {
   getUsageDelta,
   getContextLimit,
   getContextPercentage,
-  CLAUDE_PRICING,
-  OPENAI_PRICING,
-  GOOGLE_PRICING,
 } from '../index.js';
 
 describe('getPricingTier', () => {
   it('returns exact model pricing for Claude models', () => {
     const tier = getPricingTier('claude-opus-4-5-20251101');
-    expect(tier).toBe(CLAUDE_PRICING['claude-opus-4-5-20251101']);
     expect(tier.inputPerMillion).toBe(5);
     expect(tier.outputPerMillion).toBe(25);
   });
 
   it('returns exact model pricing for OpenAI models', () => {
     const tier = getPricingTier('gpt-4o');
-    expect(tier).toBe(OPENAI_PRICING['gpt-4o']);
     expect(tier.inputPerMillion).toBe(2.5);
     expect(tier.outputPerMillion).toBe(10);
   });
 
   it('returns exact model pricing for Google models', () => {
     const tier = getPricingTier('gemini-2.5-pro');
-    expect(tier).toBe(GOOGLE_PRICING['gemini-2.5-pro']);
     expect(tier.inputPerMillion).toBe(1.25);
     expect(tier.outputPerMillion).toBe(5);
   });
@@ -64,7 +58,9 @@ describe('getPricingTier', () => {
 
   it('defaults to sonnet pricing for unknown models', () => {
     const tier = getPricingTier('unknown-model-xyz');
-    expect(tier).toBe(CLAUDE_PRICING['claude-sonnet-4-20250514']);
+    // Defaults to claude-sonnet-4-20250514 pricing
+    expect(tier.inputPerMillion).toBe(3);
+    expect(tier.outputPerMillion).toBe(15);
   });
 });
 

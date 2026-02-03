@@ -108,6 +108,3 @@ export {
   type ModelInfo,
   type ModelCategory,
 } from './llm/providers/models.js';
-
-// Re-export feature flags types
-export type { FeatureFlags } from './infrastructure/settings/feature-flags.js';
