@@ -7,6 +7,8 @@ struct LogViewer: View {
     @Environment(\.dependencies) private var dependencies
     @State private var logs: [(Date, LogCategory, LogLevel, String)] = []
     @State private var isExporting = false
+    @State private var exportSuccess = false
+    @State private var copySuccess = false
     @State private var exportResult: String?
     @State private var selectedLevel: LogLevel = .verbose
     @State private var selectedCategory: LogCategory?
@@ -30,8 +32,14 @@ struct LogViewer: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", systemImage: "xmark") {
-                        dismiss()
+                    if #available(iOS 26.0, *) {
+                        Button(role: .close) {
+                            dismiss()
+                        }
+                    } else {
+                        Button("Close", systemImage: "xmark") {
+                            dismiss()
+                        }
                     }
                 }
 
@@ -41,16 +49,20 @@ struct LogViewer: View {
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Export", systemImage: "square.and.arrow.up") {
+                    Button("Export", systemImage: exportSuccess ? "checkmark" : "square.and.arrow.up") {
                         exportLogsToServer()
                     }
+                    .contentTransition(.symbolEffect(.replace))
                     .disabled(isExporting)
 
-                    Button("Copy", systemImage: "doc.on.doc") {
+                    Button("Copy", systemImage: copySuccess ? "checkmark" : "doc.on.doc") {
                         copyFilteredLogs()
                     }
+                    .contentTransition(.symbolEffect(.replace))
                 }
             }
+            .sensoryFeedback(.success, trigger: exportSuccess)
+            .sensoryFeedback(.success, trigger: copySuccess)
             .onAppear { refreshLogs() }
             .onReceive(timer) { _ in
                 if autoScroll {
@@ -224,6 +236,18 @@ struct LogViewer: View {
         }.joined(separator: "\n")
 
         UIPasteboard.general.string = logText
+
+        // Show success feedback
+        withAnimation {
+            copySuccess = true
+        }
+        // Reset after delay
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            withAnimation {
+                copySuccess = false
+            }
+        }
     }
 
     private func exportLogsToServer() {
@@ -258,7 +282,18 @@ struct LogViewer: View {
 
                 let result = try await rpcClient.misc.exportLogs(content: logText)
                 logger.info("Exported \(allLogs.count) log entries to server: \(result.path)", category: .general)
-                exportResult = "Exported to \(result.path)"
+
+                // Show success feedback
+                withAnimation {
+                    exportSuccess = true
+                }
+                // Reset after delay
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    withAnimation {
+                        exportSuccess = false
+                    }
+                }
             } catch {
                 logger.error("Failed to export logs to server: \(error.localizedDescription)", category: .general)
                 exportResult = "Error: \(error.localizedDescription)"
