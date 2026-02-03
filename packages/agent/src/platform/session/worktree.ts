@@ -4,6 +4,9 @@
  * Provides automatic git worktree management for isolated session work.
  * Each session can optionally work in its own worktree to avoid conflicts.
  *
+ * @deprecated Use WorktreeCoordinator instead. This module is maintained
+ * for backward compatibility only and will be removed in a future version.
+ *
  * @example
  * ```typescript
  * const worktreeManager = new WorktreeManager({
@@ -16,12 +19,16 @@
  * await worktreeManager.cleanup('session-123');
  * ```
  */
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
+import { createGitExecutor } from './worktree/git-executor.js';
 
 const logger = createLogger('worktree');
+
+// Shared git executor instance
+const gitExecutor = createGitExecutor();
 
 // =============================================================================
 // Types
@@ -72,38 +79,10 @@ export interface WorktreeStatus {
 // Git Command Helpers
 // =============================================================================
 
-async function execGit(
-  args: string[],
-  options: { cwd: string; timeout?: number }
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const timeout = options.timeout ?? 30000;
-    const proc = spawn('git', args, {
-      cwd: options.cwd,
-      timeout,
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
-    });
-
-    proc.on('error', (error) => {
-      reject(error);
-    });
-  });
-}
-
+/**
+ * Execute git command synchronously. Used only for simple queries during initialization.
+ * Prefer gitExecutor.execGit for async operations.
+ */
 function execGitSync(args: string[], cwd: string): string {
   try {
     return execSync(`git ${args.join(' ')}`, { cwd, encoding: 'utf-8' }).trim();
@@ -116,6 +95,25 @@ function execGitSync(args: string[], cwd: string): string {
 // Worktree Manager Implementation
 // =============================================================================
 
+/**
+ * Legacy worktree manager for session isolation.
+ *
+ * @deprecated Use {@link WorktreeCoordinator} instead.
+ * This class is maintained for backward compatibility only and will be
+ * removed in a future version. WorktreeCoordinator provides event-sourced
+ * worktree management with better integration into the session lifecycle.
+ *
+ * Migration example:
+ * ```typescript
+ * // Before (deprecated):
+ * const manager = new WorktreeManager({ baseDir: '/worktrees' });
+ * const worktree = await manager.createForSession(sessionId, repoPath);
+ *
+ * // After (recommended):
+ * const coordinator = createWorktreeCoordinator({ baseDir: '/worktrees' });
+ * const workDir = await coordinator.acquire(sessionId, repoPath);
+ * ```
+ */
 export class WorktreeManager {
   private config: Required<WorktreeManagerConfig>;
   private worktrees: Map<string, Worktree> = new Map();
@@ -135,7 +133,7 @@ export class WorktreeManager {
    */
   async isGitRepo(dir: string): Promise<boolean> {
     try {
-      const result = await execGit(['rev-parse', '--git-dir'], { cwd: dir });
+      const result = await gitExecutor.execGit(['rev-parse', '--git-dir'], dir);
       return result.exitCode === 0;
     } catch {
       return false;
@@ -147,7 +145,7 @@ export class WorktreeManager {
    */
   async getRepoRoot(dir: string): Promise<string | null> {
     try {
-      const result = await execGit(['rev-parse', '--show-toplevel'], { cwd: dir });
+      const result = await gitExecutor.execGit(['rev-parse', '--show-toplevel'], dir);
       return result.exitCode === 0 ? result.stdout : null;
     } catch {
       return null;
@@ -210,14 +208,14 @@ export class WorktreeManager {
     // Create new branch and worktree
     try {
       // Create branch from base
-      await execGit(['branch', branchName, baseBranch], { cwd: repoRoot });
+      await gitExecutor.execGit(['branch', branchName, baseBranch], repoRoot);
 
       // Create worktree
-      const result = await execGit(['worktree', 'add', worktreePath, branchName], { cwd: repoRoot });
+      const result = await gitExecutor.execGit(['worktree', 'add', worktreePath, branchName], repoRoot);
 
       if (result.exitCode !== 0) {
         // Branch might already exist, try without creating it
-        const retryResult = await execGit(['worktree', 'add', worktreePath, branchName], { cwd: repoRoot });
+        const retryResult = await gitExecutor.execGit(['worktree', 'add', worktreePath, branchName], repoRoot);
         if (retryResult.exitCode !== 0) {
           throw new Error(`Failed to create worktree: ${retryResult.stderr}`);
         }
@@ -275,7 +273,7 @@ export class WorktreeManager {
       return [];
     }
 
-    const result = await execGit(['worktree', 'list', '--porcelain'], { cwd: repoRoot });
+    const result = await gitExecutor.execGit(['worktree', 'list', '--porcelain'], repoRoot);
     if (result.exitCode !== 0) {
       return [];
     }
@@ -314,8 +312,8 @@ export class WorktreeManager {
       return null;
     }
 
-    const result = await execGit(['status', '--porcelain'], { cwd: worktree.path });
-    const diffStat = await execGit(['diff', '--stat', '--stat-count=100'], { cwd: worktree.path });
+    const result = await gitExecutor.execGit(['status', '--porcelain'], worktree.path);
+    const diffStat = await gitExecutor.execGit(['diff', '--stat', '--stat-count=100'], worktree.path);
 
     const modifiedFiles = result.stdout
       .split('\n')
@@ -355,17 +353,17 @@ export class WorktreeManager {
 
     try {
       if (options?.addAll) {
-        await execGit(['add', '-A'], { cwd: worktree.path });
+        await gitExecutor.execGit(['add', '-A'], worktree.path);
       }
 
-      const result = await execGit(['commit', '-m', message], { cwd: worktree.path });
+      const result = await gitExecutor.execGit(['commit', '-m', message], worktree.path);
 
       if (result.exitCode !== 0 && !result.stderr.includes('nothing to commit')) {
         throw new Error(result.stderr);
       }
 
       // Get commit hash
-      const hashResult = await execGit(['rev-parse', 'HEAD'], { cwd: worktree.path });
+      const hashResult = await gitExecutor.execGit(['rev-parse', 'HEAD'], worktree.path);
       const commitHash = hashResult.stdout;
 
       logger.info('Changes committed', { sessionId, commit: commitHash });
@@ -420,12 +418,12 @@ export class WorktreeManager {
 
       // Remove worktree
       if (worktreePath) {
-        await execGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoRoot });
+        await gitExecutor.execGit(['worktree', 'remove', worktreePath, '--force'], repoRoot);
       }
 
       // Delete branch if configured
       if (this.config.deleteBranchOnCleanup) {
-        await execGit(['branch', '-D', branchName], { cwd: repoRoot });
+        await gitExecutor.execGit(['branch', '-D', branchName], repoRoot);
       }
 
       this.worktrees.delete(sessionId);
@@ -464,10 +462,10 @@ export class WorktreeManager {
 
     try {
       // Switch to target branch in main worktree
-      await execGit(['checkout', targetBranch], { cwd: repoRoot });
+      await gitExecutor.execGit(['checkout', targetBranch], repoRoot);
 
       // Merge session branch
-      const result = await execGit(['merge', worktree.branch, '--no-ff', '-m', `Merge session ${sessionId}`], { cwd: repoRoot });
+      const result = await gitExecutor.execGit(['merge', worktree.branch, '--no-ff', '-m', `Merge session ${sessionId}`], repoRoot);
 
       if (result.exitCode !== 0) {
         throw new Error(`Merge failed: ${result.stderr}`);
@@ -510,6 +508,12 @@ export class WorktreeManager {
 // Factory Function
 // =============================================================================
 
+/**
+ * Create a WorktreeManager instance.
+ *
+ * @deprecated Use {@link createWorktreeCoordinator} instead.
+ * WorktreeManager is maintained for backward compatibility only.
+ */
 export function createWorktreeManager(config?: WorktreeManagerConfig): WorktreeManager {
   return new WorktreeManager(config);
 }

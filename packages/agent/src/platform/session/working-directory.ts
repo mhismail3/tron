@@ -10,12 +10,15 @@
  * - Provides git operations (commit, diff, status)
  */
 
-import { spawn } from 'child_process';
 import * as path from 'path';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { createGitExecutor } from './worktree/git-executor.js';
 import type { SessionId } from '@infrastructure/events/types.js';
 
 const logger = createLogger('working-directory');
+
+// Shared git executor instance for all working directories
+const gitExecutor = createGitExecutor();
 
 // =============================================================================
 // Types
@@ -66,40 +69,6 @@ export interface CommitResult {
   insertions: number;
   /** Number of deletions */
   deletions: number;
-}
-
-// =============================================================================
-// Git Helpers
-// =============================================================================
-
-async function execGit(
-  args: string[],
-  cwd: string,
-  options?: { timeout?: number }
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const timeout = options?.timeout ?? 30000;
-    const proc = spawn('git', args, { cwd, timeout });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    proc.on('close', (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
-    });
-
-    proc.on('error', (error) => {
-      reject(error);
-    });
-  });
 }
 
 // =============================================================================
@@ -200,21 +169,21 @@ export class WorkingDirectory {
    */
   async getStatus(): Promise<GitStatus> {
     // Get current branch
-    const branchResult = await execGit(
+    const branchResult = await gitExecutor.execGit(
       ['rev-parse', '--abbrev-ref', 'HEAD'],
       this.info.path
     );
     const branch = branchResult.stdout || this.info.branch;
 
     // Get current commit
-    const commitResult = await execGit(
+    const commitResult = await gitExecutor.execGit(
       ['rev-parse', 'HEAD'],
       this.info.path
     );
     const commit = commitResult.stdout;
 
     // Get status
-    const statusResult = await execGit(
+    const statusResult = await gitExecutor.execGit(
       ['status', '--porcelain'],
       this.info.path
     );
@@ -224,7 +193,7 @@ export class WorkingDirectory {
       .map(line => line.slice(3));
 
     // Get diff stats
-    const diffResult = await execGit(
+    const diffResult = await gitExecutor.execGit(
       ['diff', '--stat', '--stat-count=100'],
       this.info.path
     );
@@ -253,7 +222,7 @@ export class WorkingDirectory {
    */
   async getDiff(base?: string): Promise<string> {
     const baseRef = base || this.info.baseCommit;
-    const result = await execGit(
+    const result = await gitExecutor.execGit(
       ['diff', baseRef, 'HEAD'],
       this.info.path
     );
@@ -265,8 +234,8 @@ export class WorkingDirectory {
    */
   async getUncommittedDiff(): Promise<string> {
     // Get both staged and unstaged changes
-    const stagedResult = await execGit(['diff', '--cached'], this.info.path);
-    const unstagedResult = await execGit(['diff'], this.info.path);
+    const stagedResult = await gitExecutor.execGit(['diff', '--cached'], this.info.path);
+    const unstagedResult = await gitExecutor.execGit(['diff'], this.info.path);
     return stagedResult.stdout + '\n' + unstagedResult.stdout;
   }
 
@@ -274,7 +243,7 @@ export class WorkingDirectory {
    * Stage all changes
    */
   async stageAll(): Promise<void> {
-    await execGit(['add', '-A'], this.info.path);
+    await gitExecutor.execGit(['add', '-A'], this.info.path);
   }
 
   /**
@@ -293,11 +262,11 @@ export class WorkingDirectory {
     }
 
     // Get list of files before commit
-    const filesResult = await execGit(['diff', '--cached', '--name-only'], this.info.path);
+    const filesResult = await gitExecutor.execGit(['diff', '--cached', '--name-only'], this.info.path);
     const filesChanged = filesResult.stdout.split('\n').filter(f => f.trim());
 
     // Commit
-    const result = await execGit(
+    const result = await gitExecutor.execGit(
       ['commit', '-m', message],
       this.info.path
     );
@@ -307,11 +276,11 @@ export class WorkingDirectory {
     }
 
     // Get commit hash
-    const hashResult = await execGit(['rev-parse', 'HEAD'], this.info.path);
+    const hashResult = await gitExecutor.execGit(['rev-parse', 'HEAD'], this.info.path);
     const hash = hashResult.stdout;
 
     // Get stats
-    const statsResult = await execGit(
+    const statsResult = await gitExecutor.execGit(
       ['diff', '--stat', 'HEAD~1..HEAD'],
       this.info.path
     );
@@ -345,7 +314,7 @@ export class WorkingDirectory {
    * Get the current HEAD commit
    */
   async getCurrentCommit(): Promise<string> {
-    const result = await execGit(['rev-parse', 'HEAD'], this.info.path);
+    const result = await gitExecutor.execGit(['rev-parse', 'HEAD'], this.info.path);
     return result.stdout;
   }
 
@@ -361,7 +330,7 @@ export class WorkingDirectory {
    * Get commits since base
    */
   async getCommitsSinceBase(): Promise<Array<{ hash: string; message: string; timestamp: string }>> {
-    const result = await execGit(
+    const result = await gitExecutor.execGit(
       ['log', `${this.info.baseCommit}..HEAD`, '--pretty=format:%H|%s|%aI'],
       this.info.path
     );
