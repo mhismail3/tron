@@ -108,10 +108,6 @@ export type RpcMethod =
   // Model management
   | 'model.switch'
   | 'model.list'
-  // Memory operations
-  | 'memory.search'
-  | 'memory.addEntry'
-  | 'memory.getHandoffs'
   // Skill operations
   | 'skill.list'
   | 'skill.get'

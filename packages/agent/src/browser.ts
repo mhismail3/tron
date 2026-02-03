@@ -70,11 +70,6 @@ export type {
   FilesystemListDirResult,
   FilesystemGetHomeParams,
   FilesystemGetHomeResult,
-  // Memory types
-  MemorySearchParams,
-  RpcMemorySearchResult,
-  MemoryAddEntryParams,
-  MemoryAddEntryResult,
   // Event data types
   AgentTextDeltaEvent,
   AgentThinkingDeltaEvent,

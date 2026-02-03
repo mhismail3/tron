@@ -32,7 +32,6 @@ describe('Search Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
       eventStore: {
         searchContent: mockSearchContent,
         getEventHistory: vi.fn(),
@@ -49,7 +48,6 @@ describe('Search Handlers', () => {
     mockContextWithoutEventStore = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

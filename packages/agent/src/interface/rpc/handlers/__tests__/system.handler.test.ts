@@ -21,7 +21,6 @@ describe('System Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

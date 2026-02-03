@@ -39,11 +39,6 @@ const mockContext: RpcContext = {
     abort: vi.fn().mockResolvedValue({ success: true }),
     getState: vi.fn().mockResolvedValue({ messages: [] }),
   },
-  memoryStore: {
-    searchEntries: vi.fn().mockResolvedValue({ entries: [], totalCount: 0 }),
-    addEntry: vi.fn().mockResolvedValue({ id: 'mem_test' }),
-    listHandoffs: vi.fn().mockResolvedValue([]),
-  },
 };
 
 describe('TronWebSocketServer', () => {

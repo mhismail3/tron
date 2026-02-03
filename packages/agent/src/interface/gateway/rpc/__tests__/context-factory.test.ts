@@ -33,14 +33,6 @@ vi.mock('../adapters/agent.adapter.js', () => ({
   }),
 }));
 
-vi.mock('../adapters/memory.adapter.js', () => ({
-  createMemoryAdapter: vi.fn().mockReturnValue({
-    searchEntries: vi.fn(),
-    addEntry: vi.fn(),
-    listHandoffs: vi.fn(),
-  }),
-}));
-
 vi.mock('../adapters/transcription.adapter.js', () => ({
   createTranscriptionAdapter: vi.fn().mockReturnValue({
     transcribeAudio: vi.fn(),
@@ -103,7 +95,6 @@ vi.mock('../adapters/skill.adapter.js', () => ({
 // Import mocked functions to verify calls
 import { createSessionAdapter } from '../adapters/session.adapter.js';
 import { createAgentAdapter } from '../adapters/agent.adapter.js';
-import { createMemoryAdapter } from '../adapters/memory.adapter.js';
 import { createTranscriptionAdapter } from '../adapters/transcription.adapter.js';
 import { createEventStoreAdapter } from '../adapters/event-store.adapter.js';
 import { createWorktreeAdapter } from '../adapters/worktree.adapter.js';
@@ -131,7 +122,6 @@ describe('RpcContextFactory', () => {
       // Required managers must exist
       expect(context.sessionManager).toBeDefined();
       expect(context.agentManager).toBeDefined();
-      expect(context.memoryStore).toBeDefined();
     });
 
     it('should create context with all optional managers by default', () => {
@@ -163,7 +153,6 @@ describe('RpcContextFactory', () => {
       expect(createSkillAdapter).toHaveBeenCalledWith(deps);
 
       // Standalone adapters should be called without deps
-      expect(createMemoryAdapter).toHaveBeenCalledWith();
       expect(createTranscriptionAdapter).toHaveBeenCalledWith();
     });
 
@@ -176,7 +165,6 @@ describe('RpcContextFactory', () => {
       // Required managers must exist
       expect(context.sessionManager).toBeDefined();
       expect(context.agentManager).toBeDefined();
-      expect(context.memoryStore).toBeDefined();
 
       // Optional managers should be undefined
       expect(context.eventStore).toBeUndefined();
@@ -198,7 +186,6 @@ describe('RpcContextFactory', () => {
       // Required adapters should be called
       expect(createSessionAdapter).toHaveBeenCalled();
       expect(createAgentAdapter).toHaveBeenCalled();
-      expect(createMemoryAdapter).toHaveBeenCalled();
 
       // Optional adapters should NOT be called
       expect(createEventStoreAdapter).not.toHaveBeenCalled();
@@ -235,7 +222,6 @@ describe('RpcContextFactory', () => {
       expect(typeof context.sessionManager.getSession).toBe('function');
       expect(typeof context.agentManager.prompt).toBe('function');
       expect(typeof context.agentManager.abort).toBe('function');
-      expect(typeof context.memoryStore.searchEntries).toBe('function');
     });
   });
 
@@ -248,7 +234,6 @@ describe('RpcContextFactory', () => {
       // Required managers must exist
       expect(context.sessionManager).toBeDefined();
       expect(context.agentManager).toBeDefined();
-      expect(context.memoryStore).toBeDefined();
 
       // Optional managers should be undefined
       expect(context.eventStore).toBeUndefined();
@@ -409,17 +394,6 @@ describe('RpcContextFactory', () => {
       // Verify transcriptionManager has all expected methods
       expect(context.transcriptionManager).toHaveProperty('transcribeAudio');
       expect(context.transcriptionManager).toHaveProperty('listModels');
-    });
-
-    it('should compose memory store with correct interface', () => {
-      const context = createRpcContext({
-        orchestrator: mockOrchestrator,
-      });
-
-      // Verify memoryStore has all expected methods (deprecated but present)
-      expect(context.memoryStore).toHaveProperty('searchEntries');
-      expect(context.memoryStore).toHaveProperty('addEntry');
-      expect(context.memoryStore).toHaveProperty('listHandoffs');
     });
   });
 });

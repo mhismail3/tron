@@ -48,7 +48,6 @@ describe('Events Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
       eventStore: {
         getEventHistory: mockGetEventHistory,
         getEventsSince: mockGetEventsSince,
@@ -65,7 +64,6 @@ describe('Events Handlers', () => {
     mockContextWithoutEventStore = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

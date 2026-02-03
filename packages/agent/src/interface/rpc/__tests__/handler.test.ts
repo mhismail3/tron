@@ -54,11 +54,6 @@ describe('RpcHandler', () => {
           tools: ['read', 'write', 'edit', 'bash'],
         }),
       },
-      memoryStore: {
-        searchEntries: vi.fn().mockResolvedValue({ entries: [], totalCount: 0 }),
-        addEntry: vi.fn().mockResolvedValue({ id: 'mem_123' }),
-        listHandoffs: vi.fn().mockResolvedValue([]),
-      },
     } as unknown as RpcContext;
 
     handler = new RpcHandler(mockContext);
@@ -199,22 +194,6 @@ describe('RpcHandler', () => {
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-    });
-
-    it('should handle memory.search request', async () => {
-      const request: RpcRequest = {
-        id: 'req_10',
-        method: 'memory.search',
-        params: {
-          searchText: 'test pattern',
-          type: 'pattern',
-        },
-      };
-
-      const response = await handler.handle(request);
-
-      expect(response.success).toBe(true);
-      expect(response.result).toHaveProperty('entries');
     });
 
     it('should handle session.fork request', async () => {

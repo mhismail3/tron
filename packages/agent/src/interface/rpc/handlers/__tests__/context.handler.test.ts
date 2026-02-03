@@ -73,7 +73,6 @@ describe('Context Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
       contextManager: {
         getContextSnapshot: mockGetContextSnapshot,
         getDetailedContextSnapshot: mockGetDetailedContextSnapshot,
@@ -88,7 +87,6 @@ describe('Context Handlers', () => {
     mockContextWithoutContextManager = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

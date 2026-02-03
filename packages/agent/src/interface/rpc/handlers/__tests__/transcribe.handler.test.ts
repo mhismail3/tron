@@ -38,7 +38,6 @@ describe('Transcribe Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
       transcriptionManager: {
         transcribeAudio: mockTranscribeAudio,
         listModels: mockListModels,
@@ -48,7 +47,6 @@ describe('Transcribe Handlers', () => {
     mockContextWithoutTranscription = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

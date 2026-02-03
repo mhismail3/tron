@@ -39,12 +39,10 @@ describe('Model Handlers', () => {
         switchModel: mockSwitchModel,
       } as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
 
     mockContextWithoutSessionManager = {
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

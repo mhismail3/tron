@@ -56,17 +56,6 @@ export type {
   ModelListResult,
 } from './model.js';
 
-// Memory types
-export type {
-  MemorySearchParams,
-  RpcMemorySearchResult,
-  MemorySearchResultRpc,
-  MemoryAddEntryParams,
-  MemoryAddEntryResult,
-  MemoryGetHandoffsParams,
-  MemoryGetHandoffsResult,
-} from './memory.js';
-
 // Skill types
 export type {
   RpcSkillInfo,

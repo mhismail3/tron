@@ -61,7 +61,6 @@ describe('Tree Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
       eventStore: {
         getEventHistory: vi.fn(),
         getEventsSince: vi.fn(),
@@ -78,7 +77,6 @@ describe('Tree Handlers', () => {
     mockContextWithoutEventStore = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

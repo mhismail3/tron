@@ -51,11 +51,6 @@ export type SessionManagerAdapter = RpcContext['sessionManager'];
 export type AgentManagerAdapter = RpcContext['agentManager'];
 
 /**
- * Memory store interface - deprecated, returns empty results
- */
-export type MemoryStoreAdapter = RpcContext['memoryStore'];
-
-/**
  * Transcription manager interface - audio transcription
  */
 export type TranscriptionManagerAdapter = NonNullable<RpcContext['transcriptionManager']>;

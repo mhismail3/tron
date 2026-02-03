@@ -47,12 +47,10 @@ describe('Agent Handlers', () => {
         abort: mockAbort,
         getState: mockGetState,
       } as any,
-      memoryStore: {} as any,
     };
 
     mockContextWithoutAgentManager = {
       sessionManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

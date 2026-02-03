@@ -35,13 +35,11 @@ describe('Browser Handlers', () => {
       },
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     } as unknown as RpcContext;
 
     mockContextWithoutBrowserManager = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

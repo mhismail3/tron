@@ -26,7 +26,6 @@ describe('Filesystem Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
 
     // Create a temp directory for testing

@@ -93,12 +93,10 @@ describe('Session Handlers', () => {
         switchModel: vi.fn(),
       } as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
 
     mockContextWithoutSessionManager = {
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

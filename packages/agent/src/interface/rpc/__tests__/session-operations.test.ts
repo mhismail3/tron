@@ -74,11 +74,6 @@ describe('RpcHandler - Session Fork', () => {
           tools: [],
         }),
       },
-      memoryStore: {
-        searchEntries: vi.fn().mockResolvedValue({ entries: [], totalCount: 0 }),
-        addEntry: vi.fn().mockResolvedValue({ id: 'mem_1' }),
-        listHandoffs: vi.fn().mockResolvedValue([]),
-      },
     };
 
     handler = new RpcHandler(mockContext);
@@ -128,50 +123,6 @@ describe('RpcHandler - Session Fork', () => {
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
-    });
-  });
-
-  describe('memory.getHandoffs', () => {
-    it('should list handoffs', async () => {
-      (mockContext.memoryStore.listHandoffs as any).mockResolvedValue([
-        {
-          id: 'handoff_1',
-          sessionId: 'sess_1',
-          summary: 'First handoff',
-          createdAt: '2024-01-01T00:00:00Z',
-        },
-        {
-          id: 'handoff_2',
-          sessionId: 'sess_2',
-          summary: 'Second handoff',
-          createdAt: '2024-01-02T00:00:00Z',
-        },
-      ]);
-
-      const response = await handler.handle({
-        id: 'req_7',
-        method: 'memory.getHandoffs',
-        params: { limit: 10 },
-      });
-
-      expect(response.success).toBe(true);
-      expect(response.result).toEqual({
-        handoffs: [
-          { id: 'handoff_1', sessionId: 'sess_1', summary: 'First handoff', createdAt: '2024-01-01T00:00:00Z' },
-          { id: 'handoff_2', sessionId: 'sess_2', summary: 'Second handoff', createdAt: '2024-01-02T00:00:00Z' },
-        ],
-      });
-    });
-
-    it('should filter by working directory', async () => {
-      const response = await handler.handle({
-        id: 'req_8',
-        method: 'memory.getHandoffs',
-        params: { workingDirectory: '/project', limit: 5 },
-      });
-
-      expect(response.success).toBe(true);
-      expect(mockContext.memoryStore.listHandoffs).toHaveBeenCalledWith('/project', 5);
     });
   });
 });
@@ -242,18 +193,6 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
           tools: [],
         }),
       },
-      memoryStore: {
-        searchEntries: vi.fn().mockResolvedValue({ entries: [], totalCount: 0 }),
-        addEntry: vi.fn().mockResolvedValue({ id: 'mem_1' }),
-        listHandoffs: vi.fn().mockResolvedValue([
-          {
-            id: 'handoff_1',
-            sessionId: 'sess_terminal',
-            summary: 'Initial implementation with failing tests',
-            createdAt: new Date().toISOString(),
-          },
-        ]),
-      },
     };
 
     const handler = new RpcHandler(mockContext);
@@ -281,13 +220,5 @@ describe('RpcHandler - Cross-Interface Session Continuity', () => {
       newSessionId: 'sess_web_fork',
       forkedFromSessionId: 'sess_terminal',
     });
-
-    // Step 3: Get handoffs for context
-    const handoffsResponse = await handler.handle({
-      id: 'handoffs_1',
-      method: 'memory.getHandoffs',
-      params: {},
-    });
-    expect(handoffsResponse.success).toBe(true);
   });
 });

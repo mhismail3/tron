@@ -23,7 +23,6 @@ export {
 export { createSystemHandlers } from './system.handler.js';
 export { createFilesystemHandlers } from './filesystem.handler.js';
 export { createModelHandlers } from './model.handler.js';
-export { createMemoryHandlers } from './memory.handler.js';
 export { createTranscribeHandlers } from './transcribe.handler.js';
 export { createSessionHandlers } from './session.handler.js';
 export { createAgentHandlers } from './agent.handler.js';

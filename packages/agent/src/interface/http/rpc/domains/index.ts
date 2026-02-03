@@ -14,7 +14,6 @@
  * Data:
  * - context: Context loading and management
  * - events: Event store operations
- * - memory: Memory/message operations
  * - model: Model selection and switching
  *
  * Features:
@@ -48,7 +47,6 @@ export * from './filesystem/index.js';
 // Data domains
 export * from './context/index.js';
 export * from './events/index.js';
-export * from './memory/index.js';
 export * from './model/index.js';
 
 // Feature domains

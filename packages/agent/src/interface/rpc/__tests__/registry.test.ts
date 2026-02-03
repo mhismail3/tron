@@ -24,7 +24,6 @@ describe('MethodRegistry', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 

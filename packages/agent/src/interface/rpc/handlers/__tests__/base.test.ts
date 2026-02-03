@@ -102,7 +102,6 @@ describe('Base Handler Utilities', () => {
       const context: RpcContext = {
         sessionManager: mockSessionManager as any,
         agentManager: {} as any,
-        memoryStore: {} as any,
       };
 
       const result = requireManager(context, 'sessionManager', 'req-1');
@@ -117,7 +116,6 @@ describe('Base Handler Utilities', () => {
       const context: RpcContext = {
         sessionManager: {} as any,
         agentManager: {} as any,
-        memoryStore: {} as any,
         // transcriptionManager is undefined
       };
 
@@ -197,7 +195,6 @@ describe('Base Handler Utilities', () => {
       const context: RpcContext = {
         sessionManager: {} as any,
         agentManager: {} as any,
-        memoryStore: {} as any,
       };
 
       const request: RpcRequest = {
@@ -226,7 +223,6 @@ describe('Base Handler Utilities', () => {
       const context: RpcContext = {
         sessionManager: {} as any,
         agentManager: {} as any,
-        memoryStore: {} as any,
       };
 
       const request: RpcRequest = {
@@ -251,7 +247,6 @@ describe('Base Handler Utilities', () => {
       const context: RpcContext = {
         sessionManager: {} as any,
         agentManager: {} as any,
-        memoryStore: {} as any,
       };
 
       const request: RpcRequest = {

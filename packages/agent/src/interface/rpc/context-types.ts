@@ -21,8 +21,6 @@ import type {
   AgentPromptResult,
   AgentAbortResult,
   AgentGetStateResult,
-  MemorySearchParams,
-  MemoryAddEntryParams,
   TranscribeAudioParams,
   TranscribeAudioResult,
   TranscribeListModelsResult,
@@ -52,7 +50,6 @@ import type {
 export interface RpcContext {
   sessionManager: SessionManager;
   agentManager: AgentManager;
-  memoryStore: MemoryStore;
   /** EventStore for event-sourced session operations (optional for backwards compatibility) */
   eventStore?: EventStoreManager;
   /** Worktree manager for git worktree operations (optional) */
@@ -235,15 +232,6 @@ export interface AgentManager {
   prompt(params: AgentPromptParams): Promise<AgentPromptResult>;
   abort(sessionId: string): Promise<AgentAbortResult>;
   getState(sessionId: string): Promise<AgentGetStateResult>;
-}
-
-/**
- * Memory store interface
- */
-export interface MemoryStore {
-  searchEntries(params: MemorySearchParams): Promise<{ entries: unknown[]; totalCount: number }>;
-  addEntry(params: MemoryAddEntryParams): Promise<{ id: string }>;
-  listHandoffs(workingDirectory?: string, limit?: number): Promise<unknown[]>;
 }
 
 /**

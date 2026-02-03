@@ -28,7 +28,6 @@
  * │  ┌─────────────────────────────────┐  │
  * │  │  Standalone adapters            │  │
  * │  ├─────────────────────────────────┤  │
- * │  │ memoryStore       ◄── memory    │  │
  * │  │ transcription...  ◄── transcr.  │  │
  * │  └─────────────────────────────────┘  │
  * └───────────────────────────────────────┘
@@ -53,7 +52,6 @@ import { createTodoAdapter } from './adapters/todo.adapter.js';
 import { createDeviceAdapter } from './adapters/device.adapter.js';
 
 // Standalone adapters (no orchestrator dependency)
-import { createMemoryAdapter } from './adapters/memory.adapter.js';
 import { createTranscriptionAdapter } from './adapters/transcription.adapter.js';
 import { createCanvasAdapter } from './adapters/canvas.adapter.js';
 
@@ -101,13 +99,11 @@ export function createRpcContext(
   // Always create required managers
   const sessionManager = createSessionAdapter(deps);
   const agentManager = createAgentAdapter(deps);
-  const memoryStore = createMemoryAdapter();
 
   // Build the base context with required managers
   const context: RpcContext = {
     sessionManager,
     agentManager,
-    memoryStore,
   };
 
   // Add optional managers unless minimal mode requested

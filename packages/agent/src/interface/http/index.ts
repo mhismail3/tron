@@ -1,12 +1,20 @@
 /**
- * @fileoverview Server module exports
+ * @fileoverview HTTP Server Module
+ *
+ * This module provides HTTP-based communication infrastructure for future
+ * expansion beyond WebSocket-based RPC. Intended use cases include:
+ * - Cron jobs and scheduled tasks
+ * - Webhook handlers
+ * - REST API endpoints
+ * - HTTP-based integrations
  *
  * The server module provides:
  * - TronServer: Main server entry point
  * - Gateway: WebSocket and HTTP communication
- * - RPC: Remote procedure call handling
+ * - RPC: Remote procedure call handling with domain organization
  *
- * @migration This consolidates server components from various locations.
+ * @status Future infrastructure - domains/ structure provides organized
+ *         handler namespacing for when HTTP endpoints are fully implemented.
  */
 
 // Main server

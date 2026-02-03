@@ -51,7 +51,6 @@ describe('Worktree Handlers', () => {
     mockContext = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
       worktreeManager: {
         getWorktreeStatus: mockGetWorktreeStatus,
         commitWorktree: mockCommitWorktree,
@@ -63,7 +62,6 @@ describe('Worktree Handlers', () => {
     mockContextWithoutWorktreeManager = {
       sessionManager: {} as any,
       agentManager: {} as any,
-      memoryStore: {} as any,
     };
   });
 
