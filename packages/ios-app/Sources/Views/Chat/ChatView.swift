@@ -2,14 +2,6 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
-// MARK: - Scroll Position Tracking
-
-/// Tracks scroll state for detecting user scroll vs content growth
-private struct ScrollState: Equatable {
-    let isNearBottom: Bool
-    let offset: CGFloat
-}
-
 // MARK: - Chat View
 
 @available(iOS 26.0, *)
@@ -436,31 +428,33 @@ struct ChatView: View {
                 // Instead, we manually scroll to bottom on initial load and when keyboard appears.
                 .scrollDismissesKeyboard(.interactively)
                 .onScrollGeometryChange(for: ScrollState.self) { geometry in
-                    // Track both near-bottom status AND scroll offset to detect user scroll vs content growth
+                    // Track near-bottom status, scroll offset, AND content height
+                    // Content height is critical for detecting content growth vs user scroll
                     let distanceFromBottom = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
                     let isNearBottom = distanceFromBottom < 100
-                    return ScrollState(isNearBottom: isNearBottom, offset: geometry.contentOffset.y)
+                    return ScrollState(
+                        isNearBottom: isNearBottom,
+                        offset: geometry.contentOffset.y,
+                        contentHeight: geometry.contentSize.height
+                    )
                 } action: { oldState, newState in
-                    // Don't switch to reviewing mode during initial cascade
-                    guard initialLoadComplete && !viewModel.animationCoordinator.isCascading else { return }
+                    guard initialLoadComplete else { return }
 
-                    // Detect user actively scrolling up: offset DECREASES when scrolling toward top
-                    // Use threshold to avoid noise from minor layout adjustments
-                    let userScrolledUp = newState.offset < oldState.offset - 5
+                    let decision = ScrollGeometryHandler.processGeometryChange(
+                        oldState: oldState,
+                        newState: newState,
+                        isFollowingMode: scrollCoordinator.shouldAutoScroll,
+                        isCascading: viewModel.animationCoordinator.isCascading
+                    )
 
-                    if userScrolledUp {
-                        // User is actively scrolling up - switch to reviewing mode
+                    switch decision {
+                    case .noChange:
+                        break
+                    case .scrolledUp:
                         scrollCoordinator.userDidScroll(isNearBottom: false)
-                        return
+                    case .updateNearBottom(let isNear):
+                        scrollCoordinator.userDidScroll(isNearBottom: isNear)
                     }
-
-                    // During streaming in following mode, if not near bottom but user didn't scroll up,
-                    // this is content growing faster than auto-scroll. Don't switch to reviewing.
-                    if viewModel.isProcessing && scrollCoordinator.shouldAutoScroll && !newState.isNearBottom {
-                        return
-                    }
-
-                    scrollCoordinator.userDidScroll(isNearBottom: newState.isNearBottom)
                 }
                 // Scroll to bottom when keyboard appears (container height shrinks significantly)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -533,6 +527,22 @@ struct ChatView: View {
                     if wasLoading && !isLoading {
                         // Older messages are now visible via messageIsVisible() (cascade complete = all visible)
                         scrollCoordinator.didPrependHistory(using: proxy)
+                    }
+                }
+                // Scroll to bottom when keyboard appears (using reliable system notification)
+                // This is more robust than container height changes because safeAreaInset
+                // may not change containerSize when keyboard appears
+                .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
+                    guard initialLoadComplete else { return }
+                    guard !wasVisible && isVisible else { return }  // Only when keyboard appears
+                    guard scrollCoordinator.shouldAutoScroll else { return }  // Only in following mode
+
+                    // Small delay to let layout settle before scrolling
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(50))
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
                 }
             }
