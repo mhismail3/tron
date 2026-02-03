@@ -121,4 +121,105 @@ final class TokenFormatterTests: XCTestCase {
         XCTAssertEqual(usage.formattedCacheRead, "18.0k")
         XCTAssertEqual(usage.formattedCacheWrite, "2.0k")
     }
+
+    // MARK: - formatFullSession() Tests (includes cache tokens)
+
+    func test_formatFullSession_noCacheTokens_returnsBasePair() {
+        // No cache tokens - just returns the base pair
+        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 0, cacheWrite: 0)
+        XCTAssertEqual(result, "↓500 ↑63")
+    }
+
+    func test_formatFullSession_cacheReadOnly_includesCheckmark() {
+        // Cache read only - shows ✓ symbol
+        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 20300, cacheWrite: 0)
+        XCTAssertEqual(result, "↓500 ↑63 ✓20.3k")
+    }
+
+    func test_formatFullSession_cacheWriteOnly_includesLightningBolt() {
+        // Cache write only - shows ⚡ symbol
+        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 0, cacheWrite: 8000)
+        XCTAssertEqual(result, "↓500 ↑63 ⚡8.0k")
+    }
+
+    func test_formatFullSession_bothCacheReadAndWrite_includesBoth() {
+        // Both cache read and write
+        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 20000, cacheWrite: 8000)
+        XCTAssertEqual(result, "↓500 ↑63 ✓20.0k ⚡8.0k")
+    }
+
+    func test_formatFullSession_largeNumbers_formatsCorrectly() {
+        // Large numbers format correctly
+        let result = TokenFormatter.formatFullSession(input: 100000, output: 25000, cacheRead: 1500000, cacheWrite: 500000)
+        XCTAssertEqual(result, "↓100.0k ↑25.0k ✓1.5M ⚡500.0k")
+    }
+
+    func test_formatFullSession_nilValues_treatedAsZero() {
+        // nil values should be treated as 0 (no cache display)
+        let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: nil, cacheWrite: nil)
+        XCTAssertEqual(result, "↓500 ↑63")
+    }
+
+    // MARK: - SessionInfo.formattedTokens Tests
+
+    func test_sessionInfo_formattedTokens_includesCacheWhenPresent() {
+        // Create SessionInfo with cache tokens via JSON decoding
+        let json = """
+        {
+            "sessionId": "test_session",
+            "model": "claude-sonnet",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "messageCount": 2,
+            "inputTokens": 502,
+            "outputTokens": 63,
+            "cacheReadTokens": 20300,
+            "cacheCreationTokens": 0,
+            "cost": 0.03,
+            "isActive": true
+        }
+        """.data(using: .utf8)!
+
+        let session = try! JSONDecoder().decode(SessionInfo.self, from: json)
+        XCTAssertEqual(session.formattedTokens, "↓502 ↑63 ✓20.3k")
+    }
+
+    func test_sessionInfo_formattedTokens_noCacheWhenZero() {
+        let json = """
+        {
+            "sessionId": "test_session",
+            "model": "claude-sonnet",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "messageCount": 2,
+            "inputTokens": 502,
+            "outputTokens": 63,
+            "cacheReadTokens": 0,
+            "cacheCreationTokens": 0,
+            "cost": 0.03,
+            "isActive": true
+        }
+        """.data(using: .utf8)!
+
+        let session = try! JSONDecoder().decode(SessionInfo.self, from: json)
+        XCTAssertEqual(session.formattedTokens, "↓502 ↑63")
+    }
+
+    func test_sessionInfo_formattedTokens_showsBothCacheTypes() {
+        let json = """
+        {
+            "sessionId": "test_session",
+            "model": "claude-sonnet",
+            "createdAt": "2024-01-01T00:00:00Z",
+            "messageCount": 2,
+            "inputTokens": 502,
+            "outputTokens": 63,
+            "cacheReadTokens": 18000,
+            "cacheCreationTokens": 2000,
+            "cost": 0.03,
+            "isActive": true
+        }
+        """.data(using: .utf8)!
+
+        let session = try! JSONDecoder().decode(SessionInfo.self, from: json)
+        XCTAssertEqual(session.formattedTokens, "↓502 ↑63 ✓18.0k ⚡2.0k")
+    }
 }

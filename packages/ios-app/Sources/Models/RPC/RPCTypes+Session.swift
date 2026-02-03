@@ -69,9 +69,14 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         return createdAt
     }
 
-    /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
+    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ✓20.3k")
     var formattedTokens: String {
-        TokenFormatter.formatPair(input: inputTokens ?? 0, output: outputTokens ?? 0)
+        TokenFormatter.formatFullSession(
+            input: inputTokens ?? 0,
+            output: outputTokens ?? 0,
+            cacheRead: cacheReadTokens,
+            cacheWrite: cacheCreationTokens
+        )
     }
 
     /// Formatted cache tokens - separate read/creation for visibility

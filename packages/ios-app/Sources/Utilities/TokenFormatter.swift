@@ -43,6 +43,29 @@ enum TokenFormatter {
         return "↓\(inStr) ↑\(outStr)"
     }
 
+    /// Format full session tokens including cache: "↓1.2k ↑3.4k ✓20.3k ⚡8.0k"
+    /// - Parameters:
+    ///   - input: Input token count
+    ///   - output: Output token count
+    ///   - cacheRead: Cache read tokens (nil or 0 to hide)
+    ///   - cacheWrite: Cache write/creation tokens (nil or 0 to hide)
+    /// - Returns: Formatted string with arrows and optional cache indicators
+    static func formatFullSession(input: Int, output: Int, cacheRead: Int?, cacheWrite: Int?) -> String {
+        var result = formatPair(input: input, output: output)
+
+        // Add cache read if non-zero
+        if let read = cacheRead, read > 0 {
+            result += " ✓\(format(read, style: .compact))"
+        }
+
+        // Add cache write if non-zero
+        if let write = cacheWrite, write > 0 {
+            result += " ⚡\(format(write, style: .compact))"
+        }
+
+        return result
+    }
+
     // MARK: - Private
 
     private static func formatCompact(_ count: Int) -> String {
