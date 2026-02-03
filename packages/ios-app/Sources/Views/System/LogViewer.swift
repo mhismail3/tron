@@ -29,44 +29,25 @@ struct LogViewer: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close", systemImage: "xmark") {
+                        dismiss()
                     }
                 }
 
                 ToolbarItem(placement: .principal) {
                     Text("Logs")
                         .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            exportLogsToServer()
-                        } label: {
-                            if isExporting {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                                    .foregroundStyle(.tronEmerald)
-                            }
-                        }
-                        .disabled(isExporting)
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("Export", systemImage: "square.and.arrow.up") {
+                        exportLogsToServer()
+                    }
+                    .disabled(isExporting)
 
-                        Button {
-                            copyFilteredLogs()
-                        } label: {
-                            Image(systemName: "doc.on.doc")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                        }
+                    Button("Copy", systemImage: "doc.on.doc") {
+                        copyFilteredLogs()
                     }
                 }
             }
