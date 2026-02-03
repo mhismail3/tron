@@ -91,20 +91,6 @@ export type {
 // Re-export gateway components
 export * from './interface/gateway/index.js';
 
-// Re-export services (explicit to avoid type conflicts)
-export {
-  createSessionService,
-  createContextService,
-  type SessionService,
-  type SessionServiceDeps,
-  type EndSessionOptions,
-  type ContextService,
-  type ContextServiceDeps,
-  type CompactionOptions,
-  type TurnValidationOptions,
-  type ClearContextResult,
-  type OrchestrationService,
-} from './runtime/services/index.js';
 
 // Re-export orchestrator modules (explicit to avoid type conflicts)
 export {
@@ -113,12 +99,6 @@ export {
   TurnManager,
   createTurnManager,
   TurnContentTracker,
-  InterruptHandler,
-  createInterruptHandler,
-  CompactionHandler,
-  createCompactionHandler,
-  ContextClearHandler,
-  createContextClearHandler,
   SessionReconstructor,
   createSessionReconstructor,
   SessionContext,
@@ -148,11 +128,6 @@ export {
   type ToolResultBlock,
   type EndTurnResult,
   type NormalizedTokenUsage,
-  type InterruptContext,
-  type InterruptResult,
-  type CompactionContext,
-  type ContextClearContext,
-  type ClearReason,
   type ReconstructedState,
   type SessionContextConfig,
   type BrowserConfig,

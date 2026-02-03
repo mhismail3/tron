@@ -14,11 +14,6 @@
  *   - Builds message.assistant content blocks
  *   - Handles interrupted content for persistence
  *
- * - **Handlers**: Encapsulated special case handling
- *   - InterruptHandler: Interrupted session content
- *   - CompactionHandler: Context compaction events
- *   - ContextClearHandler: Context clearing events
- *
  * - **SessionReconstructor**: Session state reconstruction
  *   - Reconstructs turn count, interrupt status from events
  *   - Handles reset points (compaction, context clear)
@@ -102,24 +97,6 @@ export {
   createAgentEventHandler,
   type AgentEventHandlerConfig,
 } from './turn/index.js';
-
-// Handlers (Phase 3)
-export {
-  // Interrupt
-  InterruptHandler,
-  createInterruptHandler,
-  type InterruptContext,
-  type InterruptResult,
-  // Compaction
-  CompactionHandler,
-  createCompactionHandler,
-  type CompactionContext,
-  // Context Clear
-  ContextClearHandler,
-  createContextClearHandler,
-  type ContextClearContext,
-  type ClearReason,
-} from './handlers/index.js';
 
 // =============================================================================
 // Session Lifecycle (organized in session/ subfolder)

@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AgentEventHandler } from '../../turn/agent-event-handler.js';
+import { AgentEventHandler } from '../agent-event-handler.js';
 import type { SessionId } from '@infrastructure/events/types.js';
 import type { TronEvent } from '@core/types/events.js';
 
