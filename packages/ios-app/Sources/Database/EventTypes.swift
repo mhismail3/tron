@@ -524,9 +524,14 @@ struct CachedSession: Identifiable, Codable {
 
     var totalTokens: Int { inputTokens + outputTokens }
 
-    /// Formatted token counts (e.g., "↓1.2k ↑3.4k")
+    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ✓20.3k")
     var formattedTokens: String {
-        TokenFormatter.formatPair(input: inputTokens, output: outputTokens)
+        TokenFormatter.formatFullSession(
+            input: inputTokens,
+            output: outputTokens,
+            cacheRead: cacheReadTokens > 0 ? cacheReadTokens : nil,
+            cacheWrite: cacheCreationTokens > 0 ? cacheCreationTokens : nil
+        )
     }
 
     /// Formatted cache tokens - separate read/creation for visibility
