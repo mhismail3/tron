@@ -37,3 +37,18 @@ struct DeviceTokenUnregisterParams: Encodable {
 struct DeviceTokenUnregisterResult: Decodable {
     let success: Bool
 }
+
+// MARK: - Logs Methods
+
+/// Parameters for logs.export
+struct LogsExportParams: Encodable {
+    let content: String
+    let filename: String?
+}
+
+/// Result of logs.export
+struct LogsExportResult: Decodable {
+    let success: Bool
+    let path: String
+    let bytesWritten: Int
+}

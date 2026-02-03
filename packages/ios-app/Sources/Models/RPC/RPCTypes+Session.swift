@@ -71,12 +71,15 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
 
     /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ✓20.3k")
     var formattedTokens: String {
-        TokenFormatter.formatFullSession(
+        let result = TokenFormatter.formatFullSession(
             input: inputTokens ?? 0,
             output: outputTokens ?? 0,
             cacheRead: cacheReadTokens,
             cacheWrite: cacheCreationTokens
         )
+        // DEBUG: Log token values for session cards
+        logger.debug("[SESSION-TOKENS] \(sessionId.prefix(12)): in=\(inputTokens ?? 0) out=\(outputTokens ?? 0) cacheRead=\(cacheReadTokens ?? 0) cacheWrite=\(cacheCreationTokens ?? 0) -> \(result)", category: .session)
+        return result
     }
 
     /// Formatted cache tokens - separate read/creation for visibility

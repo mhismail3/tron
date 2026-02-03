@@ -338,4 +338,21 @@ final class MiscClient {
             logger.info("Device token unregistered", category: .notification)
         }
     }
+
+    // MARK: - Logs Methods
+
+    /// Export logs to server filesystem at $HOME/.tron/artifacts/ios-logs/
+    func exportLogs(content: String, filename: String? = nil) async throws -> LogsExportResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        let params = LogsExportParams(content: content, filename: filename)
+        let result: LogsExportResult = try await ws.send(
+            method: "logs.export",
+            params: params
+        )
+
+        logger.info("Logs exported to server: \(result.path) (\(result.bytesWritten) bytes)", category: .general)
+        return result
+    }
 }

@@ -292,6 +292,13 @@ final class WebSocketService {
         let duration = CFAbsoluteTimeGetCurrent() - startTime
         logger.logWebSocketMessage(direction: "← RECV", type: method, size: responseData.count, preview: String(data: responseData, encoding: .utf8))
 
+        // DEBUG: Log raw JSON for session.list to debug cache tokens
+        if method == "session.list" {
+            if let rawJson = String(data: responseData, encoding: .utf8) {
+                logger.debug("[SESSION-LIST-JSON] Raw response (first 2000 chars): \(String(rawJson.prefix(2000)))", category: .rpc)
+            }
+        }
+
         let decoder = JSONDecoder()
         do {
             let response = try decoder.decode(RPCResponse<R>.self, from: responseData)

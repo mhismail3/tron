@@ -4,7 +4,10 @@ import SwiftUI
 
 struct LogViewer: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dependencies) private var dependencies
     @State private var logs: [(Date, LogCategory, LogLevel, String)] = []
+    @State private var isExporting = false
+    @State private var exportResult: String?
     @State private var selectedLevel: LogLevel = .verbose
     @State private var selectedCategory: LogCategory?
     @State private var autoScroll = true
@@ -41,12 +44,29 @@ struct LogViewer: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        copyFilteredLogs()
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                    HStack(spacing: 16) {
+                        Button {
+                            exportLogsToServer()
+                        } label: {
+                            if isExporting {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                    .foregroundStyle(.tronEmerald)
+                            }
+                        }
+                        .disabled(isExporting)
+
+                        Button {
+                            copyFilteredLogs()
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                        }
                     }
                 }
             }
@@ -223,6 +243,46 @@ struct LogViewer: View {
         }.joined(separator: "\n")
 
         UIPasteboard.general.string = logText
+    }
+
+    private func exportLogsToServer() {
+        guard !isExporting else { return }
+
+        isExporting = true
+        exportResult = nil
+
+        Task {
+            defer { isExporting = false }
+
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss.SSS"
+
+            // Get ALL logs (not just filtered) for complete export
+            let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
+
+            let logText = allLogs.map { entry in
+                let timestamp = formatter.string(from: entry.0)
+                let category = entry.1.rawValue
+                let level = String(describing: entry.2).uppercased()
+                let message = entry.3
+                return "\(timestamp) [\(level)] [\(category)] \(message)"
+            }.joined(separator: "\n")
+
+            do {
+                guard let rpcClient = dependencies?.rpcClient else {
+                    logger.error("Cannot export logs - no RPC client available", category: .general)
+                    exportResult = "Error: Not connected"
+                    return
+                }
+
+                let result = try await rpcClient.misc.exportLogs(content: logText)
+                logger.info("Exported \(allLogs.count) log entries to server: \(result.path)", category: .general)
+                exportResult = "Exported to \(result.path)"
+            } catch {
+                logger.error("Failed to export logs to server: \(error.localizedDescription)", category: .general)
+                exportResult = "Error: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func colorForLevel(_ level: LogLevel) -> Color {

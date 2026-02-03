@@ -56,6 +56,11 @@ final class SessionClient {
             params: params
         )
 
+        // DEBUG: Log cache tokens from server response
+        for session in result.sessions {
+            logger.debug("[SESSION-LIST-RAW] \(session.sessionId.prefix(12)): cacheRead=\(session.cacheReadTokens ?? -1) cacheWrite=\(session.cacheCreationTokens ?? -1)", category: .session)
+        }
+
         return result.sessions
     }
 

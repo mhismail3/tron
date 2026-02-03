@@ -63,6 +63,7 @@ import { createVoiceNotesHandlers } from './handlers/voiceNotes.handler.js';
 import { createCanvasHandlers } from './handlers/canvas.handler.js';
 import { createTodoHandlers } from './handlers/todo.handler.js';
 import { getDeviceHandlers } from './handlers/device.handler.js';
+import { createLogsHandlers } from './handlers/logs.handler.js';
 
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
@@ -96,6 +97,7 @@ export class RpcHandler extends EventEmitter {
     this.registry.registerAll(createCanvasHandlers());
     this.registry.registerAll(createTodoHandlers());
     this.registry.registerAll(getDeviceHandlers());
+    this.registry.registerAll(createLogsHandlers());
 
     logger.debug('RPC handler initialized', {
       registeredMethods: this.registry.list(),
