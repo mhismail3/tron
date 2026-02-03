@@ -87,17 +87,15 @@ final class TurnLifecycleCoordinator {
         result: TurnEndResult,
         context: TurnLifecycleContext
     ) {
-        // Log both raw and normalized usage for debugging
-        let rawIn = result.tokenUsage?.inputTokens ?? 0
-        let rawOut = result.tokenUsage?.outputTokens ?? 0
-        let hasNormalized = result.normalizedUsage != nil
-        context.logInfo("Turn \(result.turnNumber) ended, tokens: raw_in=\(rawIn) raw_out=\(rawOut) hasNormalizedUsage=\(hasNormalized)")
+        // Log token record for debugging
+        let hasTokenRecord = result.tokenRecord != nil
+        context.logInfo("Turn \(result.turnNumber) ended, hasTokenRecord=\(hasTokenRecord)")
 
-        // Log normalized values if available (server's pre-calculated values)
-        if let normalized = result.normalizedUsage {
-            context.logDebug("NormalizedUsage: newInput=\(normalized.newInputTokens) contextWindow=\(normalized.contextWindowTokens) cacheRead=\(normalized.cacheReadTokens)")
+        // Log token values if available
+        if let record = result.tokenRecord {
+            context.logDebug("TokenRecord: newInput=\(record.computed.newInputTokens) contextWindow=\(record.computed.contextWindowTokens) rawIn=\(record.source.rawInputTokens) rawOut=\(record.source.rawOutputTokens)")
         } else {
-            context.logDebug("NormalizedUsage not available, will use fallback local calculation")
+            context.logError("[TOKEN-FLOW] iOS: turn_end MISSING tokenRecord (turn=\(result.turnNumber))")
         }
 
         // Persist thinking content for this turn (before clearing state)
@@ -142,24 +140,18 @@ final class TurnLifecycleCoordinator {
 
         // Update the target message with metadata
         if let index = targetIndex {
-            context.messages[index].tokenUsage = result.tokenUsage
+            context.messages[index].tokenRecord = result.tokenRecord
             context.messages[index].model = context.currentModel
             context.messages[index].latencyMs = result.durationMs
             context.messages[index].stopReason = result.stopReason
             context.messages[index].turnNumber = result.turnNumber
 
-            // Use server-provided normalizedUsage for incremental tokens (preferred)
-            if let normalized = result.normalizedUsage {
-                context.messages[index].incrementalTokens = TokenUsage(
-                    inputTokens: normalized.newInputTokens,
-                    outputTokens: normalized.outputTokens,
-                    cacheReadTokens: normalized.cacheReadTokens,
-                    cacheCreationTokens: normalized.cacheCreationTokens
-                )
+            // Log token record assignment
+            if let record = result.tokenRecord {
                 context.logDebug("[TOKEN-FLOW] iOS: stream.turn_end received")
-                context.logDebug("  turn=\(result.turnNumber), newInput=\(normalized.newInputTokens), contextWindow=\(normalized.contextWindowTokens), output=\(normalized.outputTokens)")
+                context.logDebug("  turn=\(result.turnNumber), newInput=\(record.computed.newInputTokens), contextWindow=\(record.computed.contextWindowTokens), output=\(record.source.rawOutputTokens)")
             } else {
-                context.logError("[TOKEN-FLOW] iOS: stream.turn_end MISSING normalizedUsage (turn=\(result.turnNumber))")
+                context.logError("[TOKEN-FLOW] iOS: stream.turn_end MISSING tokenRecord (turn=\(result.turnNumber))")
             }
         } else {
             context.logWarning("Could not find message to update with turn metadata (turn=\(result.turnNumber))")
@@ -192,36 +184,36 @@ final class TurnLifecycleCoordinator {
             context.logDebug("Updated context window from turn_end: \(contextLimit)")
         }
 
-        // Server MUST provide normalizedUsage for context tracking
-        if let normalized = result.normalizedUsage {
-            context.updateContextStateFromNormalizedUsage(normalized)
+        // Server MUST provide tokenRecord for context tracking
+        if let record = result.tokenRecord {
+            context.updateContextStateFromTokenRecord(record)
             context.logDebug("[TOKEN-FLOW] iOS: Context state updated from stream.turn_end")
         } else {
-            context.logError("[TOKEN-FLOW] iOS: Context tracking stale - no normalizedUsage on turn_end")
+            context.logError("[TOKEN-FLOW] iOS: Context tracking stale - no tokenRecord on turn_end")
         }
 
         // Update token tracking and accumulation
-        if let usage = result.tokenUsage {
-            let contextSize = result.normalizedUsage?.contextWindowTokens ?? 0
+        if let record = result.tokenRecord {
+            let contextSize = record.computed.contextWindowTokens
             context.logInfo("LIVE handleTurnEnd: contextSize=\(contextSize)")
 
             // Accumulate ALL tokens for billing tracking
             context.accumulateTokens(
-                input: usage.inputTokens,
-                output: usage.outputTokens,
-                cacheRead: usage.cacheReadTokens ?? 0,
-                cacheCreation: usage.cacheCreationTokens ?? 0,
+                input: record.source.rawInputTokens,
+                output: record.source.rawOutputTokens,
+                cacheRead: record.source.rawCacheReadTokens,
+                cacheCreation: record.source.rawCacheCreationTokens,
                 cost: result.cost ?? 0
             )
 
             // Update session tokens in database
             do {
                 try context.updateSessionTokens(
-                    inputTokens: usage.inputTokens,
-                    outputTokens: usage.outputTokens,
+                    inputTokens: record.source.rawInputTokens,
+                    outputTokens: record.source.rawOutputTokens,
                     lastTurnInputTokens: contextSize,
-                    cacheReadTokens: usage.cacheReadTokens ?? 0,
-                    cacheCreationTokens: usage.cacheCreationTokens ?? 0,
+                    cacheReadTokens: record.source.rawCacheReadTokens,
+                    cacheCreationTokens: record.source.rawCacheCreationTokens,
                     cost: result.cost ?? 0
                 )
             } catch {

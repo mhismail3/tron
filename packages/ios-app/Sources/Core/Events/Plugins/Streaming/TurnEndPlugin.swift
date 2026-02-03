@@ -17,14 +17,13 @@ enum TurnEndPlugin: EventPlugin {
             let turn: Int?
             let turnNumber: Int?
             let duration: Int?
-            let tokenUsage: TokenUsage?
-            let normalizedUsage: NormalizedTokenUsage?
+            let tokenRecord: TokenRecord?
             let stopReason: String?
             let cost: Double?
             let contextLimit: Int?
 
             enum CodingKeys: String, CodingKey {
-                case turn, turnNumber, duration, tokenUsage, normalizedUsage, stopReason, cost, contextLimit
+                case turn, turnNumber, duration, tokenRecord, stopReason, cost, contextLimit
             }
 
             init(from decoder: Decoder) throws {
@@ -32,8 +31,7 @@ enum TurnEndPlugin: EventPlugin {
                 turn = try container.decodeIfPresent(Int.self, forKey: .turn)
                 turnNumber = try container.decodeIfPresent(Int.self, forKey: .turnNumber)
                 duration = try container.decodeIfPresent(Int.self, forKey: .duration)
-                tokenUsage = try container.decodeIfPresent(TokenUsage.self, forKey: .tokenUsage)
-                normalizedUsage = try container.decodeIfPresent(NormalizedTokenUsage.self, forKey: .normalizedUsage)
+                tokenRecord = try container.decodeIfPresent(TokenRecord.self, forKey: .tokenRecord)
                 stopReason = try container.decodeIfPresent(String.self, forKey: .stopReason)
                 contextLimit = try container.decodeIfPresent(Int.self, forKey: .contextLimit)
 
@@ -58,8 +56,7 @@ enum TurnEndPlugin: EventPlugin {
     struct Result: EventResult {
         let turnNumber: Int
         let duration: Int?
-        let tokenUsage: TokenUsage?
-        let normalizedUsage: NormalizedTokenUsage?
+        let tokenRecord: TokenRecord?
         let stopReason: String?
         let cost: Double?
         let contextLimit: Int?
@@ -72,8 +69,7 @@ enum TurnEndPlugin: EventPlugin {
             return Result(
                 turnNumber: 1,
                 duration: nil,
-                tokenUsage: nil,
-                normalizedUsage: nil,
+                tokenRecord: nil,
                 stopReason: nil,
                 cost: nil,
                 contextLimit: nil
@@ -82,8 +78,7 @@ enum TurnEndPlugin: EventPlugin {
         return Result(
             turnNumber: data.number,
             duration: data.duration,
-            tokenUsage: data.tokenUsage,
-            normalizedUsage: data.normalizedUsage,
+            tokenRecord: data.tokenRecord,
             stopReason: data.stopReason,
             cost: data.cost,
             contextLimit: data.contextLimit

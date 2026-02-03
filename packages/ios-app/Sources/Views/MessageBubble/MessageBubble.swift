@@ -21,7 +21,7 @@ struct MessageBubble: View {
 
     /// Check if we have any metadata to display
     private var hasMetadata: Bool {
-        message.tokenUsage != nil ||
+        message.tokenRecord != nil ||
         message.shortModelName != nil ||
         message.formattedLatency != nil ||
         message.hasThinking == true
@@ -75,15 +75,14 @@ struct MessageBubble: View {
             // Show enriched metadata badge for assistant messages with metadata
             if !isUserMessage && hasMetadata {
                 MessageMetadataBadge(
-                    usage: message.tokenUsage,
-                    incrementalUsage: message.incrementalTokens,
+                    tokenRecord: message.tokenRecord,
                     model: message.shortModelName,
                     latency: message.formattedLatency,
                     hasThinking: message.hasThinking
                 )
-            } else if let usage = message.tokenUsage {
+            } else if let record = message.tokenRecord {
                 // Fallback to simple token badge for user messages
-                TokenBadge(usage: usage)
+                TokenBadge(record: record)
             }
         }
         .frame(maxWidth: .infinity, alignment: isUserMessage ? .trailing : .leading)

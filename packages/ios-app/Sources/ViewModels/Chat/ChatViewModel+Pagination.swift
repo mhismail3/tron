@@ -185,7 +185,7 @@ extension ChatViewModel {
             //
             // The reconstructed state comes from parsing events synced from the server.
             // This is the ONLY source of truth for token values:
-            // - state.lastTurnInputTokens = from stream.turn_end events' normalizedUsage.contextWindowTokens
+            // - state.lastTurnInputTokens = from stream.turn_end events' tokenRecord.computed.contextWindowTokens
             // - state.totalTokenUsage = accumulated from all turn_end events
             //
             // The iOS DB session table is ONLY for dashboard display (which sessions exist).

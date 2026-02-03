@@ -198,57 +198,57 @@ final class ChatEventHandlerTests: XCTestCase {
     // MARK: - Turn End Tests
 
     func testTurnEndPassesThroughServerValues() async throws {
-        // Given: a turn end plugin result with token usage and normalizedUsage
-        let tokenUsage = TokenUsage(
-            inputTokens: 1000,
-            outputTokens: 500,
-            cacheReadTokens: 100,
-            cacheCreationTokens: 50
-        )
-        let normalizedUsage = NormalizedTokenUsage(
-            newInputTokens: 500,
-            outputTokens: 500,
-            contextWindowTokens: 8500,
-            rawInputTokens: 1000,
-            cacheReadTokens: 8000,
-            cacheCreationTokens: 50
+        // Given: a turn end plugin result with tokenRecord
+        let tokenRecord = TokenRecord(
+            source: TokenSource(
+                provider: "anthropic",
+                timestamp: ISO8601DateFormatter().string(from: Date()),
+                rawInputTokens: 1000,
+                rawOutputTokens: 500,
+                rawCacheReadTokens: 100,
+                rawCacheCreationTokens: 50
+            ),
+            computed: ComputedTokens(
+                contextWindowTokens: 8500,
+                newInputTokens: 500,
+                previousContextBaseline: 8000,
+                calculationMethod: "anthropic_cache_aware"
+            ),
+            meta: TokenMeta(
+                turn: 1,
+                sessionId: "test-session",
+                extractedAt: ISO8601DateFormatter().string(from: Date()),
+                normalizedAt: ISO8601DateFormatter().string(from: Date())
+            )
         )
         let pluginResult = TurnEndPlugin.Result(
             turnNumber: 1,
             duration: 1500,
-            tokenUsage: tokenUsage,
-            normalizedUsage: normalizedUsage,
+            tokenRecord: tokenRecord,
             stopReason: "end_turn",
             cost: 0.05,
             contextLimit: 200000
         )
 
-        // When: handling turn end (no previousInputTokens parameter - uses server values)
+        // When: handling turn end
         let result = handler.handleTurnEnd(pluginResult)
 
         // Then: server values should be passed through (no local calculation)
         XCTAssertEqual(result.turnNumber, 1)
-        XCTAssertEqual(result.tokenUsage?.inputTokens, 1000)
-        XCTAssertEqual(result.tokenUsage?.outputTokens, 500)
-        XCTAssertEqual(result.normalizedUsage?.newInputTokens, 500)
-        XCTAssertEqual(result.normalizedUsage?.contextWindowTokens, 8500)
+        XCTAssertEqual(result.tokenRecord?.source.rawInputTokens, 1000)
+        XCTAssertEqual(result.tokenRecord?.source.rawOutputTokens, 500)
+        XCTAssertEqual(result.tokenRecord?.computed.newInputTokens, 500)
+        XCTAssertEqual(result.tokenRecord?.computed.contextWindowTokens, 8500)
         XCTAssertEqual(result.contextLimit, 200000)
         XCTAssertEqual(result.cost, 0.05)
     }
 
-    func testTurnEndWithoutNormalizedUsage() async throws {
-        // Given: a turn end plugin result without normalizedUsage (backward compatibility)
-        let tokenUsage = TokenUsage(
-            inputTokens: 1500,
-            outputTokens: 200,
-            cacheReadTokens: nil,
-            cacheCreationTokens: nil
-        )
+    func testTurnEndWithoutTokenRecord() async throws {
+        // Given: a turn end plugin result without tokenRecord
         let pluginResult = TurnEndPlugin.Result(
             turnNumber: 2,
             duration: nil,
-            tokenUsage: tokenUsage,
-            normalizedUsage: nil,
+            tokenRecord: nil,
             stopReason: "end_turn",
             cost: nil,
             contextLimit: nil
@@ -257,29 +257,30 @@ final class ChatEventHandlerTests: XCTestCase {
         // When: handling turn end
         let result = handler.handleTurnEnd(pluginResult)
 
-        // Then: normalizedUsage should be nil, tokenUsage should be present
-        XCTAssertNil(result.normalizedUsage)
-        XCTAssertEqual(result.tokenUsage?.inputTokens, 1500)
-        XCTAssertEqual(result.tokenUsage?.outputTokens, 200)
+        // Then: tokenRecord should be nil
+        XCTAssertNil(result.tokenRecord)
+        XCTAssertEqual(result.turnNumber, 2)
     }
 
-    func testTurnEndDoesNotRequirePreviousInputTokens() async throws {
-        // Verify the method signature no longer requires previousInputTokens
+    func testTurnEndPassesThroughAllValues() async throws {
+        // Verify all values are passed through correctly
         let pluginResult = TurnEndPlugin.Result(
             turnNumber: 1,
-            duration: nil,
-            tokenUsage: TokenUsage(inputTokens: 500, outputTokens: 100, cacheReadTokens: nil, cacheCreationTokens: nil),
-            normalizedUsage: nil,
+            duration: 1500,
+            tokenRecord: nil,
             stopReason: "end_turn",
-            cost: nil,
-            contextLimit: nil
+            cost: 0.05,
+            contextLimit: 200000
         )
 
-        // This should compile without previousInputTokens parameter
+        // This should compile and pass through all values
         let result = handler.handleTurnEnd(pluginResult)
 
         XCTAssertNotNil(result)
         XCTAssertEqual(result.turnNumber, 1)
+        XCTAssertEqual(result.stopReason, "end_turn")
+        XCTAssertEqual(result.cost, 0.05)
+        XCTAssertEqual(result.contextLimit, 200000)
     }
 
     // MARK: - Thinking Reset Tests

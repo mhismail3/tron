@@ -15,7 +15,7 @@ import type { TronEvent } from '@core/types/index.js';
 import type { EventType } from '@infrastructure/events/index.js';
 import { normalizeContentBlocks } from '@core/utils/index.js';
 import type { EventContext } from '../event-context.js';
-import type { NormalizedTokenUsage } from '../turn-content-tracker.js';
+import type { TokenRecord } from '@infrastructure/tokens/index.js';
 
 const logger = createLogger('turn-event-handler');
 
@@ -86,8 +86,8 @@ export class TurnEventHandler {
       };
     };
 
-    // Track turnResult for normalizedUsage access
-    let turnResult: { turn: number; content: unknown[]; normalizedUsage?: unknown } | undefined;
+    // Track turnResult for tokenRecord access
+    let turnResult: { turn: number; content: unknown[]; tokenRecord?: TokenRecord } | undefined;
 
     // CREATE MESSAGE.ASSISTANT FOR THIS TURN - BUT ONLY IF NOT ALREADY FLUSHED
     // Linear event ordering means content with tool_use is flushed at first tool_execution_start.
@@ -100,16 +100,16 @@ export class TurnEventHandler {
 
       // Use SessionContext for turn end
       // Token usage was already set via setResponseTokenUsage when response_complete fired
-      // This returns built content blocks, clears per-turn tracking, and includes normalizedUsage
+      // This returns built content blocks, clears per-turn tracking, and includes tokenRecord
       const turnStartTime = ctx.active.sessionContext!.getTurnStartTime();
       turnResult = ctx.active.sessionContext!.endTurn();
 
       // Sync API token count to ContextManager for consistent RPC responses
       // This ensures context sheet and progress bar show the same value
-      const normalizedUsage = turnResult?.normalizedUsage as NormalizedTokenUsage | undefined;
-      if (normalizedUsage?.contextWindowTokens !== undefined) {
+      const tokenRecord = turnResult?.tokenRecord;
+      if (tokenRecord?.computed.contextWindowTokens !== undefined) {
         ctx.active.agent.getContextManager().setApiContextTokens(
-          normalizedUsage.contextWindowTokens
+          tokenRecord.computed.contextWindowTokens
         );
       }
 
@@ -132,11 +132,11 @@ export class TurnEventHandler {
       turn: turnEndEvent.turn,
       duration: turnEndEvent.duration,
       tokenUsage: turnEndEvent.tokenUsage,
-      normalizedUsage: turnResult?.normalizedUsage,
+      tokenRecord: turnResult?.tokenRecord,
       cost: turnCost,
     });
 
-    // Store turn end event with token usage, normalized usage, and cost (linearized)
+    // Store turn end event with token record and cost (linearized)
     this.persistStreamTurnEnd(ctx, turnEndEvent, turnResult, turnCost);
   }
 
@@ -160,27 +160,29 @@ export class TurnEventHandler {
       };
     };
 
-    // Set token usage immediately - this computes normalizedUsage
+    // Set token usage immediately - this creates a TokenRecord
     // before any tool execution starts
     if (responseEvent.tokenUsage) {
-      ctx.active.sessionContext.setResponseTokenUsage(responseEvent.tokenUsage);
+      ctx.active.sessionContext.setResponseTokenUsage(responseEvent.tokenUsage, ctx.sessionId);
 
-      const normalizedUsage = ctx.active.sessionContext.getLastNormalizedUsage();
+      const tokenRecord = ctx.active.sessionContext.getLastTokenRecord();
 
       logger.info('[TOKEN-FLOW] 2. handleResponseComplete - setResponseTokenUsage called', {
         sessionId: ctx.sessionId,
         turn: responseEvent.turn,
-        rawTokenUsage: {
-          inputTokens: responseEvent.tokenUsage.inputTokens,
-          outputTokens: responseEvent.tokenUsage.outputTokens,
-          cacheRead: responseEvent.tokenUsage.cacheReadTokens ?? 0,
-          cacheCreation: responseEvent.tokenUsage.cacheCreationTokens ?? 0,
-        },
-        normalizedUsage: normalizedUsage
+        source: tokenRecord
           ? {
-              newInputTokens: normalizedUsage.newInputTokens,
-              contextWindowTokens: normalizedUsage.contextWindowTokens,
-              outputTokens: normalizedUsage.outputTokens,
+              rawInputTokens: tokenRecord.source.rawInputTokens,
+              rawOutputTokens: tokenRecord.source.rawOutputTokens,
+              rawCacheReadTokens: tokenRecord.source.rawCacheReadTokens,
+              rawCacheCreationTokens: tokenRecord.source.rawCacheCreationTokens,
+            }
+          : 'NOT_COMPUTED',
+        computed: tokenRecord
+          ? {
+              newInputTokens: tokenRecord.computed.newInputTokens,
+              contextWindowTokens: tokenRecord.computed.contextWindowTokens,
+              calculationMethod: tokenRecord.computed.calculationMethod,
             }
           : 'NOT_COMPUTED',
       });
@@ -201,7 +203,7 @@ export class TurnEventHandler {
    */
   private createMessageAssistantEvent(
     ctx: EventContext,
-    turnResult: { turn: number; content: unknown[]; normalizedUsage?: unknown; tokenUsage?: unknown },
+    turnResult: { turn: number; content: unknown[]; tokenRecord?: TokenRecord; tokenUsage?: unknown },
     turnStartTime: number | undefined,
     eventDuration: number | undefined
   ): void {
@@ -226,7 +228,7 @@ export class TurnEventHandler {
       {
         content: normalizedContent,
         tokenUsage: turnResult.tokenUsage,
-        normalizedUsage: turnResult.normalizedUsage,
+        tokenRecord: turnResult.tokenRecord,
         turn: turnResult.turn,
         model: ctx.active!.model,
         stopReason: 'end_turn',
@@ -235,25 +237,23 @@ export class TurnEventHandler {
       }
     );
 
-    const tokenUsageForLog = turnResult.tokenUsage as { inputTokens: number; outputTokens: number; cacheReadTokens?: number } | undefined;
-    const normalizedForLog = turnResult.normalizedUsage as NormalizedTokenUsage | undefined;
+    const tokenRecord = turnResult.tokenRecord;
 
     logger.info('[TOKEN-FLOW] 3b. Turn-end message.assistant created (no tools case)', {
       sessionId: ctx.sessionId,
       turn: turnResult.turn,
       contentBlocks: normalizedContent.length,
-      tokenUsage: tokenUsageForLog
+      tokenRecord: tokenRecord
         ? {
-            inputTokens: tokenUsageForLog.inputTokens,
-            outputTokens: tokenUsageForLog.outputTokens,
-            cacheRead: tokenUsageForLog.cacheReadTokens ?? 0,
-          }
-        : 'MISSING',
-      normalizedUsage: normalizedForLog
-        ? {
-            newInputTokens: normalizedForLog.newInputTokens,
-            contextWindowTokens: normalizedForLog.contextWindowTokens,
-            outputTokens: normalizedForLog.outputTokens,
+            source: {
+              rawInputTokens: tokenRecord.source.rawInputTokens,
+              rawOutputTokens: tokenRecord.source.rawOutputTokens,
+              rawCacheReadTokens: tokenRecord.source.rawCacheReadTokens,
+            },
+            computed: {
+              newInputTokens: tokenRecord.computed.newInputTokens,
+              contextWindowTokens: tokenRecord.computed.contextWindowTokens,
+            },
           }
         : 'MISSING',
       latency: turnLatency,
@@ -294,31 +294,30 @@ export class TurnEventHandler {
   }
 
   /**
-   * Persist stream.turn_end event with token and cost data.
+   * Persist stream.turn_end event with token record and cost data.
    */
   private persistStreamTurnEnd(
     ctx: EventContext,
     turnEndEvent: { turn?: number; tokenUsage?: { inputTokens: number; outputTokens: number; cacheReadTokens?: number } },
-    turnResult: { normalizedUsage?: unknown } | undefined,
+    turnResult: { tokenRecord?: TokenRecord } | undefined,
     turnCost: number | undefined
   ): void {
-    const normalizedUsage = turnResult?.normalizedUsage as NormalizedTokenUsage | undefined;
+    const tokenRecord = turnResult?.tokenRecord;
 
     logger.info('[TOKEN-FLOW] 4. stream.turn_end persisted', {
       sessionId: ctx.sessionId,
       turn: turnEndEvent.turn,
-      tokenUsage: turnEndEvent.tokenUsage
+      tokenRecord: tokenRecord
         ? {
-            inputTokens: turnEndEvent.tokenUsage.inputTokens,
-            outputTokens: turnEndEvent.tokenUsage.outputTokens,
-            cacheRead: turnEndEvent.tokenUsage.cacheReadTokens ?? 0,
-          }
-        : 'MISSING',
-      normalizedUsage: normalizedUsage
-        ? {
-            newInputTokens: normalizedUsage.newInputTokens,
-            contextWindowTokens: normalizedUsage.contextWindowTokens,
-            outputTokens: normalizedUsage.outputTokens,
+            source: {
+              rawInputTokens: tokenRecord.source.rawInputTokens,
+              rawOutputTokens: tokenRecord.source.rawOutputTokens,
+              rawCacheReadTokens: tokenRecord.source.rawCacheReadTokens,
+            },
+            computed: {
+              newInputTokens: tokenRecord.computed.newInputTokens,
+              contextWindowTokens: tokenRecord.computed.contextWindowTokens,
+            },
           }
         : 'MISSING',
       cost: turnCost,
@@ -327,7 +326,7 @@ export class TurnEventHandler {
     ctx.persist('stream.turn_end' as EventType, {
       turn: turnEndEvent.turn,
       tokenUsage: turnEndEvent.tokenUsage ?? { inputTokens: 0, outputTokens: 0 },
-      normalizedUsage: turnResult?.normalizedUsage,
+      tokenRecord: turnResult?.tokenRecord,
       cost: turnCost,
     });
   }

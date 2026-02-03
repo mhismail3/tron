@@ -644,7 +644,7 @@ final class ChatViewModel: ChatEventContext {
                     // - contextLimit: Maximum tokens for the model (e.g., 200k)
                     // - currentTokens: Current ESTIMATED context (system prompt + tools + messages)
                     //
-                    // CRITICAL: currentTokens is NOT the same as normalizedUsage.contextWindowTokens!
+                    // CRITICAL: currentTokens is NOT the same as tokenRecord.computed.contextWindowTokens!
                     // - contextWindowTokens (stored in turn_end events) = actual tokens sent to LLM
                     // - currentTokens (from getSnapshot) = current context estimate
                     //

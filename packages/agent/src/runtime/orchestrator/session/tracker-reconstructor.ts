@@ -121,10 +121,10 @@ export class TrackerReconstructor {
       const event = events[i];
       if (event?.type === 'stream.turn_end') {
         const payload = event.payload as {
-          normalizedUsage?: { contextWindowTokens?: number };
+          tokenRecord?: { computed?: { contextWindowTokens?: number } };
         };
-        if (payload?.normalizedUsage?.contextWindowTokens !== undefined) {
-          return payload.normalizedUsage.contextWindowTokens;
+        if (payload?.tokenRecord?.computed?.contextWindowTokens !== undefined) {
+          return payload.tokenRecord.computed.contextWindowTokens;
         }
       }
     }

@@ -8,8 +8,8 @@
  * ## Architecture Overview
  *
  * 1. response_complete event fires immediately after LLM streaming completes (before tools)
- * 2. normalizedUsage is computed immediately when response_complete is received
- * 3. message.assistant events ALWAYS include tokenUsage and normalizedUsage
+ * 2. TokenRecord is computed immediately when response_complete is received
+ * 3. message.assistant events ALWAYS include tokenUsage and tokenRecord
  * 4. iOS can read token data directly - no correlation with stream.turn_end needed
  *
  * ## Test Coverage
@@ -22,10 +22,28 @@
  * - Session reconstruction without fallbacks
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { TurnContentTracker } from '../turn/turn-content-tracker.js';
-import { normalizeTokenUsage } from '@llm/providers/token-normalizer.js';
+import { normalizeTokens, type TokenSource } from '@infrastructure/tokens/index.js';
 import type { ProviderType } from '@core/types/messages.js';
+
+// Helper to create a TokenSource for normalizeTokens
+function createTokenSource(
+  provider: ProviderType,
+  inputTokens: number,
+  outputTokens: number,
+  cacheReadTokens = 0,
+  cacheCreationTokens = 0
+): TokenSource {
+  return {
+    provider,
+    timestamp: new Date().toISOString(),
+    rawInputTokens: inputTokens,
+    rawOutputTokens: outputTokens,
+    rawCacheReadTokens: cacheReadTokens,
+    rawCacheCreationTokens: cacheCreationTokens,
+  };
+}
 
 describe('Token Usage Architecture', () => {
   describe('TurnContentTracker - Early Token Capture', () => {
@@ -35,26 +53,26 @@ describe('Token Usage Architecture', () => {
       tracker = new TurnContentTracker();
     });
 
-    describe('setResponseTokenUsage (new method)', () => {
-      it('should compute normalizedUsage immediately when token usage is set', () => {
+    describe('setResponseTokenUsage (captures tokens early)', () => {
+      it('should compute TokenRecord immediately when token usage is set', () => {
         tracker.onAgentStart();
         tracker.onTurnStart(1);
 
         // Simulate response_complete: set token usage BEFORE tools execute
-        // Note: cacheCreationTokens is a billing indicator, NOT additional context
+        // cacheCreationTokens ARE part of context (mutually exclusive with input/cacheRead)
         tracker.setResponseTokenUsage({
           inputTokens: 500,
           outputTokens: 100,
-          cacheCreationTokens: 8000, // Being written to cache, but not adding to context
+          cacheCreationTokens: 8000, // Being written to cache AND sent to model
         });
 
-        // normalizedUsage should be available immediately
-        const normalized = tracker.getLastNormalizedUsage();
-        expect(normalized).toBeDefined();
-        // contextWindowTokens = inputTokens + cacheRead (NOT + cacheCreate)
-        expect(normalized?.newInputTokens).toBe(500); // First turn: all context is new
-        expect(normalized?.contextWindowTokens).toBe(500); // Only inputTokens, no cache read yet
-        expect(normalized?.outputTokens).toBe(100);
+        // TokenRecord should be available immediately
+        const tokenRecord = tracker.getLastTokenRecord();
+        expect(tokenRecord).toBeDefined();
+        // contextWindowTokens = inputTokens + cacheRead + cacheCreate (all mutually exclusive)
+        expect(tokenRecord?.computed.newInputTokens).toBe(8500); // First turn: 500 + 8000
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(8500); // input + cacheCreate
+        expect(tokenRecord?.source.rawOutputTokens).toBe(100);
       });
 
       it('should make token data available for pre-tool flush', () => {
@@ -76,40 +94,40 @@ describe('Token Usage Architecture', () => {
 
         // Token usage should be available for the message.assistant event
         const tokenUsage = tracker.getLastTurnTokenUsage();
-        const normalizedUsage = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
 
         expect(tokenUsage).toBeDefined();
         expect(tokenUsage?.inputTokens).toBe(604);
-        expect(normalizedUsage).toBeDefined();
-        expect(normalizedUsage?.newInputTokens).toBe(17936); // 604 + 17332 (first turn)
-        expect(normalizedUsage?.contextWindowTokens).toBe(17936);
+        expect(tokenRecord).toBeDefined();
+        expect(tokenRecord?.computed.newInputTokens).toBe(17936); // 604 + 17332 (first turn)
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(17936);
       });
 
       it('should update baseline for subsequent turns', () => {
         tracker.onAgentStart();
 
-        // Turn 1: cacheCreation is just billing info, not additional context
+        // Turn 1: cacheCreation is part of context (being written to cache AND sent to model)
         tracker.onTurnStart(1);
         tracker.setResponseTokenUsage({
           inputTokens: 500,
           outputTokens: 100,
-          cacheCreationTokens: 8000, // Being cached for future reads, but context is just 500
+          cacheCreationTokens: 8000, // Writing to cache AND part of context
         });
         tracker.onTurnEnd(); // This should NOT re-compute (already done)
 
-        // Turn 2: Now reading from cache
+        // Turn 2: Now reading from cache (same content, now served from cache)
         tracker.onTurnStart(2);
         tracker.setResponseTokenUsage({
           inputTokens: 604,
           outputTokens: 50,
-          cacheReadTokens: 8000, // Cache is now being READ (part of context)
+          cacheReadTokens: 8000, // Cache is now being READ (same tokens as before)
         });
 
-        const normalized = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
         // contextWindowTokens = 604 + 8000 = 8604
-        // Previous was 500 (just inputTokens, cache wasn't read yet)
-        expect(normalized?.newInputTokens).toBe(8104); // 8604 - 500
-        expect(normalized?.contextWindowTokens).toBe(8604); // 604 + 8000
+        // Previous was 8500 (500 input + 8000 cacheCreation)
+        expect(tokenRecord?.computed.newInputTokens).toBe(104); // 8604 - 8500 (small delta)
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(8604); // 604 + 8000
       });
     });
 
@@ -129,12 +147,12 @@ describe('Token Usage Architecture', () => {
 
         // Get the data that would go on message.assistant
         const tokenUsage = tracker.getLastTurnTokenUsage();
-        const normalizedUsage = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
 
         expect(tokenUsage).toBeDefined();
-        expect(normalizedUsage).toBeDefined();
+        expect(tokenRecord).toBeDefined();
         expect(tokenUsage?.inputTokens).toBe(500);
-        expect(normalizedUsage?.newInputTokens).toBe(500);
+        expect(tokenRecord?.computed.newInputTokens).toBe(500);
       });
 
       it('should include token data on message.assistant for TOOL turns', () => {
@@ -161,17 +179,17 @@ describe('Token Usage Architecture', () => {
 
         // The token data should be available to include on the message.assistant event
         const tokenUsage = tracker.getLastTurnTokenUsage();
-        const normalizedUsage = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
 
         expect(flushed).not.toBeNull();
         expect(tokenUsage).toBeDefined();
-        expect(normalizedUsage).toBeDefined();
+        expect(tokenRecord).toBeDefined();
 
         // These values should be correct for Anthropic
         expect(tokenUsage?.inputTokens).toBe(604);
         expect(tokenUsage?.cacheReadTokens).toBe(17332);
-        expect(normalizedUsage?.contextWindowTokens).toBe(17936); // 604 + 17332
-        expect(normalizedUsage?.newInputTokens).toBe(17936); // First turn
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(17936); // 604 + 17332
+        expect(tokenRecord?.computed.newInputTokens).toBe(17936); // First turn
       });
     });
 
@@ -182,16 +200,16 @@ describe('Token Usage Architecture', () => {
         tracker.onTurnStart(1);
 
         tracker.setResponseTokenUsage({
-          inputTokens: 502,    // Non-cached only
+          inputTokens: 502, // Non-cached only
           outputTokens: 53,
-          cacheReadTokens: 17332,  // Cached system prompt
+          cacheReadTokens: 17332, // Cached system prompt
         });
 
-        const normalized = tracker.getLastNormalizedUsage();
-        // contextWindow = inputTokens + cacheRead + cacheCreate
-        expect(normalized?.contextWindowTokens).toBe(17834); // 502 + 17332
-        expect(normalized?.rawInputTokens).toBe(502);
-        expect(normalized?.cacheReadTokens).toBe(17332);
+        const tokenRecord = tracker.getLastTokenRecord();
+        // contextWindow = inputTokens + cacheRead
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(17834); // 502 + 17332
+        expect(tokenRecord?.source.rawInputTokens).toBe(502);
+        expect(tokenRecord?.source.rawCacheReadTokens).toBe(17332);
       });
 
       it('should handle OpenAI semantics (inputTokens is full context)', () => {
@@ -201,7 +219,7 @@ describe('Token Usage Architecture', () => {
         // Turn 1
         tracker.onTurnStart(1);
         tracker.setResponseTokenUsage({
-          inputTokens: 5000,  // FULL context
+          inputTokens: 5000, // FULL context
           outputTokens: 100,
         });
         tracker.onTurnEnd();
@@ -209,14 +227,14 @@ describe('Token Usage Architecture', () => {
         // Turn 2
         tracker.onTurnStart(2);
         tracker.setResponseTokenUsage({
-          inputTokens: 6000,  // Context grew
+          inputTokens: 6000, // Context grew
           outputTokens: 150,
         });
 
-        const normalized = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
         // For OpenAI, contextWindow = inputTokens (no cache adjustment)
-        expect(normalized?.contextWindowTokens).toBe(6000);
-        expect(normalized?.newInputTokens).toBe(1000); // 6000 - 5000
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(6000);
+        expect(tokenRecord?.computed.newInputTokens).toBe(1000); // 6000 - 5000
       });
 
       it('should handle Google semantics (same as OpenAI)', () => {
@@ -229,9 +247,9 @@ describe('Token Usage Architecture', () => {
           outputTokens: 200,
         });
 
-        const normalized = tracker.getLastNormalizedUsage();
-        expect(normalized?.contextWindowTokens).toBe(8000);
-        expect(normalized?.newInputTokens).toBe(8000); // First turn
+        const tokenRecord = tracker.getLastTokenRecord();
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(8000);
+        expect(tokenRecord?.computed.newInputTokens).toBe(8000); // First turn
       });
 
       it('should reset baseline when provider changes', () => {
@@ -254,9 +272,9 @@ describe('Token Usage Architecture', () => {
           outputTokens: 150,
         });
 
-        const normalized = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
         // Baseline reset to 0 on provider change
-        expect(normalized?.newInputTokens).toBe(5000); // All new (baseline was reset)
+        expect(tokenRecord?.computed.newInputTokens).toBe(5000); // All new (baseline was reset)
       });
     });
 
@@ -265,27 +283,33 @@ describe('Token Usage Architecture', () => {
         tracker.setProviderType('anthropic');
         tracker.onAgentStart();
 
-        // Turn 1: Initial context - cacheCreation is billing info, not context
+        // Turn 1: Initial context with cache being written
+        // IMPORTANT: Anthropic's three token fields are MUTUALLY EXCLUSIVE:
+        // - inputTokens: tokens NOT involved in cache operations
+        // - cacheCreationTokens: tokens being written TO cache (part of context)
+        // - cacheReadTokens: tokens read FROM cache (part of context)
+        // Total context = inputTokens + cacheCreationTokens + cacheReadTokens (no overlap)
         tracker.onTurnStart(1);
         tracker.setResponseTokenUsage({
           inputTokens: 500,
           outputTokens: 100,
-          cacheCreationTokens: 8000, // Writing to cache, but context is just inputTokens
+          cacheCreationTokens: 8000, // System prompt being written to cache (IS part of context)
         });
-        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(500);
-        expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(500);
+        // contextWindow = 500 + 8000 = 8500 (cacheCreation IS context)
+        expect(tracker.getLastTokenRecord()?.computed.newInputTokens).toBe(8500);
+        expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(8500);
         tracker.onTurnEnd();
 
-        // Turn 2: Context grew - now reading from cache
+        // Turn 2: Cache hit - same system prompt now read from cache
         tracker.onTurnStart(2);
         tracker.setResponseTokenUsage({
-          inputTokens: 800,  // Grew by 300 (user + prev assistant)
+          inputTokens: 800, // Grew by 300 (user + prev assistant, non-cached)
           outputTokens: 150,
-          cacheReadTokens: 8000,  // System prompt from cache (now part of context!)
+          cacheReadTokens: 8000, // System prompt now read from cache
         });
-        // contextWindow = 800 + 8000 = 8800, previous was 500
-        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(8300); // 8800 - 500
-        expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(8800);
+        // contextWindow = 800 + 8000 = 8800, previous was 8500
+        expect(tracker.getLastTokenRecord()?.computed.newInputTokens).toBe(300); // 8800 - 8500
+        expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(8800);
         tracker.onTurnEnd();
 
         // Turn 3: More growth
@@ -296,8 +320,8 @@ describe('Token Usage Architecture', () => {
           cacheReadTokens: 8000,
         });
         // contextWindow = 1200 + 8000 = 9200, previous was 8800
-        expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(400); // 9200 - 8800
-        expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(9200);
+        expect(tracker.getLastTokenRecord()?.computed.newInputTokens).toBe(400); // 9200 - 8800
+        expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(9200);
       });
 
       it('should handle context shrink gracefully (compaction)', () => {
@@ -315,19 +339,19 @@ describe('Token Usage Architecture', () => {
         // Turn 2: Context shrank (compaction happened)
         tracker.onTurnStart(2);
         tracker.setResponseTokenUsage({
-          inputTokens: 10000,  // Shrank from 50000
+          inputTokens: 10000, // Shrank from 50000
           outputTokens: 100,
         });
 
-        const normalized = tracker.getLastNormalizedUsage();
+        const tokenRecord = tracker.getLastTokenRecord();
         // Should report 0, not negative
-        expect(normalized?.newInputTokens).toBe(0);
-        expect(normalized?.contextWindowTokens).toBe(10000);
+        expect(tokenRecord?.computed.newInputTokens).toBe(0);
+        expect(tokenRecord?.computed.contextWindowTokens).toBe(10000);
       });
     });
 
     describe('onTurnEnd should not re-compute if already set', () => {
-      it('should preserve normalizedUsage from setResponseTokenUsage', () => {
+      it('should preserve tokenRecord from setResponseTokenUsage', () => {
         tracker.onAgentStart();
         tracker.onTurnStart(1);
 
@@ -337,19 +361,19 @@ describe('Token Usage Architecture', () => {
           outputTokens: 100,
         });
 
-        const beforeEnd = tracker.getLastNormalizedUsage();
-        expect(beforeEnd?.newInputTokens).toBe(500);
+        const beforeEnd = tracker.getLastTokenRecord();
+        expect(beforeEnd?.computed.newInputTokens).toBe(500);
 
         // End turn (should NOT overwrite)
         tracker.onTurnEnd();
 
-        const afterEnd = tracker.getLastNormalizedUsage();
-        expect(afterEnd?.newInputTokens).toBe(500);
+        const afterEnd = tracker.getLastTokenRecord();
+        expect(afterEnd?.computed.newInputTokens).toBe(500);
       });
     });
   });
 
-  describe('normalizeTokenUsage function', () => {
+  describe('normalizeTokens function', () => {
     // These tests ensure the core normalization logic is correct
 
     describe('first turn behavior', () => {
@@ -357,68 +381,79 @@ describe('Token Usage Architecture', () => {
         const providers: ProviderType[] = ['anthropic', 'openai', 'openai-codex', 'google'];
 
         for (const provider of providers) {
-          const result = normalizeTokenUsage(
-            { inputTokens: 5000, outputTokens: 100 },
-            provider,
-            0
-          );
-          expect(result.newInputTokens).toBe(5000);
+          const source = createTokenSource(provider, 5000, 100);
+          const result = normalizeTokens(source, 0, {
+            turn: 1,
+            sessionId: 'test',
+            extractedAt: new Date().toISOString(),
+            normalizedAt: new Date().toISOString(),
+          });
+          expect(result.computed.newInputTokens).toBe(5000);
         }
       });
     });
 
     describe('Anthropic cache handling', () => {
-      it('should add cacheRead (NOT cacheCreation) to context window', () => {
-        // cacheCreationTokens is billing info (how many inputTokens are being cached)
-        // It does NOT add to context window - it's a subset of inputTokens
-        const result = normalizeTokenUsage(
-          { inputTokens: 500, outputTokens: 100, cacheReadTokens: 8000, cacheCreationTokens: 200 },
-          'anthropic',
-          0
-        );
+      it('should include all token types (input + cacheRead + cacheCreation) in context window', () => {
+        // Anthropic token fields are MUTUALLY EXCLUSIVE (no overlap)
+        // Total context = input + cacheRead + cacheCreation
+        const source = createTokenSource('anthropic', 500, 100, 8000, 200);
+        const result = normalizeTokens(source, 0, {
+          turn: 1,
+          sessionId: 'test',
+          extractedAt: new Date().toISOString(),
+          normalizedAt: new Date().toISOString(),
+        });
 
-        // contextWindowTokens = inputTokens + cacheRead (NOT + cacheCreate)
-        expect(result.contextWindowTokens).toBe(8500); // 500 + 8000
-        expect(result.rawInputTokens).toBe(500);
-        expect(result.cacheReadTokens).toBe(8000);
-        expect(result.cacheCreationTokens).toBe(200); // Still tracked for billing
+        // contextWindowTokens = inputTokens + cacheRead + cacheCreate (mutually exclusive)
+        expect(result.computed.contextWindowTokens).toBe(8700); // 500 + 8000 + 200
+        expect(result.source.rawInputTokens).toBe(500);
+        expect(result.source.rawCacheReadTokens).toBe(8000);
+        expect(result.source.rawCacheCreationTokens).toBe(200);
       });
 
       it('should calculate delta from contextWindowTokens for Anthropic', () => {
-        // Previous context was 8500 (500 input + 8000 cache read)
-        const result = normalizeTokenUsage(
-          { inputTokens: 604, outputTokens: 100, cacheReadTokens: 8000 },
-          'anthropic',
-          8500
-        );
+        // Previous context was 8700 (500 input + 8000 cacheRead + 200 cacheCreation)
+        const source = createTokenSource('anthropic', 604, 100, 8000);
+        const result = normalizeTokens(source, 8700, {
+          turn: 2,
+          sessionId: 'test',
+          extractedAt: new Date().toISOString(),
+          normalizedAt: new Date().toISOString(),
+        });
 
-        // New context is 8604, delta is 104
-        expect(result.newInputTokens).toBe(104);
-        expect(result.contextWindowTokens).toBe(8604);
+        // New context is 8604 (604 input + 8000 cacheRead)
+        // Context actually shrank, so delta should be 0
+        expect(result.computed.newInputTokens).toBe(0); // Context shrunk
+        expect(result.computed.contextWindowTokens).toBe(8604);
       });
     });
 
     describe('OpenAI/Google/Codex handling', () => {
       it('should use inputTokens directly as contextWindow for OpenAI', () => {
-        const result = normalizeTokenUsage(
-          { inputTokens: 5000, outputTokens: 100 },
-          'openai',
-          0
-        );
+        const source = createTokenSource('openai', 5000, 100);
+        const result = normalizeTokens(source, 0, {
+          turn: 1,
+          sessionId: 'test',
+          extractedAt: new Date().toISOString(),
+          normalizedAt: new Date().toISOString(),
+        });
 
-        expect(result.contextWindowTokens).toBe(5000);
-        expect(result.rawInputTokens).toBe(5000);
+        expect(result.computed.contextWindowTokens).toBe(5000);
+        expect(result.source.rawInputTokens).toBe(5000);
       });
 
       it('should calculate simple delta for OpenAI', () => {
-        const result = normalizeTokenUsage(
-          { inputTokens: 6000, outputTokens: 100 },
-          'openai',
-          5000
-        );
+        const source = createTokenSource('openai', 6000, 100);
+        const result = normalizeTokens(source, 5000, {
+          turn: 2,
+          sessionId: 'test',
+          extractedAt: new Date().toISOString(),
+          normalizedAt: new Date().toISOString(),
+        });
 
-        expect(result.newInputTokens).toBe(1000);
-        expect(result.contextWindowTokens).toBe(6000);
+        expect(result.computed.newInputTokens).toBe(1000);
+        expect(result.computed.contextWindowTokens).toBe(6000);
       });
     });
   });
@@ -440,17 +475,15 @@ describe('Event Ordering and Timing', () => {
 
     // Token data should be available NOW (before any tools)
     expect(tracker.getLastTurnTokenUsage()).toBeDefined();
-    expect(tracker.getLastNormalizedUsage()).toBeDefined();
+    expect(tracker.getLastTokenRecord()).toBeDefined();
 
     // Now tools start
-    tracker.registerToolIntents([
-      { id: 'tc_1', name: 'Read', arguments: {} },
-    ]);
+    tracker.registerToolIntents([{ id: 'tc_1', name: 'Read', arguments: {} }]);
     tracker.startToolCall('tc_1', 'Read', {}, new Date().toISOString());
 
     // Token data should still be the same
     expect(tracker.getLastTurnTokenUsage()?.inputTokens).toBe(500);
-    expect(tracker.getLastNormalizedUsage()?.newInputTokens).toBe(500);
+    expect(tracker.getLastTokenRecord()?.computed.newInputTokens).toBe(500);
   });
 
   it('should preserve token data through entire turn lifecycle', () => {
@@ -468,31 +501,31 @@ describe('Event Ordering and Timing', () => {
     const expectedContext = 17936; // 604 + 17332
 
     // Before tools
-    expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(expectedContext);
+    expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(expectedContext);
 
     // During tools
     tracker.registerToolIntents([{ id: 'tc_1', name: 'Read', arguments: {} }]);
     tracker.startToolCall('tc_1', 'Read', {}, new Date().toISOString());
-    expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(expectedContext);
+    expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(expectedContext);
 
     // Pre-tool flush
     tracker.flushPreToolContent();
-    expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(expectedContext);
+    expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(expectedContext);
 
     // Tool end
     tracker.endToolCall('tc_1', 'file contents', false, new Date().toISOString());
-    expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(expectedContext);
+    expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(expectedContext);
 
     // Turn end
     tracker.onTurnEnd();
-    expect(tracker.getLastNormalizedUsage()?.contextWindowTokens).toBe(expectedContext);
+    expect(tracker.getLastTokenRecord()?.computed.contextWindowTokens).toBe(expectedContext);
   });
 });
 
 describe('iOS Reconstruction Compatibility', () => {
   // These tests ensure the data structure is correct for iOS to consume directly
 
-  it('should produce normalizedUsage with all required fields', () => {
+  it('should produce TokenRecord with all required fields', () => {
     const tracker = new TurnContentTracker();
     tracker.setProviderType('anthropic');
     tracker.onAgentStart();
@@ -505,23 +538,22 @@ describe('iOS Reconstruction Compatibility', () => {
       cacheCreationTokens: 0,
     });
 
-    const normalized = tracker.getLastNormalizedUsage();
+    const tokenRecord = tracker.getLastTokenRecord();
 
     // All fields iOS needs should be present
-    expect(normalized).toHaveProperty('newInputTokens');
-    expect(normalized).toHaveProperty('outputTokens');
-    expect(normalized).toHaveProperty('contextWindowTokens');
-    expect(normalized).toHaveProperty('rawInputTokens');
-    expect(normalized).toHaveProperty('cacheReadTokens');
-    expect(normalized).toHaveProperty('cacheCreationTokens');
+    expect(tokenRecord).toHaveProperty('source');
+    expect(tokenRecord).toHaveProperty('computed');
+    expect(tokenRecord).toHaveProperty('meta');
 
-    // Values should be correct
-    expect(normalized?.newInputTokens).toBe(17834); // 502 + 17332
-    expect(normalized?.outputTokens).toBe(53);
-    expect(normalized?.contextWindowTokens).toBe(17834);
-    expect(normalized?.rawInputTokens).toBe(502);
-    expect(normalized?.cacheReadTokens).toBe(17332);
-    expect(normalized?.cacheCreationTokens).toBe(0);
+    // Source fields
+    expect(tokenRecord?.source.rawInputTokens).toBe(502);
+    expect(tokenRecord?.source.rawOutputTokens).toBe(53);
+    expect(tokenRecord?.source.rawCacheReadTokens).toBe(17332);
+    expect(tokenRecord?.source.rawCacheCreationTokens).toBe(0);
+
+    // Computed fields
+    expect(tokenRecord?.computed.newInputTokens).toBe(17834); // 502 + 17332
+    expect(tokenRecord?.computed.contextWindowTokens).toBe(17834);
   });
 
   it('should produce tokenUsage with all raw fields', () => {

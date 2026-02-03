@@ -46,7 +46,7 @@ import type {
 } from '@infrastructure/events/types.js';
 import type { WorkingDirectory } from '@platform/session/working-directory.js';
 import type { ProviderType } from '@core/types/messages.js';
-import { detectProviderType } from '@llm/providers/token-normalizer.js';
+import { detectProviderFromModel } from '@infrastructure/tokens/index.js';
 import {
   EventPersister,
   createEventPersister,
@@ -139,7 +139,7 @@ export class SessionContext {
     this.reconstructor = createSessionReconstructor();
 
     // Set provider type based on model for token normalization
-    const providerType = detectProviderType(config.model);
+    const providerType = detectProviderFromModel(config.model);
     this.turnManager.setProviderType(providerType);
 
     logger.debug('Session context created', {
@@ -201,7 +201,7 @@ export class SessionContext {
    * Convenience method for when the model changes mid-session.
    */
   updateProviderTypeForModel(modelId: string): void {
-    const type = detectProviderType(modelId);
+    const type = detectProviderFromModel(modelId);
     this.turnManager.setProviderType(type);
     logger.debug('Provider type updated for model', { modelId, providerType: type });
   }
@@ -307,8 +307,8 @@ export class SessionContext {
    * This should be called when response_complete fires, enabling message.assistant
    * to include token data even for tool-using turns.
    */
-  setResponseTokenUsage(tokenUsage: TokenUsage): void {
-    this.turnManager.setResponseTokenUsage(tokenUsage);
+  setResponseTokenUsage(tokenUsage: TokenUsage, sessionId?: string): void {
+    this.turnManager.setResponseTokenUsage(tokenUsage, sessionId ?? this.sessionId);
   }
 
   /**
@@ -320,11 +320,11 @@ export class SessionContext {
   }
 
   /**
-   * Get the last turn's normalized token usage.
-   * Provides semantic clarity for UI display.
+   * Get the last turn's token record.
+   * Contains source (raw provider values), computed (normalized), and metadata.
    */
-  getLastNormalizedUsage() {
-    return this.turnManager.getLastNormalizedUsage();
+  getLastTokenRecord() {
+    return this.turnManager.getLastTokenRecord();
   }
 
   /**

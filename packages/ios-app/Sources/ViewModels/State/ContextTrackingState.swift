@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Manages context and token tracking state for ChatViewModel
-/// Uses server-provided normalizedUsage values instead of local calculations
+/// Uses server-provided tokenRecord values instead of local calculations
 /// to eliminate bugs from model switches, session resume/fork, and context shrinks.
 @Observable
 @MainActor
@@ -12,15 +12,15 @@ final class ContextTrackingState {
     /// Current model's context window size (from server's model.list)
     var currentContextWindow: Int = 200_000
 
-    // MARK: - Server-Provided Values (from normalizedUsage)
+    // MARK: - Server-Provided Values (from tokenRecord)
 
-    /// Per-turn NEW tokens (for stats line display) - from server's normalizedUsage.newInputTokens
+    /// Per-turn NEW tokens (for stats line display) - from server's tokenRecord.computed.newInputTokens
     var newInputTokens: Int = 0
 
-    /// Total context size in tokens (for progress pill) - from server's normalizedUsage.contextWindowTokens
+    /// Total context size in tokens (for progress pill) - from server's tokenRecord.computed.contextWindowTokens
     var contextWindowTokens: Int = 0
 
-    /// Output tokens for this turn - from server's normalizedUsage.outputTokens
+    /// Output tokens for this turn - from server's tokenRecord.source.rawOutputTokens
     var outputTokens: Int = 0
 
     // MARK: - Accumulated Totals (from session counters, NOT locally accumulated)
@@ -67,12 +67,12 @@ final class ContextTrackingState {
 
     // MARK: - Server Value Updates
 
-    /// Update from server's normalizedUsage (called on turn_end)
+    /// Update from server's tokenRecord (called on turn_end)
     /// This is the preferred method - uses server-calculated values
-    func updateFromNormalizedUsage(_ usage: NormalizedTokenUsage) {
-        newInputTokens = usage.newInputTokens
-        contextWindowTokens = usage.contextWindowTokens
-        outputTokens = usage.outputTokens
+    func updateFromTokenRecord(_ record: TokenRecord) {
+        newInputTokens = record.computed.newInputTokens
+        contextWindowTokens = record.computed.contextWindowTokens
+        outputTokens = record.source.rawOutputTokens
     }
 
     /// Accumulate tokens from a turn (for billing tracking)

@@ -6,31 +6,10 @@
 
 import type { BaseEvent } from './base.js';
 import type { TokenUsage } from './token-usage.js';
+import type { TokenRecord } from '../../tokens/index.js';
 
-// =============================================================================
-// Normalized Token Usage
-// =============================================================================
-
-/**
- * Normalized token usage with semantic clarity for different UI components.
- * Handles the semantic differences in how different providers report tokens:
- * - Anthropic: inputTokens is NEW tokens only (excludes cache)
- * - OpenAI/Codex/Gemini: inputTokens is FULL context sent
- */
-export interface NormalizedTokenUsage {
-  /** Per-turn NEW input tokens (for stats line display) */
-  newInputTokens: number;
-  /** Output tokens for this turn */
-  outputTokens: number;
-  /** Total context window size (for progress pill) */
-  contextWindowTokens: number;
-  /** Raw input tokens as reported by provider (for billing/debugging) */
-  rawInputTokens: number;
-  /** Tokens read from cache (Anthropic/OpenAI) */
-  cacheReadTokens: number;
-  /** Tokens written to cache (Anthropic only) */
-  cacheCreationTokens: number;
-}
+// Re-export TokenRecord for convenience
+export type { TokenRecord };
 
 // =============================================================================
 // Streaming Events
@@ -55,10 +34,10 @@ export interface StreamTurnEndEvent extends BaseEvent {
     turn: number;
     tokenUsage: TokenUsage;
     /**
-     * Normalized token usage with semantic clarity for different UI components.
-     * Handles provider semantic differences (Anthropic vs OpenAI/Codex/Gemini).
+     * Token record with source (raw provider values), computed (normalized), and metadata.
+     * The canonical token data structure from @infrastructure/tokens.
      */
-    normalizedUsage?: NormalizedTokenUsage;
+    tokenRecord?: TokenRecord;
     /** Cost for this turn in USD */
     cost?: number;
   };

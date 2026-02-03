@@ -67,7 +67,7 @@ enum MessageHandlers {
             role: .assistant,
             content: .text(text),
             timestamp: timestamp,
-            tokenUsage: parsed.tokenUsage,
+            tokenRecord: parsed.tokenRecord,
             model: parsed.model,
             latencyMs: parsed.latencyMs,
             turnNumber: parsed.turn,

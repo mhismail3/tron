@@ -10,9 +10,8 @@ struct ChatMessage: Identifiable, Equatable {
     var isStreaming: Bool
     /// Version counter for streaming updates (triggers SwiftUI onChange reliably)
     var streamingVersion: Int = 0
-    var tokenUsage: TokenUsage?
-    /// Incremental token usage (delta from previous turn) for display purposes
-    var incrementalTokens: TokenUsage?
+    /// Token record with source, computed, and metadata
+    var tokenRecord: TokenRecord?
     /// Files attached to this message (unified model - images, PDFs, documents)
     var attachments: [Attachment]?
     /// Skills referenced in this message (rendered as chips above the message)
@@ -48,8 +47,7 @@ struct ChatMessage: Identifiable, Equatable {
         timestamp: Date = Date(),
         isStreaming: Bool = false,
         streamingVersion: Int = 0,
-        tokenUsage: TokenUsage? = nil,
-        incrementalTokens: TokenUsage? = nil,
+        tokenRecord: TokenRecord? = nil,
         attachments: [Attachment]? = nil,
         skills: [Skill]? = nil,
         spells: [Skill]? = nil,
@@ -66,8 +64,7 @@ struct ChatMessage: Identifiable, Equatable {
         self.timestamp = timestamp
         self.isStreaming = isStreaming
         self.streamingVersion = streamingVersion
-        self.tokenUsage = tokenUsage
-        self.incrementalTokens = incrementalTokens
+        self.tokenRecord = tokenRecord
         self.attachments = attachments
         self.skills = skills
         self.spells = spells

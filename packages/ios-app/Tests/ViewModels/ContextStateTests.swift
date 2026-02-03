@@ -78,43 +78,73 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.tokensRemaining, 0)  // Should be 0, not negative
     }
 
-    // MARK: - updateFromNormalizedUsage Tests
+    // MARK: - updateFromTokenRecord Tests
 
-    func testUpdateFromNormalizedUsage() {
+    func testUpdateFromTokenRecord() {
         let state = ContextTrackingState()
 
-        let usage = NormalizedTokenUsage(
-            newInputTokens: 500,
-            outputTokens: 100,
-            contextWindowTokens: 8500,
+        let record = makeTokenRecord(
             rawInputTokens: 500,
-            cacheReadTokens: 8000,
-            cacheCreationTokens: 0
+            rawOutputTokens: 100,
+            contextWindowTokens: 8500,
+            newInputTokens: 500
         )
 
-        state.updateFromNormalizedUsage(usage)
+        state.updateFromTokenRecord(record)
 
         XCTAssertEqual(state.newInputTokens, 500)
         XCTAssertEqual(state.contextWindowTokens, 8500)
         XCTAssertEqual(state.outputTokens, 100)
     }
 
-    func testUpdateFromNormalizedUsageUpdatesLastTurnInputTokens() {
+    func testUpdateFromTokenRecordUpdatesLastTurnInputTokens() {
         let state = ContextTrackingState()
 
-        let usage = NormalizedTokenUsage(
-            newInputTokens: 500,
-            outputTokens: 100,
-            contextWindowTokens: 8500,
+        let record = makeTokenRecord(
             rawInputTokens: 500,
-            cacheReadTokens: 8000,
-            cacheCreationTokens: 0
+            rawOutputTokens: 100,
+            contextWindowTokens: 8500,
+            newInputTokens: 500
         )
 
-        state.updateFromNormalizedUsage(usage)
+        state.updateFromTokenRecord(record)
 
         // lastTurnInputTokens is now a proxy to contextWindowTokens
         XCTAssertEqual(state.lastTurnInputTokens, 8500)
+    }
+
+    // MARK: - Helper Methods
+
+    private func makeTokenRecord(
+        rawInputTokens: Int,
+        rawOutputTokens: Int,
+        contextWindowTokens: Int,
+        newInputTokens: Int,
+        cacheReadTokens: Int = 0,
+        cacheCreationTokens: Int = 0
+    ) -> TokenRecord {
+        TokenRecord(
+            source: TokenSource(
+                provider: "anthropic",
+                timestamp: ISO8601DateFormatter().string(from: Date()),
+                rawInputTokens: rawInputTokens,
+                rawOutputTokens: rawOutputTokens,
+                rawCacheReadTokens: cacheReadTokens,
+                rawCacheCreationTokens: cacheCreationTokens
+            ),
+            computed: ComputedTokens(
+                contextWindowTokens: contextWindowTokens,
+                newInputTokens: newInputTokens,
+                previousContextBaseline: 0,
+                calculationMethod: "anthropic_cache_aware"
+            ),
+            meta: TokenMeta(
+                turn: 1,
+                sessionId: "test-session",
+                extractedAt: ISO8601DateFormatter().string(from: Date()),
+                normalizedAt: ISO8601DateFormatter().string(from: Date())
+            )
+        )
     }
 
     // MARK: - Accumulation Tests (still needed for billing)
@@ -209,26 +239,31 @@ final class ContextStateTests: XCTestCase {
         let state = ContextTrackingState()
 
         // First turn with Anthropic
-        state.updateFromNormalizedUsage(NormalizedTokenUsage(
-            newInputTokens: 500, outputTokens: 100, contextWindowTokens: 8500,
-            rawInputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 0
-        ))
+        let record1 = makeTokenRecord(
+            rawInputTokens: 500,
+            rawOutputTokens: 100,
+            contextWindowTokens: 8500,
+            newInputTokens: 500,
+            cacheReadTokens: 8000
+        )
+        state.updateFromTokenRecord(record1)
 
         XCTAssertEqual(state.contextWindowTokens, 8500)
         XCTAssertEqual(state.newInputTokens, 500)
 
         // Model switch to Codex - server sends full context as newInputTokens
-        state.updateFromNormalizedUsage(NormalizedTokenUsage(
-            newInputTokens: 11000, outputTokens: 50, contextWindowTokens: 11000,
-            rawInputTokens: 11000, cacheReadTokens: 0, cacheCreationTokens: 0
-        ))
+        let record2 = makeTokenRecord(
+            rawInputTokens: 11000,
+            rawOutputTokens: 50,
+            contextWindowTokens: 11000,
+            newInputTokens: 11000
+        )
+        state.updateFromTokenRecord(record2)
 
         // Verify: iOS just displays what server sends, no local calculation
         XCTAssertEqual(state.newInputTokens, 11000)
         XCTAssertEqual(state.contextWindowTokens, 11000)
     }
-
-    // MARK: - Helper Methods
 
     private func createTestModelInfo(id: String, name: String, contextWindow: Int) -> ModelInfo {
         return ModelInfo(

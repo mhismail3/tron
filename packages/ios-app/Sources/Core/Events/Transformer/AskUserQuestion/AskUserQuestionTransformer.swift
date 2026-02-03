@@ -16,7 +16,7 @@ enum AskUserQuestionTransformer {
     ///   - toolCall: Optional tool call payload with full arguments
     ///   - contentBlock: The tool_use content block from message.assistant
     ///   - timestamp: Event timestamp
-    ///   - tokenUsage: Optional token usage (not used for tool messages)
+    ///   - tokenRecord: Optional token record (not used for tool messages)
     ///   - model: Optional model name
     ///   - turn: Turn number
     ///   - allEvents: Optional array of all events for status detection
@@ -26,7 +26,7 @@ enum AskUserQuestionTransformer {
         toolCall: ToolCallPayload?,
         contentBlock: [String: Any],
         timestamp: Date,
-        tokenUsage: TokenUsage?,
+        tokenRecord: TokenRecord?,
         model: String?,
         turn: Int,
         allEvents: [E]?
@@ -82,7 +82,7 @@ enum AskUserQuestionTransformer {
             role: .assistant,
             content: .askUserQuestion(toolData),
             timestamp: timestamp,
-            tokenUsage: tokenUsage,
+            tokenRecord: tokenRecord,
             model: model,
             turnNumber: turn
         )

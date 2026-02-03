@@ -64,9 +64,12 @@ export {
   type ModelCategory,
 } from './models.js';
 
-// Token normalization (handles provider semantic differences)
-// Note: NormalizedTokenUsage type is exported via orchestrator/turn-manager to avoid duplicate exports
+// Token module is now in @infrastructure/tokens - re-export for convenience
 export {
-  normalizeTokenUsage,
-  detectProviderType as detectProviderTypeFromModel,
-} from './token-normalizer.js';
+  normalizeTokens,
+  detectProviderFromModel as detectProviderTypeFromModel,
+  type TokenRecord,
+  type TokenSource,
+  type TokenMeta,
+  type ComputedTokens,
+} from '@infrastructure/tokens/index.js';

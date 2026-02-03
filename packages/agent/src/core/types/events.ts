@@ -10,6 +10,7 @@
 
 import type { AssistantMessage, ToolCall } from './messages.js';
 import type { TronToolResult } from './tools.js';
+import type { TokenRecord } from '@infrastructure/tokens/index.js';
 
 // =============================================================================
 // LLM Stream Events (from provider)
@@ -206,25 +207,10 @@ export interface TurnEndEvent extends BaseTronEvent {
     cacheCreationTokens?: number;
   };
   /**
-   * Normalized token usage with semantic clarity for different UI components.
-   * Handles the semantic differences in how different providers report tokens:
-   * - Anthropic: inputTokens is NEW tokens only (excludes cache)
-   * - OpenAI/Codex/Gemini: inputTokens is FULL context sent
+   * Immutable token record with source (raw provider values), computed (normalized), and metadata.
+   * The canonical token data structure for cross-platform consistency.
    */
-  normalizedUsage?: {
-    /** Per-turn NEW input tokens (for stats line display) */
-    newInputTokens: number;
-    /** Output tokens for this turn */
-    outputTokens: number;
-    /** Total context window size (for progress pill) */
-    contextWindowTokens: number;
-    /** Raw input tokens as reported by provider (for billing/debugging) */
-    rawInputTokens: number;
-    /** Tokens read from cache (Anthropic/OpenAI) */
-    cacheReadTokens: number;
-    /** Tokens written to cache (Anthropic only) */
-    cacheCreationTokens: number;
-  };
+  tokenRecord?: TokenRecord;
   /** Cost for this turn in USD */
   cost?: number;
   /** Current model's context window limit (for iOS sync after model switch) */
@@ -261,7 +247,7 @@ export interface TurnFailedEvent extends BaseTronEvent {
  * This is a critical event for proper token tracking architecture:
  * - Fires immediately after streaming completes (message_stop from provider)
  * - Contains the full token usage from the API response
- * - Triggers normalizedUsage computation
+ * - Triggers TokenRecord computation
  * - Enables message.assistant to include token data even for tool-using turns
  */
 export interface ResponseCompleteEvent extends BaseTronEvent {

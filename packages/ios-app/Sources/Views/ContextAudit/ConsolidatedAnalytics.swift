@@ -48,14 +48,17 @@ struct ConsolidatedAnalytics {
         return nil
     }
 
-    /// Extract token usage from event payload
+    /// Extract token usage from event payload's tokenRecord.
     private static func extractTokenUsage(from payload: [String: AnyCodable]) -> (input: Int, output: Int, cacheRead: Int, cacheCreation: Int)? {
-        guard let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] else { return nil }
+        guard let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
+              let source = tokenRecord["source"] as? [String: Any] else {
+            return nil
+        }
 
-        let input = extractInt(tokenUsage["inputTokens"]) ?? 0
-        let output = extractInt(tokenUsage["outputTokens"]) ?? 0
-        let cacheRead = extractInt(tokenUsage["cacheReadTokens"]) ?? 0
-        let cacheCreation = extractInt(tokenUsage["cacheCreationTokens"]) ?? 0
+        let input = extractInt(source["rawInputTokens"]) ?? 0
+        let output = extractInt(source["rawOutputTokens"]) ?? 0
+        let cacheRead = extractInt(source["rawCacheReadTokens"]) ?? 0
+        let cacheCreation = extractInt(source["rawCacheCreationTokens"]) ?? 0
 
         return (input, output, cacheRead, cacheCreation)
     }

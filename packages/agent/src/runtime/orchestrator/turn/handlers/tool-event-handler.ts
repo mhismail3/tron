@@ -242,16 +242,16 @@ export class ToolEventHandler {
       (b) => (b as Record<string, unknown>).type === 'thinking'
     );
 
-    // Get token usage captured from response_complete
+    // Get token record captured from response_complete
     const tokenUsage = ctx.active.sessionContext!.getLastTurnTokenUsage();
-    const normalizedUsage = ctx.active.sessionContext!.getLastNormalizedUsage();
+    const tokenRecord = ctx.active.sessionContext!.getLastTokenRecord();
 
     ctx.persist(
       'message.assistant' as EventType,
       {
         content: normalizedContent,
         tokenUsage,
-        normalizedUsage,
+        tokenRecord,
         turn: ctx.active.sessionContext!.getCurrentTurn(),
         model: ctx.active.model,
         stopReason: 'tool_use', // Indicates tools are being called
@@ -270,18 +270,17 @@ export class ToolEventHandler {
       sessionId: ctx.sessionId,
       turn: ctx.active.sessionContext!.getCurrentTurn(),
       contentBlocks: normalizedContent.length,
-      tokenUsage: tokenUsage
+      tokenRecord: tokenRecord
         ? {
-            inputTokens: tokenUsage.inputTokens,
-            outputTokens: tokenUsage.outputTokens,
-            cacheRead: tokenUsage.cacheReadTokens ?? 0,
-          }
-        : 'MISSING',
-      normalizedUsage: normalizedUsage
-        ? {
-            newInputTokens: normalizedUsage.newInputTokens,
-            contextWindowTokens: normalizedUsage.contextWindowTokens,
-            outputTokens: normalizedUsage.outputTokens,
+            source: {
+              rawInputTokens: tokenRecord.source.rawInputTokens,
+              rawOutputTokens: tokenRecord.source.rawOutputTokens,
+              rawCacheReadTokens: tokenRecord.source.rawCacheReadTokens,
+            },
+            computed: {
+              newInputTokens: tokenRecord.computed.newInputTokens,
+              contextWindowTokens: tokenRecord.computed.contextWindowTokens,
+            },
           }
         : 'MISSING',
     });

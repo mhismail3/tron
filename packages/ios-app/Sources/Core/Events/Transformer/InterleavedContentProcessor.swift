@@ -49,25 +49,16 @@ enum InterleavedContentProcessor {
         let parsed = AssistantMessagePayload(from: payload)
         guard let blocks = parsed.contentBlocks else { return [] }
 
-        // Token usage from message.assistant payload
-        let effectiveTokenUsage = parsed.tokenUsage
+        // Token record from message.assistant payload
+        let effectiveTokenRecord = parsed.tokenRecord
 
-        // Incremental tokens for stats line display - from normalizedUsage on message.assistant
-        let effectiveIncrementalTokens: TokenUsage?
-        if let normalized = parsed.normalizedUsage {
-            effectiveIncrementalTokens = TokenUsage(
-                inputTokens: normalized.newInputTokens,
-                outputTokens: normalized.outputTokens,
-                cacheReadTokens: normalized.cacheReadTokens,
-                cacheCreationTokens: normalized.cacheCreationTokens
-            )
+        if let record = effectiveTokenRecord {
             TronLogger.shared.debug("[TOKEN-FLOW] iOS: message.assistant reconstruction", category: .events)
             TronLogger.shared.debug("  turn=\(parsed.turn), blocks=\(blocks.count)", category: .events)
-            TronLogger.shared.debug("  normalizedUsage: newInput=\(normalized.newInputTokens), contextWindow=\(normalized.contextWindowTokens), output=\(normalized.outputTokens)", category: .events)
+            TronLogger.shared.debug("  tokenRecord: newInput=\(record.computed.newInputTokens), contextWindow=\(record.computed.contextWindowTokens), output=\(record.source.rawOutputTokens)", category: .events)
         } else {
-            // Server should provide normalizedUsage - stats may be missing without it
-            TronLogger.shared.warning("[TOKEN-FLOW] iOS: message.assistant MISSING normalizedUsage (turn=\(parsed.turn))", category: .events)
-            effectiveIncrementalTokens = nil
+            // Server should provide tokenRecord - stats may be missing without it
+            TronLogger.shared.warning("[TOKEN-FLOW] iOS: message.assistant MISSING tokenRecord (turn=\(parsed.turn))", category: .events)
         }
 
         var messages: [ChatMessage] = []
@@ -90,8 +81,7 @@ enum InterleavedContentProcessor {
                 if let message = processTextBlock(
                     block,
                     timestamp: timestamp,
-                    tokenUsage: effectiveTokenUsage,
-                    incrementalTokens: effectiveIncrementalTokens,
+                    tokenRecord: effectiveTokenRecord,
                     parsed: parsed,
                     isFirstMessage: messages.isEmpty
                 ) {
@@ -110,7 +100,7 @@ enum InterleavedContentProcessor {
                         toolCall: toolCall,
                         contentBlock: block,
                         timestamp: timestamp,
-                        tokenUsage: nil,  // Stats only shown on text messages
+                        tokenRecord: nil,  // Stats only shown on text messages
                         model: nil,
                         turn: parsed.turn,
                         allEvents: allEvents
@@ -161,8 +151,7 @@ enum InterleavedContentProcessor {
     private static func processTextBlock(
         _ block: [String: Any],
         timestamp: Date,
-        tokenUsage: TokenUsage?,
-        incrementalTokens: TokenUsage?,
+        tokenRecord: TokenRecord?,
         parsed: AssistantMessagePayload,
         isFirstMessage: Bool
     ) -> ChatMessage? {
@@ -174,8 +163,7 @@ enum InterleavedContentProcessor {
             role: .assistant,
             content: .text(text),
             timestamp: timestamp,
-            tokenUsage: tokenUsage,
-            incrementalTokens: incrementalTokens,
+            tokenRecord: tokenRecord,
             model: parsed.model,
             latencyMs: isFirstMessage ? parsed.latencyMs : nil,
             turnNumber: parsed.turn,
@@ -236,7 +224,7 @@ enum InterleavedContentProcessor {
                 durationMs: result?.durationMs
             )),
             timestamp: timestamp,
-            tokenUsage: nil,
+            tokenRecord: nil,
             model: nil,
             latencyMs: nil,
             turnNumber: turn,

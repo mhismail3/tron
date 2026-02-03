@@ -65,14 +65,15 @@ export {
 // Turn content tracking
 export { TurnContentTracker } from './turn/index.js';
 
-// Token usage tracking (extracted from TurnContentTracker)
-export {
-  TokenUsageTracker,
-  createTokenUsageTracker,
-  type RawTokenUsage,
-  type TokenUsageTrackerConfig,
-  type NormalizedTokenUsage,
-} from './turn/index.js';
+// Token tracking is now in @infrastructure/tokens - re-export for convenience
+export type {
+  TokenRecord,
+  TokenSource,
+  ComputedTokens,
+  TokenMeta,
+  TokenState,
+  AccumulatedTokens,
+} from '@infrastructure/tokens/index.js';
 
 // Content block building utilities (extracted from TurnContentTracker)
 export {

@@ -11,53 +11,55 @@ import Foundation
 /// Used to extract token usage from turn end events stored in SQLite
 struct StreamTurnEndPayload {
     let turn: Int
-    let tokenUsage: TokenUsage?
-    /// Server-calculated normalized token usage (includes contextWindowTokens)
-    let normalizedUsage: NormalizedTokenUsage?
+    let tokenRecord: TokenRecord?
 
     init(from payload: [String: AnyCodable]) {
         self.turn = payload.int("turn") ?? 1
 
-        if let usage = payload.dict("tokenUsage") {
-            self.tokenUsage = TokenUsage(
-                inputTokens: usage["inputTokens"] as? Int ?? 0,
-                outputTokens: usage["outputTokens"] as? Int ?? 0,
-                cacheReadTokens: usage["cacheReadTokens"] as? Int,
-                cacheCreationTokens: usage["cacheCreationTokens"] as? Int
+        // Extract tokenRecord for accurate context tracking
+        if let record = payload.dict("tokenRecord"),
+           let sourceDict = record["source"] as? [String: Any],
+           let computedDict = record["computed"] as? [String: Any],
+           let metaDict = record["meta"] as? [String: Any] {
+            let source = TokenSource(
+                provider: sourceDict["provider"] as? String ?? "",
+                timestamp: sourceDict["timestamp"] as? String ?? "",
+                rawInputTokens: sourceDict["rawInputTokens"] as? Int ?? 0,
+                rawOutputTokens: sourceDict["rawOutputTokens"] as? Int ?? 0,
+                rawCacheReadTokens: sourceDict["rawCacheReadTokens"] as? Int ?? 0,
+                rawCacheCreationTokens: sourceDict["rawCacheCreationTokens"] as? Int ?? 0
             )
-        } else {
-            self.tokenUsage = nil
-        }
-
-        // Extract normalizedUsage for accurate context window tracking
-        if let normalized = payload.dict("normalizedUsage") {
-            self.normalizedUsage = NormalizedTokenUsage(
-                newInputTokens: normalized["newInputTokens"] as? Int ?? 0,
-                outputTokens: normalized["outputTokens"] as? Int ?? 0,
-                contextWindowTokens: normalized["contextWindowTokens"] as? Int ?? 0,
-                rawInputTokens: normalized["rawInputTokens"] as? Int ?? 0,
-                cacheReadTokens: normalized["cacheReadTokens"] as? Int ?? 0,
-                cacheCreationTokens: normalized["cacheCreationTokens"] as? Int ?? 0
+            let computed = ComputedTokens(
+                contextWindowTokens: computedDict["contextWindowTokens"] as? Int ?? 0,
+                newInputTokens: computedDict["newInputTokens"] as? Int ?? 0,
+                previousContextBaseline: computedDict["previousContextBaseline"] as? Int ?? 0,
+                calculationMethod: computedDict["calculationMethod"] as? String ?? ""
             )
+            let meta = TokenMeta(
+                turn: metaDict["turn"] as? Int ?? 1,
+                sessionId: metaDict["sessionId"] as? String ?? "",
+                extractedAt: metaDict["extractedAt"] as? String ?? "",
+                normalizedAt: metaDict["normalizedAt"] as? String ?? ""
+            )
+            self.tokenRecord = TokenRecord(source: source, computed: computed, meta: meta)
         } else {
-            self.normalizedUsage = nil
+            self.tokenRecord = nil
         }
     }
 
-    /// Get the context window token count (prefer normalizedUsage, fallback to tokenUsage.inputTokens)
+    /// Get the context window token count from tokenRecord
     var contextWindowTokens: Int {
-        normalizedUsage?.contextWindowTokens ?? tokenUsage?.inputTokens ?? 0
+        tokenRecord?.computed.contextWindowTokens ?? 0
     }
 
     /// Get the new input tokens for this turn (delta for stats line display)
-    /// This is the correct value for incremental token display (includes cache tokens)
     var newInputTokens: Int? {
-        normalizedUsage?.newInputTokens
+        tokenRecord?.computed.newInputTokens
     }
 
     /// Get the output tokens for this turn
     var outputTokens: Int {
-        normalizedUsage?.outputTokens ?? tokenUsage?.outputTokens ?? 0
+        tokenRecord?.source.rawOutputTokens ?? 0
     }
 }
 

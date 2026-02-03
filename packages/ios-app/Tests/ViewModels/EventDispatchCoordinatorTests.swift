@@ -119,8 +119,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         let result = TurnEndPlugin.Result(
             turnNumber: 1,
             duration: nil,
-            tokenUsage: nil,
-            normalizedUsage: nil,
+            tokenRecord: nil,
             stopReason: nil,
             cost: nil,
             contextLimit: nil

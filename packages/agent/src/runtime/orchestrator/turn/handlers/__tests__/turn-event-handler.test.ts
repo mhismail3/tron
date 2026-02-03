@@ -20,6 +20,35 @@ function createMockDeps(): TurnEventHandlerDeps {
   return {};
 }
 
+function createMockTokenRecord(overrides: Partial<{
+  contextWindowTokens: number;
+  newInputTokens: number;
+  outputTokens: number;
+}> = {}) {
+  return {
+    source: {
+      provider: 'anthropic' as const,
+      timestamp: new Date().toISOString(),
+      rawInputTokens: 100,
+      rawOutputTokens: overrides.outputTokens ?? 50,
+      rawCacheReadTokens: 0,
+      rawCacheCreationTokens: 0,
+    },
+    computed: {
+      contextWindowTokens: overrides.contextWindowTokens ?? 1000,
+      newInputTokens: overrides.newInputTokens ?? 100,
+      previousContextBaseline: 0,
+      calculationMethod: 'anthropic_cache_aware' as const,
+    },
+    meta: {
+      turn: 1,
+      sessionId: 'test-session',
+      extractedAt: new Date().toISOString(),
+      normalizedAt: new Date().toISOString(),
+    },
+  };
+}
+
 function createMockActiveSession(overrides: Partial<ActiveSession> = {}): ActiveSession {
   return {
     sessionId: 'test-session' as SessionId,
@@ -34,16 +63,12 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
       endTurn: vi.fn().mockReturnValue({
         turn: 1,
         content: [],
-        normalizedUsage: { newInputTokens: 100, contextWindowTokens: 1000, outputTokens: 50 },
+        tokenRecord: createMockTokenRecord(),
       }),
       hasPreToolContentFlushed: vi.fn().mockReturnValue(false),
       getTurnStartTime: vi.fn().mockReturnValue(Date.now() - 1000),
       setResponseTokenUsage: vi.fn(),
-      getLastNormalizedUsage: vi.fn().mockReturnValue({
-        newInputTokens: 100,
-        contextWindowTokens: 1000,
-        outputTokens: 50,
-      }),
+      getLastTokenRecord: vi.fn().mockReturnValue(createMockTokenRecord()),
       addMessageEventId: vi.fn(),
     } as unknown as ActiveSession['sessionContext'],
     ...overrides,
@@ -184,7 +209,7 @@ describe('TurnEventHandler', () => {
       (mockActive.sessionContext!.endTurn as ReturnType<typeof vi.fn>).mockReturnValue({
         turn: 1,
         content: [{ type: 'text', text: 'Hello world' }],
-        normalizedUsage: { newInputTokens: 100, contextWindowTokens: 1000, outputTokens: 50 },
+        tokenRecord: createMockTokenRecord(),
       });
 
       const ctx = createTestContext({ active: mockActive });
@@ -214,7 +239,7 @@ describe('TurnEventHandler', () => {
       (mockActive.sessionContext!.endTurn as ReturnType<typeof vi.fn>).mockReturnValue({
         turn: 1,
         content: [{ type: 'text', text: 'Hello world' }],
-        normalizedUsage: { newInputTokens: 100, contextWindowTokens: 1000, outputTokens: 50 },
+        tokenRecord: createMockTokenRecord(),
       });
 
       const ctx = createTestContext({ active: mockActive });
@@ -240,7 +265,7 @@ describe('TurnEventHandler', () => {
       (mockActive.sessionContext!.endTurn as ReturnType<typeof vi.fn>).mockReturnValue({
         turn: 1,
         content: [],
-        normalizedUsage: { contextWindowTokens: 5000 },
+        tokenRecord: createMockTokenRecord({ contextWindowTokens: 5000 }),
       });
 
       const ctx = createTestContext({ active: mockActive });
@@ -288,12 +313,15 @@ describe('TurnEventHandler', () => {
 
       handler.handleResponseComplete(ctx, event);
 
-      expect(mockActive.sessionContext!.setResponseTokenUsage).toHaveBeenCalledWith({
-        inputTokens: 100,
-        outputTokens: 50,
-        cacheReadTokens: 10,
-        cacheCreationTokens: 5,
-      });
+      expect(mockActive.sessionContext!.setResponseTokenUsage).toHaveBeenCalledWith(
+        {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 10,
+          cacheCreationTokens: 5,
+        },
+        'test-session' // sessionId is passed as second argument
+      );
     });
 
     it('should do nothing when no active session', () => {

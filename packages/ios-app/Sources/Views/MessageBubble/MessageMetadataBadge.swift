@@ -3,30 +3,30 @@ import SwiftUI
 // MARK: - Token Badge (Terminal-style)
 
 struct TokenBadge: View {
-    let usage: TokenUsage
+    let record: TokenRecord
 
     var body: some View {
         HStack(spacing: 8) {
-            // Input/Output tokens
+            // Input/Output tokens (using computed newInputTokens for delta display)
             HStack(spacing: 2) {
                 Image(systemName: "arrow.down")
                     .font(TronTypography.labelSM)
-                Text(usage.formattedInput)
+                Text(record.formattedNewInput)
             }
 
             HStack(spacing: 2) {
                 Image(systemName: "arrow.up")
                     .font(TronTypography.labelSM)
-                Text(usage.formattedOutput)
+                Text(record.formattedOutput)
             }
 
             // Cache section (if any cache activity)
-            if usage.hasCacheActivity {
+            if record.hasCacheActivity {
                 Text("\u{2022}")
                     .foregroundStyle(.tronTextMuted)
 
                 // Cache read
-                if let cacheRead = usage.formattedCacheRead {
+                if let cacheRead = record.formattedCacheRead {
                     HStack(spacing: 2) {
                         Image(systemName: "bolt.fill")
                             .font(TronTypography.labelSM)
@@ -36,7 +36,7 @@ struct TokenBadge: View {
                 }
 
                 // Cache write
-                if let cacheWrite = usage.formattedCacheWrite {
+                if let cacheWrite = record.formattedCacheWrite {
                     HStack(spacing: 2) {
                         Image(systemName: "pencil")
                             .font(TronTypography.labelSM)
@@ -56,21 +56,14 @@ struct TokenBadge: View {
 /// Displays comprehensive metadata beneath assistant messages:
 /// Token usage, model name, latency, and thinking indicator
 struct MessageMetadataBadge: View {
-    let usage: TokenUsage?
-    /// Incremental tokens (delta from previous turn) for display - preferred over raw usage
-    let incrementalUsage: TokenUsage?
+    let tokenRecord: TokenRecord?
     let model: String?
     let latency: String?
     let hasThinking: Bool?
 
-    /// The token usage to display - prefer incremental if available
-    private var displayUsage: TokenUsage? {
-        incrementalUsage ?? usage
-    }
-
     /// Check if we need a separator before additional metadata
     private var needsSeparator: Bool {
-        displayUsage != nil && (model != nil || latency != nil || hasThinking == true)
+        tokenRecord != nil && (model != nil || latency != nil || hasThinking == true)
     }
 
     /// Check if we need a separator between model and latency
@@ -80,9 +73,9 @@ struct MessageMetadataBadge: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Token usage - show incremental if available, otherwise full
-            if let usage = displayUsage {
-                TokenBadge(usage: usage)
+            // Token record
+            if let record = tokenRecord {
+                TokenBadge(record: record)
             }
 
             // Separator after tokens

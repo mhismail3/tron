@@ -215,13 +215,13 @@ describe('TrackerReconstructor', () => {
     it('should extract API token count from last turn_end event', () => {
       const events = [
         createEvent('stream.turn_end', {
-          normalizedUsage: { contextWindowTokens: 5000 },
+          tokenRecord: createMockTokenRecord(5000),
         }),
         createEvent('stream.turn_end', {
-          normalizedUsage: { contextWindowTokens: 10000 },
+          tokenRecord: createMockTokenRecord(10000),
         }),
         createEvent('stream.turn_end', {
-          normalizedUsage: { contextWindowTokens: 15000 },
+          tokenRecord: createMockTokenRecord(15000),
         }),
       ] as SessionEvent[];
 
@@ -242,7 +242,7 @@ describe('TrackerReconstructor', () => {
       expect(result.apiTokenCount).toBeUndefined();
     });
 
-    it('should handle turn_end events without normalizedUsage', () => {
+    it('should handle turn_end events without tokenRecord', () => {
       const events = [
         createEvent('stream.turn_end', {}),
       ] as SessionEvent[];
@@ -265,7 +265,7 @@ describe('TrackerReconstructor', () => {
         createEvent('skill.added', { skillName: 'commit', source: 'global', addedVia: 'mention' }),
         createEvent('message.user', { content: 'Hello' }),
         createEvent('stream.turn_end', {
-          normalizedUsage: { contextWindowTokens: 5000 },
+          tokenRecord: createMockTokenRecord(5000),
         }),
         createEvent('subagent.spawned', {
           subagentSessionId: 'sess_sub1',
@@ -279,7 +279,7 @@ describe('TrackerReconstructor', () => {
           trigger: 'tool',
         }),
         createEvent('stream.turn_end', {
-          normalizedUsage: { contextWindowTokens: 8000 },
+          tokenRecord: createMockTokenRecord(8000),
         }),
       ] as SessionEvent[];
 
@@ -331,9 +331,9 @@ describe('TrackerReconstructor', () => {
 
     it('should preserve API token count through compaction', () => {
       const events = [
-        createEvent('stream.turn_end', { normalizedUsage: { contextWindowTokens: 5000 } }),
+        createEvent('stream.turn_end', { tokenRecord: createMockTokenRecord(5000) }),
         createEvent('compact.boundary', { reason: 'context_limit' }),
-        createEvent('stream.turn_end', { normalizedUsage: { contextWindowTokens: 2000 } }),
+        createEvent('stream.turn_end', { tokenRecord: createMockTokenRecord(2000) }),
       ] as SessionEvent[];
 
       const result = reconstructor.reconstruct(events);
@@ -362,6 +362,32 @@ describe('TrackerReconstructor', () => {
     });
   });
 });
+
+// Helper to create mock token record
+function createMockTokenRecord(contextWindowTokens: number) {
+  return {
+    source: {
+      provider: 'anthropic' as const,
+      timestamp: new Date().toISOString(),
+      rawInputTokens: 100,
+      rawOutputTokens: 50,
+      rawCacheReadTokens: 0,
+      rawCacheCreationTokens: 0,
+    },
+    computed: {
+      contextWindowTokens,
+      newInputTokens: 100,
+      previousContextBaseline: 0,
+      calculationMethod: 'anthropic_cache_aware' as const,
+    },
+    meta: {
+      turn: 1,
+      sessionId: 'test-session',
+      extractedAt: new Date().toISOString(),
+      normalizedAt: new Date().toISOString(),
+    },
+  };
+}
 
 // Helper to create mock events
 function createEvent(type: string, payload: Record<string, unknown>): SessionEvent {

@@ -77,7 +77,7 @@ export type { ToolCallEvent, ToolResultEvent } from './tool.js';
 // =============================================================================
 
 export type {
-  NormalizedTokenUsage,
+  TokenRecord,
   StreamTurnStartEvent,
   StreamTurnEndEvent,
   StreamTextDeltaEvent,

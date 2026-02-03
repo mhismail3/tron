@@ -73,8 +73,8 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
 
     // MARK: - Context State
 
-    /// Update context state from normalized usage
-    func updateContextStateFromNormalizedUsage(_ usage: NormalizedTokenUsage)
+    /// Update context state from token record
+    func updateContextStateFromTokenRecord(_ record: TokenRecord)
 
     /// Set the current context window limit
     func setContextStateCurrentContextWindow(_ limit: Int)

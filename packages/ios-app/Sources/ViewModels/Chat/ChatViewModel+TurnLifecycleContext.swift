@@ -86,9 +86,9 @@ extension ChatViewModel: TurnLifecycleContext {
 
     // MARK: - Context State (Protocol Methods)
 
-    /// Update context state from normalized usage (TurnLifecycleContext)
-    func updateContextStateFromNormalizedUsage(_ usage: NormalizedTokenUsage) {
-        contextState.updateFromNormalizedUsage(usage)
+    /// Update context state from token record (TurnLifecycleContext)
+    func updateContextStateFromTokenRecord(_ record: TokenRecord) {
+        contextState.updateFromTokenRecord(record)
     }
 
     /// Set the current context window limit (TurnLifecycleContext)

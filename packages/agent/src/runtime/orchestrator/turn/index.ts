@@ -5,9 +5,10 @@
  *
  * - TurnManager: Turn lifecycle management
  * - TurnContentTracker: Content accumulation for streaming and persistence
- * - TokenUsageTracker: Token normalization and baseline tracking
  * - ContentBlockBuilder: Pure functions for building API content blocks
  * - AgentEventHandler: Event forwarding and processing
+ *
+ * Token tracking is now handled by the unified @infrastructure/tokens module.
  */
 
 // Turn lifecycle management
@@ -21,6 +22,7 @@ export {
   type AssistantContentBlock,
   type ToolResultBlock,
   type EndTurnResult,
+  type TokenRecord,
 } from './turn-manager.js';
 
 // Turn content tracking
@@ -29,20 +31,21 @@ export {
   type AccumulatedContent,
   type TurnContent,
   type InterruptedContent,
-  type NormalizedTokenUsage,
   type ContentSequenceItem,
   type ToolCallData,
   type ToolUseMeta,
   type ToolResultMeta,
 } from './turn-content-tracker.js';
 
-// Token usage tracking (extracted from TurnContentTracker)
-export {
-  TokenUsageTracker,
-  createTokenUsageTracker,
-  type RawTokenUsage,
-  type TokenUsageTrackerConfig,
-} from './token-usage-tracker.js';
+// Token tracking is now in @infrastructure/tokens - re-export for convenience
+export type {
+  TokenRecord as TokenRecordType,
+  TokenSource,
+  ComputedTokens,
+  TokenMeta,
+  TokenState,
+  AccumulatedTokens,
+} from '@infrastructure/tokens/index.js';
 
 // Content block building utilities (extracted from TurnContentTracker)
 export {

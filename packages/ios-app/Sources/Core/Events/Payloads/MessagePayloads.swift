@@ -162,9 +162,7 @@ struct UserMessagePayload {
 struct AssistantMessagePayload {
     let contentBlocks: [[String: Any]]?
     let turn: Int
-    let tokenUsage: TokenUsage?
-    /// Normalized token usage (preferred for display, handles provider semantic differences)
-    let normalizedUsage: NormalizedTokenUsage?
+    let tokenRecord: TokenRecord?
     let stopReason: StopReason?
     let latencyMs: Int?
     let model: String?
@@ -208,22 +206,34 @@ struct AssistantMessagePayload {
 
         self.turn = payload.int("turn") ?? 1
 
-        if let usage = payload.dict("tokenUsage") {
-            self.tokenUsage = TokenUsage(
-                inputTokens: usage["inputTokens"] as? Int ?? 0,
-                outputTokens: usage["outputTokens"] as? Int ?? 0,
-                cacheReadTokens: usage["cacheReadTokens"] as? Int,
-                cacheCreationTokens: usage["cacheCreationTokens"] as? Int
+        // Parse tokenRecord
+        if let record = payload.dict("tokenRecord"),
+           let sourceDict = record["source"] as? [String: Any],
+           let computedDict = record["computed"] as? [String: Any],
+           let metaDict = record["meta"] as? [String: Any] {
+            let source = TokenSource(
+                provider: sourceDict["provider"] as? String ?? "",
+                timestamp: sourceDict["timestamp"] as? String ?? "",
+                rawInputTokens: sourceDict["rawInputTokens"] as? Int ?? 0,
+                rawOutputTokens: sourceDict["rawOutputTokens"] as? Int ?? 0,
+                rawCacheReadTokens: sourceDict["rawCacheReadTokens"] as? Int ?? 0,
+                rawCacheCreationTokens: sourceDict["rawCacheCreationTokens"] as? Int ?? 0
             )
+            let computed = ComputedTokens(
+                contextWindowTokens: computedDict["contextWindowTokens"] as? Int ?? 0,
+                newInputTokens: computedDict["newInputTokens"] as? Int ?? 0,
+                previousContextBaseline: computedDict["previousContextBaseline"] as? Int ?? 0,
+                calculationMethod: computedDict["calculationMethod"] as? String ?? ""
+            )
+            let meta = TokenMeta(
+                turn: metaDict["turn"] as? Int ?? 1,
+                sessionId: metaDict["sessionId"] as? String ?? "",
+                extractedAt: metaDict["extractedAt"] as? String ?? "",
+                normalizedAt: metaDict["normalizedAt"] as? String ?? ""
+            )
+            self.tokenRecord = TokenRecord(source: source, computed: computed, meta: meta)
         } else {
-            self.tokenUsage = nil
-        }
-
-        // Parse normalizedUsage (preferred for display, handles provider semantic differences)
-        if let normalized = payload.dict("normalizedUsage") {
-            self.normalizedUsage = NormalizedTokenUsage(from: normalized)
-        } else {
-            self.normalizedUsage = nil
+            self.tokenRecord = nil
         }
 
         if let stopStr = payload.string("stopReason") {

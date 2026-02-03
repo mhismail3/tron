@@ -289,16 +289,14 @@ extension UnifiedEventTransformer {
                 state.messages.append(contentsOf: interleaved)
 
                 let payload = AssistantMessagePayload(from: event.payload)
-                if let usage = payload.tokenUsage {
+                if let record = payload.tokenRecord {
                     state.totalTokenUsage = TokenUsage(
-                        inputTokens: state.totalTokenUsage.inputTokens + usage.inputTokens,
-                        outputTokens: state.totalTokenUsage.outputTokens + usage.outputTokens,
-                        cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + (usage.cacheReadTokens ?? 0),
-                        cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
+                        inputTokens: state.totalTokenUsage.inputTokens + record.source.rawInputTokens,
+                        outputTokens: state.totalTokenUsage.outputTokens + record.source.rawOutputTokens,
+                        cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + record.source.rawCacheReadTokens,
+                        cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + record.source.rawCacheCreationTokens
                     )
-                    if let contextWindow = payload.normalizedUsage?.contextWindowTokens {
-                        state.lastTurnInputTokens = contextWindow
-                    }
+                    state.lastTurnInputTokens = record.computed.contextWindowTokens
                 }
                 if payload.turn > state.currentTurn {
                     state.currentTurn = payload.turn

@@ -242,7 +242,7 @@ export class EventStore {
       // Track token usage and cost
       const payload = options.payload as {
         tokenUsage?: TokenUsage;
-        normalizedUsage?: { contextWindowTokens: number };
+        tokenRecord?: { computed?: { contextWindowTokens?: number } };
         model?: string;
         cost?: number;
       };
@@ -250,13 +250,13 @@ export class EventStore {
         counters.inputTokens = payload.tokenUsage.inputTokens;
         counters.outputTokens = payload.tokenUsage.outputTokens;
         // Set current context size (not accumulated - represents context window utilization)
-        // Use normalizedUsage.contextWindowTokens if available (includes cache tokens),
+        // Use tokenRecord.computed.contextWindowTokens if available (includes cache tokens),
         // otherwise fall back to raw inputTokens
         counters.lastTurnInputTokens =
-          payload.normalizedUsage?.contextWindowTokens ?? payload.tokenUsage.inputTokens;
+          payload.tokenRecord?.computed?.contextWindowTokens ?? payload.tokenUsage.inputTokens;
         logger.debug(
           `[TOKEN-FIX] Storing lastTurnInputTokens: ${counters.lastTurnInputTokens} ` +
-            `(normalizedUsage.contextWindowTokens=${payload.normalizedUsage?.contextWindowTokens}, ` +
+            `(tokenRecord.computed.contextWindowTokens=${payload.tokenRecord?.computed?.contextWindowTokens}, ` +
             `tokenUsage.inputTokens=${payload.tokenUsage.inputTokens})`
         );
         // Track cache tokens for prompt caching efficiency

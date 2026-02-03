@@ -44,10 +44,7 @@ struct TurnStartResult {
 struct TurnEndResult {
     let turnNumber: Int
     let stopReason: String?
-    /// Server-provided normalized token usage (preferred)
-    let normalizedUsage: NormalizedTokenUsage?
-    /// Raw token usage (for backward compatibility)
-    let tokenUsage: TokenUsage?
+    let tokenRecord: TokenRecord?
     let contextLimit: Int?
     let cost: Double?
     let durationMs: Int?
@@ -287,8 +284,7 @@ final class ChatEventHandler {
         return TurnEndResult(
             turnNumber: result.turnNumber,
             stopReason: result.stopReason,
-            normalizedUsage: result.normalizedUsage,
-            tokenUsage: result.tokenUsage,
+            tokenRecord: result.tokenRecord,
             contextLimit: result.contextLimit,
             cost: result.cost,
             durationMs: result.duration

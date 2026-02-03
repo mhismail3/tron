@@ -26,10 +26,12 @@ import { createLogger } from '@infrastructure/logging/index.js';
 import type { CurrentTurnToolCall } from '@interface/rpc/types.js';
 import type { ProviderType } from '@core/types/messages.js';
 import {
-  TokenUsageTracker,
-  createTokenUsageTracker,
-  type NormalizedTokenUsage,
-} from './token-usage-tracker.js';
+  normalizeTokens,
+  type TokenSource,
+  type TokenRecord,
+  type TokenMeta,
+  type ProviderType as TokenProviderType,
+} from '@infrastructure/tokens/index.js';
 import {
   buildPreToolContentBlocks,
   buildInterruptedContentBlocks,
@@ -41,10 +43,10 @@ import {
 
 const logger = createLogger('turn-content-tracker');
 
-// Re-export NormalizedTokenUsage for convenience
-export type { NormalizedTokenUsage } from './token-usage-tracker.js';
+// Export TokenRecord as the canonical token type (replaces NormalizedTokenUsage)
+export type { TokenRecord } from '@infrastructure/tokens/index.js';
 
-// Re-export types from content-block-builder for backward compatibility
+// Re-export types from content-block-builder
 export type { ContentSequenceItem, ToolCallData, ToolUseMeta, ToolResultMeta } from './content-block-builder.js';
 
 // =============================================================================
@@ -132,15 +134,23 @@ export class TurnContentTracker {
   private currentTurnStartTime: number | undefined;
 
   // =========================================================================
-  // Token Usage Tracking (extracted to TokenUsageTracker)
+  // Token Tracking State
   //
-  // Handles provider type management, context baseline tracking, and token
-  // normalization. See TokenUsageTracker for detailed documentation.
+  // Uses the unified token module from @infrastructure/tokens for normalization.
+  // Maintains provider type and context baseline for accurate delta calculation.
   // =========================================================================
-  private tokenTracker: TokenUsageTracker = createTokenUsageTracker();
+  private currentProviderType: TokenProviderType = 'anthropic';
+  private previousContextBaseline: number = 0;
+  private lastTokenRecord: TokenRecord | undefined;
+  private lastRawTokenUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  } | undefined;
 
   // =========================================================================
-  // Provider Type Management (delegated to TokenUsageTracker)
+  // Provider Type Management
   // =========================================================================
 
   /**
@@ -148,17 +158,28 @@ export class TurnContentTracker {
    * Different providers report inputTokens differently and require
    * different normalization strategies.
    *
+   * IMPORTANT: Changing provider resets the context baseline because
+   * different providers interpret inputTokens differently.
+   *
    * @param type - The provider type ('anthropic' | 'openai' | 'openai-codex' | 'google')
    */
   setProviderType(type: ProviderType): void {
-    this.tokenTracker.setProviderType(type);
+    if (this.currentProviderType !== type) {
+      logger.debug('Provider type changed', {
+        from: this.currentProviderType,
+        to: type,
+      });
+      this.currentProviderType = type as TokenProviderType;
+      // Reset baseline when provider changes (context interpretation changes)
+      this.previousContextBaseline = 0;
+    }
   }
 
   /**
    * Get the current provider type.
    */
   getProviderType(): ProviderType {
-    return this.tokenTracker.getProviderType();
+    return this.currentProviderType;
   }
 
   // =========================================================================
@@ -364,7 +385,8 @@ export class TurnContentTracker {
     this.thisTurnThinkingSignature = '';
 
     // Clear per-turn token data (baseline persists for delta calculation)
-    this.tokenTracker.resetForNewTurn();
+    this.lastTokenRecord = undefined;
+    this.lastRawTokenUsage = undefined;
 
     // Reset pre-tool flush flag for new turn
     this.preToolContentFlushed = false;
@@ -393,29 +415,57 @@ export class TurnContentTracker {
    * (created for tool-using turns) didn't have token data.
    *
    * Now, token data is captured immediately when available, enabling:
-   * - message.assistant events to ALWAYS include tokenUsage + normalizedUsage
+   * - message.assistant events to ALWAYS include tokenRecord
    * - iOS to read token data directly without correlating with stream.turn_end
    * - Consistent token display for both tool and non-tool turns
    *
    * @param tokenUsage - Raw token usage from the provider API response
+   * @param sessionId - Session ID for the token record metadata
    */
-  setResponseTokenUsage(tokenUsage: {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    cacheCreationTokens?: number;
-  }): void {
-    // Delegate to TokenUsageTracker (handles normalization and baseline update)
-    this.tokenTracker.recordTokenUsage(tokenUsage);
+  setResponseTokenUsage(
+    tokenUsage: {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens?: number;
+      cacheCreationTokens?: number;
+    },
+    sessionId: string = ''
+  ): void {
+    // Store raw usage
+    this.lastRawTokenUsage = tokenUsage;
 
-    const normalized = this.tokenTracker.getLastNormalizedUsage();
+    // Create TokenSource from raw usage
+    const timestamp = new Date().toISOString();
+    const source: TokenSource = {
+      provider: this.currentProviderType,
+      timestamp,
+      rawInputTokens: tokenUsage.inputTokens,
+      rawOutputTokens: tokenUsage.outputTokens,
+      rawCacheReadTokens: tokenUsage.cacheReadTokens ?? 0,
+      rawCacheCreationTokens: tokenUsage.cacheCreationTokens ?? 0,
+    };
+
+    // Create metadata
+    const meta: TokenMeta = {
+      turn: this.currentTurn,
+      sessionId,
+      extractedAt: timestamp,
+      normalizedAt: '', // Will be set by normalizeTokens
+    };
+
+    // Normalize using the unified token module
+    this.lastTokenRecord = normalizeTokens(source, this.previousContextBaseline, meta);
+
+    // Update baseline for next recording
+    this.previousContextBaseline = this.lastTokenRecord.computed.contextWindowTokens;
+
     logger.debug('Token usage set from response_complete', {
       turn: this.currentTurn,
-      providerType: this.tokenTracker.getProviderType(),
+      providerType: this.currentProviderType,
       rawInputTokens: tokenUsage.inputTokens,
-      newInputTokens: normalized?.newInputTokens,
-      contextWindowTokens: normalized?.contextWindowTokens,
-      baseline: this.tokenTracker.getContextBaseline(),
+      newInputTokens: this.lastTokenRecord.computed.newInputTokens,
+      contextWindowTokens: this.lastTokenRecord.computed.contextWindowTokens,
+      baseline: this.previousContextBaseline,
     });
   }
 
@@ -458,7 +508,7 @@ export class TurnContentTracker {
    * Called when a new agent run starts.
    * Clears content tracking state (both accumulated and per-turn).
    *
-   * IMPORTANT: Does NOT reset previousContextSize!
+   * IMPORTANT: Does NOT reset previousContextBaseline!
    * The token baseline persists across agent runs within a session to maintain
    * accurate delta calculations. It only resets when:
    * 1. Provider type changes (handled by setProviderType())
@@ -485,12 +535,15 @@ export class TurnContentTracker {
     this.currentTurn = 0;
     this.currentTurnStartTime = undefined;
 
-    // Reset token tracker (baseline persists for delta calculation)
-    this.tokenTracker.resetForNewAgent();
+    // Clear per-turn token data (baseline persists for delta calculation)
+    this.lastTokenRecord = undefined;
+    this.lastRawTokenUsage = undefined;
+    // NOTE: previousContextBaseline is intentionally NOT reset
+    // NOTE: currentProviderType is intentionally NOT reset
 
     logger.debug('Agent run started, content tracking cleared', {
-      contextBaseline: this.tokenTracker.getContextBaseline(),
-      providerType: this.tokenTracker.getProviderType(),
+      contextBaseline: this.previousContextBaseline,
+      providerType: this.currentProviderType,
     });
   }
 
@@ -577,18 +630,15 @@ export class TurnContentTracker {
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
   } | undefined {
-    return this.tokenTracker.getLastRawUsage();
+    return this.lastRawTokenUsage;
   }
 
   /**
-   * Get last turn's normalized token usage.
-   * Provides semantic clarity for different UI components:
-   * - newInputTokens: For stats line (per-turn new tokens)
-   * - contextWindowTokens: For context progress pill (total context size)
-   * - rawInputTokens: For billing/debugging
+   * Get last turn's token record.
+   * Contains source (raw provider values), computed (normalized values), and metadata.
    */
-  getLastNormalizedUsage(): NormalizedTokenUsage | undefined {
-    return this.tokenTracker.getLastNormalizedUsage();
+  getLastTokenRecord(): TokenRecord | undefined {
+    return this.lastTokenRecord;
   }
 
   /**
@@ -596,7 +646,7 @@ export class TurnContentTracker {
    * Used for debugging and verification.
    */
   getContextBaseline(): number {
-    return this.tokenTracker.getContextBaseline();
+    return this.previousContextBaseline;
   }
 
   /**

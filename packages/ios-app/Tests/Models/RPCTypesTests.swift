@@ -217,46 +217,6 @@ final class TokenTypesTests: XCTestCase {
         XCTAssertEqual(usage.formattedTotal, "15.9k")
     }
 
-    func testNormalizedTokenUsageDecoding() throws {
-        let json = """
-        {
-            "newInputTokens": 500,
-            "outputTokens": 200,
-            "contextWindowTokens": 15000,
-            "rawInputTokens": 600,
-            "cacheReadTokens": 100,
-            "cacheCreationTokens": 0
-        }
-        """.data(using: .utf8)!
-
-        let usage = try JSONDecoder().decode(NormalizedTokenUsage.self, from: json)
-
-        XCTAssertEqual(usage.newInputTokens, 500)
-        XCTAssertEqual(usage.contextWindowTokens, 15000)
-    }
-
-    func testNormalizedTokenUsageFromDictionary() {
-        let dict: [String: Any] = [
-            "newInputTokens": 500,
-            "outputTokens": 200,
-            "contextWindowTokens": 15000,
-            "rawInputTokens": 600,
-            "cacheReadTokens": 100,
-            "cacheCreationTokens": 0
-        ]
-
-        let usage = NormalizedTokenUsage(from: dict)
-        XCTAssertNotNil(usage)
-        XCTAssertEqual(usage?.newInputTokens, 500)
-        XCTAssertEqual(usage?.contextWindowTokens, 15000)
-    }
-
-    func testNormalizedTokenUsageFromInvalidDictionary() {
-        let dict: [String: Any] = ["invalid": "data"]
-        let usage = NormalizedTokenUsage(from: dict)
-        XCTAssertNil(usage)
-    }
-
     func testAgentStateTokenUsage() throws {
         let json = """
         {"input": 1000, "output": 500}

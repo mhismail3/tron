@@ -146,8 +146,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: nil,
-            tokenUsage: TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: nil),
+            tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50),
             contextLimit: nil,
             cost: nil,
             durationMs: 1000
@@ -176,8 +175,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 2,
             stopReason: "end_turn",
-            normalizedUsage: nil,
-            tokenUsage: TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: nil),
+            tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 2),
             contextLimit: nil,
             cost: nil,
             durationMs: 1500
@@ -186,8 +184,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
         // Then
         let msg = mockContext.messages[0]
-        XCTAssertEqual(msg.tokenUsage?.inputTokens, 100)
-        XCTAssertEqual(msg.tokenUsage?.outputTokens, 50)
+        XCTAssertEqual(msg.tokenRecord?.source.rawInputTokens, 100)
+        XCTAssertEqual(msg.tokenRecord?.source.rawOutputTokens, 50)
         XCTAssertEqual(msg.model, "claude-3-opus")
         XCTAssertEqual(msg.latencyMs, 1500)
         XCTAssertEqual(msg.stopReason, "end_turn")
@@ -209,8 +207,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: nil,
-            tokenUsage: TokenUsage(inputTokens: 100, outputTokens: 50, cacheReadTokens: nil, cacheCreationTokens: nil),
+            tokenRecord: makeTokenRecord(inputTokens: 100, outputTokens: 50),
             contextLimit: nil,
             cost: nil,
             durationMs: 1000
@@ -221,7 +218,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages[0].turnNumber, 1)
     }
 
-    func testTurnEndUpdatesIncrementalTokensFromNormalizedTokenUsage() {
+    func testTurnEndAssignsTokenRecordToMessage() {
         // Given
         let messageId = UUID()
         mockContext.streamingMessageId = messageId
@@ -229,22 +226,18 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
             ChatMessage(id: messageId, role: .assistant, content: .text("response"))
         ]
 
-        let normalized = NormalizedTokenUsage(
-            newInputTokens: 500,
-            outputTokens: 200,
-            contextWindowTokens: 1000,
-            rawInputTokens: 1500,
-            cacheReadTokens: 100,
-            cacheCreationTokens: 50
-        )
-
         // When
         let event = makeTurnEndResult(turnNumber: 1)
+        let tokenRecord = makeTokenRecord(
+            inputTokens: 1500,
+            outputTokens: 200,
+            contextWindow: 1000,
+            newInput: 500
+        )
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: normalized,
-            tokenUsage: TokenUsage(inputTokens: 1500, outputTokens: 200, cacheReadTokens: 100, cacheCreationTokens: 50),
+            tokenRecord: tokenRecord,
             contextLimit: nil,
             cost: nil,
             durationMs: 1000
@@ -252,11 +245,11 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         coordinator.handleTurnEnd(event, result: result, context: mockContext)
 
         // Then
-        let incrementalTokens = mockContext.messages[0].incrementalTokens
-        XCTAssertEqual(incrementalTokens?.inputTokens, 500) // newInputTokens
-        XCTAssertEqual(incrementalTokens?.outputTokens, 200)
-        XCTAssertEqual(incrementalTokens?.cacheReadTokens, 100)
-        XCTAssertEqual(incrementalTokens?.cacheCreationTokens, 50)
+        let record = mockContext.messages[0].tokenRecord
+        XCTAssertNotNil(record)
+        XCTAssertEqual(record?.computed.newInputTokens, 500)
+        XCTAssertEqual(record?.source.rawOutputTokens, 200)
+        XCTAssertEqual(record?.computed.contextWindowTokens, 1000)
     }
 
     func testTurnEndRemovesCatchingUpMessage() {
@@ -273,8 +266,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: nil,
-            tokenUsage: nil,
+            tokenRecord: nil,
             contextLimit: nil,
             cost: nil,
             durationMs: 1000
@@ -286,15 +278,13 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.catchingUpMessageId)
     }
 
-    func testTurnEndUpdatesContextStateFromNormalizedTokenUsage() {
+    func testTurnEndUpdatesContextStateFromTokenRecord() {
         // Given
-        let normalized = NormalizedTokenUsage(
-            newInputTokens: 500,
+        let tokenRecord = makeTokenRecord(
+            inputTokens: 1500,
             outputTokens: 200,
-            contextWindowTokens: 1000,
-            rawInputTokens: 1500,
-            cacheReadTokens: 100,
-            cacheCreationTokens: 50
+            contextWindow: 1000,
+            newInput: 500
         )
 
         // When
@@ -302,8 +292,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: normalized,
-            tokenUsage: TokenUsage(inputTokens: 1500, outputTokens: 200, cacheReadTokens: 100, cacheCreationTokens: 50),
+            tokenRecord: tokenRecord,
             contextLimit: nil,
             cost: nil,
             durationMs: 1000
@@ -311,7 +300,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         coordinator.handleTurnEnd(event, result: result, context: mockContext)
 
         // Then
-        XCTAssertTrue(mockContext.contextStateUpdateFromNormalizedTokenUsageCalled)
+        XCTAssertTrue(mockContext.contextStateUpdateFromTokenRecordCalled)
     }
 
     func testTurnEndUpdatesContextLimit() {
@@ -320,8 +309,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: nil,
-            tokenUsage: nil,
+            tokenRecord: nil,
             contextLimit: 200000,
             cost: nil,
             durationMs: 1000
@@ -342,8 +330,7 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         let result = TurnEndResult(
             turnNumber: 1,
             stopReason: "end_turn",
-            normalizedUsage: nil,
-            tokenUsage: nil,
+            tokenRecord: nil,
             contextLimit: nil,
             cost: nil,
             durationMs: 1000
@@ -447,17 +434,47 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     private func makeTurnEndResult(turnNumber: Int) -> TurnEndPlugin.Result {
         TurnEndPlugin.Result(
             turnNumber: turnNumber,
+            duration: nil,
+            tokenRecord: nil,
             stopReason: "end_turn",
-            tokenUsage: nil,
-            normalizedUsage: nil,
-            contextLimit: nil,
-            data: nil,
-            cost: nil
+            cost: nil,
+            contextLimit: nil
         )
     }
 
     private func makeTextMessage(_ text: String) -> ChatMessage {
         ChatMessage(role: .assistant, content: .text(text))
+    }
+
+    private func makeTokenRecord(
+        inputTokens: Int = 100,
+        outputTokens: Int = 50,
+        contextWindow: Int? = nil,
+        newInput: Int? = nil,
+        turn: Int = 1
+    ) -> TokenRecord {
+        TokenRecord(
+            source: TokenSource(
+                provider: "anthropic",
+                timestamp: "2024-01-15T10:30:00.000Z",
+                rawInputTokens: inputTokens,
+                rawOutputTokens: outputTokens,
+                rawCacheReadTokens: 0,
+                rawCacheCreationTokens: 0
+            ),
+            computed: ComputedTokens(
+                contextWindowTokens: contextWindow ?? inputTokens,
+                newInputTokens: newInput ?? inputTokens,
+                previousContextBaseline: 0,
+                calculationMethod: "anthropic_cache_aware"
+            ),
+            meta: TokenMeta(
+                turn: turn,
+                sessionId: "test-session",
+                extractedAt: "2024-01-15T10:30:00.000Z",
+                normalizedAt: "2024-01-15T10:30:00.001Z"
+            )
+        )
     }
 }
 
@@ -485,7 +502,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
 
     // Context state tracking
     var contextStateCurrentContextWindow: Int = 0
-    var contextStateUpdateFromNormalizedTokenUsageCalled = false
+    var contextStateUpdateFromTokenRecordCalled = false
 
     // MARK: - Call tracking
     var flushPendingTextUpdatesCalled = false
@@ -548,8 +565,8 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
         refreshContextFromServerCalled = true
     }
 
-    func updateContextStateFromNormalizedUsage(_ usage: NormalizedTokenUsage) {
-        contextStateUpdateFromNormalizedTokenUsageCalled = true
+    func updateContextStateFromTokenRecord(_ record: TokenRecord) {
+        contextStateUpdateFromTokenRecordCalled = true
     }
 
     func setContextStateCurrentContextWindow(_ limit: Int) {
@@ -585,27 +602,3 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     func showError(_ message: String) {}
 }
 
-// MARK: - Test Helper Extensions
-
-/// Test-only initializer matching legacy TurnEndEvent constructor
-extension TurnEndPlugin.Result {
-    init(
-        turnNumber: Int,
-        stopReason: String?,
-        tokenUsage: TokenUsage?,
-        normalizedUsage: NormalizedTokenUsage?,
-        contextLimit: Int?,
-        data: Any?, // Ignored - was internal data in legacy event
-        cost: Double?
-    ) {
-        self.init(
-            turnNumber: turnNumber,
-            duration: nil,
-            tokenUsage: tokenUsage,
-            normalizedUsage: normalizedUsage,
-            stopReason: stopReason,
-            cost: cost,
-            contextLimit: contextLimit
-        )
-    }
-}

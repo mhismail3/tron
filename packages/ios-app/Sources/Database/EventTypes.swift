@@ -309,12 +309,12 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
                 lines.append("Extended thinking: Yes")
             }
 
-            // Token usage
-            if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
-                if let input = tokenUsage["inputTokens"] as? Int,
-                   let output = tokenUsage["outputTokens"] as? Int {
-                    lines.append("Tokens: ↓\(TokenFormatter.format(input, style: .uppercase)) ↑\(TokenFormatter.format(output, style: .uppercase))")
-                }
+            // Token usage from tokenRecord
+            if let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
+               let source = tokenRecord["source"] as? [String: Any],
+               let input = source["rawInputTokens"] as? Int,
+               let output = source["rawOutputTokens"] as? Int {
+                lines.append("Tokens: ↓\(TokenFormatter.format(input, style: .uppercase)) ↑\(TokenFormatter.format(output, style: .uppercase))")
             }
 
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
@@ -394,11 +394,13 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
                 lines.append("Turn: \(turn)")
             }
 
-            if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
-                if let input = tokenUsage["inputTokens"] as? Int {
+            // Token usage from tokenRecord
+            if let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
+               let source = tokenRecord["source"] as? [String: Any] {
+                if let input = source["rawInputTokens"] as? Int {
                     lines.append("Input tokens: \(TokenFormatter.format(input, style: .uppercase))")
                 }
-                if let output = tokenUsage["outputTokens"] as? Int {
+                if let output = source["rawOutputTokens"] as? Int {
                     lines.append("Output tokens: \(TokenFormatter.format(output, style: .uppercase))")
                 }
             }

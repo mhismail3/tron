@@ -19,6 +19,40 @@ final class EventDatabaseTests: XCTestCase {
         database.close()
     }
 
+    // MARK: - Helper
+
+    /// Creates a tokenRecord payload for test events
+    private func makeTokenRecord(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int = 0,
+        cacheCreationTokens: Int = 0,
+        turn: Int = 1
+    ) -> [String: Any] {
+        return [
+            "source": [
+                "provider": "anthropic",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "rawInputTokens": inputTokens,
+                "rawOutputTokens": outputTokens,
+                "rawCacheReadTokens": cacheReadTokens,
+                "rawCacheCreationTokens": cacheCreationTokens
+            ],
+            "computed": [
+                "contextWindowTokens": inputTokens + cacheReadTokens,
+                "newInputTokens": inputTokens,
+                "previousContextBaseline": 0,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": turn,
+                "sessionId": "test-session",
+                "extractedAt": "2024-01-01T00:00:00Z",
+                "normalizedAt": "2024-01-01T00:00:00Z"
+            ]
+        ]
+    }
+
     // MARK: - Event Operations
 
     @MainActor
@@ -340,12 +374,11 @@ final class EventDatabaseTests: XCTestCase {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
-                "content": AnyCodable("Hello"),
-                "tokenUsage": AnyCodable(["inputTokens": 10, "outputTokens": 0])
+                "content": AnyCodable("Hello")
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
                 "content": AnyCodable("Hi there!"),
-                "tokenUsage": AnyCodable(["inputTokens": 10, "outputTokens": 50]),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10, outputTokens: 50, turn: 1)),
                 "turn": AnyCodable(1)
             ])
         ]
@@ -465,7 +498,7 @@ final class EventDatabaseTests: XCTestCase {
                 "turn": AnyCodable(1),
                 "hasThinking": AnyCodable(true),
                 "stopReason": AnyCodable("end_turn"),
-                "tokenUsage": AnyCodable(["inputTokens": 100, "outputTokens": 200])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 200, turn: 1))
             ])
         ]
 
@@ -546,7 +579,7 @@ final class EventDatabaseTests: XCTestCase {
                 "model": AnyCodable("claude-sonnet-4-20250514"),
                 "latency": AnyCodable(500),
                 "turn": AnyCodable(1),
-                "tokenUsage": AnyCodable(["inputTokens": 50, "outputTokens": 100])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 50, outputTokens: 100, turn: 1))
             ]),
             SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:03:00Z", sequence: 4, payload: [
                 "name": AnyCodable("Read"),
@@ -563,7 +596,7 @@ final class EventDatabaseTests: XCTestCase {
                 "model": AnyCodable("claude-sonnet-4-20250514"),
                 "latency": AnyCodable(300),
                 "turn": AnyCodable(2),
-                "tokenUsage": AnyCodable(["inputTokens": 100, "outputTokens": 150])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 150, turn: 2))
             ])
         ]
 
@@ -617,24 +650,24 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-sonnet-4"),
-                "tokenUsage": AnyCodable(["inputTokens": 1000, "outputTokens": 500])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 500, turn: 1))
             ]),
             // Cost as Double (normal case)
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
                 "cost": AnyCodable(0.0105),  // Double
-                "tokenUsage": AnyCodable(["inputTokens": 1000, "outputTokens": 500])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 500, turn: 1))
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:03:00Z", sequence: 3, payload: [
                 "turn": AnyCodable(2),
                 "model": AnyCodable("claude-sonnet-4"),
-                "tokenUsage": AnyCodable(["inputTokens": 2000, "outputTokens": 1000])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 1000, turn: 2))
             ]),
             // Cost as Int (edge case when cost is 0)
             SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:04:00Z", sequence: 4, payload: [
                 "turn": AnyCodable(2),
                 "cost": AnyCodable(0),  // Int (JSON serializes 0.0 as 0)
-                "tokenUsage": AnyCodable(["inputTokens": 2000, "outputTokens": 1000])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 1000, turn: 2))
             ])
         ]
 
@@ -653,22 +686,12 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-sonnet-4"),
-                "tokenUsage": AnyCodable([
-                    "inputTokens": 10000,
-                    "outputTokens": 500,
-                    "cacheReadTokens": 8000,
-                    "cacheCreationTokens": 1000
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10000, outputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 1000, turn: 1))
             ]),
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
                 // No cost provided - should be calculated from tokens
-                "tokenUsage": AnyCodable([
-                    "inputTokens": 10000,
-                    "outputTokens": 500,
-                    "cacheReadTokens": 8000,
-                    "cacheCreationTokens": 1000
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10000, outputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 1000, turn: 1))
             ])
         ]
 
@@ -696,12 +719,12 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-sonnet-4"),
-                "tokenUsage": AnyCodable(["inputTokens": 1000000, "outputTokens": 100000])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000000, outputTokens: 100000, turn: 1))
             ]),
             // No cost in stream.turn_end - should calculate from tokens
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
-                "tokenUsage": AnyCodable(["inputTokens": 1000000, "outputTokens": 100000])
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000000, outputTokens: 100000, turn: 1))
             ])
         ]
 

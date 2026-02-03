@@ -57,26 +57,41 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         )
     }
 
-    private func makeNormalizedUsage(
-        newInputTokens: Int = 500,
+    private func makeTokenRecord(
+        inputTokens: Int = 500,
         outputTokens: Int = 200,
-        contextWindowTokens: Int = 5000
-    ) -> NormalizedTokenUsage {
-        NormalizedTokenUsage(
-            newInputTokens: newInputTokens,
-            outputTokens: outputTokens,
-            contextWindowTokens: contextWindowTokens,
-            rawInputTokens: newInputTokens,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0
+        contextWindowTokens: Int = 5000,
+        newInputTokens: Int? = nil,
+        turn: Int = 1
+    ) -> TokenRecord {
+        TokenRecord(
+            source: TokenSource(
+                provider: "anthropic",
+                timestamp: ISO8601DateFormatter().string(from: Date()),
+                rawInputTokens: inputTokens,
+                rawOutputTokens: outputTokens,
+                rawCacheReadTokens: 0,
+                rawCacheCreationTokens: 0
+            ),
+            computed: ComputedTokens(
+                contextWindowTokens: contextWindowTokens,
+                newInputTokens: newInputTokens ?? contextWindowTokens,
+                previousContextBaseline: 0,
+                calculationMethod: "anthropic_cache_aware"
+            ),
+            meta: TokenMeta(
+                turn: turn,
+                sessionId: "test-session",
+                extractedAt: ISO8601DateFormatter().string(from: Date()),
+                normalizedAt: ISO8601DateFormatter().string(from: Date())
+            )
         )
     }
 
     private func makeTurnEndResult(
         turnNumber: Int = 1,
         duration: Int? = 1000,
-        tokenUsage: TokenUsage? = nil,
-        normalizedUsage: NormalizedTokenUsage? = nil,
+        tokenRecord: TokenRecord? = nil,
         stopReason: String? = "end_turn",
         cost: Double? = nil,
         contextLimit: Int? = nil
@@ -84,8 +99,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         TurnEndPlugin.Result(
             turnNumber: turnNumber,
             duration: duration,
-            tokenUsage: tokenUsage,
-            normalizedUsage: normalizedUsage,
+            tokenRecord: tokenRecord,
             stopReason: stopReason,
             cost: cost,
             contextLimit: contextLimit
@@ -384,14 +398,14 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     func test_turnEnd_updatesContextState() {
         // Given
-        let normalizedUsage = makeNormalizedUsage(
-            newInputTokens: 500,
+        let tokenRecord = makeTokenRecord(
+            inputTokens: 500,
             outputTokens: 200,
             contextWindowTokens: 5000
         )
         let result = makeTurnEndResult(
             turnNumber: 1,
-            normalizedUsage: normalizedUsage
+            tokenRecord: tokenRecord
         )
 
         // When
@@ -632,16 +646,15 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.handleToolEnd(toolEndResult)
 
         // 5. Turn ends
-        let tokenUsage = TokenUsage(
+        let tokenRecord = makeTokenRecord(
             inputTokens: 100,
             outputTokens: 50,
-            cacheReadTokens: nil,
-            cacheCreationTokens: nil
+            contextWindowTokens: 100
         )
         let turnEndResult = makeTurnEndResult(
             turnNumber: 1,
             duration: 2000,
-            tokenUsage: tokenUsage
+            tokenRecord: tokenRecord
         )
         viewModel.handleTurnEnd(turnEndResult)
 

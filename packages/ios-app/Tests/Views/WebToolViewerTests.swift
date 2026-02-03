@@ -47,7 +47,7 @@ struct WebFetchParsedResultTests {
         let parsed = WebFetchParsedResult(from: result, arguments: arguments)
 
         #expect(parsed.source != nil)
-        #expect(parsed.source?.domain == "www.example.com")
+        #expect(parsed.source?.domain == "example.com")
     }
 
     @Test("Extracts title from result when present")

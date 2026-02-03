@@ -148,7 +148,6 @@ export type {
 // Streaming types
 export type {
   RpcEventType,
-  NormalizedTokenUsage,
   AgentTurnEndEvent,
   AgentTextDeltaEvent,
   AgentThinkingDeltaEvent,

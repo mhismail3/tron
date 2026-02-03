@@ -46,7 +46,7 @@ import {
   type AccumulatedContent,
   type InterruptedContent,
   type TurnContent,
-  type NormalizedTokenUsage,
+  type TokenRecord,
 } from './turn-content-tracker.js';
 
 const logger = createLogger('turn-manager');
@@ -103,10 +103,10 @@ export interface EndTurnResult {
   /** Token usage if provided */
   tokenUsage?: TokenUsage;
   /**
-   * Normalized token usage with semantic clarity for different UI components.
-   * Handles provider semantic differences (Anthropic vs OpenAI/Codex/Gemini).
+   * Token record with source (raw provider values), computed (normalized), and metadata.
+   * The canonical token data structure - replaces the old NormalizedTokenUsage.
    */
-  normalizedUsage?: NormalizedTokenUsage;
+  tokenRecord?: TokenRecord;
 }
 
 // =============================================================================
@@ -168,9 +168,10 @@ export class TurnManager {
    * for tool-using turns.
    *
    * @param tokenUsage - Raw token usage from the provider API response
+   * @param sessionId - Session ID for the token record metadata
    */
-  setResponseTokenUsage(tokenUsage: TokenUsage): void {
-    this.tracker.setResponseTokenUsage(tokenUsage);
+  setResponseTokenUsage(tokenUsage: TokenUsage, sessionId?: string): void {
+    this.tracker.setResponseTokenUsage(tokenUsage, sessionId);
   }
 
   /**
@@ -182,11 +183,11 @@ export class TurnManager {
   }
 
   /**
-   * Get the last turn's normalized token usage.
-   * Provides semantic clarity for UI display.
+   * Get the last turn's token record.
+   * Contains source (raw provider values), computed (normalized), and metadata.
    */
-  getLastNormalizedUsage(): NormalizedTokenUsage | undefined {
-    return this.tracker.getLastNormalizedUsage();
+  getLastTokenRecord(): TokenRecord | undefined {
+    return this.tracker.getLastTokenRecord();
   }
 
   /**
@@ -194,15 +195,15 @@ export class TurnManager {
    *
    * REQUIRES: setResponseTokenUsage() must be called before this method.
    *
-   * @returns Content blocks, tool results, and normalized usage for persistence
+   * @returns Content blocks, tool results, and token record for persistence
    */
   endTurn(): EndTurnResult {
     const turn = this.tracker.getCurrentTurn();
     const turnContent = this.tracker.onTurnEnd();
 
-    // Get token usage and normalized usage (set by setResponseTokenUsage)
+    // Get token usage and token record (set by setResponseTokenUsage)
     const tokenUsage = this.tracker.getLastTurnTokenUsage();
-    const normalizedUsage = this.tracker.getLastNormalizedUsage();
+    const tokenRecord = this.tracker.getLastTokenRecord();
 
     // Build content blocks from turn content
     const { content, toolResults } = this.buildContentBlocks(turnContent);
@@ -211,7 +212,7 @@ export class TurnManager {
       turn,
       contentBlocks: content.length,
       toolResults: toolResults.length,
-      hasNormalizedUsage: !!normalizedUsage,
+      hasTokenRecord: !!tokenRecord,
     });
 
     return {
@@ -219,7 +220,7 @@ export class TurnManager {
       content,
       toolResults,
       tokenUsage,
-      normalizedUsage,
+      tokenRecord,
     };
   }
 
@@ -476,4 +477,4 @@ export function createTurnManager(): TurnManager {
 // Re-exports
 // =============================================================================
 
-export type { AccumulatedContent, InterruptedContent, NormalizedTokenUsage } from './turn-content-tracker.js';
+export type { AccumulatedContent, InterruptedContent, TokenRecord } from './turn-content-tracker.js';

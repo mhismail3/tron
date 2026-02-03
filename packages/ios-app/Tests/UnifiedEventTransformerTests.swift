@@ -573,9 +573,27 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable("Hi there!"),
                 "turn": AnyCodable(1),
-                "tokenUsage": AnyCodable([
-                    "inputTokens": 100,
-                    "outputTokens": 50
+                "tokenRecord": AnyCodable([
+                    "source": [
+                        "provider": "anthropic",
+                        "timestamp": timestamp(2),
+                        "rawInputTokens": 100,
+                        "rawOutputTokens": 50,
+                        "rawCacheReadTokens": 0,
+                        "rawCacheCreationTokens": 0
+                    ],
+                    "computed": [
+                        "contextWindowTokens": 100,
+                        "newInputTokens": 100,
+                        "previousContextBaseline": 0,
+                        "calculationMethod": "anthropic_cache_aware"
+                    ],
+                    "meta": [
+                        "turn": 1,
+                        "sessionId": "test-session",
+                        "extractedAt": timestamp(2),
+                        "normalizedAt": timestamp(2)
+                    ]
                 ])
             ], timestamp: timestamp(2))
         ]
@@ -613,12 +631,54 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable("Response 1"),
                 "turn": AnyCodable(1),
-                "tokenUsage": AnyCodable(["inputTokens": 100, "outputTokens": 50])
+                "tokenRecord": AnyCodable([
+                    "source": [
+                        "provider": "anthropic",
+                        "timestamp": timestamp(1),
+                        "rawInputTokens": 100,
+                        "rawOutputTokens": 50,
+                        "rawCacheReadTokens": 0,
+                        "rawCacheCreationTokens": 0
+                    ],
+                    "computed": [
+                        "contextWindowTokens": 100,
+                        "newInputTokens": 100,
+                        "previousContextBaseline": 0,
+                        "calculationMethod": "anthropic_cache_aware"
+                    ],
+                    "meta": [
+                        "turn": 1,
+                        "sessionId": "test-session",
+                        "extractedAt": timestamp(1),
+                        "normalizedAt": timestamp(1)
+                    ]
+                ])
             ], timestamp: timestamp(1)),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable("Response 2"),
                 "turn": AnyCodable(2),
-                "tokenUsage": AnyCodable(["inputTokens": 200, "outputTokens": 100])
+                "tokenRecord": AnyCodable([
+                    "source": [
+                        "provider": "anthropic",
+                        "timestamp": timestamp(2),
+                        "rawInputTokens": 200,
+                        "rawOutputTokens": 100,
+                        "rawCacheReadTokens": 0,
+                        "rawCacheCreationTokens": 0
+                    ],
+                    "computed": [
+                        "contextWindowTokens": 300,
+                        "newInputTokens": 200,
+                        "previousContextBaseline": 100,
+                        "calculationMethod": "anthropic_cache_aware"
+                    ],
+                    "meta": [
+                        "turn": 2,
+                        "sessionId": "test-session",
+                        "extractedAt": timestamp(2),
+                        "normalizedAt": timestamp(2)
+                    ]
+                ])
             ], timestamp: timestamp(2))
         ]
 
@@ -791,23 +851,33 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testNormalizedUsageIsExtracted() {
-        // message.assistant with normalizedUsage should include incrementalTokens
+    func testTokenRecordIsExtracted() {
+        // message.assistant with tokenRecord should include tokenRecord
         let events = [
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Hello"]]),
                 "turn": AnyCodable(1),
-                "tokenUsage": AnyCodable([
-                    "inputTokens": 100,
-                    "outputTokens": 50
-                ]),
-                "normalizedUsage": AnyCodable([
-                    "newInputTokens": 25,
-                    "outputTokens": 50,
-                    "contextWindowTokens": 150,
-                    "rawInputTokens": 100,
-                    "cacheReadTokens": 75,
-                    "cacheCreationTokens": 0
+                "tokenRecord": AnyCodable([
+                    "source": [
+                        "provider": "anthropic",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "rawInputTokens": 100,
+                        "rawOutputTokens": 50,
+                        "rawCacheReadTokens": 75,
+                        "rawCacheCreationTokens": 0
+                    ],
+                    "computed": [
+                        "contextWindowTokens": 150,
+                        "newInputTokens": 25,
+                        "previousContextBaseline": 125,
+                        "calculationMethod": "anthropic_cache_aware"
+                    ],
+                    "meta": [
+                        "turn": 1,
+                        "sessionId": "test-session",
+                        "extractedAt": "2026-01-01T00:00:00Z",
+                        "normalizedAt": "2026-01-01T00:00:00Z"
+                    ]
                 ])
             ], timestamp: timestamp(0), sequence: 1)
         ]
@@ -815,10 +885,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
         XCTAssertEqual(messages.count, 1)
-        // Verify incrementalTokens is set from normalizedUsage
-        XCTAssertNotNil(messages[0].incrementalTokens)
-        XCTAssertEqual(messages[0].incrementalTokens?.inputTokens, 25)  // newInputTokens
-        XCTAssertEqual(messages[0].incrementalTokens?.outputTokens, 50)
+        // Verify tokenRecord is set
+        XCTAssertNotNil(messages[0].tokenRecord)
+        XCTAssertEqual(messages[0].tokenRecord?.computed.newInputTokens, 25)
+        XCTAssertEqual(messages[0].tokenRecord?.source.rawOutputTokens, 50)
+        XCTAssertEqual(messages[0].tokenRecord?.computed.contextWindowTokens, 150)
     }
 
     func testAskUserQuestionPendingStatus() {
@@ -943,8 +1014,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testReconstructSessionStateWithNormalizedUsage() {
-        // Reconstruction should extract contextWindowTokens from normalizedUsage
+    func testReconstructSessionStateWithTokenRecord() {
+        // Reconstruction should extract contextWindowTokens from tokenRecord
         let events = [
             rawEvent(type: "session.start", payload: [
                 "model": AnyCodable("claude-sonnet-4")
@@ -952,26 +1023,36 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Hello"]]),
                 "turn": AnyCodable(1),
-                "tokenUsage": AnyCodable([
-                    "inputTokens": 100,
-                    "outputTokens": 50
-                ]),
-                "normalizedUsage": AnyCodable([
-                    "newInputTokens": 25,
-                    "outputTokens": 50,
-                    "contextWindowTokens": 150,
-                    "rawInputTokens": 100,
-                    "cacheReadTokens": 75,
-                    "cacheCreationTokens": 0
+                "tokenRecord": AnyCodable([
+                    "source": [
+                        "provider": "anthropic",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "rawInputTokens": 100,
+                        "rawOutputTokens": 50,
+                        "rawCacheReadTokens": 75,
+                        "rawCacheCreationTokens": 0
+                    ],
+                    "computed": [
+                        "contextWindowTokens": 150,
+                        "newInputTokens": 25,
+                        "previousContextBaseline": 125,
+                        "calculationMethod": "anthropic_cache_aware"
+                    ],
+                    "meta": [
+                        "turn": 1,
+                        "sessionId": "test-session",
+                        "extractedAt": "2026-01-01T00:00:00Z",
+                        "normalizedAt": "2026-01-01T00:00:00Z"
+                    ]
                 ])
             ], timestamp: timestamp(1), sequence: 2)
         ]
 
         let state = UnifiedEventTransformer.reconstructSessionState(from: events)
 
-        // lastTurnInputTokens should come from normalizedUsage.contextWindowTokens
+        // lastTurnInputTokens should come from tokenRecord.computed.contextWindowTokens
         XCTAssertEqual(state.lastTurnInputTokens, 150)
-        // totalTokenUsage accumulates from tokenUsage
+        // totalTokenUsage accumulates from tokenRecord.source
         XCTAssertEqual(state.totalTokenUsage.inputTokens, 100)
         XCTAssertEqual(state.totalTokenUsage.outputTokens, 50)
     }

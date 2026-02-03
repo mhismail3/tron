@@ -44,10 +44,27 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
       getCurrentTurn: vi.fn().mockReturnValue(1),
       getTurnStartTime: vi.fn().mockReturnValue(Date.now() - 1000),
       getLastTurnTokenUsage: vi.fn().mockReturnValue({ inputTokens: 100, outputTokens: 50 }),
-      getLastNormalizedUsage: vi.fn().mockReturnValue({
-        newInputTokens: 100,
-        contextWindowTokens: 1000,
-        outputTokens: 50,
+      getLastTokenRecord: vi.fn().mockReturnValue({
+        source: {
+          provider: 'anthropic',
+          timestamp: new Date().toISOString(),
+          rawInputTokens: 100,
+          rawOutputTokens: 50,
+          rawCacheReadTokens: 0,
+          rawCacheCreationTokens: 0,
+        },
+        computed: {
+          contextWindowTokens: 1000,
+          newInputTokens: 100,
+          previousContextBaseline: 0,
+          calculationMethod: 'anthropic_cache_aware',
+        },
+        meta: {
+          turn: 1,
+          sessionId: 'test-session',
+          extractedAt: new Date().toISOString(),
+          normalizedAt: new Date().toISOString(),
+        },
       }),
       addMessageEventId: vi.fn(),
     } as unknown as ActiveSession['sessionContext'],

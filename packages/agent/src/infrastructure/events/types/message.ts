@@ -6,7 +6,10 @@
 
 import type { BaseEvent } from './base.js';
 import type { TokenUsage } from './token-usage.js';
-import type { NormalizedTokenUsage } from './streaming.js';
+import type { TokenRecord } from '../../tokens/index.js';
+
+// Re-export TokenRecord for convenience
+export type { TokenRecord };
 
 // =============================================================================
 // Content Block Types
@@ -48,12 +51,12 @@ export interface AssistantMessageEvent extends BaseEvent {
     turn: number;
     tokenUsage: TokenUsage;
     /**
-     * Normalized token usage with semantic clarity for different UI components.
-     * Handles provider semantic differences (Anthropic vs OpenAI/Codex/Gemini).
+     * Token record with source (raw provider values), computed (normalized), and metadata.
+     * The canonical token data structure from @infrastructure/tokens.
      * This is stored directly on message.assistant so iOS can reconstruct without
      * correlating with stream.turn_end events.
      */
-    normalizedUsage?: NormalizedTokenUsage;
+    tokenRecord?: TokenRecord;
     stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
     /** Duration of LLM call in ms */
     latency?: number;
