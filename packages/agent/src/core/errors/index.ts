@@ -8,7 +8,7 @@
 // Re-export all error utilities from utils
 export * from '../utils/errors.js';
 
-// RPC error types
+// RPC error types - use these for RPC wire protocol errors
 export {
   RpcError,
   RpcErrorCode,
@@ -24,16 +24,16 @@ export {
   type RpcErrorResponse,
 } from './rpc-errors.js';
 
-// Error codes used across the system
+/**
+ * Domain-specific error codes for agent, tool, and provider errors.
+ * For RPC-specific errors (session, params, etc.), use RpcErrorCode instead.
+ */
 export const ErrorCodes = {
-  // General
-  INTERNAL_ERROR: 'INTERNAL_ERROR',
-  INVALID_PARAMS: 'INVALID_PARAMS',
+  // General (non-RPC)
   NOT_FOUND: 'NOT_FOUND',
   UNAUTHORIZED: 'UNAUTHORIZED',
 
-  // Session
-  SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
+  // Session (non-RPC specific)
   SESSION_BUSY: 'SESSION_BUSY',
   SESSION_ENDED: 'SESSION_ENDED',
 

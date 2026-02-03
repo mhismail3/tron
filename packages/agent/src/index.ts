@@ -13,9 +13,6 @@ export * from './core/types/index.js';
 // Re-export settings (must be early for other modules to use)
 export * from './infrastructure/settings/index.js';
 
-// Re-export dependency injection utilities
-export * from './core/di/index.js';
-
 // Feature flags are now exported through settings module
 
 // Re-export logging
