@@ -49,16 +49,20 @@ struct LogViewer: View {
                 }
 
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Export", systemImage: exportSuccess ? "checkmark" : "square.and.arrow.up") {
+                    Button {
                         exportLogsToServer()
+                    } label: {
+                        Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
+                            .contentTransition(.symbolEffect(.replace.magic(fallback: .replace)))
                     }
-                    .contentTransition(.symbolEffect(.replace))
                     .disabled(isExporting)
 
-                    Button("Copy", systemImage: copySuccess ? "checkmark" : "doc.on.doc") {
+                    Button {
                         copyFilteredLogs()
+                    } label: {
+                        Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
+                            .contentTransition(.symbolEffect(.replace.magic(fallback: .replace)))
                     }
-                    .contentTransition(.symbolEffect(.replace))
                 }
             }
             .sensoryFeedback(.success, trigger: exportSuccess)
@@ -237,14 +241,14 @@ struct LogViewer: View {
 
         UIPasteboard.general.string = logText
 
-        // Show success feedback
-        withAnimation {
+        // Show success feedback with spring animation
+        withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
             copySuccess = true
         }
         // Reset after delay
         Task {
             try? await Task.sleep(for: .seconds(1.5))
-            withAnimation {
+            withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
                 copySuccess = false
             }
         }
@@ -283,14 +287,14 @@ struct LogViewer: View {
                 let result = try await rpcClient.misc.exportLogs(content: logText)
                 logger.info("Exported \(allLogs.count) log entries to server: \(result.path)", category: .general)
 
-                // Show success feedback
-                withAnimation {
+                // Show success feedback with spring animation
+                withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
                     exportSuccess = true
                 }
                 // Reset after delay
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))
-                    withAnimation {
+                    withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
                         exportSuccess = false
                     }
                 }
