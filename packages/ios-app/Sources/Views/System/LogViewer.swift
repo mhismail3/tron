@@ -8,7 +8,6 @@ struct LogViewer: View {
     @State private var logs: [(Date, LogCategory, LogLevel, String)] = []
     @State private var isExporting = false
     @State private var exportSuccess = false
-    @State private var copySuccess = false
     @State private var exportResult: String?
     @State private var selectedLevel: LogLevel = .verbose
     @State private var selectedCategory: LogCategory?
@@ -46,27 +45,20 @@ struct LogViewer: View {
                 ToolbarItem(placement: .principal) {
                     Text("Logs")
                         .font(TronTypography.button)
+                        .foregroundStyle(.tronEmerald)
                 }
 
-                ToolbarItemGroup(placement: .primaryAction) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         exportLogsToServer()
                     } label: {
                         Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
-                            .contentTransition(.symbolEffect(.replace.magic(fallback: .replace)))
+                            .contentTransition(.symbolEffect(.replace.downUp))
                     }
                     .disabled(isExporting)
-
-                    Button {
-                        copyFilteredLogs()
-                    } label: {
-                        Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
-                            .contentTransition(.symbolEffect(.replace.magic(fallback: .replace)))
-                    }
                 }
             }
             .sensoryFeedback(.success, trigger: exportSuccess)
-            .sensoryFeedback(.success, trigger: copySuccess)
             .onAppear { refreshLogs() }
             .onReceive(timer) { _ in
                 if autoScroll {
@@ -227,38 +219,14 @@ struct LogViewer: View {
         logs = logger.getRecentLogs(count: 1000, level: selectedLevel, category: selectedCategory)
     }
 
-    private func copyFilteredLogs() {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-
-        let logText = filteredLogs.map { entry in
-            let timestamp = formatter.string(from: entry.0)
-            let category = entry.1.rawValue
-            let level = String(describing: entry.2).uppercased()
-            let message = entry.3
-            return "\(timestamp) [\(level)] [\(category)] \(message)"
-        }.joined(separator: "\n")
-
-        UIPasteboard.general.string = logText
-
-        // Show success feedback with spring animation
-        withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
-            copySuccess = true
-        }
-        // Reset after delay
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
-                copySuccess = false
-            }
-        }
-    }
-
     private func exportLogsToServer() {
         guard !isExporting else { return }
 
         isExporting = true
         exportResult = nil
+
+        // Show checkmark immediately for snappy feedback
+        exportSuccess = true
 
         Task {
             defer { isExporting = false }
@@ -286,22 +254,14 @@ struct LogViewer: View {
 
                 let result = try await rpcClient.misc.exportLogs(content: logText)
                 logger.info("Exported \(allLogs.count) log entries to server: \(result.path)", category: .general)
-
-                // Show success feedback with spring animation
-                withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
-                    exportSuccess = true
-                }
-                // Reset after delay
-                Task {
-                    try? await Task.sleep(for: .seconds(1.5))
-                    withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
-                        exportSuccess = false
-                    }
-                }
             } catch {
                 logger.error("Failed to export logs to server: \(error.localizedDescription)", category: .general)
                 exportResult = "Error: \(error.localizedDescription)"
             }
+
+            // Reset checkmark after brief delay
+            try? await Task.sleep(for: .seconds(0.6))
+            exportSuccess = false
         }
     }
 
