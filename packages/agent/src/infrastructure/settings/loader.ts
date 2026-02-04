@@ -493,8 +493,8 @@ export function getTronDataDir(homeDir?: string): string {
 }
 
 /**
- * Get the path to the voice notes directory (~/.tron/notes)
+ * Get the path to the voice notes directory (~/.tron/notes/Voice Notes)
  */
 export function getNotesDir(homeDir?: string): string {
-  return path.join(getSettingsDir(homeDir), 'notes');
+  return path.join(getSettingsDir(homeDir), 'notes', 'Voice Notes');
 }
