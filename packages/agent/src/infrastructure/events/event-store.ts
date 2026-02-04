@@ -609,6 +609,37 @@ export class EventStore {
   }
 
   // ===========================================================================
+  // Blob Storage
+  // ===========================================================================
+
+  /**
+   * Get the blob store for content offloading.
+   * Returns an object with store() and getContent() methods.
+   */
+  getBlobStore(): { store: (content: string | Buffer, mimeType?: string) => string; getContent: (blobId: string) => string | null } {
+    return {
+      store: (content: string | Buffer, mimeType = 'text/plain') =>
+        this.backend.getRepositories().blob.store(content, mimeType),
+      getContent: (blobId: string) =>
+        this.backend.getRepositories().blob.getContent(blobId),
+    };
+  }
+
+  /**
+   * Get a blob by ID with full metadata.
+   */
+  getBlob(blobId: string): {
+    id: string;
+    hash: string;
+    content: Buffer;
+    mime_type: string;
+    size_original: number;
+    created_at: string;
+  } | null {
+    return this.backend.getRepositories().blob.getById(blobId);
+  }
+
+  // ===========================================================================
   // Utilities
   // ===========================================================================
 

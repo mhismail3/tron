@@ -43,6 +43,8 @@ struct ToolResultPayload {
     let durationMs: Int
     let affectedFiles: [String]?
     let truncated: Bool?
+    /// Blob ID if content was stored in blob storage (for large results)
+    let blobId: String?
 
     // Additional fields for display (may come from enrichment)
     let name: String?
@@ -59,6 +61,7 @@ struct ToolResultPayload {
         self.durationMs = payload.int("duration") ?? payload.int("durationMs") ?? 0
         self.affectedFiles = payload.stringArray("affectedFiles")
         self.truncated = payload.bool("truncated")
+        self.blobId = payload.string("blobId")
 
         // Optional enrichment fields
         self.name = payload.string("name")

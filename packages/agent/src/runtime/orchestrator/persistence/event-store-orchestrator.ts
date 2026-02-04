@@ -423,6 +423,10 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     await this.eventStore.initialize();
 
+    // Initialize blob storage for large tool results
+    const blobStore = this.eventStore.getBlobStore();
+    this.agentEventHandler.setBlobStore(blobStore);
+
     this.startCleanupTimer();
     this.initialized = true;
     logger.info('EventStore orchestrator initialized');

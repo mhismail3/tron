@@ -32,6 +32,7 @@ import {
   UnifiedSearchTool,
   BraveProvider,
   ExaProvider,
+  IntrospectTool,
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
@@ -216,6 +217,7 @@ export class AgentFactory {
         generateId: () => this.config.generateTodoId(),
         onTodosUpdated: (todos) => this.config.onTodosUpdated(sessionId, todos),
       }),
+      new IntrospectTool({ dbPath: this.config.dbPath }),
     ];
 
     // Add NotifyApp tool if push notifications are configured

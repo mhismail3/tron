@@ -62,6 +62,7 @@ import {
   type HookEventHandler,
   type InternalHookTriggeredEvent,
   type InternalHookCompletedEvent,
+  type BlobStore,
 } from './handlers/index.js';
 import { createEventContext, type EventContext } from './event-context.js';
 
@@ -148,8 +149,6 @@ export class AgentEventHandler {
     this.uiRenderHandler = createUIRenderHandler(config.emit);
 
     // Create focused handlers with simplified dependencies
-    // Most handlers now only need their specific deps since EventContext
-    // provides getActiveSession, emit, and appendEventLinearized
     this.turnHandler = createTurnEventHandler({});
 
     this.toolHandler = createToolEventHandler({
@@ -173,6 +172,14 @@ export class AgentEventHandler {
   }
 
   /**
+   * Set the blob store for large content storage.
+   * Call after EventStore is initialized to enable content storage.
+   */
+  setBlobStore(blobStore: BlobStore): void {
+    this.toolHandler.setBlobStore(blobStore);
+  }
+
+  /**
    * Forward an agent event for processing.
    * Handles turn lifecycle, streaming, tool execution, and other event types.
    *
@@ -183,7 +190,6 @@ export class AgentEventHandler {
    */
   forwardEvent(sessionId: SessionId, event: TronEvent): void {
     // Create EventContext ONCE at the start of event dispatch
-    // All handlers receive this context for consistent metadata
     const ctx = this.createEventContext(sessionId);
 
     // If this is a subagent session, forward streaming events to parent
@@ -269,7 +275,6 @@ export class AgentEventHandler {
 
   /**
    * Create an EventContext for a session.
-   * This provides scoped access to session metadata and event methods.
    */
   private createEventContext(sessionId: SessionId): EventContext {
     return createEventContext(sessionId, {

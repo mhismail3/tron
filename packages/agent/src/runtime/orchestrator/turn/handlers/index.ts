@@ -26,6 +26,7 @@ export {
   ToolEventHandler,
   createToolEventHandler,
   type ToolEventHandlerDeps,
+  type BlobStore,
 } from './tool-event-handler.js';
 
 // Real-time streaming

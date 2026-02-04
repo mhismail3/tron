@@ -7,34 +7,77 @@
  * - tool_execution_end: Individual tool execution completes
  *
  * Uses EventContext for automatic metadata injection (sessionId, timestamp, runId).
+ *
+ * ## Content Storage
+ *
+ * Large tool results are stored in blob storage before truncation.
+ * The truncation message includes the blob ID so the agent can
+ * retrieve full content via the Introspect tool if needed.
  */
 
 import { createLogger } from '@infrastructure/logging/index.js';
 import type { TronEvent } from '@core/types/index.js';
 import type { EventType } from '@infrastructure/events/index.js';
-import {
-  normalizeContentBlocks,
-  truncateString,
-  MAX_TOOL_RESULT_SIZE,
-} from '@core/utils/index.js';
+import { normalizeContentBlocks } from '@core/utils/index.js';
 import type { UIRenderHandler, ToolStartArgs, ToolEndDetails } from '../../ui-render-handler.js';
 import type { EventContext } from '../event-context.js';
 
 const logger = createLogger('tool-event-handler');
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+/** Threshold for storing tool results in blob storage (2KB) */
+const BLOB_STORAGE_THRESHOLD = 2 * 1024;
+
+/** Maximum size for tool result in context (10KB) */
+const MAX_TOOL_RESULT_SIZE = 10 * 1024;
+
+// =============================================================================
 // Types
 // =============================================================================
 
 /**
+ * Simple blob store interface - just store and get content.
+ */
+export interface BlobStore {
+  store(content: string | Buffer, mimeType?: string): string;
+  getContent(blobId: string): string | null;
+}
+
+/**
  * Dependencies for ToolEventHandler.
- *
- * Note: No longer needs getActiveSession, appendEventLinearized, or emit
- * since EventContext provides all of these.
  */
 export interface ToolEventHandlerDeps {
   /** UI render handler for RenderAppUI tool */
   uiRenderHandler: UIRenderHandler;
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Truncate a string with a notice about where to find full content.
+ */
+function truncateWithBlobRef(content: string, maxLength: number, blobId: string): string {
+  if (content.length <= maxLength) return content;
+
+  const truncated = content.slice(0, maxLength);
+  const remaining = content.length - maxLength;
+
+  return `${truncated}\n\n... [truncated ${remaining.toLocaleString()} bytes → ${blobId}]\n[Use Introspect tool with action "read_blob" and blob_id "${blobId}" to retrieve full content]`;
+}
+
+/**
+ * Simple truncation without blob reference.
+ */
+function truncateString(str: string, maxLength: number): string {
+  if (str.length <= maxLength) return str;
+  const truncated = str.slice(0, maxLength);
+  const remaining = str.length - maxLength;
+  return `${truncated}\n\n... [truncated ${remaining.toLocaleString()} bytes]`;
 }
 
 // =============================================================================
@@ -43,20 +86,23 @@ export interface ToolEventHandlerDeps {
 
 /**
  * Handles tool execution events.
- *
- * Uses EventContext for:
- * - Automatic runId inclusion in events
- * - Consistent timestamp across related events
- * - Access to active session for state updates
- * - Simplified emit/persist API
  */
 export class ToolEventHandler {
+  private blobStore?: BlobStore;
+
   constructor(private deps: ToolEventHandlerDeps) {}
+
+  /**
+   * Set the blob store for large content storage.
+   * Call after EventStore is initialized.
+   */
+  setBlobStore(blobStore: BlobStore): void {
+    this.blobStore = blobStore;
+  }
 
   /**
    * Handle tool_use_batch event.
    * Registers all tool_use intents BEFORE any execution starts.
-   * This enables linear event ordering by knowing all tools upfront.
    */
   handleToolUseBatch(ctx: EventContext, event: TronEvent): void {
     const batchEvent = event as {
@@ -69,7 +115,6 @@ export class ToolEventHandler {
     };
 
     if (ctx.active && batchEvent.toolCalls && Array.isArray(batchEvent.toolCalls)) {
-      // Transform tool calls to expected format (input may come as input or arguments)
       const normalizedToolCalls = batchEvent.toolCalls.map((tc) => ({
         id: tc.id,
         name: tc.name,
@@ -96,7 +141,6 @@ export class ToolEventHandler {
       arguments?: Record<string, unknown>;
     };
 
-    // Track tool call for resume support (across ALL turns)
     if (ctx.active) {
       ctx.active.sessionContext!.startToolCall(
         toolStartEvent.toolCallId,
@@ -104,9 +148,7 @@ export class ToolEventHandler {
         toolStartEvent.arguments ?? {}
       );
 
-      // LINEAR EVENT ORDERING: Flush accumulated content as message.assistant BEFORE tool.call
-      // This ensures correct order: message.assistant (with tool_use) → tool.call → tool.result
-      // The flush only happens once per turn (first tool_execution_start)
+      // Flush accumulated content as message.assistant BEFORE tool.call
       this.flushPreToolContent(ctx);
     }
 
@@ -116,7 +158,7 @@ export class ToolEventHandler {
       arguments: toolStartEvent.arguments,
     });
 
-    // Delegate RenderAppUI handling to UIRenderHandler
+    // Delegate RenderAppUI handling
     if (toolStartEvent.toolName === 'RenderAppUI' && toolStartEvent.arguments) {
       this.deps.uiRenderHandler.handleToolStart(
         ctx.sessionId,
@@ -127,7 +169,7 @@ export class ToolEventHandler {
       );
     }
 
-    // Store discrete tool.call event (linearized)
+    // Store tool.call event
     ctx.persist('tool.call' as EventType, {
       toolCallId: toolStartEvent.toolCallId,
       name: toolStartEvent.toolName,
@@ -149,10 +191,9 @@ export class ToolEventHandler {
       duration?: number;
     };
 
-    // Extract text content from TronToolResult
     const resultContent = this.extractResultContent(toolEndEvent.result);
 
-    // Update tool call tracking for resume support (across ALL turns)
+    // Update tool call tracking
     if (ctx.active) {
       ctx.active.sessionContext!.endToolCall(
         toolEndEvent.toolCallId,
@@ -161,7 +202,7 @@ export class ToolEventHandler {
       );
     }
 
-    // Extract details from tool result (e.g., full screenshot data for iOS)
+    // Extract details for iOS screenshots etc.
     const resultDetails =
       typeof toolEndEvent.result === 'object' && toolEndEvent.result !== null
         ? (toolEndEvent.result as { details?: unknown }).details
@@ -174,12 +215,10 @@ export class ToolEventHandler {
       output: toolEndEvent.isError ? undefined : resultContent,
       error: toolEndEvent.isError ? resultContent : undefined,
       duration: toolEndEvent.duration,
-      // Include details for clients that need full binary data (e.g., iOS screenshots)
-      // This is NOT persisted to event store to avoid bloating storage
       details: resultDetails,
     });
 
-    // Delegate RenderAppUI handling to UIRenderHandler
+    // Delegate RenderAppUI handling
     if (toolEndEvent.toolName === 'RenderAppUI') {
       this.deps.uiRenderHandler.handleToolEnd(
         ctx.sessionId,
@@ -192,18 +231,47 @@ export class ToolEventHandler {
       );
     }
 
-    // Store discrete tool.result event (linearized)
+    // Store large results in blob, then truncate with blob reference
+    let contentToStore = resultContent;
+    let blobId: string | undefined;
+    let truncated = false;
+
+    const contentSize = Buffer.byteLength(resultContent, 'utf-8');
+
+    if (contentSize > BLOB_STORAGE_THRESHOLD && this.blobStore) {
+      // Store full content in blob
+      blobId = this.blobStore.store(resultContent, 'text/plain');
+
+      logger.debug('Stored large tool result in blob', {
+        toolCallId: toolEndEvent.toolCallId,
+        toolName: toolEndEvent.toolName,
+        originalSize: contentSize,
+        blobId,
+      });
+
+      // Truncate with blob reference
+      if (contentSize > MAX_TOOL_RESULT_SIZE) {
+        contentToStore = truncateWithBlobRef(resultContent, MAX_TOOL_RESULT_SIZE, blobId);
+        truncated = true;
+      }
+    } else if (contentSize > MAX_TOOL_RESULT_SIZE) {
+      // No blob store available, just truncate
+      contentToStore = truncateString(resultContent, MAX_TOOL_RESULT_SIZE);
+      truncated = true;
+    }
+
+    // Persist tool.result event
     ctx.persist(
       'tool.result' as EventType,
       {
         toolCallId: toolEndEvent.toolCallId,
-        content: truncateString(resultContent, MAX_TOOL_RESULT_SIZE),
+        content: contentToStore,
         isError: toolEndEvent.isError ?? false,
         duration: toolEndEvent.duration,
-        truncated: resultContent.length > MAX_TOOL_RESULT_SIZE,
+        truncated,
+        blobId,
       },
       (evt) => {
-        // Track eventId for context manager message (tool result) via SessionContext
         if (ctx.active?.sessionContext) {
           ctx.active.sessionContext.addMessageEventId(evt.id);
         }
@@ -215,34 +283,22 @@ export class ToolEventHandler {
   // Private Helpers
   // ===========================================================================
 
-  /**
-   * Flush pre-tool content as message.assistant event.
-   * Ensures correct linear event ordering.
-   */
   private flushPreToolContent(ctx: EventContext): void {
-    if (!ctx.active) {
-      return;
-    }
+    if (!ctx.active) return;
 
     const preToolContent = ctx.active.sessionContext!.flushPreToolContent();
-    if (!preToolContent || preToolContent.length === 0) {
-      return;
-    }
+    if (!preToolContent || preToolContent.length === 0) return;
 
     const normalizedContent = normalizeContentBlocks(preToolContent);
-    if (normalizedContent.length === 0) {
-      return;
-    }
+    if (normalizedContent.length === 0) return;
 
     const turnStartTime = ctx.active.sessionContext!.getTurnStartTime();
     const turnLatency = turnStartTime ? Date.now() - turnStartTime : 0;
 
-    // Detect if content has thinking blocks
     const hasThinking = normalizedContent.some(
       (b) => (b as Record<string, unknown>).type === 'thinking'
     );
 
-    // Get token record captured from response_complete
     const tokenUsage = ctx.active.sessionContext!.getLastTurnTokenUsage();
     const tokenRecord = ctx.active.sessionContext!.getLastTokenRecord();
 
@@ -254,12 +310,11 @@ export class ToolEventHandler {
         tokenRecord,
         turn: ctx.active.sessionContext!.getCurrentTurn(),
         model: ctx.active.model,
-        stopReason: 'tool_use', // Indicates tools are being called
+        stopReason: 'tool_use',
         latency: turnLatency,
         hasThinking,
       },
       (evt) => {
-        // Track eventId for context manager message via SessionContext
         if (ctx.active?.sessionContext) {
           ctx.active.sessionContext.addMessageEventId(evt.id);
         }
@@ -286,10 +341,6 @@ export class ToolEventHandler {
     });
   }
 
-  /**
-   * Extract text content from TronToolResult.
-   * Content can be string OR array of { type: 'text', text } | { type: 'image', ... }
-   */
   private extractResultContent(result: unknown): string {
     if (typeof result !== 'object' || result === null) {
       return String(result ?? '');
@@ -302,7 +353,6 @@ export class ToolEventHandler {
     }
 
     if (Array.isArray(typedResult.content)) {
-      // Extract text from content blocks, join with newlines
       return typedResult.content
         .filter(
           (block): block is { type: 'text'; text: string } =>
@@ -312,7 +362,6 @@ export class ToolEventHandler {
         .join('\n');
     }
 
-    // Fallback: stringify the whole result
     return JSON.stringify(result);
   }
 }
@@ -321,9 +370,6 @@ export class ToolEventHandler {
 // Factory
 // =============================================================================
 
-/**
- * Create a ToolEventHandler instance.
- */
 export function createToolEventHandler(deps: ToolEventHandlerDeps): ToolEventHandler {
   return new ToolEventHandler(deps);
 }

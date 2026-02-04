@@ -76,6 +76,9 @@ export {
 export {
   BashTool,
   type BashToolConfig,
+  IntrospectTool,
+  type IntrospectToolConfig,
+  type IntrospectParams,
 } from './system/index.js';
 
 // Search tools

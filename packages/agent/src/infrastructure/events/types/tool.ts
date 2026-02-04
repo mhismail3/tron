@@ -37,5 +37,7 @@ export interface ToolResultEvent extends BaseEvent {
     affectedFiles?: string[];
     /** Whether result was truncated */
     truncated?: boolean;
+    /** Blob ID containing full content (if truncated) */
+    blobId?: string;
   };
 }

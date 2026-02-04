@@ -455,4 +455,137 @@ describe('ToolEventHandler', () => {
       expect(handler).toBeInstanceOf(ToolEventHandler);
     });
   });
+
+  describe('blob storage', () => {
+    function createMockBlobStore() {
+      const storage = new Map<string, string>();
+      let counter = 0;
+      return {
+        store: vi.fn((content: string) => {
+          const blobId = `blob_${++counter}`;
+          storage.set(blobId, content);
+          return blobId;
+        }),
+        getContent: vi.fn((blobId: string) => storage.get(blobId) ?? null),
+        _storage: storage,
+      };
+    }
+
+    it('should store large results (> 2KB) to blob', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-blob-1' });
+      const ctx = createTestContext({ active: mockActive });
+      const blobStore = createMockBlobStore();
+      handler.setBlobStore(blobStore);
+
+      // Create content > 2KB but < 10KB (shouldn't truncate)
+      const largeContent = 'x'.repeat(3000);
+      const event = {
+        type: 'tool_execution_end',
+        toolCallId: 'call-1',
+        toolName: 'Read',
+        result: { content: largeContent },
+        isError: false,
+        duration: 100,
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionEnd(ctx, event);
+
+      // Blob should be stored
+      expect(blobStore.store).toHaveBeenCalledWith(largeContent, 'text/plain');
+
+      // Content should NOT be truncated (under 10KB threshold)
+      const toolResultPersist = ctx.persistCalls.find(c => c.type === 'tool.result');
+      expect(toolResultPersist!.payload.content).toBe(largeContent);
+      expect(toolResultPersist!.payload.blobId).toBe('blob_1');
+      expect(toolResultPersist!.payload.truncated).toBe(false);
+    });
+
+    it('should truncate and add blob reference for very large results (> 10KB)', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-blob-2' });
+      const ctx = createTestContext({ active: mockActive });
+      const blobStore = createMockBlobStore();
+      handler.setBlobStore(blobStore);
+
+      // Create content > 10KB
+      const veryLargeContent = 'y'.repeat(15000);
+      const event = {
+        type: 'tool_execution_end',
+        toolCallId: 'call-2',
+        toolName: 'Read',
+        result: { content: veryLargeContent },
+        isError: false,
+        duration: 100,
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionEnd(ctx, event);
+
+      // Blob should be stored
+      expect(blobStore.store).toHaveBeenCalledWith(veryLargeContent, 'text/plain');
+
+      // Content should be truncated with blob reference
+      const toolResultPersist = ctx.persistCalls.find(c => c.type === 'tool.result');
+      expect(toolResultPersist!.payload.content.length).toBeLessThan(veryLargeContent.length);
+      expect(toolResultPersist!.payload.content).toContain('blob_1');
+      expect(toolResultPersist!.payload.content).toContain('truncated');
+      expect(toolResultPersist!.payload.content).toContain('Introspect');
+      expect(toolResultPersist!.payload.blobId).toBe('blob_1');
+      expect(toolResultPersist!.payload.truncated).toBe(true);
+    });
+
+    it('should truncate without blob reference when no blob store', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-blob-3' });
+      const ctx = createTestContext({ active: mockActive });
+      // No blob store set
+
+      // Create content > 10KB
+      const veryLargeContent = 'z'.repeat(15000);
+      const event = {
+        type: 'tool_execution_end',
+        toolCallId: 'call-3',
+        toolName: 'Read',
+        result: { content: veryLargeContent },
+        isError: false,
+        duration: 100,
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionEnd(ctx, event);
+
+      // Content should be truncated without blob reference
+      const toolResultPersist = ctx.persistCalls.find(c => c.type === 'tool.result');
+      expect(toolResultPersist!.payload.content.length).toBeLessThan(veryLargeContent.length);
+      expect(toolResultPersist!.payload.content).toContain('truncated');
+      expect(toolResultPersist!.payload.content).not.toContain('blob_');
+      expect(toolResultPersist!.payload.blobId).toBeUndefined();
+      expect(toolResultPersist!.payload.truncated).toBe(true);
+    });
+
+    it('should not store small results (< 2KB) to blob', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-blob-4' });
+      const ctx = createTestContext({ active: mockActive });
+      const blobStore = createMockBlobStore();
+      handler.setBlobStore(blobStore);
+
+      // Create small content (< 2KB)
+      const smallContent = 'small file contents';
+      const event = {
+        type: 'tool_execution_end',
+        toolCallId: 'call-4',
+        toolName: 'Read',
+        result: { content: smallContent },
+        isError: false,
+        duration: 100,
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionEnd(ctx, event);
+
+      // Blob should NOT be stored
+      expect(blobStore.store).not.toHaveBeenCalled();
+
+      // Content should be stored as-is
+      const toolResultPersist = ctx.persistCalls.find(c => c.type === 'tool.result');
+      expect(toolResultPersist!.payload.content).toBe(smallContent);
+      expect(toolResultPersist!.payload.blobId).toBeUndefined();
+      expect(toolResultPersist!.payload.truncated).toBe(false);
+    });
+  });
 });
