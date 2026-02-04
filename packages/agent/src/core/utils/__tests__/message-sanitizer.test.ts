@@ -39,6 +39,10 @@ function createText(text: string) {
   return { type: 'text' as const, text };
 }
 
+function createThinking(thinking: string, signature?: string) {
+  return { type: 'thinking' as const, thinking, ...(signature && { signature }) };
+}
+
 // =============================================================================
 // 1. Invariant Tests
 // =============================================================================
@@ -365,6 +369,152 @@ describe('sanitizeMessages edge cases', () => {
       expect(result.messages).toHaveLength(6);
       const toolResults = result.messages.filter(m => m.role === 'toolResult');
       expect(toolResults.length).toBe(2);
+    });
+  });
+});
+
+// =============================================================================
+// 2b. Thinking Block Tests
+// =============================================================================
+
+describe('sanitizeMessages thinking blocks', () => {
+  describe('thinking-only messages (no signature)', () => {
+    it('should remove assistant messages with only thinking blocks (no signature)', () => {
+      // This is the exact bug from session forking:
+      // An interrupted session may have an assistant message with ONLY a thinking block
+      // When this thinking block has no signature (non-extended thinking models like Haiku),
+      // it will be filtered out during conversion, leaving empty content.
+      const messages: Message[] = [
+        createUserMessage('Hello'),
+        createAssistantMessage([createThinking('I am pondering this...')]),
+        createAssistantMessage([createText('Valid response')]),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      expect(result.messages).toHaveLength(2);
+      expect(result.messages[0]!.role).toBe('user');
+      expect(result.messages[1]!.role).toBe('assistant');
+      // The remaining assistant message should be the valid one with text
+      expect((result.messages[1] as AssistantMessage).content).toEqual([createText('Valid response')]);
+      expect(result.fixes.some(f => f.type === 'removed_thinking_only_message')).toBe(true);
+    });
+
+    it('should remove thinking-only messages in the middle of a conversation', () => {
+      // Real scenario from forked session: thinking-only message sandwiched between valid messages
+      const messages: Message[] = [
+        createUserMessage('Hey'),
+        createAssistantMessage([createThinking('Greeting...'), createText('Hi there!')]),
+        createUserMessage('What\'s up'),
+        createAssistantMessage([createThinking('Just thinking...')]), // This was interrupted
+        createUserMessage('New prompt'),
+        createAssistantMessage([createText('I can help with that')]),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      // Should have 5 messages (thinking-only removed)
+      expect(result.messages).toHaveLength(5);
+      expect(result.messages.map(m => m.role)).toEqual([
+        'user', 'assistant', 'user', 'user', 'assistant',
+      ]);
+      expect(result.fixes.some(f => f.type === 'removed_thinking_only_message')).toBe(true);
+    });
+
+    it('should NOT remove assistant messages with thinking that has a signature', () => {
+      // Extended thinking models (Opus 4.5) provide signatures - these MUST be preserved
+      const messages: Message[] = [
+        createUserMessage('Hello'),
+        createAssistantMessage([createThinking('Deep thinking...', 'sig_abc123')]),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      expect(result.messages).toHaveLength(2);
+      expect(result.isValid).toBe(true);
+      expect(result.fixes).toHaveLength(0);
+    });
+
+    it('should preserve messages with both thinking and text', () => {
+      const messages: Message[] = [
+        createUserMessage('Hello'),
+        createAssistantMessage([
+          createThinking('Let me think...'),
+          createText('Here is my response'),
+        ]),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      expect(result.messages).toHaveLength(2);
+      expect(result.isValid).toBe(true);
+      expect(result.fixes).toHaveLength(0);
+    });
+
+    it('should preserve messages with thinking and tool_use', () => {
+      const messages: Message[] = [
+        createUserMessage('Read a file'),
+        createAssistantMessage([
+          createThinking('I should read the file...'),
+          createToolUse('call_1', 'ReadFile', { path: '/test' }),
+        ]),
+        createToolResult('call_1', 'file contents'),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      expect(result.messages).toHaveLength(3);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should handle multiple consecutive thinking-only messages', () => {
+      const messages: Message[] = [
+        createUserMessage('Start'),
+        createAssistantMessage([createThinking('Thinking 1...')]),
+        createAssistantMessage([createThinking('Thinking 2...')]),
+        createAssistantMessage([createThinking('Thinking 3...')]),
+        createAssistantMessage([createText('Finally a response')]),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      expect(result.messages).toHaveLength(2);
+      expect(result.fixes.filter(f => f.type === 'removed_thinking_only_message')).toHaveLength(3);
+    });
+  });
+
+  describe('forked session regression', () => {
+    it('should handle the exact forked session scenario', () => {
+      // This reproduces the exact scenario from sess_303ac47a2c6a (fork of sess_696cd493332b)
+      // Parent session had an interrupted assistant message with only thinking content
+      const messages: Message[] = [
+        createUserMessage('Hey'),
+        createAssistantMessage([
+          createThinking('The user just said "Hey" - a greeting'),
+          createText('Hey! What\'s up?'),
+        ]),
+        createUserMessage('What\'s up'), // Merged consecutive user messages
+        createAssistantMessage([
+          createThinking('The user is just greeting me casually'), // NO TEXT - this was interrupted
+        ]),
+        createUserMessage('What can you do'),
+        createAssistantMessage([
+          createThinking('The user is asking what I can do'),
+          createText('I can help with many things...'),
+        ]),
+      ];
+
+      const result = sanitizeMessages(messages);
+
+      // The thinking-only message should be removed
+      expect(result.messages).toHaveLength(5);
+      expect(result.fixes.some(f => f.type === 'removed_thinking_only_message')).toBe(true);
+
+      // Verify the structure is valid for API
+      const roles = result.messages.map(m => m.role);
+      // User messages will be merged since they're consecutive after removal
+      expect(roles[0]).toBe('user');
+      expect(roles[1]).toBe('assistant');
     });
   });
 });

@@ -36,6 +36,7 @@ const logger = createLogger('message-sanitizer');
 export type SanitizationFixType =
   | 'injected_tool_result'
   | 'removed_empty_message'
+  | 'removed_thinking_only_message'
   | 'removed_invalid_block'
   | 'injected_placeholder_user';
 
@@ -105,13 +106,51 @@ function isValidUserMessage(msg: UserMessage): boolean {
 }
 
 /**
+ * Check if an assistant message has content that will survive API conversion.
+ *
+ * Thinking blocks without signatures are display-only (used by non-extended thinking
+ * models like Haiku/Sonnet) and are filtered out before sending to the API.
+ * If a message contains ONLY such thinking blocks, it will become empty after conversion
+ * and must be removed to prevent API errors.
+ *
+ * Content that survives conversion:
+ * - text blocks (always)
+ * - tool_use blocks (always)
+ * - thinking blocks WITH signatures (extended thinking models like Opus 4.5)
+ */
+function hasContentSurvivingConversion(content: AssistantContent[]): boolean {
+  return content.some(block => {
+    if (!block || typeof block !== 'object') return false;
+    const type = block.type;
+
+    // text and tool_use blocks always survive
+    if (type === 'text' || type === 'tool_use') return true;
+
+    // thinking blocks only survive if they have a signature (extended thinking)
+    if (type === 'thinking') {
+      return typeof (block as { signature?: string }).signature === 'string' &&
+             (block as { signature?: string }).signature!.length > 0;
+    }
+
+    // Unknown block types - be permissive and keep them
+    return true;
+  });
+}
+
+/**
  * Check if an assistant message has valid non-empty content.
+ * Also checks that the content will survive API conversion (thinking-only messages
+ * without signatures will become empty and are therefore invalid).
  */
 function isValidAssistantMessage(msg: AssistantMessage): boolean {
   if (!Array.isArray(msg.content)) {
     return false;
   }
-  return msg.content.length > 0;
+  if (msg.content.length === 0) {
+    return false;
+  }
+  // Must have content that survives API conversion
+  return hasContentSurvivingConversion(msg.content);
 }
 
 /**
@@ -190,8 +229,23 @@ export function sanitizeMessages(messages: Message[]): SanitizationResult {
 
   for (const msg of messages) {
     if (!isValidMessage(msg)) {
+      // Determine the specific reason for removal
+      let fixType: SanitizationFixType = 'removed_empty_message';
+
+      // Check if this is a thinking-only assistant message
+      if (msg?.role === 'assistant' && Array.isArray((msg as AssistantMessage).content)) {
+        const content = (msg as AssistantMessage).content;
+        if (content.length > 0 && !hasContentSurvivingConversion(content)) {
+          fixType = 'removed_thinking_only_message';
+          logger.warn('Removed assistant message with only thinking blocks (no signature)', {
+            blockCount: content.length,
+            blockTypes: content.map((b: AssistantContent) => b?.type),
+          });
+        }
+      }
+
       fixes.push({
-        type: 'removed_empty_message',
+        type: fixType,
         details: { role: msg?.role ?? 'unknown' },
       });
       continue;
