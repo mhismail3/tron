@@ -4,7 +4,7 @@
  * Types for the database migration system.
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 
 /**
  * A database migration
@@ -15,7 +15,7 @@ export interface Migration {
   /** Human-readable description */
   description: string;
   /** SQL to execute for the migration */
-  up: (db: Database.Database) => void;
+  up: (db: Database) => void;
 }
 
 /**

@@ -7,17 +7,17 @@
  * - Supports incremental column additions
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 import type { Migration, MigrationResult, SchemaVersionRow, ColumnInfo } from './types.js';
 
 /**
  * Runs database migrations
  */
 export class MigrationRunner {
-  private readonly db: Database.Database;
+  private readonly db: Database;
   private readonly migrations: Migration[];
 
-  constructor(db: Database.Database, migrations: Migration[]) {
+  constructor(db: Database, migrations: Migration[]) {
     this.db = db;
     this.migrations = this.sortMigrations(migrations);
   }
@@ -75,13 +75,14 @@ export class MigrationRunner {
 
   /**
    * Check if a table exists
+   * Note: bun:sqlite returns null for no rows, not undefined
    */
   tableExists(tableName: string): boolean {
     const row = this.db.prepare(`
       SELECT name FROM sqlite_master
       WHERE type='table' AND name=?
-    `).get(tableName) as { name: string } | undefined;
-    return row !== undefined;
+    `).get(tableName) as { name: string } | null;
+    return row !== null;
   }
 
   /**
@@ -162,7 +163,7 @@ export class MigrationRunner {
  * Create a migration runner for the given database
  */
 export function createMigrationRunner(
-  db: Database.Database,
+  db: Database,
   migrations: Migration[]
 ): MigrationRunner {
   return new MigrationRunner(db, migrations);

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import {
   LoggerRegistry,
   getDefaultRegistry,
@@ -12,7 +12,7 @@ import {
 } from '../logger-registry.js';
 import { TronLogger } from '../logger.js';
 
-function createLogsSchema(db: Database.Database): void {
+function createLogsSchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +97,7 @@ describe('LoggerRegistry', () => {
   });
 
   describe('initializeTransport', () => {
-    let db: Database.Database;
+    let db: Database;
 
     beforeEach(() => {
       db = new Database(':memory:');
@@ -138,7 +138,7 @@ describe('LoggerRegistry', () => {
   });
 
   describe('flush', () => {
-    let db: Database.Database;
+    let db: Database;
 
     beforeEach(() => {
       db = new Database(':memory:');

@@ -60,15 +60,15 @@ describe('DatabaseConnection', () => {
 
       // Note: In-memory databases can't use WAL mode (SQLite limitation)
       // The journal_mode will remain 'memory' for in-memory databases
-      const journalMode = db.pragma('journal_mode', { simple: true });
+      const journalMode = (db.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode;
       expect(['wal', 'memory']).toContain(journalMode);
 
       // Check foreign keys enabled
-      const foreignKeys = db.pragma('foreign_keys', { simple: true });
+      const foreignKeys = (db.query('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys;
       expect(foreignKeys).toBe(1);
 
       // Check synchronous mode
-      const synchronous = db.pragma('synchronous', { simple: true });
+      const synchronous = (db.query('PRAGMA synchronous').get() as { synchronous: number }).synchronous;
       expect(synchronous).toBe(1); // NORMAL = 1
     });
 
@@ -77,7 +77,7 @@ describe('DatabaseConnection', () => {
       const db = noWalConnection.open();
 
       // In-memory databases use 'memory' journal mode regardless of WAL setting
-      const journalMode = db.pragma('journal_mode', { simple: true });
+      const journalMode = (db.query('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode;
       expect(journalMode).toBe('memory');
 
       noWalConnection.close();
@@ -181,7 +181,7 @@ describe('DatabaseConnection', () => {
   describe('pragmas optimization', () => {
     it('should set temp_store appropriately for environment', () => {
       const db = connection.open();
-      const result = db.pragma('temp_store', { simple: true });
+      const result = (db.query('PRAGMA temp_store').get() as { temp_store: number }).temp_store;
       // In test environment: DEFAULT (0), in production: MEMORY (2)
       expect([0, 2]).toContain(result);
     });
@@ -190,14 +190,14 @@ describe('DatabaseConnection', () => {
       // Note: In-memory databases return undefined for mmap_size since there's no file
       // For file-based databases, this would return the configured mmap size
       const db = connection.open();
-      const result = db.pragma('mmap_size', { simple: true });
+      const result = (db.query('PRAGMA mmap_size').get() as { mmap_size: number } | null)?.mmap_size;
       // In-memory databases return undefined, file-based would return a number
       expect(result === undefined || typeof result === 'number').toBe(true);
     });
 
     it('should set wal_autocheckpoint', () => {
       const db = connection.open();
-      const result = db.pragma('wal_autocheckpoint', { simple: true });
+      const result = (db.query('PRAGMA wal_autocheckpoint').get() as { wal_autocheckpoint: number }).wal_autocheckpoint;
       // WAL mode may not work for in-memory databases, but pragma should not throw
       expect(typeof result).toBe('number');
     });

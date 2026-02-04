@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { SQLiteTransport, type SQLiteTransportOptions } from '../sqlite-transport.js';
 import { setLoggingContext, clearLoggingContext } from '../log-context.js';
 

@@ -9,8 +9,14 @@
  */
 
 import * as crypto from 'crypto';
-import type Database from 'better-sqlite3';
+import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { DatabaseConnection } from '../database.js';
+
+/** Result of a run() query */
+interface RunResult {
+  changes: number;
+  lastInsertRowid: number | bigint;
+}
 
 /**
  * Base class for all repositories
@@ -28,7 +34,7 @@ export abstract class BaseRepository {
   /**
    * Get the underlying database instance
    */
-  protected get db(): Database.Database {
+  protected get db(): Database {
     return this.connection.getDatabase();
   }
 
@@ -52,21 +58,23 @@ export abstract class BaseRepository {
   /**
    * Execute a query and return all results
    */
-  protected all<T>(sql: string, ...params: unknown[]): T[] {
+  protected all<T>(sql: string, ...params: SQLQueryBindings[]): T[] {
     return this.db.prepare(sql).all(...params) as T[];
   }
 
   /**
    * Execute a query and return the first result
+   * Note: bun:sqlite returns null for no rows, we normalize to undefined
    */
-  protected get<T>(sql: string, ...params: unknown[]): T | undefined {
-    return this.db.prepare(sql).get(...params) as T | undefined;
+  protected get<T>(sql: string, ...params: SQLQueryBindings[]): T | undefined {
+    const result = this.db.prepare(sql).get(...params);
+    return (result ?? undefined) as T | undefined;
   }
 
   /**
    * Execute a query that modifies data
    */
-  protected run(sql: string, ...params: unknown[]): Database.RunResult {
+  protected run(sql: string, ...params: SQLQueryBindings[]): RunResult {
     return this.db.prepare(sql).run(...params);
   }
 

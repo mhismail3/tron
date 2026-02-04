@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { LogStore, type LogEntry, type LogQueryOptions, type LogLevel } from '../log-store.js';
 
 describe('LogStore', () => {

@@ -9,7 +9,7 @@
  * individual repositories directly when possible.
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 import { DatabaseConnection, getDefaultConfig } from './database.js';
 import { runMigrations, runIncrementalMigrations } from './migrations/index.js';
 import {
@@ -147,7 +147,7 @@ export class SQLiteEventStore {
   /**
    * Get the underlying database instance
    */
-  getDatabase(): Database.Database {
+  getDatabase(): Database {
     return this.connection.getDatabase();
   }
 
@@ -155,7 +155,7 @@ export class SQLiteEventStore {
    * Get the underlying database instance
    * @deprecated Use getDatabase() instead
    */
-  getDb(): Database.Database {
+  getDb(): Database {
     return this.connection.getDatabase();
   }
 

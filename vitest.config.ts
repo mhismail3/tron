@@ -9,7 +9,11 @@ export default defineConfig({
       'packages/*/src/**/*.test.ts',      // Co-located tests
       'packages/*/src/**/__tests__/*.test.ts',  // Tests in __tests__ folders
     ],
-    exclude: ['**/node_modules/**', '**/dist/**', 'packages/chat-web/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'packages/chat-web/**',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -39,6 +43,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // bun:sqlite shim for vitest (uses better-sqlite3 under the hood)
+      'bun:sqlite': resolve(__dirname, 'packages/agent/src/__fixtures__/bun-sqlite-shim.ts'),
       '@tron/agent': resolve(__dirname, 'packages/agent/src'),
       '@tron/agent/browser': resolve(__dirname, 'packages/agent/src/browser.ts'),
       '@tron/tui': resolve(__dirname, 'packages/tui/src'),

@@ -58,7 +58,7 @@ export interface EventStoreMethods {
   initialize(): Promise<void>;
   close(): Promise<void>;
   isInitialized(): boolean;
-  getDatabase(): import('better-sqlite3').Database;
+  getDatabase(): import('bun:sqlite').Database;
   createSession(options: CreateSessionOptions): Promise<CreateSessionResult>;
   append(options: AppendEventOptions): Promise<SessionEvent>;
   getEvent(eventId: EventId): Promise<SessionEvent | null>;

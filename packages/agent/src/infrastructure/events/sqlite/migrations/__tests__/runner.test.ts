@@ -3,12 +3,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { MigrationRunner, createMigrationRunner } from '../runner.js';
 import type { Migration } from '../types.js';
 
 describe('MigrationRunner', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = new Database(':memory:');

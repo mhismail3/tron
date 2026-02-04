@@ -8,19 +8,19 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import BetterSqlite3 from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { IntrospectTool } from '../system/introspect.js';
 
 describe('IntrospectTool', () => {
   let dbPath: string;
-  let db: BetterSqlite3.Database;
+  let db: Database;
   let tool: IntrospectTool;
 
   beforeEach(() => {
     // Create temp database
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'introspect-test-'));
     dbPath = path.join(tmpDir, 'test.db');
-    db = new BetterSqlite3(dbPath);
+    db = new Database(dbPath);
 
     // Create minimal schema
     db.exec(`

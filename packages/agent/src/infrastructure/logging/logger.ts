@@ -11,7 +11,7 @@
  */
 
 import pino from 'pino';
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 import { SQLiteTransport } from './sqlite-transport.js';
 import { getLoggingContext } from './log-context.js';
 import {
@@ -35,11 +35,11 @@ let globalSqliteTransport: SQLiteTransport | null = null;
  * Initialize the SQLite transport for log persistence.
  * Call this once at server startup with the database instance.
  *
- * @param db - The better-sqlite3 database instance (the event store database)
+ * @param db - The bun:sqlite database instance (the event store database)
  * @param options - Transport configuration options
  */
 export function initializeLogTransport(
-  db: Database.Database,
+  db: Database,
   options?: {
     minLevel?: number;
     batchSize?: number;

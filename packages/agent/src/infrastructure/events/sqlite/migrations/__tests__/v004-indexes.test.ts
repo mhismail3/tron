@@ -3,11 +3,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { runMigrations } from '../index.js';
 
 describe('v004 migration - indexes', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = new Database(':memory:');
@@ -86,7 +86,7 @@ describe('v004 migration - indexes', () => {
 });
 
 describe('v004 migration - FTS triggers', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = new Database(':memory:');

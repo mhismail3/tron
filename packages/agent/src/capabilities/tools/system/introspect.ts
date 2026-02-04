@@ -16,7 +16,7 @@
  * - read_blob: Read stored blob content
  */
 
-import type Database from 'better-sqlite3';
+import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import type { TronTool, TronToolResult } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
@@ -109,18 +109,15 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
   readonly category = 'custom' as const;
 
   private dbPath: string;
-  private _db: Database.Database | null = null;
+  private _db: Database | null = null;
 
   constructor(config: IntrospectToolConfig) {
     this.dbPath = config.dbPath;
   }
 
-  private get db(): Database.Database {
+  private get db(): Database {
     if (!this._db) {
-      // Lazy load better-sqlite3 to avoid issues at import time
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const BetterSqlite3 = require('better-sqlite3');
-      this._db = new BetterSqlite3(this.dbPath, { readonly: true }) as Database.Database;
+      this._db = new Database(this.dbPath, { readonly: true });
     }
     return this._db!;
   }
@@ -295,7 +292,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
       FROM events
       WHERE 1=1
     `;
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (sessionId) {
       query += ` AND (session_id = ? OR session_id LIKE ?)`;
@@ -468,7 +465,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
       FROM logs
       WHERE 1=1
     `;
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (sessionId) {
       query += ` AND (session_id = ? OR session_id LIKE ?)`;

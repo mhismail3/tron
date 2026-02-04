@@ -8,7 +8,7 @@
  * - Providing access to the underlying database instance
  */
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import type { DatabaseConfig, DatabaseState } from './types.js';
 
 /**
@@ -69,7 +69,7 @@ export class DatabaseConnection {
   /**
    * Open the database connection and configure pragmas
    */
-  open(): Database.Database {
+  open(): Database {
     if (this.state.db) {
       return this.state.db;
     }
@@ -95,7 +95,7 @@ export class DatabaseConnection {
     if (this.state.db) {
       // Run optimize to update query planner statistics before closing
       try {
-        this.state.db.pragma('optimize');
+        this.state.db.run('PRAGMA optimize');
       } catch {
         // Ignore errors during optimize (database might be in unexpected state)
       }
@@ -123,7 +123,7 @@ export class DatabaseConnection {
    * Get the database instance
    * @throws Error if database not initialized
    */
-  getDatabase(): Database.Database {
+  getDatabase(): Database {
     if (!this.state.db) {
       throw new Error('Database not initialized. Call initialize() first.');
     }
@@ -147,41 +147,41 @@ export class DatabaseConnection {
   /**
    * Configure SQLite pragmas for optimal performance
    */
-  private configurePragmas(db: Database.Database): void {
+  private configurePragmas(db: Database): void {
     const { enableWAL, busyTimeout, cacheSize } = this.state.config;
 
     // WAL mode for better concurrent access
     if (enableWAL) {
-      db.pragma('journal_mode = WAL');
+      db.run('PRAGMA journal_mode = WAL');
       // Better write batching for WAL mode
-      db.pragma('wal_autocheckpoint = 2000');
+      db.run('PRAGMA wal_autocheckpoint = 2000');
     }
 
     // Busy timeout for handling locked database
-    db.pragma(`busy_timeout = ${busyTimeout}`);
+    db.run(`PRAGMA busy_timeout = ${busyTimeout}`);
 
     // Enable foreign key constraints
-    db.pragma('foreign_keys = ON');
+    db.run('PRAGMA foreign_keys = ON');
 
     // Balance between durability and performance
-    db.pragma('synchronous = NORMAL');
+    db.run('PRAGMA synchronous = NORMAL');
 
     // Set cache size (negative = KB, positive = pages)
-    db.pragma(`cache_size = -${cacheSize}`);
+    db.run(`PRAGMA cache_size = -${cacheSize}`);
 
     // Memory settings: minimize for tests to prevent OOM in Vitest workers
     if (isTestEnvironment()) {
-      db.pragma('temp_store = DEFAULT'); // Use disk for temp tables in tests
-      db.pragma('mmap_size = 0'); // Disable memory-mapped I/O
+      db.run('PRAGMA temp_store = DEFAULT'); // Use disk for temp tables in tests
+      db.run('PRAGMA mmap_size = 0'); // Disable memory-mapped I/O
     } else {
-      db.pragma('temp_store = MEMORY'); // Store temp tables in memory for production
-      db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O for production
+      db.run('PRAGMA temp_store = MEMORY'); // Store temp tables in memory for production
+      db.run('PRAGMA mmap_size = 268435456'); // 256MB memory-mapped I/O for production
     }
   }
 
   /**
    * Execute a function within a transaction
-   * Note: better-sqlite3 transactions are synchronous
+   * Note: bun:sqlite transactions are synchronous
    */
   transaction<T>(fn: () => T): T {
     const db = this.getDatabase();

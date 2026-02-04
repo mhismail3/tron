@@ -139,6 +139,20 @@ get_node_path() {
     which node
 }
 
+#-----------------------------------------------------------------------------
+# get_bun_path - Find the Bun binary
+#
+# Checks common locations for bun installation.
+# Returns: Path to bun binary via stdout
+#-----------------------------------------------------------------------------
+get_bun_path() {
+    if [ -x "$HOME/.bun/bin/bun" ]; then
+        echo "$HOME/.bun/bin/bun"
+    else
+        which bun
+    fi
+}
+
 #=============================================================================
 # SECTION 3: BUILD FUNCTIONS
 # Workspace building, production bundling, native module handling
@@ -171,12 +185,12 @@ build_workspace() {
 #-----------------------------------------------------------------------------
 # build_production - Create production bundle with esbuild
 #
-# Creates a single bundled JS file with all dependencies. External native
-# modules (better-sqlite3, playwright) are copied to node_modules/.
+# Creates a single bundled JS file with all dependencies. External modules
+# (bun:sqlite provided by Bun, playwright-core) are handled at runtime.
 #
 # Output:
 #   dist/prod/index.js         - Minified bundle
-#   dist/prod/node_modules/    - Native dependencies
+#   dist/prod/node_modules/    - External dependencies (playwright-core)
 #   dist/prod/prompts/         - Runtime assets
 #
 # Usage: build_production
@@ -195,7 +209,7 @@ build_production() {
     mkdir -p dist/prod/node_modules
 
     # Bundle with esbuild
-    # External: native modules that can't be bundled (require .node binaries)
+    # External: bun:sqlite is provided by Bun runtime, playwright-core has native binaries
     local BANNER='const _importMetaUrl = require("url").pathToFileURL(__filename).href;'
 
     ./node_modules/.bin/esbuild packages/agent/dist/interface/server.js \
@@ -205,7 +219,7 @@ build_production() {
         --format=cjs \
         --outfile=dist/prod/index.js \
         --external:playwright-core \
-        --external:better-sqlite3 \
+        --external:bun:sqlite \
         --metafile=dist/prod/meta.json \
         --banner:js="$BANNER" \
         --define:import.meta.url=_importMetaUrl \
@@ -216,11 +230,8 @@ build_production() {
         cp -r packages/agent/dist/providers/prompts dist/prod/
     fi
 
-    # Copy external native dependencies
+    # Copy external native dependencies (playwright only - bun:sqlite is provided by Bun)
     copy_native_dependency "playwright-core"
-    copy_native_dependency "better-sqlite3"
-    copy_native_dependency "bindings"
-    copy_native_dependency "file-uri-to-path"
 
     # Create minimal package.json
     cat > dist/prod/package.json << 'EOF'
@@ -553,7 +564,7 @@ health_check() {
 # Usage: create_launchd_plist
 #-----------------------------------------------------------------------------
 create_launchd_plist() {
-    local node_path=$(get_node_path)
+    local bun_path=$(get_bun_path)
 
     cat > "$PLIST_PATH" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -567,7 +578,7 @@ create_launchd_plist() {
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>exec "$node_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_FILE" 2>&amp;1</string>
+        <string>exec "$bun_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_FILE" 2>&amp;1</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -596,7 +607,7 @@ create_launchd_plist() {
         <key>HOME</key>
         <string>$HOME</string>
         <key>PATH</key>
-        <string>$(dirname "$node_path"):/usr/local/bin:/usr/bin:/bin</string>
+        <string>$(dirname "$bun_path"):/usr/local/bin:/usr/bin:/bin</string>
         <key>TRON_DATA_DIR</key>
         <string>$TRON_HOME</string>
         <key>TRON_WS_PORT</key>
@@ -942,13 +953,13 @@ cmd_dev() {
         echo ""
         echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        exec node packages/agent/dist/interface/server.js
+        exec bun packages/agent/dist/interface/server.js
     else
         # Background mode (default)
         echo ""
         echo -e "${CYAN}Starting Beta Server (background)${NC}"
 
-        node packages/agent/dist/interface/server.js >/dev/null 2>&1 &
+        bun packages/agent/dist/interface/server.js >/dev/null 2>&1 &
         local pid=$!
 
         sleep 2
@@ -1029,12 +1040,6 @@ cmd_deploy() {
     cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
     print_success "Installed to: $INSTALL_DIR"
 
-    # Rebuild native modules for launchd's Node.js
-    local plist_node_path
-    plist_node_path=$(grep 'exec "' "$PLIST_PATH" 2>/dev/null | sed 's/.*exec "\([^"]*\)".*/\1/' | head -1)
-    [ -z "$plist_node_path" ] || [ ! -x "$plist_node_path" ] && plist_node_path=$(get_node_path)
-    rebuild_native_modules "$plist_node_path" "$INSTALL_DIR"
-
     # Record deployed commit
     local current_commit=$(git rev-parse HEAD)
     echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
@@ -1089,17 +1094,11 @@ cmd_install() {
         build_production
     fi
 
-    # Get node path
-    local node_path=$(get_node_path)
-
     # Copy production bundle
     print_status "Installing to $INSTALL_DIR..."
     rm -rf "$INSTALL_DIR"/*
     cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
     print_success "Installed to: $INSTALL_DIR"
-
-    # Rebuild native modules
-    rebuild_native_modules "$node_path" "$INSTALL_DIR"
 
     # Create launchd plist
     print_status "Creating launchd service..."
@@ -1216,12 +1215,6 @@ cmd_rollback() {
 
     rm -rf "$INSTALL_DIR"/*
     cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
-
-    # Rebuild native modules
-    local plist_node_path
-    plist_node_path=$(grep 'exec "' "$PLIST_PATH" 2>/dev/null | sed 's/.*exec "\([^"]*\)".*/\1/' | head -1)
-    [ -z "$plist_node_path" ] || [ ! -x "$plist_node_path" ] && plist_node_path=$(get_node_path)
-    rebuild_native_modules "$plist_node_path" "$INSTALL_DIR"
 
     echo "$deployed_commit" > "$DEPLOYED_COMMIT_FILE"
 

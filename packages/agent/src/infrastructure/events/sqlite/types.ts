@@ -5,7 +5,7 @@
  * Public types are exported from events/types.ts.
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 
 /**
  * Configuration for SQLite database connection
@@ -25,7 +25,7 @@ export interface DatabaseConfig {
  * Database connection state
  */
 export interface DatabaseState {
-  db: Database.Database | null;
+  db: Database | null;
   initialized: boolean;
   config: Required<Omit<DatabaseConfig, 'dbPath'>> & { dbPath: string };
 }

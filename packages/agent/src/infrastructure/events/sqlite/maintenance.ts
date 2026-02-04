@@ -8,7 +8,7 @@
  * - Statistics gathering
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 
 /**
  * Result of a maintenance run
@@ -31,7 +31,7 @@ export interface DatabaseStats {
  * Database maintenance service for periodic cleanup operations
  */
 export class DatabaseMaintenance {
-  constructor(private db: Database.Database) {}
+  constructor(private db: Database) {}
 
   /**
    * Run all maintenance operations
@@ -66,7 +66,7 @@ export class DatabaseMaintenance {
    */
   checkpoint(): void {
     try {
-      this.db.pragma('wal_checkpoint(PASSIVE)');
+      this.db.run('PRAGMA wal_checkpoint(PASSIVE)');
     } catch {
       // Checkpoint may fail if not in WAL mode (e.g., in-memory database)
       // This is safe to ignore

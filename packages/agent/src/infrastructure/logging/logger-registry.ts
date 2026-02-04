@@ -9,7 +9,7 @@
  * Supports multiple independent registries for testing isolation.
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 import { TronLogger } from './logger.js';
 import { SQLiteTransport } from './sqlite-transport.js';
 import type {
@@ -47,10 +47,10 @@ export class LoggerRegistry implements ILoggerRegistry {
    * Initialize the SQLite transport for log persistence.
    * Call this once with the database instance.
    *
-   * @param db - The better-sqlite3 database instance
+   * @param db - The bun:sqlite database instance
    * @param options - Transport configuration options
    */
-  initializeTransport(db: Database.Database, options?: TransportOptions): void {
+  initializeTransport(db: Database, options?: TransportOptions): void {
     if (this.closed) {
       throw new Error('LoggerRegistry has been closed');
     }

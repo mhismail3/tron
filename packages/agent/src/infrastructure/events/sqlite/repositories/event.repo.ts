@@ -5,6 +5,7 @@
  * Events are immutable and form a tree structure via parentId chains.
  */
 
+import type { SQLQueryBindings } from 'bun:sqlite';
 import { BaseRepository, rowUtils } from './base.js';
 import {
   EventId,
@@ -129,7 +130,7 @@ export class EventRepository extends BaseRepository {
    */
   getBySession(sessionId: SessionId, options?: ListEventsOptions): EventWithDepth[] {
     let sql = 'SELECT * FROM events WHERE session_id = ? ORDER BY sequence ASC';
-    const params: unknown[] = [sessionId];
+    const params: SQLQueryBindings[] = [sessionId];
 
     if (options?.limit) {
       sql += ' LIMIT ?';
@@ -157,7 +158,7 @@ export class EventRepository extends BaseRepository {
 
     const placeholders = this.inPlaceholders(types);
     let sql = `SELECT * FROM events WHERE session_id = ? AND type IN (${placeholders}) ORDER BY sequence ASC`;
-    const params: unknown[] = [sessionId, ...types];
+    const params: SQLQueryBindings[] = [sessionId, ...types];
 
     if (options?.limit) {
       sql += ' LIMIT ?';
@@ -331,7 +332,7 @@ export class EventRepository extends BaseRepository {
     options?: { limit?: number; offset?: number }
   ): EventWithDepth[] {
     let sql = 'SELECT * FROM events WHERE workspace_id = ? ORDER BY timestamp DESC';
-    const params: unknown[] = [workspaceId];
+    const params: SQLQueryBindings[] = [workspaceId];
 
     if (options?.limit) {
       sql += ' LIMIT ?';

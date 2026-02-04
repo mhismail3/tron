@@ -4,7 +4,7 @@
  * Provides the migration runner and all registered migrations.
  */
 
-import type Database from 'better-sqlite3';
+import type { Database } from 'bun:sqlite';
 import { MigrationRunner, createMigrationRunner } from './runner.js';
 import type { Migration, MigrationResult } from './types.js';
 
@@ -29,7 +29,7 @@ export const migrations: Migration[] = [
 /**
  * Run all pending migrations on the database
  */
-export function runMigrations(db: Database.Database): MigrationResult {
+export function runMigrations(db: Database): MigrationResult {
   const runner = createMigrationRunner(db, migrations);
   return runner.run();
 }
@@ -40,7 +40,7 @@ export function runMigrations(db: Database.Database): MigrationResult {
  * These handle schema changes for databases created before certain versions.
  * New databases get the full schema from v001 and don't need these.
  */
-export function runIncrementalMigrations(db: Database.Database): void {
+export function runIncrementalMigrations(db: Database): void {
   const runner = new MigrationRunner(db, []);
 
   // Check if sessions table exists
@@ -81,7 +81,7 @@ export function runIncrementalMigrations(db: Database.Database): void {
  * This migration is only needed for databases created before v2.
  * It uses table rebuild since SQLite doesn't support DROP COLUMN.
  */
-function runProviderStatusMigration(db: Database.Database, runner: MigrationRunner): void {
+function runProviderStatusMigration(db: Database, runner: MigrationRunner): void {
   const columns = runner.getTableColumns('sessions');
 
   // Check if migration is needed (provider column exists = old schema)
@@ -90,7 +90,7 @@ function runProviderStatusMigration(db: Database.Database, runner: MigrationRunn
   }
 
   // Disable foreign keys during rebuild
-  db.pragma('foreign_keys = OFF');
+  db.run('PRAGMA foreign_keys = OFF');
 
   db.exec(`
     -- Clean up any partial migration state
@@ -155,7 +155,7 @@ function runProviderStatusMigration(db: Database.Database, runner: MigrationRunn
   `);
 
   // Re-enable foreign keys
-  db.pragma('foreign_keys = ON');
+  db.run('PRAGMA foreign_keys = ON');
 }
 
 // Re-export types and runner

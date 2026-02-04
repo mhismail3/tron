@@ -8,7 +8,7 @@
  * - FTS5 indexing for full-text search
  */
 
-import type Database from 'better-sqlite3';
+import type { Database, Statement } from 'bun:sqlite';
 import { getLoggingContext } from './log-context.js';
 
 // =============================================================================
@@ -83,17 +83,17 @@ const STANDARD_FIELDS = new Set([
 // =============================================================================
 
 export class SQLiteTransport {
-  private db: Database.Database;
+  private db: Database;
   private batch: LogEntry[] = [];
   private batchSize: number;
   private flushIntervalMs: number;
   private minLevel: number;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
-  private insertLogStmt: Database.Statement | null = null;
-  private insertFtsStmt: Database.Statement | null = null;
+  private insertLogStmt: Statement | null = null;
+  private insertFtsStmt: Statement | null = null;
   private closed = false;
 
-  constructor(db: Database.Database, options: SQLiteTransportOptions = {}) {
+  constructor(db: Database, options: SQLiteTransportOptions = {}) {
     this.db = db;
     this.batchSize = options.batchSize ?? 50;
     this.flushIntervalMs = options.flushIntervalMs ?? 500;

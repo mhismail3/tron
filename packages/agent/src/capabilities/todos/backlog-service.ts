@@ -5,7 +5,7 @@
  * Tasks are moved to the backlog when context is cleared or sessions end.
  */
 
-import type Database from 'better-sqlite3';
+import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { TodoItem, BackloggedTask, BacklogReason } from './types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
@@ -60,9 +60,9 @@ export interface BacklogQueryOptions {
  * - Restore tasks from backlog to new sessions
  */
 export class BacklogService {
-  private db: Database.Database;
+  private db: Database;
 
-  constructor(db: Database.Database) {
+  constructor(db: Database) {
     this.db = db;
   }
 
@@ -131,7 +131,7 @@ export class BacklogService {
       SELECT * FROM task_backlog
       WHERE workspace_id = ?
     `;
-    const params: unknown[] = [workspaceId];
+    const params: SQLQueryBindings[] = [workspaceId];
 
     if (!includeRestored) {
       sql += ' AND restored_to_session_id IS NULL';
@@ -311,6 +311,6 @@ export class BacklogService {
 /**
  * Create a BacklogService instance
  */
-export function createBacklogService(db: Database.Database): BacklogService {
+export function createBacklogService(db: Database): BacklogService {
   return new BacklogService(db);
 }

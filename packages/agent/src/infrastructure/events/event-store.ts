@@ -116,7 +116,7 @@ export class EventStore {
    * Get the underlying database instance.
    * Used for initializing shared resources like the log transport.
    */
-  getDatabase(): import('better-sqlite3').Database {
+  getDatabase(): import('bun:sqlite').Database {
     return this.backend.getDatabase();
   }
 

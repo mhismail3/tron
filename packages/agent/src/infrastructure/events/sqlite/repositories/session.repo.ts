@@ -4,6 +4,7 @@
  * Handles session CRUD operations including counters, filtering, and message previews.
  */
 
+import type { SQLQueryBindings } from 'bun:sqlite';
 import { BaseRepository, rowUtils } from './base.js';
 import {
   SessionId,
@@ -212,7 +213,7 @@ export class SessionRepository extends BaseRepository {
    */
   list(options: ListSessionsOptions = {}): SessionRow[] {
     let sql = 'SELECT * FROM sessions WHERE 1=1';
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (options.workspaceId) {
       sql += ' AND workspace_id = ?';
@@ -397,7 +398,7 @@ export class SessionRepository extends BaseRepository {
    */
   incrementCounters(sessionId: SessionId, counters: IncrementCountersOptions): void {
     const updates: string[] = [];
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (counters.eventCount) {
       updates.push('event_count = event_count + ?');

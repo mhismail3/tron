@@ -51,11 +51,13 @@ export class BlobRepository extends BaseRepository {
 
   /**
    * Get blob content by ID
+   * Note: bun:sqlite returns Uint8Array for BLOB columns
    */
   getContent(blobId: string): string | null {
-    const row = this.get<{ content: Buffer }>('SELECT content FROM blobs WHERE id = ?', blobId);
+    const row = this.get<{ content: Uint8Array }>('SELECT content FROM blobs WHERE id = ?', blobId);
     if (!row) return null;
-    return row.content.toString('utf-8');
+    // bun:sqlite returns Uint8Array, decode to string
+    return new TextDecoder().decode(row.content);
   }
 
   /**

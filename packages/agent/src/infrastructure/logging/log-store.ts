@@ -9,7 +9,7 @@
  * - "Around event" queries for debugging
  */
 
-import type Database from 'better-sqlite3';
+import type { Database, Statement, SQLQueryBindings } from 'bun:sqlite';
 import { LOG_LEVEL_NUM, type LogLevel } from './types.js';
 
 // Re-export LogLevel for backward compatibility
@@ -82,11 +82,11 @@ export interface LogStats {
 // =============================================================================
 
 export class LogStore {
-  private db: Database.Database;
-  private insertLogStmt: Database.Statement | null = null;
-  private insertFtsStmt: Database.Statement | null = null;
+  private db: Database;
+  private insertLogStmt: Statement | null = null;
+  private insertFtsStmt: Statement | null = null;
 
-  constructor(db: Database.Database) {
+  constructor(db: Database) {
     this.db = db;
     this.prepareStatements();
   }
@@ -157,7 +157,7 @@ export class LogStore {
    */
   query(options: LogQueryOptions): LogEntry[] {
     const conditions: string[] = ['1=1'];
-    const params: unknown[] = [];
+    const params: SQLQueryBindings[] = [];
 
     if (options.since) {
       conditions.push('timestamp >= ?');
@@ -294,7 +294,7 @@ export class LogStore {
     const escapedQuery = this.escapeFtsQuery(queryText);
 
     const conditions: string[] = ['logs_fts MATCH ?'];
-    const params: unknown[] = [escapedQuery];
+    const params: SQLQueryBindings[] = [escapedQuery];
 
     if (options?.sessionId) {
       conditions.push('logs.session_id = ?');

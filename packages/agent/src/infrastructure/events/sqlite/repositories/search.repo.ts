@@ -4,6 +4,7 @@
  * Handles FTS5 full-text search indexing and querying for events.
  */
 
+import type { SQLQueryBindings } from 'bun:sqlite';
 import { BaseRepository } from './base.js';
 import {
   EventId,
@@ -78,7 +79,7 @@ export class SearchRepository extends BaseRepository {
       WHERE events_fts MATCH ?
     `;
 
-    const params: unknown[] = [query];
+    const params: SQLQueryBindings[] = [query];
 
     if (options.workspaceId) {
       sql += ' AND e.workspace_id = ?';
@@ -158,7 +159,7 @@ export class SearchRepository extends BaseRepository {
       WHERE events_fts.tool_name MATCH ?
     `;
 
-    const params: unknown[] = [toolName];
+    const params: SQLQueryBindings[] = [toolName];
 
     if (options.workspaceId) {
       sql += ' AND e.workspace_id = ?';
