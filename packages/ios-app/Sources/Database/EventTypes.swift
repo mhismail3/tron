@@ -524,7 +524,7 @@ struct CachedSession: Identifiable, Codable {
 
     var totalTokens: Int { inputTokens + outputTokens }
 
-    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ✓20.3k")
+    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ⚡20.3k ✏8.0k")
     var formattedTokens: String {
         TokenFormatter.formatFullSession(
             input: inputTokens,
@@ -537,7 +537,7 @@ struct CachedSession: Identifiable, Codable {
     /// Formatted cache tokens - separate read/creation for visibility
     var formattedCacheTokens: String? {
         if cacheReadTokens == 0 && cacheCreationTokens == 0 { return nil }
-        return "⚡\(cacheReadTokens.formattedTokenCount) read, \(cacheCreationTokens.formattedTokenCount) write"
+        return "⚡\(cacheReadTokens.formattedTokenCount) read, ✏\(cacheCreationTokens.formattedTokenCount) write"
     }
 
     /// Formatted cost string (e.g., "$0.12")

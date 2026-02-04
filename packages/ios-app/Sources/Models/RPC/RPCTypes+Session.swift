@@ -69,7 +69,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         return createdAt
     }
 
-    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ✓20.3k")
+    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ⚡20.3k ✏8.0k")
     var formattedTokens: String {
         let result = TokenFormatter.formatFullSession(
             input: inputTokens ?? 0,
@@ -87,7 +87,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         let read = cacheReadTokens ?? 0
         let creation = cacheCreationTokens ?? 0
         if read == 0 && creation == 0 { return nil }
-        return "⚡\(read.formattedTokenCount) read, \(creation.formattedTokenCount) write"
+        return "⚡\(read.formattedTokenCount) read, ✏\(creation.formattedTokenCount) write"
     }
 
     /// Formatted cost string (e.g., "$0.12")
