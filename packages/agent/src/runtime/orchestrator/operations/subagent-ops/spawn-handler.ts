@@ -7,7 +7,7 @@
 import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '@infrastructure/logging/index.js';
 import type { EventStore } from '@infrastructure/events/index.js';
 import type { SessionId, EventType } from '@infrastructure/events/index.js';
-import type { SpawnSubagentParams } from '@capabilities/tools/subagent/index.js';
+import type { SpawnSubagentParams, SubagentCompletionType } from '@capabilities/tools/subagent/index.js';
 import type {
   ActiveSession,
   AgentRunOptions,
@@ -15,12 +15,18 @@ import type {
   CreateSessionOptions,
 } from '../../types.js';
 import type { SpawnSubagentResult, SpawnTmuxAgentResult } from './types.js';
+import type { RunResult } from '../../../agent/types.js';
 
 const logger = createLogger('subagent-spawn');
 
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * Default guardrail timeout for subagent execution (1 hour)
+ */
+const DEFAULT_GUARDRAIL_TIMEOUT_MS = 60 * 60 * 1000;
 
 /**
  * Dependencies for SpawnHandler
@@ -32,8 +38,8 @@ export interface SpawnHandlerDeps {
   getActiveSession: (sessionId: string) => ActiveSession | undefined;
   /** Create a new session */
   createSession: (options: CreateSessionOptions) => Promise<SessionInfo>;
-  /** Run agent for a session */
-  runAgent: (options: AgentRunOptions) => Promise<unknown>;
+  /** Run agent for a session - returns RunResult[] */
+  runAgent: (options: AgentRunOptions) => Promise<RunResult[]>;
   /** Append event to session (fire-and-forget) */
   appendEventLinearized: (
     sessionId: SessionId,
@@ -141,15 +147,17 @@ export class SpawnHandler {
         { maxTurns: params.maxTurns ?? 50 }
       );
 
-      // Run sub-agent asynchronously
+      // Run sub-agent asynchronously with guardrail timeout
+      // Note: The .catch() is a fallback for truly unexpected errors that escape the try-finally
       this.runSubagentAsync(
         subSession.sessionId,
         parentSessionId,
         params.task,
-        params.maxTurns ?? 50
+        params.maxTurns ?? 50,
+        params.guardrailTimeout ?? DEFAULT_GUARDRAIL_TIMEOUT_MS
       ).catch((error) => {
         const structured = categorizeError(error, { parentSessionId, subagentSessionId: subSession.sessionId, operation: 'subagent_execution' });
-        logger.error('Subagent execution failed', {
+        logger.error('Subagent execution failed (escaped try-finally)', {
           parentSessionId,
           subagentSessionId: subSession.sessionId,
           code: structured.code,
@@ -335,17 +343,37 @@ export class SpawnHandler {
 
   /**
    * Run a sub-agent asynchronously (for in-process subsessions).
+   *
+   * GUARANTEED: This method ALWAYS delivers a result to the tracker,
+   * either via complete() or fail(). The try-finally pattern ensures
+   * no code path can exit without delivering a result.
    */
   private async runSubagentAsync(
     sessionId: string,
     parentSessionId: string,
     task: string,
-    _maxTurns: number
+    _maxTurns: number,
+    guardrailTimeoutMs: number = DEFAULT_GUARDRAIL_TIMEOUT_MS
   ): Promise<void> {
     const startTime = Date.now();
-    const parent = this.deps.getActiveSession(parentSessionId);
+    let resultDelivered = false;
+    let guardrailTimedOut = false;
+
+    // Set up guardrail timeout to prevent runaway subagents
+    const abortController = new AbortController();
+    const guardrailTimer = setTimeout(() => {
+      guardrailTimedOut = true;
+      abortController.abort();
+      logger.warn('Subagent guardrail timeout triggered', {
+        sessionId,
+        parentSessionId,
+        timeoutMs: guardrailTimeoutMs,
+      });
+    }, guardrailTimeoutMs);
 
     try {
+      const parent = this.deps.getActiveSession(parentSessionId);
+
       // Update status to running
       if (parent) {
         parent.subagentTracker.updateStatus(sessionId as SessionId, 'running');
@@ -354,10 +382,15 @@ export class SpawnHandler {
       // Run the agent with the task
       // Note: Streaming events (tool_start, text_delta, etc.) are forwarded to parent
       // automatically by AgentEventHandler.forwardToParent() based on parentSessionId
-      await this.deps.runAgent({
+      const runResults = await this.deps.runAgent({
         sessionId,
         prompt: task,
+        signal: abortController.signal,
       });
+
+      // Extract stopReason from run result
+      const runResult = runResults?.[0];
+      const stopReason = runResult?.stoppedReason;
 
       // Get final stats
       const session = await this.deps.eventStore.getSession(
@@ -388,11 +421,12 @@ export class SpawnHandler {
         }
       }
 
-      const resultSummary = fullOutput
-        ? fullOutput.length > 200
-          ? fullOutput.slice(0, 200) + '...'
-          : fullOutput
-        : `Completed task in ${session?.turnCount ?? 0} turns`;
+      // Detect problem scenarios and determine completion type
+      const { resultSummary, completionType, truncated, warning } = this.analyzeCompletion(
+        fullOutput,
+        stopReason,
+        session?.turnCount ?? 0
+      );
 
       const tokenUsage = {
         inputTokens: session?.totalInputTokens ?? 0,
@@ -415,6 +449,10 @@ export class SpawnHandler {
           totalTokenUsage: tokenUsage,
           duration,
           model,
+          stopReason,
+          truncated,
+          completionType,
+          warning,
         }
       );
 
@@ -431,6 +469,10 @@ export class SpawnHandler {
           duration,
           tokenUsage,
           model,
+          stopReason,
+          truncated,
+          completionType,
+          warning,
         },
       });
 
@@ -444,8 +486,10 @@ export class SpawnHandler {
           session?.turnCount ?? 0,
           tokenUsage,
           duration,
-          fullOutput
+          fullOutput,
+          { stopReason, truncated, completionType }
         );
+        resultDelivered = true;
 
         // Emit notification if parent is idle (not processing)
         // This allows iOS to show a chip for the user to review and send results
@@ -460,6 +504,7 @@ export class SpawnHandler {
             duration,
             tokenUsage,
             completedAt: new Date().toISOString(),
+            warning,
           };
 
           // Persist the notification event for reconstruction
@@ -490,6 +535,10 @@ export class SpawnHandler {
         turns: session?.turnCount,
         duration,
         outputLength: fullOutput.length,
+        stopReason,
+        completionType,
+        truncated,
+        hasWarning: !!warning,
       });
 
       // Emit SubagentStop hook with full result
@@ -505,12 +554,22 @@ export class SpawnHandler {
             output: fullOutput,
             tokenUsage,
             duration,
+            completionType,
+            truncated,
+            warning,
           },
         },
       });
     } catch (error) {
-      const structured = categorizeError(error, { parentSessionId, subagentSessionId: sessionId, operation: 'run_subagent' });
       const duration = Date.now() - startTime;
+
+      // Determine if this was a guardrail timeout
+      const completionType: SubagentCompletionType = guardrailTimedOut ? 'timeout' : 'error';
+      const errorMessage = guardrailTimedOut
+        ? `Subagent guardrail timeout exceeded (${guardrailTimeoutMs}ms)`
+        : (error instanceof Error ? error.message : String(error));
+
+      const structured = categorizeError(error, { parentSessionId, subagentSessionId: sessionId, operation: 'run_subagent' });
 
       // Emit failure event
       this.deps.appendEventLinearized(
@@ -518,9 +577,10 @@ export class SpawnHandler {
         'subagent.failed' as EventType,
         {
           subagentSessionId: sessionId,
-          error: structured.message,
+          error: errorMessage,
           recoverable: false,
           duration,
+          completionType,
         }
       );
 
@@ -531,8 +591,9 @@ export class SpawnHandler {
         timestamp: new Date().toISOString(),
         data: {
           subagentSessionId: sessionId,
-          error: structured.message,
+          error: errorMessage,
           duration,
+          completionType,
         },
       });
 
@@ -540,9 +601,11 @@ export class SpawnHandler {
       // Re-fetch parent since time has passed
       const currentParent = this.deps.getActiveSession(parentSessionId);
       if (currentParent) {
-        currentParent.subagentTracker.fail(sessionId as SessionId, structured.message, {
+        currentParent.subagentTracker.fail(sessionId as SessionId, errorMessage, {
           duration,
+          completionType,
         });
+        resultDelivered = true;
 
         // Emit notification if parent is idle (not processing)
         // This allows iOS to show a chip for the user to review the failure
@@ -555,8 +618,9 @@ export class SpawnHandler {
             success: false,
             totalTurns: 0,
             duration,
-            error: structured.message,
+            error: errorMessage,
             completedAt: new Date().toISOString(),
+            completionType,
           };
 
           // Persist the notification event for reconstruction
@@ -589,6 +653,8 @@ export class SpawnHandler {
         error: structured.message,
         retryable: structured.retryable,
         duration,
+        completionType,
+        guardrailTimedOut,
       });
 
       // Emit SubagentStop hook
@@ -597,11 +663,100 @@ export class SpawnHandler {
         sessionId: parentSessionId,
         data: {
           subagentId: sessionId,
-          stopReason: 'error',
-          result: { success: false, error: structured.message },
+          stopReason: completionType,
+          result: { success: false, error: errorMessage, completionType },
         },
       });
+    } finally {
+      // Clear the guardrail timer
+      clearTimeout(guardrailTimer);
+
+      // GUARANTEED RESULT DELIVERY: If no result was delivered by try or catch,
+      // deliver a failure result now. This should never happen, but ensures
+      // the tracker always gets a result.
+      if (!resultDelivered) {
+        const duration = Date.now() - startTime;
+        const currentParent = this.deps.getActiveSession(parentSessionId);
+
+        if (currentParent && !currentParent.subagentTracker.isTerminated(sessionId as SessionId)) {
+          const errorMessage = 'Subagent terminated without delivering result (unexpected code path)';
+
+          currentParent.subagentTracker.fail(
+            sessionId as SessionId,
+            errorMessage,
+            { duration, completionType: 'error' }
+          );
+
+          // Emit failure event for this edge case
+          this.deps.appendEventLinearized(
+            parentSessionId as SessionId,
+            'subagent.failed' as EventType,
+            {
+              subagentSessionId: sessionId,
+              error: errorMessage,
+              recoverable: false,
+              duration,
+              completionType: 'error',
+            }
+          );
+
+          logger.error('Subagent fell through without result (safety net triggered)', {
+            parentSessionId,
+            subagentSessionId: sessionId,
+            duration,
+          });
+        }
+      }
     }
+  }
+
+  /**
+   * Analyze subagent completion and determine result metadata.
+   * Detects max_tokens, empty output, and generates appropriate warnings.
+   */
+  private analyzeCompletion(
+    fullOutput: string,
+    stopReason: string | undefined,
+    turnCount: number
+  ): {
+    resultSummary: string;
+    completionType: SubagentCompletionType;
+    truncated: boolean;
+    warning: string | undefined;
+  } {
+    let warning: string | undefined;
+    let completionType: SubagentCompletionType = 'success';
+    const truncated = stopReason === 'max_tokens';
+
+    // Detect max_tokens truncation
+    if (truncated) {
+      completionType = 'max_tokens';
+      warning = 'Output was truncated due to token limit. The response may be incomplete.';
+    }
+
+    // Detect empty output
+    if (!fullOutput || fullOutput.trim().length === 0) {
+      if (truncated) {
+        warning = 'Hit token limit before producing any text output. Consider increasing maxTokens or breaking the task into smaller chunks.';
+      } else {
+        warning = 'Subagent completed without producing text output.';
+      }
+    }
+
+    // Build result summary
+    let resultSummary: string;
+    if (warning) {
+      const outputPreview = fullOutput?.slice(0, 150) || 'No output';
+      resultSummary = `[WARNING: ${warning}] ${outputPreview}${fullOutput && fullOutput.length > 150 ? '...' : ''}`;
+    } else if (fullOutput) {
+      resultSummary = fullOutput.length > 200
+        ? fullOutput.slice(0, 200) + '...'
+        : fullOutput;
+    } else {
+      resultSummary = `Completed task in ${turnCount} turns`;
+    }
+
+    return { resultSummary, completionType, truncated, warning };
   }
 }
 

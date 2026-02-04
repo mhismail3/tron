@@ -305,3 +305,82 @@ Do not make up information not present in the content.`;
     expect(agentConfig.provider.model).toBe('claude-haiku-4-5-20251001');
   });
 });
+
+// =============================================================================
+// Tests: Subagent MaxTokens Configuration
+// =============================================================================
+
+describe('AgentFactory - Subagent MaxTokens', () => {
+  let config: AgentFactoryConfig;
+  let factory: AgentFactory;
+
+  beforeEach(() => {
+    config = createMockConfig();
+    factory = new AgentFactory(config);
+  });
+
+  describe('subagent maxTokens based on model capacity', () => {
+    it('sets maxTokens to 90% of model maxOutput for subagents', async () => {
+      const agent = await factory.createAgentForSession(
+        'sess_subagent',
+        '/tmp/test',
+        'claude-sonnet-4-5-20250929', // maxOutput: 64000
+        undefined,
+        true, // isSubagent
+        undefined
+      );
+
+      const agentConfig = (agent as any).config;
+
+      // Subagent should have maxTokens set to 90% of model's maxOutput (64000)
+      // 64000 * 0.9 = 57600
+      expect(agentConfig.maxTokens).toBe(57600);
+    });
+
+    it('uses 90% of model capacity for Claude 4.5 models', async () => {
+      const agent = await factory.createAgentForSession(
+        'sess_subagent',
+        '/tmp/test',
+        'claude-opus-4-5-20251101', // maxOutput: 64000
+        undefined,
+        true, // isSubagent
+        undefined
+      );
+
+      const agentConfig = (agent as any).config;
+      expect(agentConfig.maxTokens).toBe(57600); // 64000 * 0.9
+    });
+
+    it('does not set maxTokens for non-subagent (uses default)', async () => {
+      const agent = await factory.createAgentForSession(
+        'sess_normal',
+        '/tmp/test',
+        'claude-sonnet-4-5-20250929',
+        undefined,
+        false, // NOT a subagent
+        undefined
+      );
+
+      const agentConfig = (agent as any).config;
+
+      // Non-subagent should NOT have maxTokens set (uses provider default)
+      expect(agentConfig.maxTokens).toBeUndefined();
+    });
+
+    it('falls back to default capacity if model not in registry', async () => {
+      const agent = await factory.createAgentForSession(
+        'sess_subagent',
+        '/tmp/test',
+        'claude-unknown-model', // Not in registry, defaults to maxOutput: 4096
+        undefined,
+        true, // isSubagent
+        undefined
+      );
+
+      const agentConfig = (agent as any).config;
+
+      // Default maxOutput is 4096, so 90% = 3686
+      expect(agentConfig.maxTokens).toBe(3686); // Math.floor(4096 * 0.9)
+    });
+  });
+});

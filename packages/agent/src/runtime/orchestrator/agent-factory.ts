@@ -378,12 +378,27 @@ export class AgentFactory {
     // Normalize auth to UnifiedAuth format for provider factory
     const normalizedAuth = normalizeToUnifiedAuth(auth);
 
-    // Check model capabilities for thinking support
+    // Check model capabilities for thinking support and output limits
     const capabilities = getModelCapabilities(providerType, model);
     const enableThinking = capabilities.supportsThinking;
 
     if (enableThinking) {
       logger.info('Enabling thinking for model', { model, providerType });
+    }
+
+    // Calculate maxTokens for subagents:
+    // Use 90% of model's maxOutput to prevent truncation while leaving buffer
+    // This ensures subagents can produce comprehensive outputs
+    let maxTokens: number | undefined;
+    if (isSubagent) {
+      // For subagents, use 90% of the model's maximum output capacity
+      maxTokens = Math.floor(capabilities.maxOutput * 0.9);
+      logger.info('Setting subagent maxTokens based on model capacity', {
+        sessionId,
+        model,
+        modelMaxOutput: capabilities.maxOutput,
+        subagentMaxTokens: maxTokens,
+      });
     }
 
     const agentConfig: AgentConfig = {
@@ -395,6 +410,7 @@ export class AgentFactory {
       tools,
       systemPrompt: prompt,
       maxTurns: 50,
+      maxTokens,  // Set for subagents, undefined for regular agents (uses default)
       enableThinking,
     };
 

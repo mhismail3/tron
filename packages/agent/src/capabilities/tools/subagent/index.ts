@@ -40,6 +40,7 @@ export {
   type SubagentTrackingEvent,
   type SubagentResult,
   type SubagentCompletionCallback,
+  type SubagentCompletionType,
 } from './subagent-tracker.js';
 
 export {

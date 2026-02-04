@@ -74,6 +74,12 @@ export interface SpawnSubagentParams {
    * Auto-generated if not provided.
    */
   sessionName?: string;
+  /**
+   * Hard timeout for subagent execution to prevent runaway (guardrail).
+   * Default: 3600000 (1 hour). This is separate from the blocking timeout.
+   * The subagent will be aborted if it runs longer than this.
+   */
+  guardrailTimeout?: number;
 }
 
 /**

@@ -199,6 +199,11 @@ export interface AgentRunOptions {
    * Used to correlate events belonging to the same run.
    */
   runId?: string;
+  /**
+   * Optional abort signal for cancellation.
+   * Used by subagent guardrail timeout to abort runaway executions.
+   */
+  signal?: AbortSignal;
 }
 
 export interface AgentEvent {

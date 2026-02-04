@@ -28,6 +28,11 @@ export type SubagentStatus =
   | 'failed';
 
 /**
+ * How the subagent finished execution
+ */
+export type SubagentCompletionType = 'success' | 'max_tokens' | 'timeout' | 'error' | 'aborted';
+
+/**
  * Full result of a completed sub-agent
  */
 export interface SubagentResult {
@@ -51,6 +56,12 @@ export interface SubagentResult {
   completedAt: string;
   /** Error message if failed */
   error?: string;
+  /** Stop reason from LLM (end_turn, max_tokens, tool_use, stop_sequence) */
+  stopReason?: string;
+  /** Whether output may be truncated (stopReason === 'max_tokens') */
+  truncated?: boolean;
+  /** How the subagent finished */
+  completionType?: SubagentCompletionType;
 }
 
 /**
@@ -96,6 +107,12 @@ export interface TrackedSubagent {
   maxTurns?: number;
   /** Duration in ms if completed */
   duration?: number;
+  /** Stop reason from LLM */
+  stopReason?: string;
+  /** Whether output was truncated */
+  truncated?: boolean;
+  /** How the subagent finished */
+  completionType?: SubagentCompletionType;
 }
 
 /**
@@ -208,7 +225,12 @@ export class SubAgentTracker {
     totalTurns: number,
     totalTokenUsage: TokenUsage,
     duration: number,
-    fullOutput?: string
+    fullOutput?: string,
+    metadata?: {
+      stopReason?: string;
+      truncated?: boolean;
+      completionType?: SubagentCompletionType;
+    }
   ): boolean {
     const subagent = this.subagents.get(sessionId);
     if (!subagent) return false;
@@ -222,6 +244,9 @@ export class SubAgentTracker {
     subagent.tokenUsage = totalTokenUsage;
     subagent.duration = duration;
     subagent.endedAt = completedAt;
+    subagent.stopReason = metadata?.stopReason;
+    subagent.truncated = metadata?.truncated;
+    subagent.completionType = metadata?.completionType ?? 'success';
 
     // Create the result object
     const result: SubagentResult = {
@@ -234,6 +259,9 @@ export class SubAgentTracker {
       tokenUsage: totalTokenUsage,
       duration,
       completedAt,
+      stopReason: metadata?.stopReason,
+      truncated: metadata?.truncated,
+      completionType: metadata?.completionType ?? 'success',
     };
 
     // Add to pending results queue
@@ -257,6 +285,7 @@ export class SubAgentTracker {
     options?: {
       failedAtTurn?: number;
       duration?: number;
+      completionType?: SubagentCompletionType;
     }
   ): boolean {
     const subagent = this.subagents.get(sessionId);
@@ -265,12 +294,14 @@ export class SubAgentTracker {
     const completedAt = new Date().toISOString();
     const duration = options?.duration ?? 0;
     const failedAtTurn = options?.failedAtTurn ?? subagent.currentTurn;
+    const completionType = options?.completionType ?? 'error';
 
     subagent.status = 'failed';
     subagent.error = error;
     subagent.currentTurn = failedAtTurn;
     subagent.duration = duration;
     subagent.endedAt = completedAt;
+    subagent.completionType = completionType;
 
     // Create the result object (failed)
     const result: SubagentResult = {
@@ -284,6 +315,7 @@ export class SubAgentTracker {
       duration,
       completedAt,
       error,
+      completionType,
     };
 
     // Add to pending results queue (even failures)
@@ -343,6 +375,16 @@ export class SubAgentTracker {
     return this.getActive().length;
   }
 
+  /**
+   * Check if a sub-agent has terminated (completed or failed).
+   * Non-existent subagents are considered terminated (no result possible).
+   */
+  isTerminated(sessionId: SessionId): boolean {
+    const subagent = this.subagents.get(sessionId);
+    if (!subagent) return true; // Non-existent = terminated
+    return subagent.status === 'completed' || subagent.status === 'failed';
+  }
+
   // ===========================================================================
   // Waiting and Notification APIs
   // ===========================================================================
@@ -375,6 +417,9 @@ export class SubAgentTracker {
         duration: subagent.duration ?? 0,
         completedAt: subagent.endedAt ?? new Date().toISOString(),
         error: subagent.error,
+        stopReason: subagent.stopReason,
+        truncated: subagent.truncated,
+        completionType: subagent.completionType,
       };
       return Promise.resolve(result);
     }

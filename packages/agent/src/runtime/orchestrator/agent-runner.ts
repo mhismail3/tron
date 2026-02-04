@@ -149,6 +149,27 @@ export class AgentRunner {
     active: ActiveSession,
     options: AgentRunOptions
   ): Promise<RunResult[]> {
+    // Set up abort signal handler if provided (used by subagent guardrail timeout)
+    let abortHandler: (() => void) | undefined;
+    if (options.signal) {
+      // If already aborted, abort immediately
+      if (options.signal.aborted) {
+        active.agent.abort();
+        logger.info('Agent aborted immediately (signal already aborted)', {
+          sessionId: options.sessionId,
+        });
+      } else {
+        // Set up listener to abort agent when signal fires
+        abortHandler = () => {
+          active.agent.abort();
+          logger.info('Agent aborted via external signal', {
+            sessionId: options.sessionId,
+          });
+        };
+        options.signal.addEventListener('abort', abortHandler, { once: true });
+      }
+    }
+
     try {
       // Phase 1: Pre-execution setup
       await this.preExecutionSetup(active, options);
@@ -175,6 +196,11 @@ export class AgentRunner {
       return this.handleCompletion(active, runResult, options);
     } catch (error) {
       return this.handleError(active, error, options);
+    } finally {
+      // Clean up abort signal handler
+      if (abortHandler && options.signal) {
+        options.signal.removeEventListener('abort', abortHandler);
+      }
     }
   }
 

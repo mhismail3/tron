@@ -16,6 +16,7 @@ import type {
   SessionInfo,
   CreateSessionOptions,
 } from '../../types.js';
+import type { RunResult } from '../../../agent/types.js';
 
 // =============================================================================
 // Configuration Types
@@ -31,8 +32,8 @@ export interface SubagentOperationsConfig {
   getActiveSession: (sessionId: string) => ActiveSession | undefined;
   /** Create a new session */
   createSession: (options: CreateSessionOptions) => Promise<SessionInfo>;
-  /** Run agent for a session */
-  runAgent: (options: AgentRunOptions) => Promise<unknown>;
+  /** Run agent for a session - returns RunResult[] */
+  runAgent: (options: AgentRunOptions) => Promise<RunResult[]>;
   /** Append event to session (fire-and-forget) */
   appendEventLinearized: (
     sessionId: SessionId,

@@ -8,7 +8,7 @@
  */
 
 import { createLogger } from '@infrastructure/logging/index.js';
-import type { TurnResult } from '../../agent/types.js';
+import type { RunResult } from '../../agent/types.js';
 import type { AgentRunner } from '../agent-runner.js';
 import type { ActiveSession, AgentRunOptions } from '../types.js';
 
@@ -53,7 +53,7 @@ export class AgentController {
    * Run an agent on a session.
    * Auto-resumes inactive sessions.
    */
-  async run(options: AgentRunOptions): Promise<TurnResult[]> {
+  async run(options: AgentRunOptions): Promise<RunResult[]> {
     let active = this.getActiveSession(options.sessionId);
 
     // Auto-resume session if not active (handles app reopen, server restart, etc.)
@@ -87,7 +87,7 @@ export class AgentController {
       // Delegate to AgentRunner for all execution logic
       // AgentRunner handles: context injection, content building, agent execution,
       // interrupt handling, completion handling, error handling, and event emission
-      return await this.agentRunner.run(active, options) as TurnResult[];
+      return await this.agentRunner.run(active, options);
     } finally {
       // Clear processing state and runId
       active.sessionContext.setProcessing(false);
