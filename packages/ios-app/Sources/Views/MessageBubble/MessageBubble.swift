@@ -192,20 +192,16 @@ struct MessageBubble: View {
                 // AskUserQuestion is handled in its own case
                 ToolResultRouter(tool: tool)
             default:
-                // Route all other tools to CommandToolChip
-                if let chipData = CommandToolChipData(from: tool) {
-                    if #available(iOS 26.0, *) {
-                        CommandToolChip(data: chipData) {
-                            onCommandToolTap?(chipData)
-                        }
-                    } else {
-                        CommandToolChipFallback(data: chipData) {
-                            onCommandToolTap?(chipData)
-                        }
+                // All other tools use CommandToolChip (always succeeds, uses gear icon for unknown)
+                let chipData = CommandToolChipData(from: tool)
+                if #available(iOS 26.0, *) {
+                    CommandToolChip(data: chipData) {
+                        onCommandToolTap?(chipData)
                     }
                 } else {
-                    // Fallback to ToolResultRouter for unknown tools
-                    ToolResultRouter(tool: tool)
+                    CommandToolChipFallback(data: chipData) {
+                        onCommandToolTap?(chipData)
+                    }
                 }
             }
 

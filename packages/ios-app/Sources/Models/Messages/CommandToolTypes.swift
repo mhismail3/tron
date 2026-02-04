@@ -104,7 +104,8 @@ enum CommandToolRegistry {
         "search", "glob", "find",
         "browsetheweb", "openurl",
         "webfetch", "websearch",
-        "task"
+        "task",
+        "introspect"
     ]
 
     /// Special tools that have their own dedicated UI (not command tool chips)
@@ -148,6 +149,8 @@ enum CommandToolRegistry {
             return ("magnifyingglass.circle", .tronInfo, "Search")
         case "task":
             return ("arrow.triangle.branch", .tronAmber, "Task")
+        case "introspect":
+            return ("cylinder.split.1x2", .tronInfo, "Introspect")
         default:
             return ("gearshape", .tronTextMuted, toolName.capitalized)
         }
@@ -158,16 +161,10 @@ enum CommandToolRegistry {
 
 extension CommandToolChipData {
 
-    /// Create CommandToolChipData from a ToolUseData if it's a command tool
-    /// Returns nil for special tools that have dedicated UI
-    init?(from tool: ToolUseData) {
+    /// Create CommandToolChipData from a ToolUseData
+    /// Always succeeds - uses default config for unknown tools (gear icon)
+    init(from tool: ToolUseData) {
         let normalized = tool.toolName.lowercased()
-
-        // Return nil for special tools
-        guard CommandToolRegistry.isCommandTool(normalized) else {
-            return nil
-        }
-
         let config = CommandToolRegistry.config(for: normalized)
 
         // Truncate result if too large to prevent performance issues
