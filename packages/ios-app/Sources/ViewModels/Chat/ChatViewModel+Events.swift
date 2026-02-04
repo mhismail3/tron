@@ -440,6 +440,33 @@ extension ChatViewModel {
         )
     }
 
+    func handleSubagentResultAvailableResult(_ result: SubagentResultAvailablePlugin.Result) {
+        logger.info("Subagent result available: sessionId=\(result.subagentSessionId), success=\(result.success), task=\(result.task.prefix(50))", category: .chat)
+
+        // Mark as pending user action
+        subagentState.markResultsPending(subagentSessionId: result.subagentSessionId)
+        logger.debug("Marked subagent results as pending: \(result.subagentSessionId)", category: .chat)
+
+        // Get subagent data for task preview
+        guard let subagent = subagentState.getSubagent(sessionId: result.subagentSessionId) else {
+            logger.warning("Subagent data not found for result available event: \(result.subagentSessionId) - notification will not be shown", category: .chat)
+            return
+        }
+
+        // Add notification message to chat
+        let notification = ChatMessage(
+            role: .system,
+            content: .systemEvent(.subagentResultAvailable(
+                subagentSessionId: result.subagentSessionId,
+                taskPreview: subagent.taskPreview,
+                success: result.success
+            ))
+        )
+        messages.append(notification)
+        messageWindowManager.appendMessage(notification)
+        logger.info("Added subagent result notification to chat: \(result.subagentSessionId)", category: .chat)
+    }
+
 
     // MARK: - Subagent Helpers
 
@@ -465,5 +492,55 @@ extension ChatViewModel {
             messages[index].content = .subagent(data)
             messageWindowManager.updateMessage(messages[index])
         }
+    }
+
+    // MARK: - Subagent Result Sending
+
+    /// Send subagent results to the agent as a user message
+    /// Called when user taps "Send" in the subagent detail sheet for pending results
+    func sendSubagentResults(_ subagent: SubagentToolData) {
+        logger.info("Sending subagent results to agent: sessionId=\(subagent.subagentSessionId), status=\(subagent.status)", category: .chat)
+
+        guard subagent.status == .completed || subagent.status == .failed else {
+            logger.warning("Cannot send results for subagent that is not completed/failed: status=\(subagent.status)", category: .chat)
+            return
+        }
+
+        // Mark as sent
+        subagentState.markResultsSent(subagentSessionId: subagent.subagentSessionId)
+        logger.debug("Marked subagent results as sent: \(subagent.subagentSessionId)", category: .chat)
+
+        // Dismiss sheet
+        subagentState.showDetailSheet = false
+
+        // Compose prompt with context
+        let resultContent: String
+        if let error = subagent.error {
+            resultContent = "Error: \(error)"
+        } else if let fullOutput = subagent.fullOutput {
+            resultContent = fullOutput
+        } else if let summary = subagent.resultSummary {
+            resultContent = summary
+        } else {
+            resultContent = "Completed in \(subagent.currentTurn) turns"
+        }
+
+        let prompt = """
+        [SUBAGENT RESULTS - Please review and continue]
+
+        A sub-agent I previously spawned has completed. Here are the results:
+
+        **Task:** \(subagent.task)
+
+        **Results:**
+        \(resultContent)
+
+        Please review these results and continue with the relevant task.
+        """
+
+        // Send as user message
+        inputText = prompt
+        sendMessage()
+        logger.info("Subagent results sent as user message: \(subagent.subagentSessionId)", category: .chat)
     }
 }

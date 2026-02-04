@@ -30,6 +30,7 @@ export type RpcEventType =
   | 'agent.subagent_completed'
   | 'agent.subagent_failed'
   | 'agent.subagent_event'  // Forwarded event from subagent (tool calls, text, etc.)
+  | 'agent.subagent_result_available'  // Subagent completed while parent was idle
   // Session events
   | 'session.created'
   | 'session.ended'
@@ -162,6 +163,27 @@ export interface RpcSubagentFailedData {
   subagentSessionId: string;
   error: string;
   duration: number;
+}
+
+/**
+ * Event data for subagent result available notification
+ * Emitted when a non-blocking subagent completes while the parent is idle,
+ * allowing iOS to show a notification chip for the user to review results.
+ */
+export interface RpcSubagentResultAvailableData {
+  parentSessionId: string;
+  subagentSessionId: string;
+  task: string;
+  resultSummary: string;
+  success: boolean;
+  totalTurns: number;
+  duration: number;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  error?: string;
+  completedAt: string;
 }
 
 /**

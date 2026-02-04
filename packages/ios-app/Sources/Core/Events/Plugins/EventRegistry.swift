@@ -75,6 +75,7 @@ final class EventRegistry: @unchecked Sendable {
         register(SubagentCompletedPlugin.self)
         register(SubagentFailedPlugin.self)
         register(SubagentEventPlugin.self)
+        register(SubagentResultAvailablePlugin.self)
 
         // UI Canvas events
         register(UIRenderStartPlugin.self)

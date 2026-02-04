@@ -2,9 +2,11 @@ import SwiftUI
 
 /// Renders system events (notifications) in the chat
 /// Consolidates rendering for all SystemEvent cases
+@available(iOS 26.0, *)
 struct SystemEventView: View {
     let event: SystemEvent
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
+    var onSubagentResultTap: ((String) -> Void)?
 
     var body: some View {
         switch event {
@@ -50,6 +52,16 @@ struct SystemEventView: View {
 
         case .turnFailed(let error, let code, let recoverable):
             TurnFailedNotificationView(error: error, code: code, recoverable: recoverable)
+
+        case .subagentResultAvailable(let subagentSessionId, let taskPreview, let success):
+            SubagentResultNotificationView(
+                subagentSessionId: subagentSessionId,
+                taskPreview: taskPreview,
+                success: success,
+                onTap: {
+                    onSubagentResultTap?(subagentSessionId)
+                }
+            )
         }
     }
 }

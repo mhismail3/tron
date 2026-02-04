@@ -440,6 +440,32 @@ export class SpawnHandler {
           duration,
           fullOutput
         );
+
+        // Emit notification if parent is idle (not processing)
+        // This allows iOS to show a chip for the user to review and send results
+        if (!currentParent.sessionContext.isProcessing()) {
+          this.deps.emit('agent_event', {
+            type: 'agent.subagent_result_available',
+            sessionId: parentSessionId,
+            timestamp: new Date().toISOString(),
+            data: {
+              parentSessionId,
+              subagentSessionId: sessionId,
+              task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
+              resultSummary,
+              success: true,
+              totalTurns: session?.turnCount ?? 0,
+              duration,
+              tokenUsage,
+              completedAt: new Date().toISOString(),
+            },
+          });
+
+          logger.info('Subagent completed while parent idle, notification emitted', {
+            parentSessionId,
+            subagentSessionId: sessionId,
+          });
+        }
       }
 
       logger.info('Subagent completed', {
@@ -501,6 +527,32 @@ export class SpawnHandler {
         currentParent.subagentTracker.fail(sessionId as SessionId, structured.message, {
           duration,
         });
+
+        // Emit notification if parent is idle (not processing)
+        // This allows iOS to show a chip for the user to review the failure
+        if (!currentParent.sessionContext.isProcessing()) {
+          this.deps.emit('agent_event', {
+            type: 'agent.subagent_result_available',
+            sessionId: parentSessionId,
+            timestamp: new Date().toISOString(),
+            data: {
+              parentSessionId,
+              subagentSessionId: sessionId,
+              task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
+              resultSummary: '',
+              success: false,
+              totalTurns: 0,
+              duration,
+              error: structured.message,
+              completedAt: new Date().toISOString(),
+            },
+          });
+
+          logger.info('Subagent failed while parent idle, notification emitted', {
+            parentSessionId,
+            subagentSessionId: sessionId,
+          });
+        }
       }
 
       logger.error('Subagent failed', {

@@ -9,6 +9,7 @@ struct SubagentDetailSheet: View {
     let data: SubagentToolData
     let subagentState: SubagentState
     let eventStoreManager: EventStoreManager
+    var onSendResults: ((SubagentToolData) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     /// Loading state for async event sync
@@ -84,6 +85,24 @@ struct SubagentDetailSheet: View {
                     Text(titleText)
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                         .foregroundStyle(titleColor)
+                }
+
+                // Send to Agent button (top right) - when results are pending (completed or failed)
+                if (data.status == .completed || data.status == .failed) && data.resultDeliveryStatus == .pending {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            onSendResults?(data)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Send")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                                Image(systemName: "paperplane.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(data.status == .completed ? .tronSuccess : .tronError)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }

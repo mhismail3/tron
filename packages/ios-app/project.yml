@@ -51,6 +51,15 @@ targets:
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: YES
+      configs:
+        Debug-Beta:
+          CODE_SIGN_ENTITLEMENTS: TronMobileDebug-Beta.entitlements
+        Release-Beta:
+          CODE_SIGN_ENTITLEMENTS: TronMobileRelease-Beta.entitlements
+        Debug-Prod:
+          CODE_SIGN_ENTITLEMENTS: TronMobileDebug-Prod.entitlements
+        Release-Prod:
+          CODE_SIGN_ENTITLEMENTS: TronMobileRelease-Prod.entitlements
 
   TronMobileTests:
     type: bundle.unit-test

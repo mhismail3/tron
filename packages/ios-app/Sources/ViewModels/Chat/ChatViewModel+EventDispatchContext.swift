@@ -46,6 +46,11 @@ extension ChatViewModel: EventDispatchContext {
         handleSubagentForwardedEventResult(result)
     }
 
+    /// Handle subagent result available event - wraps the existing handleSubagentResultAvailableResult
+    func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result) {
+        handleSubagentResultAvailableResult(result)
+    }
+
     // Note: logWarning and logDebug are already implemented in ChatViewModel.swift
     // via LoggingContext protocol conformance
 }

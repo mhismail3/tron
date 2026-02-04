@@ -14,6 +14,7 @@ struct MessageBubble: View {
     var onTodoWriteTap: (() -> Void)?
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
+    var onSubagentResultTap: ((String) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -222,7 +223,18 @@ struct MessageBubble: View {
             AttachedFileThumbnails(attachments: attachments)
 
         case .systemEvent(let event):
-            SystemEventView(event: event, onCompactionTap: onCompactionTap)
+            if #available(iOS 26.0, *) {
+                SystemEventView(
+                    event: event,
+                    onCompactionTap: onCompactionTap,
+                    onSubagentResultTap: onSubagentResultTap
+                )
+            } else {
+                // Fallback without subagent result notification for older iOS
+                Text(event.textContent)
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
 
         case .askUserQuestion(let data):
             if #available(iOS 26.0, *) {

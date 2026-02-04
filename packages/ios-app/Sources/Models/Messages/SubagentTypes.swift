@@ -10,6 +10,19 @@ enum SubagentStatus: String, Codable, Equatable {
     case failed
 }
 
+/// Tracks whether completed results need user action
+/// Used for non-blocking subagents that complete while the parent is idle
+enum SubagentResultDeliveryStatus: String, Codable, Equatable {
+    /// Parent was processing when subagent completed (results auto-injected)
+    case notApplicable
+    /// Completed while parent idle, awaiting user action to send results
+    case pending
+    /// User sent results to agent
+    case sent
+    /// User dismissed without sending
+    case dismissed
+}
+
 /// Data for tracking a spawned subagent (rendered as a chip in chat)
 struct SubagentToolData: Equatable {
     /// The tool call ID from SpawnSubagent
@@ -34,6 +47,8 @@ struct SubagentToolData: Equatable {
     var error: String?
     /// Token usage (when completed)
     var tokenUsage: TokenUsage?
+    /// Tracks whether results need user action (for non-blocking subagents that complete while parent idle)
+    var resultDeliveryStatus: SubagentResultDeliveryStatus = .notApplicable
 
     /// Formatted duration for display
     var formattedDuration: String? {

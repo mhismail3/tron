@@ -77,6 +77,9 @@ protocol EventDispatchContext: AnyObject {
     /// Handle subagent forwarded event
     func handleSubagentEvent(_ result: SubagentEventPlugin.Result)
 
+    /// Handle subagent result available event (subagent completed while parent idle)
+    func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result)
+
     // MARK: - UI Canvas
 
     /// Handle UI render start event

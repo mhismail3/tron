@@ -122,6 +122,11 @@ final class EventDispatchCoordinator {
                 context.handleSubagentEvent(r)
             }
 
+        case SubagentResultAvailablePlugin.eventType:
+            if let r = result as? SubagentResultAvailablePlugin.Result {
+                context.handleSubagentResultAvailable(r)
+            }
+
         case UIRenderStartPlugin.eventType:
             if let r = result as? UIRenderStartPlugin.Result {
                 context.handleUIRenderStart(r)

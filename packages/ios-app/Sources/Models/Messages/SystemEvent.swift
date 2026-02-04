@@ -29,6 +29,8 @@ enum SystemEvent: Equatable {
     case catchingUp
     /// Turn failed with error
     case turnFailed(error: String, code: String?, recoverable: Bool)
+    /// Subagent completed while parent was idle - results available for review
+    case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
 
     /// Human-readable description for the event
     var textContent: String {
@@ -62,6 +64,8 @@ enum SystemEvent: Equatable {
             return "Loading latest messages..."
         case .turnFailed(let error, _, _):
             return "Request failed: \(error)"
+        case .subagentResultAvailable(_, let taskPreview, let success):
+            return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
         }
     }
 }

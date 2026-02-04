@@ -137,7 +137,10 @@ struct ChatSheetContent: View {
             SubagentDetailSheet(
                 data: data,
                 subagentState: viewModel.subagentState,
-                eventStoreManager: eventStoreManager
+                eventStoreManager: eventStoreManager,
+                onSendResults: { subagent in
+                    viewModel.sendSubagentResults(subagent)
+                }
             )
             .adaptivePresentationDetents([.medium, .large])
         } else {

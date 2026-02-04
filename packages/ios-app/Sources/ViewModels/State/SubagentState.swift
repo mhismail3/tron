@@ -139,6 +139,36 @@ final class SubagentState {
         }
     }
 
+    /// Mark results as requiring user action (called when event received while parent idle)
+    func markResultsPending(subagentSessionId: String) {
+        guard var data = subagents[subagentSessionId] else { return }
+        data.resultDeliveryStatus = .pending
+        subagents[subagentSessionId] = data
+        if selectedSubagent?.subagentSessionId == subagentSessionId {
+            selectedSubagent = data
+        }
+    }
+
+    /// Mark results as sent to agent
+    func markResultsSent(subagentSessionId: String) {
+        guard var data = subagents[subagentSessionId] else { return }
+        data.resultDeliveryStatus = .sent
+        subagents[subagentSessionId] = data
+        if selectedSubagent?.subagentSessionId == subagentSessionId {
+            selectedSubagent = data
+        }
+    }
+
+    /// Mark results as dismissed without sending
+    func markResultsDismissed(subagentSessionId: String) {
+        guard var data = subagents[subagentSessionId] else { return }
+        data.resultDeliveryStatus = .dismissed
+        subagents[subagentSessionId] = data
+        if selectedSubagent?.subagentSessionId == subagentSessionId {
+            selectedSubagent = data
+        }
+    }
+
     // MARK: - UI Actions
 
     /// Select a subagent and show its detail sheet
