@@ -50,6 +50,25 @@ extension ChatViewModel: MessagingContext {
             eventStoreManager?.updateSessionDashboardInfo(sessionId: sessionId, lastAssistantResponse: response)
         }
     }
+
+    /// Dismiss any pending subagent results.
+    /// Called when user sends a different message (not via the "Send" button).
+    /// This is a one-time shortcut - if they choose to continue the conversation
+    /// with their own prompt, they lose the ability to auto-send subagent results.
+    func dismissPendingSubagentResults() {
+        let pendingIds = subagentState.allSubagentsSorted
+            .filter { $0.resultDeliveryStatus == .pending }
+            .map { $0.subagentSessionId }
+
+        for sessionId in pendingIds {
+            subagentState.markResultsDismissed(subagentSessionId: sessionId)
+            logger.debug("Dismissed pending subagent result: \(sessionId)", category: .chat)
+        }
+
+        if !pendingIds.isEmpty {
+            logger.info("Dismissed \(pendingIds.count) pending subagent result(s) - user sent different message", category: .chat)
+        }
+    }
 }
 
 // MARK: - Message Sending & Image Handling

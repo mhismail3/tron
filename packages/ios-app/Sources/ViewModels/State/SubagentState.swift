@@ -108,7 +108,8 @@ final class SubagentState {
         fullOutput: String?,
         totalTurns: Int,
         duration: Int,
-        tokenUsage: TokenUsage?
+        tokenUsage: TokenUsage?,
+        model: String? = nil
     ) {
         guard var data = subagents[subagentSessionId] else { return }
         data.status = .completed
@@ -117,6 +118,10 @@ final class SubagentState {
         data.fullOutput = fullOutput
         data.duration = duration
         data.tokenUsage = tokenUsage
+        // Update model if provided (may not have been set during spawn for reconstructed sessions)
+        if let model = model {
+            data.model = model
+        }
         subagents[subagentSessionId] = data
 
         // Also update selectedSubagent if it's the same one

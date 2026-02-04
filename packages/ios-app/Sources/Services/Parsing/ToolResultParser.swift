@@ -9,8 +9,9 @@ struct ToolResultParser {
 
     /// Parse SpawnSubagent tool to create SubagentToolData for chip display
     static func parseSpawnSubagent(from tool: ToolUseData) -> SubagentToolData? {
-        // Extract task from arguments
+        // Extract task and model from arguments
         let task = extractTaskFromArguments(tool.arguments)
+        let model = extractModelFromArguments(tool.arguments)
 
         // Extract session ID and other info from result
         let sessionId = extractSessionId(from: tool.result) ?? tool.toolCallId
@@ -29,15 +30,16 @@ struct ToolResultParser {
 
         // Extract additional info from result
         let resultSummary = extractResultSummary(from: tool.result)
+        let turns = extractTurns(from: tool.result)
         let error = tool.status == .error ? tool.result : nil
 
         return SubagentToolData(
             toolCallId: tool.toolCallId,
             subagentSessionId: sessionId,
             task: task,
-            model: nil,
+            model: model,
             status: status,
-            currentTurn: 0,
+            currentTurn: turns,
             resultSummary: resultSummary,
             fullOutput: tool.result,
             duration: tool.durationMs,
@@ -215,6 +217,14 @@ struct ToolResultParser {
     /// Extract "sessionId" field from JSON arguments
     private static func extractSessionIdFromArguments(_ args: String) -> String? {
         if let match = args.firstMatch(of: /"sessionId"\s*:\s*"([^"]+)"/) {
+            return String(match.1)
+        }
+        return nil
+    }
+
+    /// Extract "model" field from JSON arguments
+    private static func extractModelFromArguments(_ args: String) -> String? {
+        if let match = args.firstMatch(of: /"model"\s*:\s*"([^"]+)"/) {
             return String(match.1)
         }
         return nil

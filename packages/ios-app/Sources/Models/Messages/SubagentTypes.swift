@@ -32,7 +32,7 @@ struct SubagentToolData: Equatable {
     /// The task assigned to the subagent
     let task: String
     /// Model used by the subagent
-    let model: String?
+    var model: String?
     /// Current status
     var status: SubagentStatus
     /// Current turn number (while running)

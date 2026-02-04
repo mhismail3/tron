@@ -399,6 +399,10 @@ export class SpawnHandler {
         outputTokens: session?.totalOutputTokens ?? 0,
       };
 
+      // Get model from tracked subagent (available from spawn event)
+      const trackedSubagent = parent?.subagentTracker.get(sessionId as SessionId);
+      const model = trackedSubagent?.model;
+
       // Emit completion event with full output
       this.deps.appendEventLinearized(
         parentSessionId as SessionId,
@@ -410,6 +414,7 @@ export class SpawnHandler {
           totalTurns: session?.turnCount ?? 0,
           totalTokenUsage: tokenUsage,
           duration,
+          model,
         }
       );
 
@@ -425,6 +430,7 @@ export class SpawnHandler {
           totalTurns: session?.turnCount ?? 0,
           duration,
           tokenUsage,
+          model,
         },
       });
 
@@ -444,24 +450,34 @@ export class SpawnHandler {
         // Emit notification if parent is idle (not processing)
         // This allows iOS to show a chip for the user to review and send results
         if (!currentParent.sessionContext.isProcessing()) {
+          const notificationData = {
+            parentSessionId,
+            subagentSessionId: sessionId,
+            task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
+            resultSummary,
+            success: true,
+            totalTurns: session?.turnCount ?? 0,
+            duration,
+            tokenUsage,
+            completedAt: new Date().toISOString(),
+          };
+
+          // Persist the notification event for reconstruction
+          this.deps.appendEventLinearized(
+            parentSessionId as SessionId,
+            'notification.subagent_result' as EventType,
+            notificationData
+          );
+
+          // Emit WebSocket event for live clients
           this.deps.emit('agent_event', {
             type: 'agent.subagent_result_available',
             sessionId: parentSessionId,
             timestamp: new Date().toISOString(),
-            data: {
-              parentSessionId,
-              subagentSessionId: sessionId,
-              task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
-              resultSummary,
-              success: true,
-              totalTurns: session?.turnCount ?? 0,
-              duration,
-              tokenUsage,
-              completedAt: new Date().toISOString(),
-            },
+            data: notificationData,
           });
 
-          logger.info('Subagent completed while parent idle, notification emitted', {
+          logger.info('Subagent completed while parent idle, notification emitted and persisted', {
             parentSessionId,
             subagentSessionId: sessionId,
           });
@@ -531,24 +547,34 @@ export class SpawnHandler {
         // Emit notification if parent is idle (not processing)
         // This allows iOS to show a chip for the user to review the failure
         if (!currentParent.sessionContext.isProcessing()) {
+          const notificationData = {
+            parentSessionId,
+            subagentSessionId: sessionId,
+            task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
+            resultSummary: '',
+            success: false,
+            totalTurns: 0,
+            duration,
+            error: structured.message,
+            completedAt: new Date().toISOString(),
+          };
+
+          // Persist the notification event for reconstruction
+          this.deps.appendEventLinearized(
+            parentSessionId as SessionId,
+            'notification.subagent_result' as EventType,
+            notificationData
+          );
+
+          // Emit WebSocket event for live clients
           this.deps.emit('agent_event', {
             type: 'agent.subagent_result_available',
             sessionId: parentSessionId,
             timestamp: new Date().toISOString(),
-            data: {
-              parentSessionId,
-              subagentSessionId: sessionId,
-              task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
-              resultSummary: '',
-              success: false,
-              totalTurns: 0,
-              duration,
-              error: structured.message,
-              completedAt: new Date().toISOString(),
-            },
+            data: notificationData,
           });
 
-          logger.info('Subagent failed while parent idle, notification emitted', {
+          logger.info('Subagent failed while parent idle, notification emitted and persisted', {
             parentSessionId,
             subagentSessionId: sessionId,
           });

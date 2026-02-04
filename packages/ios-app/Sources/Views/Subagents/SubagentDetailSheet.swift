@@ -51,8 +51,8 @@ struct SubagentDetailSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
-                    // Header card (status, turns, duration)
-                    headerCard
+                    // Header tags (turns, duration, model) - left-aligned row
+                    headerTags
                         .padding(.horizontal)
 
                     // Summary section (when completed - shown prominently at top)
@@ -145,36 +145,37 @@ struct SubagentDetailSheet: View {
         }
     }
 
-    // MARK: - Header Card
+    // MARK: - Header Tags
 
-    private var headerCard: some View {
-        HStack(spacing: 12) {
-            // Status (left-aligned)
-            statusIcon
-            Text(statusText)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(statusColor)
+    /// Compute effective turn count - use activity events if currentTurn is 0 for completed subagents
+    private var effectiveTurnCount: Int {
+        if data.currentTurn > 0 {
+            return data.currentTurn
+        }
+        // For completed subagents with 0 turns, derive from activity events
+        // Each turn typically has at least one tool call, so count unique tool events
+        if data.status == .completed || data.status == .failed {
+            let events = allEvents
+            // Count tool events as proxy for turns (at minimum 1 if there's any activity)
+            let toolCount = events.filter { $0.type == .tool }.count
+            return max(1, toolCount > 0 ? (toolCount + 1) / 2 : 1) // Rough estimate: ~2 tools per turn on average, minimum 1
+        }
+        return data.currentTurn
+    }
+
+    private var headerTags: some View {
+        HStack(spacing: 8) {
+            SubagentStatBadge(label: "Turns:", value: "\(effectiveTurnCount)", color: titleColor)
+
+            if let duration = data.formattedDuration {
+                SubagentStatBadge(label: "Duration:", value: duration, color: titleColor)
+            }
+
+            if let model = data.model {
+                SubagentStatBadge(label: "Model:", value: formatModelName(model), color: titleColor)
+            }
 
             Spacer()
-
-            // Tags (right-aligned)
-            HStack(spacing: 8) {
-                SubagentStatBadge(label: "Turns", value: "\(data.currentTurn)", color: titleColor)
-
-                if let duration = data.formattedDuration {
-                    SubagentStatBadge(label: "Duration", value: duration, color: titleColor)
-                }
-
-                if let model = data.model {
-                    SubagentStatBadge(label: "Model", value: formatModelName(model), color: titleColor)
-                }
-            }
-        }
-        .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
@@ -463,54 +464,10 @@ struct SubagentDetailSheet: View {
 
     // MARK: - Helpers
 
-    @ViewBuilder
-    private var statusIcon: some View {
-        switch data.status {
-        case .spawning:
-            ProgressView()
-                .progressViewStyle(.circular)
-                .scaleEffect(0.7)
-                .frame(width: 16, height: 16)
-                .tint(.tronBlue)       // Blue while spawning
-        case .running:
-            ProgressView()
-                .progressViewStyle(.circular)
-                .scaleEffect(0.7)
-                .frame(width: 16, height: 16)
-                .tint(.tronAmber)      // Amber while running
-        case .completed:
-            Image(systemName: "checkmark.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(.tronSuccess)
-        case .failed:
-            Image(systemName: "xmark.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(.tronError)
-        }
-    }
-
-    private var statusText: String {
-        switch data.status {
-        case .spawning: return "Spawning..."
-        case .running: return "Running (turn \(data.currentTurn))"
-        case .completed: return "Completed"
-        case .failed: return "Failed"
-        }
-    }
-
-    private var statusColor: Color {
-        switch data.status {
-        case .spawning: return .tronBlue       // Blue while spawning
-        case .running: return .tronAmber       // Amber while running
-        case .completed: return .tronSuccess
-        case .failed: return .tronError
-        }
-    }
-
     private var titleText: String {
         switch data.status {
         case .spawning: return "Sub-Agent Spawning"
-        case .running: return "Sub-Agent Running"
+        case .running: return "Sub-Agent Running (Turn \(data.currentTurn))"
         case .completed: return "Sub-Agent Completed"
         case .failed: return "Sub-Agent Failed"
         }

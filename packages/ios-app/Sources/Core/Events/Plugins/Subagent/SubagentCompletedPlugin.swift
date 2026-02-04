@@ -20,6 +20,7 @@ enum SubagentCompletedPlugin: EventPlugin {
             let totalTurns: Int
             let duration: Int
             let tokenUsage: TokenUsage?
+            let model: String?
         }
     }
 
@@ -32,6 +33,7 @@ enum SubagentCompletedPlugin: EventPlugin {
         let totalTurns: Int
         let duration: Int
         let tokenUsage: TokenUsage?
+        let model: String?
     }
 
     // MARK: - Protocol Implementation
@@ -43,7 +45,8 @@ enum SubagentCompletedPlugin: EventPlugin {
             fullOutput: event.data.fullOutput,
             totalTurns: event.data.totalTurns,
             duration: event.data.duration,
-            tokenUsage: event.data.tokenUsage
+            tokenUsage: event.data.tokenUsage,
+            model: event.data.model
         )
     }
 }

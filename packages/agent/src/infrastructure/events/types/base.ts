@@ -35,6 +35,7 @@ export type EventType =
   | 'message.deleted'
   // Notifications (in-chat pill notifications)
   | 'notification.interrupted'
+  | 'notification.subagent_result'
   // Compaction/summarization
   | 'compact.boundary'
   | 'compact.summary'

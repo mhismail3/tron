@@ -403,7 +403,7 @@ extension ChatViewModel {
     }
 
     func handleSubagentCompletedResult(_ result: SubagentCompletedPlugin.Result) {
-        logger.info("Subagent completed: \(result.subagentSessionId) in \(result.totalTurns) turns, \(result.duration)ms", category: .chat)
+        logger.info("Subagent completed: \(result.subagentSessionId) in \(result.totalTurns) turns, \(result.duration)ms, model=\(result.model ?? "unknown")", category: .chat)
 
         subagentState.complete(
             subagentSessionId: result.subagentSessionId,
@@ -411,7 +411,8 @@ extension ChatViewModel {
             fullOutput: result.fullOutput,
             totalTurns: result.totalTurns,
             duration: result.duration,
-            tokenUsage: result.tokenUsage
+            tokenUsage: result.tokenUsage,
+            model: result.model
         )
 
         updateSubagentMessageContent(subagentSessionId: result.subagentSessionId)

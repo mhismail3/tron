@@ -121,4 +121,35 @@ enum SystemEventHandlers {
             timestamp: timestamp
         )
     }
+
+    /// Transform notification.subagent_result event into a ChatMessage.
+    ///
+    /// These events are persisted when a non-blocking subagent completes while
+    /// the parent agent is idle, allowing the user to send results to the agent.
+    static func transformSubagentResultNotification(
+        _ payload: [String: AnyCodable],
+        timestamp: Date,
+        logger: TronLogger = TronLogger.shared
+    ) -> ChatMessage? {
+        guard let subagentSessionId = payload["subagentSessionId"]?.value as? String else {
+            logger.warning("notification.subagent_result event missing subagentSessionId", category: .events)
+            return nil
+        }
+
+        let task = payload["task"]?.value as? String ?? "Sub-agent task"
+        let success = payload["success"]?.value as? Bool ?? true
+
+        // Create a short preview of the task for display
+        let taskPreview = task.count > 50 ? String(task.prefix(50)) + "..." : task
+
+        return ChatMessage(
+            role: .system,
+            content: .systemEvent(.subagentResultAvailable(
+                subagentSessionId: subagentSessionId,
+                taskPreview: taskPreview,
+                success: success
+            )),
+            timestamp: timestamp
+        )
+    }
 }

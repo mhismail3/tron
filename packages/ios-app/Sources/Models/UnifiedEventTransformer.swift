@@ -141,6 +141,8 @@ struct UnifiedEventTransformer {
             return ToolHandlers.transformToolResult(payload, timestamp: ts)
         case .notificationInterrupted:
             return SystemEventHandlers.transformInterrupted(payload, timestamp: ts)
+        case .notificationSubagentResult:
+            return SystemEventHandlers.transformSubagentResultNotification(payload, timestamp: ts)
         case .configModelSwitch:
             return ConfigHandlers.transformModelSwitch(payload, timestamp: ts)
         case .configReasoningLevel:

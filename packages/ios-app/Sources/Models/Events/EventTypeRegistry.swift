@@ -42,6 +42,7 @@ enum PersistedEventType: String, CaseIterable {
 
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
+    case notificationSubagentResult = "notification.subagent_result"
 
     // Skills
     case skillAdded = "skill.added"
@@ -87,7 +88,8 @@ enum PersistedEventType: String, CaseIterable {
         switch self {
         case .messageUser, .messageAssistant, .messageSystem,
              .toolCall, .toolResult,
-             .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
+             .notificationInterrupted, .notificationSubagentResult,
+             .configModelSwitch, .configReasoningLevel,
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
              .errorAgent, .errorTool, .errorProvider,
              .streamThinkingComplete, .turnFailed:
@@ -163,6 +165,7 @@ enum PersistedEventType: String, CaseIterable {
         case .configReasoningLevel: return "Reasoning level changed"
         case .messageDeleted: return "Message deleted"
         case .notificationInterrupted: return "Session interrupted"
+        case .notificationSubagentResult: return "Subagent result available"
         case .skillAdded: return "Skill added"
         case .skillRemoved: return "Skill removed"
         case .rulesLoaded: return "Rules loaded"

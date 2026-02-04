@@ -55,6 +55,9 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Mark pending AskUserQuestion chips as superseded
     func markPendingQuestionsAsSuperseded()
 
+    /// Dismiss pending subagent results (user chose to send a different message)
+    func dismissPendingSubagentResults()
+
     /// Handle agent error
     func handleAgentError(_ message: String)
 }
@@ -100,13 +103,20 @@ final class MessagingCoordinator {
 
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells, reasoningLevel=\(reasoningLevel ?? "nil")")
 
-        // Check if this is an AskUserQuestion answer prompt - don't mark as superseded
+        // Check if this is a special prompt that should not trigger certain dismissals
         let isAnswerPrompt = text.hasPrefix("[Answers to your questions]")
+        let isSubagentResultPrompt = text.hasPrefix("[SUBAGENT RESULTS")
 
         if !isAnswerPrompt {
             // Mark any pending AskUserQuestion chips as superseded
             // (user chose to send a different message instead of answering)
             context.markPendingQuestionsAsSuperseded()
+        }
+
+        if !isSubagentResultPrompt {
+            // Dismiss any pending subagent results
+            // (user chose to send a different message - the "Send" button is a one-time shortcut)
+            context.dismissPendingSubagentResults()
         }
 
         // Reset browser dismissal flags for new prompt - browser can auto-open again
