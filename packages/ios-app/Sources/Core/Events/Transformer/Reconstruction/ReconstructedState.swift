@@ -56,6 +56,10 @@ struct ReconstructedState {
     /// Session tags
     var tags: [String]
 
+    /// Subagent results that need to be restored into SubagentState
+    /// Populated from notification.subagent_result events during reconstruction
+    var subagentResults: [SubagentResultInfo]
+
     // MARK: - Initialization
 
     init() {
@@ -72,6 +76,7 @@ struct ReconstructedState {
         self.metadata = MetadataState()
         self.sessionInfo = SessionInfo()
         self.tags = []
+        self.subagentResults = []
     }
 }
 
@@ -224,5 +229,17 @@ extension ReconstructedState {
             let end = endTime ?? Date()
             return end.timeIntervalSince(start)
         }
+    }
+
+    /// Information about a completed subagent result notification
+    /// Used to populate SubagentState after reconstruction so tap handlers work
+    struct SubagentResultInfo {
+        let subagentSessionId: String
+        let task: String
+        let resultSummary: String
+        let success: Bool
+        let totalTurns: Int
+        let duration: Int?
+        let tokenUsage: TokenUsage?
     }
 }

@@ -461,6 +461,18 @@ final class MockMessagingContext: MessagingContext {
         markPendingQuestionsAsSupersededCalled = true
     }
 
+    func dismissPendingSubagentResults() {
+        // No-op for tests
+    }
+
+    func finalizeThinkingMessage() {
+        // No-op for tests
+    }
+
+    func clearThinkingCaption() {
+        // No-op for tests
+    }
+
     func flushPendingTextUpdates() {
         // No-op for tests
     }

@@ -551,6 +551,14 @@ final class SubagentState {
         Array(subagents.values)
     }
 
+    // MARK: - Reconstruction
+
+    /// Populate a subagent directly from reconstructed data.
+    /// Used when resuming a session to restore subagent state from persisted events.
+    func populateFromReconstruction(_ data: SubagentToolData) {
+        subagents[data.subagentSessionId] = data
+    }
+
     // MARK: - Cleanup
 
     /// Clear all subagent state (for new session)

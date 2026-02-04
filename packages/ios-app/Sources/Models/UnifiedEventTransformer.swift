@@ -305,7 +305,8 @@ extension UnifiedEventTransformer {
                 }
 
             case .messageUser, .messageSystem,
-                 .notificationInterrupted, .configModelSwitch, .configReasoningLevel,
+                 .notificationInterrupted, .notificationSubagentResult,
+                 .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillRemoved, .rulesLoaded,
                  .errorAgent, .errorTool, .errorProvider,
                  .streamThinkingComplete:
@@ -318,6 +319,20 @@ extension UnifiedEventTransformer {
                 if eventType == .configModelSwitch,
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
+                }
+                // Extract subagent result info for SubagentState reconstruction
+                if eventType == .notificationSubagentResult,
+                   let sessionId = event.payload["subagentSessionId"]?.value as? String {
+                    let info = ReconstructedState.SubagentResultInfo(
+                        subagentSessionId: sessionId,
+                        task: event.payload["task"]?.value as? String ?? "",
+                        resultSummary: event.payload["resultSummary"]?.value as? String ?? "",
+                        success: event.payload["success"]?.value as? Bool ?? true,
+                        totalTurns: event.payload["totalTurns"]?.value as? Int ?? 0,
+                        duration: event.payload["duration"]?.value as? Int,
+                        tokenUsage: nil
+                    )
+                    state.subagentResults.append(info)
                 }
 
             case .streamTurnEnd:

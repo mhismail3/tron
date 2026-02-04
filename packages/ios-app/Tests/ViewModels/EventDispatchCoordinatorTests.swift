@@ -337,7 +337,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             fullOutput: nil,
             totalTurns: 3,
             duration: 5000,
-            tokenUsage: nil
+            tokenUsage: nil,
+            model: nil
         )
 
         // When: Dispatching
@@ -664,6 +665,10 @@ final class MockEventDispatchContext: EventDispatchContext {
 
     func handleSubagentEvent(_ result: SubagentEventPlugin.Result) {
         handleSubagentEventCalledWith = result
+    }
+
+    func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result) {
+        // No-op for test mock
     }
 
     func handleUIRenderStart(_ result: UIRenderStartPlugin.Result) {

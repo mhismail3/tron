@@ -179,6 +179,25 @@ extension ChatViewModel {
             // Update turn counter from unified state
             currentTurn = state.currentTurn
 
+            // Populate SubagentState from reconstructed subagent results
+            // This enables tap handlers on reconstructed subagent result chips to work
+            for result in state.subagentResults {
+                let data = SubagentToolData(
+                    toolCallId: result.subagentSessionId, // Use sessionId as fallback
+                    subagentSessionId: result.subagentSessionId,
+                    task: result.task,
+                    model: nil,
+                    status: result.success ? .completed : .failed,
+                    currentTurn: result.totalTurns,
+                    resultSummary: result.resultSummary,
+                    fullOutput: nil,
+                    duration: result.duration,
+                    error: result.success ? nil : "Failed",
+                    tokenUsage: result.tokenUsage
+                )
+                subagentState.populateFromReconstruction(data)
+            }
+
             // =============================================================================
             // TOKEN STATE FROM RECONSTRUCTED STATE (SERVER EVENTS = SINGLE SOURCE OF TRUTH)
             // =============================================================================
