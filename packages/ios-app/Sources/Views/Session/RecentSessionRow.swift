@@ -77,9 +77,8 @@ struct RecentSessionRow: View {
 
                     Spacer()
 
-                    Text(session.formattedTokens)
-                        .font(TronTypography.pill)
-                        .foregroundStyle(.white.opacity(0.45))
+                    // Token stats with SF Symbols (matching chat view style)
+                    sessionTokenStats
 
                     Text(session.formattedCost)
                         .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
@@ -92,5 +91,48 @@ struct RecentSessionRow: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    /// Token stats with SF Symbols (matching chat view MessageMetadataBadge style)
+    @ViewBuilder
+    private var sessionTokenStats: some View {
+        HStack(spacing: 4) {
+            // Input tokens
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.down")
+                    .font(TronTypography.labelSM)
+                Text((session.inputTokens ?? 0).formattedTokenCount)
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            // Output tokens
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.up")
+                    .font(TronTypography.labelSM)
+                Text((session.outputTokens ?? 0).formattedTokenCount)
+            }
+            .foregroundStyle(.white.opacity(0.45))
+
+            // Cache read (if non-zero)
+            if let cacheRead = session.cacheReadTokens, cacheRead > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "bolt.fill")
+                        .font(TronTypography.labelSM)
+                    Text(cacheRead.formattedTokenCount)
+                }
+                .foregroundStyle(.tronCyan)
+            }
+
+            // Cache write (if non-zero)
+            if let cacheWrite = session.cacheCreationTokens, cacheWrite > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "pencil")
+                        .font(TronTypography.labelSM)
+                    Text(cacheWrite.formattedTokenCount)
+                }
+                .foregroundStyle(.tronAmber)
+            }
+        }
+        .font(TronTypography.pill)
     }
 }
