@@ -60,6 +60,14 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Handle agent error
     func handleAgentError(_ message: String)
+
+    /// Finalize thinking message (mark as no longer streaming)
+    /// Called on abort to stop the spinning brain icon
+    func finalizeThinkingMessage()
+
+    /// Clear the thinking caption state
+    /// Called on abort to remove the thinking caption
+    func clearThinkingCaption()
 }
 
 /// Coordinates message sending, agent abort, and attachment management for ChatViewModel.
@@ -197,6 +205,8 @@ final class MessagingCoordinator {
             context.setSessionProcessing(false)
             context.updateSessionDashboardInfo(lastUserPrompt: nil, lastAssistantResponse: "Interrupted")
             context.finalizeStreamingMessage()
+            context.finalizeThinkingMessage()
+            context.clearThinkingCaption()
             context.appendInterruptedMessage()
             context.logInfo("Agent aborted successfully")
 
