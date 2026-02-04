@@ -23,6 +23,7 @@ import type {
 import { OpenAITokenManager } from './auth.js';
 import { convertToResponsesInput, convertTools, generateToolClarificationMessage } from './message-converter.js';
 import { parseSSEStream, createStreamState } from './stream-handler.js';
+import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
 
 const logger = createLogger('openai');
 
@@ -151,8 +152,12 @@ export class OpenAIProvider {
     try {
       const headers = this.tokenManager.buildHeaders();
 
+      // Sanitize messages to guarantee API compliance (handles interrupted tool calls, etc.)
+      const sanitized = sanitizeMessages(context.messages);
+      const sanitizedContext = { ...context, messages: sanitized.messages };
+
       // Convert to Responses API format
-      const input = convertToResponsesInput(context);
+      const input = convertToResponsesInput(sanitizedContext);
       const tools = context.tools ? convertTools(context.tools) : undefined;
 
       // Prepend tool clarification message ONLY on first turn of session

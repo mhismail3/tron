@@ -20,6 +20,7 @@ import { createLogger } from '@infrastructure/logging/index.js';
 import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '@infrastructure/auth/oauth.js';
 import { parseError, formatError } from '@core/utils/errors.js';
 import { calculateBackoffDelay, extractRetryAfterFromError, sleepWithAbort, type RetryConfig } from '@core/utils/retry.js';
+import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { AnthropicConfig, StreamOptions, SystemPromptBlock, AnthropicProviderSettings } from './types.js';
 import { convertMessages, convertTools, convertResponse } from './message-converter.js';
@@ -169,7 +170,9 @@ export class AnthropicProvider {
 
     yield { type: 'start' };
 
-    const messages = convertMessages(context.messages);
+    // Sanitize messages to guarantee API compliance (handles interrupted tool calls, etc.)
+    const sanitized = sanitizeMessages(context.messages);
+    const messages = convertMessages(sanitized.messages);
     const tools = context.tools ? convertTools(context.tools) : undefined;
 
     // Build system prompt

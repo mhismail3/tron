@@ -102,6 +102,8 @@ export interface SpawnSubagentResult {
     inputTokens: number;
     outputTokens: number;
   };
+  /** Whether the blocking wait was interrupted (blocking inProcess mode only) */
+  interrupted?: boolean;
 }
 
 /**
@@ -238,20 +240,26 @@ Returns (when mode=inProcess and blocking=true):
   async execute(
     toolCallIdOrArgs: string | Record<string, unknown>,
     argsOrSignal?: Record<string, unknown> | AbortSignal,
-    _signal?: AbortSignal
+    signalArg?: AbortSignal
   ): Promise<TronToolResult<SpawnSubagentResult>> {
     // Handle both old and new signatures
     let args: Record<string, unknown>;
     let toolCallId: string;
+    let signal: AbortSignal | undefined;
 
     if (typeof toolCallIdOrArgs === 'string') {
       // New signature: (toolCallId, params, signal)
       toolCallId = toolCallIdOrArgs;
       args = argsOrSignal as Record<string, unknown>;
+      signal = signalArg;
     } else {
       // Old signature: (params) - generate a fallback ID
       toolCallId = `spawn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       args = toolCallIdOrArgs;
+      // argsOrSignal could be an AbortSignal in old signature
+      if (argsOrSignal instanceof AbortSignal) {
+        signal = argsOrSignal;
+      }
     }
 
     const task = args.task as string;
@@ -366,11 +374,48 @@ Example: QueryAgent({ sessionId: "${spawnResult.sessionId}", queryType: "status"
       // IN-PROCESS MODE: Blocking - wait for completion
       const tracker = this.config.getSubagentTracker();
 
+      // Check if already aborted before waiting
+      if (signal?.aborted) {
+        logger.info('Agent wait aborted before start (signal already aborted)', {
+          parentSessionId: this.config.sessionId,
+          agentSessionId: spawnResult.sessionId,
+        });
+
+        return {
+          content: `Agent execution was interrupted.
+**Session ID**: ${spawnResult.sessionId}
+**Task**: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}
+
+The subagent may still be running. Use QueryAgent to check status.`,
+          isError: false,
+          details: {
+            sessionId: spawnResult.sessionId,
+            success: false,
+            interrupted: true,
+          },
+        };
+      }
+
       try {
-        const completionResult = await tracker.waitFor(
-          spawnResult.sessionId as SessionId,
-          timeout
-        );
+        // Race the wait against the abort signal
+        let completionResult;
+        if (signal) {
+          // Create a promise that rejects when abort signal fires
+          const abortPromise = new Promise<never>((_, reject) => {
+            const abortHandler = () => reject(new Error('Aborted'));
+            signal.addEventListener('abort', abortHandler, { once: true });
+          });
+
+          completionResult = await Promise.race([
+            tracker.waitFor(spawnResult.sessionId as SessionId, timeout),
+            abortPromise,
+          ]);
+        } else {
+          completionResult = await tracker.waitFor(
+            spawnResult.sessionId as SessionId,
+            timeout
+          );
+        }
 
         // Build the full result
         const fullResult: SpawnSubagentResult = {
@@ -427,8 +472,31 @@ ${completionResult.output}`,
           };
         }
       } catch (waitError) {
-        // Timeout or other wait error
         const err = waitError as Error;
+
+        // Handle abort signal
+        if (err.message === 'Aborted') {
+          logger.info('Agent wait aborted by parent session', {
+            parentSessionId: this.config.sessionId,
+            agentSessionId: spawnResult.sessionId,
+          });
+
+          return {
+            content: `Agent execution was interrupted.
+**Session ID**: ${spawnResult.sessionId}
+**Task**: ${task.slice(0, 200)}${task.length > 200 ? '...' : ''}
+
+The subagent may still be running. Use QueryAgent to check status.`,
+            isError: false,
+            details: {
+              sessionId: spawnResult.sessionId,
+              success: false,
+              interrupted: true,
+            },
+          };
+        }
+
+        // Timeout or other wait error
         logger.error('Agent timed out or wait failed', {
           parentSessionId: this.config.sessionId,
           agentSessionId: spawnResult.sessionId,

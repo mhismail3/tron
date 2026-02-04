@@ -533,20 +533,25 @@ export class AgentRunner {
       }
     }
 
-    // 2. Persist tool results as user message (like normal flow)
+    // 2. Persist tool results as individual tool.result events (not message.user)
+    // This ensures proper event structure for message reconstruction
     if (toolResultContent.length > 0) {
-      const normalizedToolResults = normalizeContentBlocks(toolResultContent);
-
-      const toolResultEvent = await active.sessionContext.appendEvent('message.user', {
-        content: normalizedToolResults,
-      });
-
-      if (toolResultEvent) {
-        logger.info('Persisted tool results for interrupted session', {
-          sessionId: active.sessionId,
-          eventId: toolResultEvent.id,
-          resultCount: normalizedToolResults.length,
+      for (const tr of toolResultContent) {
+        const toolResultEvent = await active.sessionContext.appendEvent('tool.result', {
+          toolCallId: tr.tool_use_id,
+          content: tr.content,
+          isError: tr.is_error,
+          interrupted: true,
         });
+
+        if (toolResultEvent) {
+          logger.info('Persisted interrupted tool result', {
+            sessionId: active.sessionId,
+            eventId: toolResultEvent.id,
+            toolCallId: tr.tool_use_id,
+            isError: tr.is_error,
+          });
+        }
       }
     }
   }

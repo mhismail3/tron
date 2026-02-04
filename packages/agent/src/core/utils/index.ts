@@ -7,3 +7,4 @@
 export * from './errors.js';
 export * from './retry.js';
 export * from './content-normalizer.js';
+export * from './message-sanitizer.js';

@@ -548,19 +548,19 @@ describe('AgentRunner', () => {
     it('persists tool results from interrupted session', async () => {
       (active.sessionContext.buildInterruptedContent as Mock).mockReturnValue({
         assistantContent: [{ type: 'tool_use', id: 'tc_1', name: 'Read', input: {} }],
-        toolResultContent: [{ type: 'tool_result', tool_use_id: 'tc_1', content: 'file content' }],
+        toolResultContent: [{ type: 'tool_result', tool_use_id: 'tc_1', content: 'file content', is_error: false }],
       });
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      // Tool results persisted as user message
+      // Tool results persisted as individual tool.result events (not message.user)
       expect(active.sessionContext.appendEvent).toHaveBeenCalledWith(
-        'message.user',
+        'tool.result',
         expect.objectContaining({
-          content: expect.arrayContaining([
-            expect.objectContaining({ type: 'tool_result' }),
-          ]),
+          toolCallId: 'tc_1',
+          content: 'file content',
+          interrupted: true,
         })
       );
     });

@@ -41,6 +41,7 @@ import {
   isGemini3Model,
 } from './types.js';
 import { convertMessages, convertTools } from './message-converter.js';
+import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
 import {
   loadAuthMetadata,
   ensureValidTokens,
@@ -361,8 +362,12 @@ export class GoogleProvider {
   ): Record<string, unknown> {
     const model = this.config.model;
 
+    // Sanitize messages to guarantee API compliance (handles interrupted tool calls, etc.)
+    const sanitized = sanitizeMessages(context.messages);
+    const sanitizedContext = { ...context, messages: sanitized.messages };
+
     // Convert messages to Gemini format (delegated to message-converter.ts)
-    const contents = convertMessages(context);
+    const contents = convertMessages(sanitizedContext);
     const tools = context.tools ? convertTools(context.tools) : undefined;
 
     // Build generation config
