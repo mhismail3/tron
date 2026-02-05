@@ -40,12 +40,24 @@ extension ChatViewModel {
         let result = eventHandler.handleThinkingDelta(delta)
 
         // Create thinking message on first delta (so it appears BEFORE the text response)
+        // With adaptive thinking, text deltas may arrive before thinking deltas,
+        // so we insert before any existing streaming message to maintain visual order.
         if thinkingMessageId == nil {
             let thinkingMessage = ChatMessage.thinking(result.thinkingText, isStreaming: true)
-            messages.append(thinkingMessage)
+
+            if let streamingId = streamingManager.streamingMessageId,
+               let streamingIndex = MessageFinder.indexById(streamingId, in: messages) {
+                // Streaming message already exists (adaptive thinking sent text first)
+                // Insert thinking BEFORE it so thinking appears above text visually
+                messages.insert(thinkingMessage, at: streamingIndex)
+                messageWindowManager.insertMessage(thinkingMessage, before: streamingId)
+                logger.debug("Inserted thinking message before streaming: \(thinkingMessage.id)", category: .events)
+            } else {
+                messages.append(thinkingMessage)
+                messageWindowManager.appendMessage(thinkingMessage)
+                logger.debug("Created thinking message: \(thinkingMessage.id)", category: .events)
+            }
             thinkingMessageId = thinkingMessage.id
-            messageWindowManager.appendMessage(thinkingMessage)
-            logger.debug("Created thinking message: \(thinkingMessage.id)", category: .events)
         } else if let id = thinkingMessageId,
                   let index = MessageFinder.indexById(id, in: messages) {
             // Update existing thinking message with accumulated content

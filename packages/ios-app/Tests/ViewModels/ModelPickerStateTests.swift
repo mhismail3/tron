@@ -354,6 +354,43 @@ struct ModelPickerStateTests {
         #expect(state.optimisticModelName == nil)
     }
 
+    // MARK: - Opus 4.6 Recognition Tests
+
+    @Test("Opus 4.6 is recognized as latest generation")
+    func testOpus46IsLatestGeneration() {
+        let model = Self.makeModelInfo(id: "claude-opus-4-6")
+        #expect(model.isLatestGeneration == true)
+    }
+
+    @Test("Opus 4.5 is still recognized as latest generation (regression)")
+    func testOpus45StillLatestGeneration() {
+        let model = Self.makeModelInfo(id: "claude-opus-4-5-20251101")
+        #expect(model.isLatestGeneration == true)
+    }
+
+    @Test("Opus 4.6 supports reasoning")
+    func testOpus46SupportsReasoning() {
+        let model = ModelInfo(
+            id: "claude-opus-4-6",
+            name: "Opus 4.6",
+            provider: "anthropic",
+            contextWindow: 200_000,
+            maxOutputTokens: 128_000,
+            supportsThinking: true,
+            supportsImages: true,
+            tier: "opus",
+            isLegacy: false,
+            supportsReasoning: true,
+            reasoningLevels: ["low", "medium", "high", "max"],
+            defaultReasoningLevel: "high",
+            thinkingLevel: nil,
+            supportedThinkingLevels: nil
+        )
+        #expect(model.supportsReasoning == true)
+        #expect(model.reasoningLevels?.count == 4)
+        #expect(model.defaultReasoningLevel == "high")
+    }
+
     @Test("Switch model calls onError callback with error message")
     func testSwitchModel_callsOnErrorCallback() async {
         let mockClient = MockModelClient()

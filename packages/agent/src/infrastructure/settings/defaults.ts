@@ -116,9 +116,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
 
   // Model Configuration
   models: {
-    default: 'claude-opus-4-5-20251101',
-    defaultMaxTokens: 16384,  // Claude Opus 4.5 supports up to 64K; 16K is a safe default
-    defaultThinkingBudget: 2048,
+    default: 'claude-opus-4-6',
   },
 
   // Retry Configuration

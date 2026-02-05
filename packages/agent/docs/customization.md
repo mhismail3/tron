@@ -9,8 +9,7 @@ Only specify overrides. Unspecified values use defaults.
 ```json
 {
   "models": {
-    "default": "claude-sonnet-4-20250514",
-    "defaultMaxTokens": 4096
+    "default": "claude-sonnet-4-20250514"
   },
   "tools": {
     "bash": { "defaultTimeoutMs": 300000 }
@@ -22,8 +21,7 @@ Only specify overrides. Unspecified values use defaults.
 
 | Section | Key | Default | Description |
 |---------|-----|---------|-------------|
-| `models` | `default` | `claude-opus-4-5-20251101` | Default model |
-| `models` | `defaultMaxTokens` | `4096` | Max output tokens |
+| `models` | `default` | `claude-opus-4-6` | Default model |
 | `tools.bash` | `defaultTimeoutMs` | `120000` | Command timeout |
 | `tools.bash` | `maxOutputLength` | `30000` | Output truncation |
 | `tools.read` | `defaultLimitLines` | `2000` | Lines per read |

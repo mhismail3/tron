@@ -323,7 +323,9 @@ struct NewSessionFlow: View {
     }
 
     private var modelDescription: String {
-        if selectedModel.contains("opus") {
+        if selectedModel.contains("opus") && (selectedModel.contains("4-6") || selectedModel.contains("4.6")) {
+            return "Claude Opus 4.6 is the most capable model with adaptive thinking"
+        } else if selectedModel.contains("opus") {
             return "Claude Opus 4.5 is the most capable model"
         } else if selectedModel.contains("sonnet") {
             return "Claude Sonnet is fast and highly capable"
@@ -353,8 +355,8 @@ struct NewSessionFlow: View {
                 // otherwise use the first recommended model
                 if let defaultMatch = models.first(where: { $0.id == defaultModel }) {
                     selectedModel = defaultMatch.id
-                } else if let recommended = models.first(where: { $0.is45Model && $0.id.contains("opus") }) {
-                    // Fallback to Opus 4.5
+                } else if let recommended = models.first(where: { $0.isLatestGeneration && $0.id.contains("opus") }) {
+                    // Fallback to latest Opus
                     selectedModel = recommended.id
                 } else if let first = models.first {
                     selectedModel = first.id

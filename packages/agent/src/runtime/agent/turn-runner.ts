@@ -135,6 +135,7 @@ export class AgentTurnRunner implements ITurnRunner {
           enableThinking: this.config.enableThinking,
           thinkingBudget: this.config.geminiThinkingBudget ?? this.config.thinkingBudget,
           stopSequences: this.config.stopSequences,
+          effortLevel: reasoningLevel,
           reasoningEffort: reasoningLevel,
           // Gemini 3 thinking level (discrete levels: minimal/low/medium/high)
           thinkingLevel: this.config.thinkingLevel,

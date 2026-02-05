@@ -155,9 +155,12 @@ enum InterleavedContentProcessor {
         parsed: AssistantMessagePayload,
         isFirstMessage: Bool
     ) -> ChatMessage? {
-        guard let text = block["text"] as? String, !text.isEmpty else {
+        guard let rawText = block["text"] as? String, !rawText.isEmpty else {
             return nil
         }
+        // Strip leading newlines (Anthropic adaptive thinking artifact)
+        let text = String(rawText.drop(while: \.isNewline))
+        guard !text.isEmpty else { return nil }
 
         return ChatMessage(
             role: .assistant,

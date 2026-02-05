@@ -537,22 +537,26 @@ final class SystemTypesTests: XCTestCase {
 @MainActor
 final class ModelTypesExtendedTests: XCTestCase {
 
-    func testModelInfoIs45Model() throws {
-        // Claude 4.5
-        let claude45 = createModelInfo(id: "claude-opus-4-5-20251101")
-        XCTAssertTrue(claude45.is45Model)
+    func testModelInfoIsLatestGeneration() throws {
+        // Claude 4.6
+        let claude46 = createModelInfo(id: "claude-opus-4-6")
+        XCTAssertTrue(claude46.isLatestGeneration)
 
-        // Claude 4 (not 4.5)
+        // Claude 4.5 (still latest generation)
+        let claude45 = createModelInfo(id: "claude-opus-4-5-20251101")
+        XCTAssertTrue(claude45.isLatestGeneration)
+
+        // Claude 4 (not latest)
         let claude4 = createModelInfo(id: "claude-sonnet-4-20250514")
-        XCTAssertFalse(claude4.is45Model)
+        XCTAssertFalse(claude4.isLatestGeneration)
 
         // GPT-5.2 Codex
         let gpt52 = createModelInfo(id: "gpt-5.2-codex", provider: "openai-codex")
-        XCTAssertTrue(gpt52.is45Model)
+        XCTAssertTrue(gpt52.isLatestGeneration)
 
         // Gemini 3
         let gemini3 = createModelInfo(id: "gemini-3-pro-preview", provider: "google")
-        XCTAssertTrue(gemini3.is45Model)
+        XCTAssertTrue(gemini3.isLatestGeneration)
     }
 
     func testModelInfoProviderFlags() throws {

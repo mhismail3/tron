@@ -196,6 +196,18 @@ final class MessageWindowManager {
         pruneIfNeeded(preserveTop: false)
     }
 
+    /// Insert a message before an existing message (for reordering during streaming)
+    func insertMessage(_ message: ChatMessage, before existingId: UUID) {
+        if let index = allMessageIds.firstIndex(of: existingId) {
+            allMessageIds.insert(message.id, at: index)
+            loadedMessages[message.id] = message
+            windowEnd = allMessageIds.count
+        } else {
+            // Fallback: append if target not found
+            appendMessage(message)
+        }
+    }
+
     /// Update an existing message (e.g., tool result)
     func updateMessage(_ message: ChatMessage) {
         guard loadedMessages[message.id] != nil else { return }

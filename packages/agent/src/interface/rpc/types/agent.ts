@@ -42,8 +42,8 @@ export interface AgentPromptParams {
   images?: FileAttachment[];
   /** Optional file attachments (images and PDFs) */
   attachments?: FileAttachment[];
-  /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
-  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Reasoning effort level for models with reasoning/effort support (Codex, Opus 4.6) */
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Skills explicitly selected by user (via skill sheet or @mention in prompt) */
   skills?: PromptSkillReference[];
   /**

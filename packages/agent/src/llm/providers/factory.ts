@@ -88,6 +88,7 @@ export interface ProviderStreamOptions {
   // Anthropic-specific
   enableThinking?: boolean;
   thinkingBudget?: number;
+  effortLevel?: string;
   // OpenAI-specific
   reasoningEffort?: ReasoningEffort;
   // Google/Gemini-specific
@@ -279,6 +280,7 @@ function createAnthropicProvider(config: ProviderConfig): Provider {
         stopSequences: options?.stopSequences,
         enableThinking: options?.enableThinking,
         thinkingBudget: options?.thinkingBudget,
+        effortLevel: options?.effortLevel,
       };
       yield* provider.stream(context, opts);
     },
@@ -414,6 +416,9 @@ export interface ModelCapabilities {
   supportsTools: boolean;
   supportsThinking: boolean;
   supportsStreaming: boolean;
+  supportsEffort: boolean;
+  effortLevels?: string[];
+  defaultEffortLevel?: string;
   maxOutput: number;
   contextWindow: number;
 }
@@ -427,15 +432,20 @@ export function getModelCapabilities(provider: ProviderType, modelId: string): M
       supportsTools: true,
       supportsThinking: false,
       supportsStreaming: true,
+      supportsEffort: false,
       maxOutput: 4096,
       contextWindow: 128000,
     };
   }
 
+  const supportsEffort = typeof info.supportsEffort === 'boolean' ? info.supportsEffort : false;
   return {
     supportsTools: typeof info.supportsTools === 'boolean' ? info.supportsTools : true,
     supportsThinking: typeof info.supportsThinking === 'boolean' ? info.supportsThinking : false,
     supportsStreaming: true,
+    supportsEffort,
+    effortLevels: supportsEffort && Array.isArray(info.effortLevels) ? info.effortLevels as string[] : undefined,
+    defaultEffortLevel: supportsEffort && typeof info.defaultEffortLevel === 'string' ? info.defaultEffortLevel : undefined,
     maxOutput: typeof info.maxOutput === 'number' ? info.maxOutput : 4096,
     contextWindow: typeof info.contextWindow === 'number' ? info.contextWindow : 128000,
   };

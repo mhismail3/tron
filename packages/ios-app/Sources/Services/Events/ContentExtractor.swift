@@ -86,7 +86,9 @@ enum ContentExtractor {
                 texts.append(text)
             }
         }
-        return texts.joined()
+        let joined = texts.joined()
+        // Strip leading newlines (Anthropic adaptive thinking artifact)
+        return String(joined.drop(while: \.isNewline))
     }
 
     // MARK: - Tool Count Extraction

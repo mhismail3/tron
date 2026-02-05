@@ -51,7 +51,9 @@ enum ModelNameFormatter {
 
         // Detect version (order matters: check more specific versions first)
         let version: Version?
-        if lowered.contains("4-5") || lowered.contains("4.5") {
+        if lowered.contains("4-6") || lowered.contains("4.6") {
+            version = .v4_6
+        } else if lowered.contains("4-5") || lowered.contains("4.5") {
             version = .v4_5
         } else if lowered.contains("4-1") || lowered.contains("4.1") {
             version = .v4_1
@@ -208,7 +210,7 @@ enum ModelNameFormatter {
     }
 
     private enum Version {
-        case v3, v3_5, v4, v4_1, v4_5
+        case v3, v3_5, v4, v4_1, v4_5, v4_6
 
         var displaySuffix: String {
             switch self {
@@ -217,6 +219,7 @@ enum ModelNameFormatter {
             case .v4: return "4"
             case .v4_1: return "4.1"
             case .v4_5: return "4.5"
+            case .v4_6: return "4.6"
             }
         }
 
@@ -227,6 +230,7 @@ enum ModelNameFormatter {
             case .v4: return "-4"
             case .v4_1: return "-4.1"
             case .v4_5: return "-4.5"
+            case .v4_6: return "-4.6"
             }
         }
     }
@@ -285,6 +289,9 @@ extension String {
 
 /// Central mapping of model IDs to human-readable display names for known models
 private let modelDisplayNames: [String: String] = [
+    // Claude 4.6 family
+    "claude-opus-4-6": "Opus 4.6",
+
     // Claude 4.5 family
     "claude-opus-4-5-20251101": "Opus 4.5",
     "claude-sonnet-4-5-20250929": "Sonnet 4.5",

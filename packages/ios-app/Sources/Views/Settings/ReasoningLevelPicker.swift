@@ -20,7 +20,8 @@ struct ReasoningLevelPicker: View {
         case "low": return "Low"
         case "medium": return "Medium"
         case "high": return "High"
-        case "xhigh": return "Max"
+        case "xhigh": return "Extra High"
+        case "max": return "Max"
         default: return level.capitalized
         }
     }
@@ -31,7 +32,8 @@ struct ReasoningLevelPicker: View {
         case "low": return "Fastest responses, minimal reasoning"
         case "medium": return "Balanced speed and depth"
         case "high": return "Deep reasoning for complex tasks"
-        case "xhigh": return "Maximum reasoning power"
+        case "xhigh": return "Extra high reasoning power"
+        case "max": return "Maximum reasoning power"
         default: return ""
         }
     }
@@ -43,6 +45,7 @@ struct ReasoningLevelPicker: View {
         case "medium": return "brain"
         case "high": return "brain.head.profile"
         case "xhigh": return "sparkles"
+        case "max": return "flame"
         default: return "brain"
         }
     }

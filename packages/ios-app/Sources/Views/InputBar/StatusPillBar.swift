@@ -38,7 +38,8 @@ struct StatusPillsColumn: View {
         case "low": return "Low"
         case "medium": return "Medium"
         case "high": return "High"
-        case "xhigh": return "Max"
+        case "xhigh": return "Extra High"
+        case "max": return "Max"
         default: return level.capitalized
         }
     }
@@ -49,12 +50,18 @@ struct StatusPillsColumn: View {
         case "medium": return "brain"
         case "high": return "brain.head.profile"
         case "xhigh": return "sparkles"
+        case "max": return "flame"
         default: return "brain"
         }
     }
 
+    /// Available reasoning levels from the current model, or default set
+    private var availableReasoningLevels: [String] {
+        currentModelInfo?.reasoningLevels ?? ["low", "medium", "high", "xhigh"]
+    }
+
     private func reasoningLevelColor(_ level: String) -> Color {
-        let levels = ["low", "medium", "high", "xhigh"]
+        let levels = availableReasoningLevels
         let index = levels.firstIndex(of: level.lowercased()) ?? 0
         let progress = Double(index) / Double(max(levels.count - 1, 1))
         // Interpolate from #1F5E3F to #00A69B
@@ -108,7 +115,7 @@ struct StatusPillsColumn: View {
 
     /// Anthropic 4.5 models (latest)
     private var latestAnthropicModels: [ModelInfo] {
-        cachedModels.filter { $0.isAnthropic && $0.is45Model }
+        cachedModels.filter { $0.isAnthropic && $0.isLatestGeneration }
             .uniqueByFormattedName()
             .sortedByTier()
     }
@@ -126,7 +133,7 @@ struct StatusPillsColumn: View {
 
     /// Legacy models: legacy Anthropic (non-4.5) + Codex 5.1 + Gemini 2.5
     private var legacyModels: [ModelInfo] {
-        let legacyAnthropic = cachedModels.filter { $0.isAnthropic && !$0.is45Model }
+        let legacyAnthropic = cachedModels.filter { $0.isAnthropic && !$0.isLatestGeneration }
             .uniqueByFormattedName()
             .sortedByTier()
         let legacyCodex = cachedModels.filter { $0.isCodex && !$0.id.lowercased().contains("5.2") }
@@ -268,17 +275,12 @@ struct StatusPillsColumn: View {
         .overlay {
             // Invisible Menu overlay handles interaction only
             Menu {
-                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "low") } label: {
-                    Label("Low", systemImage: "hare")
-                }
-                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "medium") } label: {
-                    Label("Medium", systemImage: "brain")
-                }
-                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "high") } label: {
-                    Label("High", systemImage: "brain.head.profile")
-                }
-                Button { NotificationCenter.default.post(name: .reasoningLevelAction, object: "xhigh") } label: {
-                    Label("Max", systemImage: "sparkles")
+                ForEach(availableReasoningLevels, id: \.self) { level in
+                    Button {
+                        NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
+                    } label: {
+                        Label(reasoningLevelLabel(level), systemImage: reasoningLevelIcon(level))
+                    }
                 }
             } label: {
                 Color.clear

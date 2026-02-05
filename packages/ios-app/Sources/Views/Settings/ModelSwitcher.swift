@@ -43,12 +43,12 @@ struct ModelPickerMenu: View {
 
     // PERFORMANCE: Cache filtered/sorted models to avoid recalculating on every render
     private var latestAnthropicModels: [ModelInfo] {
-        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && $0.is45Model }
+        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && $0.isLatestGeneration }
             .uniqueByFormattedName().sortedByTier()
     }
 
     private var legacyAnthropicModels: [ModelInfo] {
-        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && !$0.is45Model }
+        models.filter { ($0.provider.lowercased() == "anthropic" || $0.id.lowercased().contains("claude")) && !$0.isLatestGeneration }
             .uniqueByFormattedName().sortedByTier()
     }
 
@@ -343,7 +343,7 @@ struct ModelRow: View {
                             .clipShape(Capsule())
                     }
 
-                    if model.is45Model {
+                    if model.isLatestGeneration {
                         Text("Latest")
                             .font(TronTypography.caption2)
                             .foregroundStyle(.tronEmerald)

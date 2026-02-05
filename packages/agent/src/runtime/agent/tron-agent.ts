@@ -73,8 +73,8 @@ export class TronAgent {
   private abortController: AbortController | null;
   readonly workingDirectory: string;
 
-  /** Current reasoning level for OpenAI Codex models */
-  private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | undefined;
+  /** Current reasoning level for models with reasoning/effort support (Codex, Opus 4.6) */
+  private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined;
   /** Skill context to inject into system prompt for current run */
   private currentSkillContext: string | undefined;
   /** Subagent results context to inject for current run */
@@ -205,17 +205,17 @@ export class TronAgent {
   }
 
   /**
-   * Set reasoning level for OpenAI Codex models.
+   * Set reasoning level for models with reasoning/effort support (Codex, Opus 4.6).
    * Call this before run() to set the reasoning effort.
    */
-  setReasoningLevel(level: 'low' | 'medium' | 'high' | 'xhigh' | undefined): void {
+  setReasoningLevel(level: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined): void {
     this.currentReasoningLevel = level;
   }
 
   /**
    * Get current reasoning level
    */
-  getReasoningLevel(): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
+  getReasoningLevel(): 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined {
     return this.currentReasoningLevel;
   }
 

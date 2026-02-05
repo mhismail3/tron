@@ -185,6 +185,52 @@ describe('Model Handlers', () => {
   });
 
   // ===========================================================================
+  // Opus 4.6 Model List Tests
+  // ===========================================================================
+
+  describe('Opus 4.6 in Model List', () => {
+    it('includes claude-opus-4-6 with supportsReasoning=true', async () => {
+      const request: RpcRequest = { id: '1', method: 'model.list' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as { models: any[] };
+      const opus46 = result.models.find(m => m.id === 'claude-opus-4-6');
+      expect(opus46).toBeDefined();
+      expect(opus46?.supportsReasoning).toBe(true);
+    });
+
+    it('includes reasoningLevels [low, medium, high, max] for opus 4.6', async () => {
+      const request: RpcRequest = { id: '1', method: 'model.list' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as { models: any[] };
+      const opus46 = result.models.find(m => m.id === 'claude-opus-4-6');
+      expect(opus46?.reasoningLevels).toEqual(['low', 'medium', 'high', 'max']);
+      expect(opus46?.defaultReasoningLevel).toBe('high');
+    });
+
+    // REGRESSION
+    it('does NOT include supportsReasoning for opus 4.5 (regression)', async () => {
+      const request: RpcRequest = { id: '1', method: 'model.list' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as { models: any[] };
+      const opus45 = result.models.find(m => m.id === 'claude-opus-4-5-20251101');
+      expect(opus45).toBeDefined();
+      expect(opus45?.supportsReasoning).toBeFalsy();
+      expect(opus45?.reasoningLevels).toBeUndefined();
+    });
+
+    it('model.switch accepts claude-opus-4-6', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'model.switch',
+        params: { sessionId: 'sess-123', model: 'claude-opus-4-6' },
+      };
+      const response = await registry.dispatch(request, mockContext);
+      expect(response.success).toBe(true);
+      expect(mockSwitchModel).toHaveBeenCalledWith('sess-123', 'claude-opus-4-6');
+    });
+  });
+
+  // ===========================================================================
   // Gemini Model Validation Tests
   // ===========================================================================
 

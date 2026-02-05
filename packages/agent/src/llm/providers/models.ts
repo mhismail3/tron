@@ -40,6 +40,12 @@ export interface ModelInfo {
   recommended?: boolean;
   /** Whether this is a legacy/deprecated model */
   legacy?: boolean;
+  /** Whether this model supports reasoning/effort levels (like Opus 4.6) */
+  supportsReasoning?: boolean;
+  /** Available reasoning effort levels */
+  reasoningLevels?: string[];
+  /** Default reasoning effort level */
+  defaultReasoningLevel?: string;
 }
 
 /**
@@ -66,9 +72,9 @@ export interface OpenAICodexModelInfo {
   /** Supports reasoning parameter */
   supportsReasoning: boolean;
   /** Available reasoning effort levels */
-  reasoningLevels?: ('low' | 'medium' | 'high' | 'xhigh')[];
+  reasoningLevels?: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[];
   /** Default reasoning effort level */
-  defaultReasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  defaultReasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Input cost per million tokens */
   inputCostPerMillion: number;
   /** Output cost per million tokens */
@@ -97,7 +103,26 @@ export interface ModelCategory {
  * Both should be kept in sync when adding new models.
  */
 export const ANTHROPIC_MODELS: ModelInfo[] = [
-  // Claude 4.5 (Latest - Current Generation)
+  // Claude 4.6 (Latest)
+  {
+    id: 'claude-opus-4-6',
+    name: 'Claude Opus 4.6',
+    shortName: 'Opus 4.6',
+    family: 'Claude 4.6',
+    tier: 'opus',
+    contextWindow: 200000,
+    maxOutput: 128000,
+    supportsThinking: true,
+    releaseDate: '2026-02-01',
+    inputCostPerMillion: 5,
+    outputCostPerMillion: 25,
+    description: 'Most capable model with adaptive thinking, effort control, and 128K output.',
+    recommended: true,
+    supportsReasoning: true,
+    reasoningLevels: ['low', 'medium', 'high', 'max'],
+    defaultReasoningLevel: 'high',
+  },
+  // Claude 4.5 (Current Generation)
   {
     id: 'claude-opus-4-5-20251101',
     name: 'Claude Opus 4.5',
@@ -111,7 +136,7 @@ export const ANTHROPIC_MODELS: ModelInfo[] = [
     inputCostPerMillion: 5,
     outputCostPerMillion: 25,
     description: 'Premium model combining maximum intelligence with practical performance.',
-    recommended: true,
+    recommended: false,
   },
   {
     id: 'claude-sonnet-4-5-20250929',
@@ -243,7 +268,7 @@ export const ANTHROPIC_MODEL_CATEGORIES: ModelCategory[] = [
   {
     name: 'Latest',
     description: 'Most capable and up-to-date models',
-    models: ANTHROPIC_MODELS.filter(m => m.family === 'Claude 4.5'),
+    models: ANTHROPIC_MODELS.filter(m => m.family === 'Claude 4.5' || m.family === 'Claude 4.6'),
   },
   {
     name: 'Legacy',

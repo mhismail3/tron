@@ -8,7 +8,8 @@ final class ModelFilteringServiceTests: XCTestCase {
     /// Create test models for testing
     private func makeModels() -> [ModelInfo] {
         [
-            // Anthropic 4.5 models
+            // Anthropic latest models
+            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
             makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
             makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
             makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic"),
@@ -60,11 +61,11 @@ final class ModelFilteringServiceTests: XCTestCase {
         // Should have Anthropic (Latest), OpenAI Codex (Latest), Gemini 3, Legacy sections
         let anthropicLatest = groups.first { $0.tier == "Anthropic (Latest)" }
         XCTAssertNotNil(anthropicLatest)
-        XCTAssertEqual(anthropicLatest?.models.count, 3) // Opus, Sonnet, Haiku 4.5
+        XCTAssertEqual(anthropicLatest?.models.count, 4) // Opus 4.6, Opus 4.5, Sonnet 4.5, Haiku 4.5
 
-        // All should be 4.5 models
+        // All should be latest generation models
         anthropicLatest?.models.forEach { model in
-            XCTAssertTrue(model.is45Model, "Expected \(model.id) to be 4.5 model")
+            XCTAssertTrue(model.isLatestGeneration, "Expected \(model.id) to be latest generation")
         }
     }
 
@@ -127,10 +128,10 @@ final class ModelFilteringServiceTests: XCTestCase {
         let latest = ModelFilteringService.filterLatest(models)
 
         // Should include: Anthropic 4.5, Codex 5.2, Gemini 3
-        XCTAssertEqual(latest.count, 7) // 3 + 1 + 3
+        XCTAssertEqual(latest.count, 8) // 4 + 1 + 3
 
         latest.forEach { model in
-            let isLatest = model.is45Model ||
+            let isLatest = model.isLatestGeneration ||
                           (model.isCodex && model.id.contains("5.2")) ||
                           model.isGemini3
             XCTAssertTrue(isLatest, "Expected \(model.id) to be latest")
@@ -143,7 +144,7 @@ final class ModelFilteringServiceTests: XCTestCase {
 
         // Should exclude: Anthropic 4.5, Codex 5.2, Gemini 3
         legacy.forEach { model in
-            XCTAssertFalse(model.is45Model && model.isAnthropic)
+            XCTAssertFalse(model.isLatestGeneration && model.isAnthropic)
             XCTAssertFalse(model.isCodex && model.id.contains("5.2"))
             XCTAssertFalse(model.isGemini3)
         }
@@ -206,6 +207,32 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertEqual(sorted[0].id, "claude-sonnet-4-5-20250501")
         XCTAssertEqual(sorted[1].id, "claude-sonnet-4-20250514")
         XCTAssertEqual(sorted[2].id, "claude-sonnet-3-5-20241022")
+    }
+
+    func test_sortByTier_opus46BeforeOpus45() {
+        let models = [
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
+        ]
+
+        let sorted = ModelFilteringService.sortByTier(models)
+
+        XCTAssertEqual(sorted[0].id, "claude-opus-4-6")
+        XCTAssertEqual(sorted[1].id, "claude-opus-4-5-20250501")
+    }
+
+    func test_categorizeModels_opus46InLatestSection() {
+        let models = [
+            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
+            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic"),
+        ]
+
+        let groups = ModelFilteringService.categorize(models)
+
+        let latest = groups.first { $0.tier == "Anthropic (Latest)" }
+        XCTAssertNotNil(latest)
+        XCTAssertTrue(latest!.models.contains { $0.id == "claude-opus-4-6" })
     }
 
     // MARK: - Deduplicate Tests

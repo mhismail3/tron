@@ -102,11 +102,12 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         return parts.joined(separator: " ")
     }
 
-    /// Whether this is a latest generation model (Claude 4.5+, GPT-5.x Codex, or Gemini 3)
-    var is45Model: Bool {
+    /// Whether this is a latest generation model (Claude 4.5+/4.6+, GPT-5.x Codex, or Gemini 3)
+    var isLatestGeneration: Bool {
         let lowerId = id.lowercased()
-        // Claude 4.5 family
-        if lowerId.contains("4-5") || lowerId.contains("4.5") {
+        // Claude 4.5 and 4.6 families
+        if lowerId.hasPrefix("claude") && (lowerId.contains("4-5") || lowerId.contains("4.5") ||
+           lowerId.contains("4-6") || lowerId.contains("4.6")) {
             return true
         }
         // GPT-5.x Codex models are also "latest"

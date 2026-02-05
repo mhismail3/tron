@@ -33,8 +33,6 @@ vi.mock('../../settings/index.js', () => ({
     },
     models: {
       default: 'claude-sonnet-4-20250514',
-      defaultMaxTokens: 4096,
-      defaultThinkingBudget: 10000,
     },
     retry: {
       maxRetries: 3,

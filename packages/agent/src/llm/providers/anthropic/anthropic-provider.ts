@@ -23,6 +23,7 @@ import { calculateBackoffDelay, extractRetryAfterFromError, sleepWithAbort, type
 import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { AnthropicConfig, StreamOptions, SystemPromptBlock, AnthropicProviderSettings } from './types.js';
+import { CLAUDE_MODELS } from './types.js';
 import { convertMessages, convertTools, convertResponse } from './message-converter.js';
 
 const logger = createLogger('anthropic');
@@ -120,10 +121,14 @@ export class AnthropicProvider {
   }
 
   private getOAuthHeaders(): Record<string, string> {
+    const modelInfo = CLAUDE_MODELS[this.config.model];
+    const betaHeaders = (!modelInfo || modelInfo.requiresThinkingBetaHeaders)
+      ? this.providerSettings.api.oauthBetaHeaders
+      : 'oauth-2025-04-20';
     return {
       'accept': 'application/json',
       'anthropic-dangerous-direct-browser-access': 'true',
-      'anthropic-beta': this.providerSettings.api.oauthBetaHeaders,
+      'anthropic-beta': betaHeaders,
     };
   }
 
@@ -159,7 +164,8 @@ export class AnthropicProvider {
     await this.ensureValidTokens();
 
     const model = this.config.model;
-    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? this.providerSettings.models.defaultMaxTokens;
+    const modelInfo = CLAUDE_MODELS[model];
+    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? modelInfo?.maxOutput ?? 16384;
 
     logger.debug('Starting stream', {
       model,
@@ -189,10 +195,19 @@ export class AnthropicProvider {
 
     // Add thinking if enabled
     if (options.enableThinking) {
-      (params as unknown as { thinking: { type: string; budget_tokens: number } }).thinking = {
-        type: 'enabled',
-        budget_tokens: options.thinkingBudget ?? this.providerSettings.models.defaultThinkingBudget,
-      };
+      if (modelInfo?.supportsAdaptiveThinking) {
+        (params as any).thinking = { type: 'adaptive' };
+      } else {
+        (params as any).thinking = {
+          type: 'enabled',
+          budget_tokens: options.thinkingBudget ?? Math.floor((modelInfo?.maxOutput ?? 16384) / 4),
+        };
+      }
+
+      // Add effort parameter for models that support it
+      if (modelInfo?.supportsEffort && options.effortLevel) {
+        (params as any).output_config = { effort: options.effortLevel };
+      }
     }
 
     if (options.stopSequences?.length) {

@@ -96,7 +96,7 @@ export interface ActiveSession {
    * Current reasoning level for extended thinking models.
    * Tracked in-memory to detect changes and persist events.
    */
-  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /**
    * Tracks skills explicitly added to this session's context.
    * Reconstructed from events on session resume/fork.
@@ -174,8 +174,8 @@ export interface AgentRunOptions {
   sessionId: string;
   prompt: string;
   onEvent?: (event: AgentEvent) => void;
-  /** Reasoning effort level for OpenAI Codex models (low/medium/high/xhigh) */
-  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
+  /** Reasoning effort level for models with reasoning/effort support (Codex, Opus 4.6) */
+  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Optional image attachments (base64) - legacy, use attachments instead */
   images?: FileAttachment[];
   /** Optional file attachments (images and PDFs) */

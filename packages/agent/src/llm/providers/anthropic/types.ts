@@ -75,6 +75,7 @@ export interface StreamOptions {
   enableThinking?: boolean;
   thinkingBudget?: number;
   stopSequences?: string[];
+  effortLevel?: string;
 }
 
 // =============================================================================
@@ -93,17 +94,39 @@ export interface ClaudeModelInfo {
   contextWindow: number;
   maxOutput: number;
   supportsThinking: boolean;
+  supportsAdaptiveThinking: boolean;
+  supportsEffort: boolean;
+  effortLevels?: string[];
+  defaultEffortLevel?: string;
+  requiresThinkingBetaHeaders: boolean;
   inputCostPer1k: number;
   outputCostPer1k: number;
 }
 
 export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
-  // Claude 4.5 models (latest - Current Generation)
+  // Claude 4.6 models (Latest)
+  'claude-opus-4-6': {
+    name: 'Claude Opus 4.6',
+    contextWindow: 200000,
+    maxOutput: 128000,
+    supportsThinking: true,
+    supportsAdaptiveThinking: true,
+    supportsEffort: true,
+    effortLevels: ['low', 'medium', 'high', 'max'],
+    defaultEffortLevel: 'high',
+    requiresThinkingBetaHeaders: false,
+    inputCostPer1k: 0.005,
+    outputCostPer1k: 0.025,
+  },
+  // Claude 4.5 models (Current Generation)
   'claude-opus-4-5-20251101': {
     name: 'Claude Opus 4.5',
     contextWindow: 200000,
     maxOutput: 64000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.005,
     outputCostPer1k: 0.025,
   },
@@ -112,6 +135,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 64000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.003,
     outputCostPer1k: 0.015,
   },
@@ -120,6 +146,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 64000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.001,
     outputCostPer1k: 0.005,
   },
@@ -129,6 +158,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 32000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.015,
     outputCostPer1k: 0.075,
   },
@@ -138,6 +170,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 32000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.015,
     outputCostPer1k: 0.075,
   },
@@ -146,6 +181,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 64000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.003,
     outputCostPer1k: 0.015,
   },
@@ -155,6 +193,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 64000,
     supportsThinking: true,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.003,
     outputCostPer1k: 0.015,
   },
@@ -164,6 +205,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     contextWindow: 200000,
     maxOutput: 4000,
     supportsThinking: false,
+    supportsAdaptiveThinking: false,
+    supportsEffort: false,
+    requiresThinkingBetaHeaders: true,
     inputCostPer1k: 0.00025,
     outputCostPer1k: 0.00125,
   },
@@ -172,7 +216,7 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
 export type ClaudeModelId = keyof typeof CLAUDE_MODELS;
 
 /** Default model for new sessions */
-export const DEFAULT_MODEL = 'claude-opus-4-5-20251101' as ClaudeModelId;
+export const DEFAULT_MODEL = 'claude-opus-4-6' as ClaudeModelId;
 
 // =============================================================================
 // OAuth Constants

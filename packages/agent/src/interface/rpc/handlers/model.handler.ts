@@ -52,6 +52,9 @@ export function createModelHandlers(): MethodRegistration[] {
         contextWindow: m.contextWindow,
         supportsThinking: m.supportsThinking,
         supportsImages: true, // All Claude models support images
+        supportsReasoning: m.supportsReasoning ?? false,
+        reasoningLevels: m.reasoningLevels,
+        defaultReasoningLevel: m.defaultReasoningLevel,
         tier: m.tier,
         isLegacy: m.legacy ?? false,
       })),

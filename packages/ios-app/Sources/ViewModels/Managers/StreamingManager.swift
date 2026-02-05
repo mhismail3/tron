@@ -138,7 +138,16 @@ final class StreamingManager {
             return false
         }
 
-        // Create streaming message if needed
+        // Strip leading newlines at start of stream (Anthropic adaptive thinking artifact)
+        let effectiveDelta: String
+        if streamingText.isEmpty {
+            effectiveDelta = String(delta.drop(while: \.isNewline))
+            guard !effectiveDelta.isEmpty else { return true }
+        } else {
+            effectiveDelta = delta
+        }
+
+        // Create streaming message if needed (AFTER newline strip to avoid empty placeholders)
         if streamingMessageId == nil {
             if let createMessage = onCreateStreamingMessage {
                 streamingMessageId = createMessage()
@@ -146,8 +155,8 @@ final class StreamingManager {
         }
 
         // Accumulate delta (efficient - no timer churn)
-        pendingTextDelta += delta
-        streamingText += delta
+        pendingTextDelta += effectiveDelta
+        streamingText += effectiveDelta
 
         // Ensure display link is running
         if displayLinkWrapper?.isPaused == true {

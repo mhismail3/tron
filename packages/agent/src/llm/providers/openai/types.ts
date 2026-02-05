@@ -16,7 +16,7 @@ import type { StreamRetryConfig } from '../base/index.js';
 /**
  * Reasoning effort levels for OpenAI models
  */
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 /**
  * OAuth authentication for OpenAI

@@ -337,6 +337,7 @@ final class RecentSessionsTests: XCTestCase {
     /// Test model shortModelName extension
     func testModelShortName() {
         // Claude models
+        XCTAssertEqual("claude-opus-4-6".shortModelName, "Opus 4.6")
         XCTAssertEqual("claude-opus-4-5-20251101".shortModelName, "Opus 4.5")
         XCTAssertEqual("claude-sonnet-4-5-20251101".shortModelName, "Sonnet 4.5")
         XCTAssertEqual("claude-sonnet-4-20250514".shortModelName, "Sonnet 4")

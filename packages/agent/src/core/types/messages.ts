@@ -190,7 +190,7 @@ export interface Cost {
 /**
  * Reasons why the model stopped generating
  */
-export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
+export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'refusal' | 'model_context_window_exceeded';
 
 // =============================================================================
 // Message Types

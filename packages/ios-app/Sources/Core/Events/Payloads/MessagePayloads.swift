@@ -177,7 +177,10 @@ struct AssistantMessagePayload {
             guard block["type"] as? String == "text" else { return nil }
             return block["text"] as? String
         }
-        return texts.isEmpty ? nil : texts.joined(separator: "\n")
+        guard !texts.isEmpty else { return nil }
+        let joined = texts.joined(separator: "\n")
+        let trimmed = joined.drop(while: \.isNewline)
+        return trimmed.isEmpty ? nil : String(trimmed)
     }
 
     /// Extracts thinking content if present

@@ -99,10 +99,6 @@ export interface ApiSettings {
 export interface ModelSettings {
   /** Default model ID */
   default: string;
-  /** Default max output tokens */
-  defaultMaxTokens: number;
-  /** Default thinking budget tokens */
-  defaultThinkingBudget: number;
 }
 
 // =============================================================================

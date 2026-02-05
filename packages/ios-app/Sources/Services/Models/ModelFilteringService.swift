@@ -13,8 +13,8 @@ enum ModelFilteringService {
 
         var groups: [ModelGroup] = []
 
-        // Anthropic 4.5 models (latest)
-        let latestAnthropic = models.filter { $0.isAnthropic && $0.is45Model }
+        // Anthropic latest (4.5+/4.6+)
+        let latestAnthropic = models.filter { $0.isAnthropic && $0.isLatestGeneration }
             |> uniqueByFormattedName
             |> sortByTier
         if !latestAnthropic.isEmpty {
@@ -38,7 +38,7 @@ enum ModelFilteringService {
         var legacyModels: [ModelInfo] = []
 
         // Legacy Anthropic (non-4.5)
-        let legacyAnthropic = models.filter { $0.isAnthropic && !$0.is45Model }
+        let legacyAnthropic = models.filter { $0.isAnthropic && !$0.isLatestGeneration }
             |> uniqueByFormattedName
             |> sortByTier
         legacyModels.append(contentsOf: legacyAnthropic)
@@ -71,7 +71,7 @@ enum ModelFilteringService {
     /// Filter to latest versions only (4.5, 5.2, Gemini 3)
     static func filterLatest(_ models: [ModelInfo]) -> [ModelInfo] {
         models.filter { model in
-            (model.isAnthropic && model.is45Model) ||
+            (model.isAnthropic && model.isLatestGeneration) ||
             (model.isCodex && model.id.lowercased().contains("5.2")) ||
             model.isGemini3
         }
@@ -80,7 +80,7 @@ enum ModelFilteringService {
     /// Filter to legacy versions only
     static func filterLegacy(_ models: [ModelInfo]) -> [ModelInfo] {
         models.filter { model in
-            if model.isAnthropic { return !model.is45Model }
+            if model.isAnthropic { return !model.isLatestGeneration }
             if model.isCodex { return !model.id.lowercased().contains("5.2") }
             if model.isGemini { return !model.isGemini3 }
             return true
@@ -166,6 +166,7 @@ enum ModelFilteringService {
 
     private static func anthropicVersionPriority(_ model: ModelInfo) -> Int {
         let id = model.id.lowercased()
+        if id.contains("4-6") || id.contains("4.6") { return 46 }
         if id.contains("4-5") || id.contains("4.5") { return 45 }
         if id.contains("4-1") || id.contains("4.1") { return 41 }
         if id.contains("-4-") || id.contains("opus-4") || id.contains("sonnet-4") || id.contains("haiku-4") { return 40 }
