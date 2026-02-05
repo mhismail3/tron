@@ -92,10 +92,15 @@ export class AnthropicProvider {
 
     // Initialize Anthropic client
     if (config.auth.type === 'api_key') {
+      const modelInfo = CLAUDE_MODELS[config.model];
+      const betaHeader = modelInfo?.betaFeatures?.length
+        ? modelInfo.betaFeatures.join(',')
+        : undefined;
       this.client = new Anthropic({
         apiKey: config.auth.apiKey,
         baseURL: config.baseURL,
         maxRetries: sdkMaxRetries,
+        ...(betaHeader && { defaultHeaders: { 'anthropic-beta': betaHeader } }),
       });
     } else {
       this.tokens = {
@@ -120,15 +125,32 @@ export class AnthropicProvider {
     });
   }
 
-  private getOAuthHeaders(): Record<string, string> {
+  private getBetaHeaderValue(): string {
     const modelInfo = CLAUDE_MODELS[this.config.model];
-    const betaHeaders = (!modelInfo || modelInfo.requiresThinkingBetaHeaders)
-      ? this.providerSettings.api.oauthBetaHeaders
-      : 'oauth-2025-04-20';
+    const parts: string[] = [];
+
+    if (this.isOAuth) {
+      if (!modelInfo || modelInfo.requiresThinkingBetaHeaders) {
+        parts.push(...this.providerSettings.api.oauthBetaHeaders.split(','));
+      } else {
+        parts.push('oauth-2025-04-20');
+      }
+    }
+
+    if (modelInfo?.betaFeatures) {
+      for (const feature of modelInfo.betaFeatures) {
+        if (!parts.includes(feature)) parts.push(feature);
+      }
+    }
+
+    return parts.join(',');
+  }
+
+  private getOAuthHeaders(): Record<string, string> {
     return {
       'accept': 'application/json',
       'anthropic-dangerous-direct-browser-access': 'true',
-      'anthropic-beta': betaHeaders,
+      'anthropic-beta': this.getBetaHeaderValue(),
     };
   }
 

@@ -27,9 +27,22 @@ interface PricingTier {
   outputPerMillion: number;
   cacheWriteMultiplier: number;  // 1.25x for 5-min, 2x for 1-hour
   cacheReadMultiplier: number;   // 0.1x (90% discount)
+  longContextThreshold?: number;
+  longContextInputMultiplier?: number;
+  longContextOutputMultiplier?: number;
 }
 
 const CLAUDE_PRICING: Record<string, PricingTier> = {
+  // Claude 4.6 models (Latest)
+  'claude-opus-4-6': {
+    inputPerMillion: 5,
+    outputPerMillion: 25,
+    cacheWriteMultiplier: 1.25,
+    cacheReadMultiplier: 0.1,
+    longContextThreshold: 200_000,
+    longContextInputMultiplier: 2.0,
+    longContextOutputMultiplier: 1.5,
+  },
   // Claude 4.5 models (Current Generation)
   // Source: https://platform.claude.com/docs/en/about-claude/models/overview
   'claude-opus-4-5-20251101': {
@@ -188,6 +201,9 @@ export function getPricingTier(model: string): PricingTier {
   // Pattern matching for model families
   const modelLower = model.toLowerCase();
 
+  if (modelLower.includes('opus-4-6') || modelLower.includes('opus-4.6')) {
+    return CLAUDE_PRICING['claude-opus-4-6']!;
+  }
   if (modelLower.includes('opus-4-5') || modelLower.includes('opus-4.5')) {
     return CLAUDE_PRICING['claude-opus-4-5-20251101']!;
   }
@@ -240,24 +256,32 @@ export function calculateCost(
   const cacheCreationTokens = usage.cacheCreationTokens ?? 0;
   const cacheReadTokens = usage.cacheReadTokens ?? 0;
 
+  // Determine effective rates (long context: ALL tokens charged at premium when over threshold)
+  let effectiveInputRate = pricing.inputPerMillion;
+  let effectiveOutputRate = pricing.outputPerMillion;
+  if (pricing.longContextThreshold && inputTokens > pricing.longContextThreshold) {
+    effectiveInputRate *= (pricing.longContextInputMultiplier ?? 1);
+    effectiveOutputRate *= (pricing.longContextOutputMultiplier ?? 1);
+  }
+
   // Calculate input cost components
   // Base input tokens (excluding cache tokens which are billed separately)
   // Use max(0) to handle edge cases where cache tokens might exceed reported input
   const baseInputTokens = Math.max(0, inputTokens - cacheReadTokens - cacheCreationTokens);
-  const baseInputCost = (baseInputTokens / 1_000_000) * pricing.inputPerMillion;
+  const baseInputCost = (baseInputTokens / 1_000_000) * effectiveInputRate;
 
   // Cache creation cost (higher rate)
   const cacheCreationCost = (cacheCreationTokens / 1_000_000) *
-    pricing.inputPerMillion * pricing.cacheWriteMultiplier;
+    effectiveInputRate * pricing.cacheWriteMultiplier;
 
   // Cache read cost (discounted rate)
   const cacheReadCost = (cacheReadTokens / 1_000_000) *
-    pricing.inputPerMillion * pricing.cacheReadMultiplier;
+    effectiveInputRate * pricing.cacheReadMultiplier;
 
   const totalInputCost = baseInputCost + cacheCreationCost + cacheReadCost;
 
   // Calculate output cost
-  const outputCost = (outputTokens / 1_000_000) * pricing.outputPerMillion;
+  const outputCost = (outputTokens / 1_000_000) * effectiveOutputRate;
 
   return {
     inputCost: totalInputCost,
@@ -363,6 +387,8 @@ export function getUsageDelta(
 // =============================================================================
 
 export const CONTEXT_LIMITS: Record<string, number> = {
+  // Claude 4.6 models
+  'claude-opus-4-6': 1_000_000,
   // Claude 4.5 models
   'claude-opus-4-5-20251101': 200_000,
   'claude-sonnet-4-5-20250929': 200_000,

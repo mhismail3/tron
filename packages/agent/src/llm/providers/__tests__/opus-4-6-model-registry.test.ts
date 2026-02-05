@@ -19,7 +19,7 @@ describe('Opus 4.6 Model Registry', () => {
     const model = CLAUDE_MODELS['claude-opus-4-6'];
     expect(model).toBeDefined();
     expect(model.name).toBe('Claude Opus 4.6');
-    expect(model.contextWindow).toBe(200000);
+    expect(model.contextWindow).toBe(1_000_000);
     expect(model.maxOutput).toBe(128000);
     expect(model.supportsThinking).toBe(true);
     expect(model.supportsAdaptiveThinking).toBe(true);
@@ -27,6 +27,9 @@ describe('Opus 4.6 Model Registry', () => {
     expect(model.effortLevels).toEqual(['low', 'medium', 'high', 'max']);
     expect(model.defaultEffortLevel).toBe('high');
     expect(model.requiresThinkingBetaHeaders).toBe(false);
+    expect(model.supportsLongContext).toBe(true);
+    expect(model.longContextThreshold).toBe(200_000);
+    expect(model.betaFeatures).toEqual(['context-1m-2025-08-07']);
   });
 
   it('claude-opus-4-6 exists in ANTHROPIC_MODELS with correct UI metadata', () => {
@@ -101,5 +104,17 @@ describe('Opus 4.6 Model Registry', () => {
     const opus45 = ANTHROPIC_MODELS.find(m => m.id === 'claude-opus-4-5-20251101');
     expect(opus45).toBeDefined();
     expect(opus45!.supportsReasoning).toBeUndefined();
+  });
+
+  it('opus 4.5 has no supportsLongContext or betaFeatures (regression)', () => {
+    const model = CLAUDE_MODELS['claude-opus-4-5-20251101'];
+    expect(model.supportsLongContext).toBeUndefined();
+    expect(model.betaFeatures).toBeUndefined();
+  });
+
+  it('claude-opus-4-6 UI model shows 1M context window', () => {
+    const model = ANTHROPIC_MODELS.find(m => m.id === 'claude-opus-4-6');
+    expect(model).toBeDefined();
+    expect(model!.contextWindow).toBe(1_000_000);
   });
 });

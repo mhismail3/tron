@@ -101,13 +101,16 @@ export interface ClaudeModelInfo {
   requiresThinkingBetaHeaders: boolean;
   inputCostPer1k: number;
   outputCostPer1k: number;
+  supportsLongContext?: boolean;
+  longContextThreshold?: number;
+  betaFeatures?: string[];
 }
 
 export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
   // Claude 4.6 models (Latest)
   'claude-opus-4-6': {
     name: 'Claude Opus 4.6',
-    contextWindow: 200000,
+    contextWindow: 1_000_000,
     maxOutput: 128000,
     supportsThinking: true,
     supportsAdaptiveThinking: true,
@@ -117,6 +120,9 @@ export const CLAUDE_MODELS: Record<string, ClaudeModelInfo> = {
     requiresThinkingBetaHeaders: false,
     inputCostPer1k: 0.005,
     outputCostPer1k: 0.025,
+    supportsLongContext: true,
+    longContextThreshold: 200_000,
+    betaFeatures: ['context-1m-2025-08-07'],
   },
   // Claude 4.5 models (Current Generation)
   'claude-opus-4-5-20251101': {

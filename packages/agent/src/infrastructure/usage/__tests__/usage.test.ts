@@ -228,7 +228,85 @@ describe('getUsageDelta', () => {
   });
 });
 
+describe('Long Context Pricing', () => {
+  it('uses standard rates when input <= 200K for Opus 4.6', () => {
+    const cost = calculateCost('claude-opus-4-6', {
+      inputTokens: 200_000,
+      outputTokens: 10_000,
+    });
+    // Standard: 200K input at $5/M = $1.00, 10K output at $25/M = $0.25
+    expect(cost.inputCost).toBeCloseTo(1.0, 4);
+    expect(cost.outputCost).toBeCloseTo(0.25, 4);
+    expect(cost.total).toBeCloseTo(1.25, 4);
+  });
+
+  it('applies 2x input and 1.5x output when input > 200K for Opus 4.6', () => {
+    const cost = calculateCost('claude-opus-4-6', {
+      inputTokens: 500_000,
+      outputTokens: 10_000,
+    });
+    // Long context: 500K input at $10/M = $5.00, 10K output at $37.50/M = $0.375
+    expect(cost.inputCost).toBeCloseTo(5.0, 4);
+    expect(cost.outputCost).toBeCloseTo(0.375, 4);
+    expect(cost.total).toBeCloseTo(5.375, 4);
+  });
+
+  it('boundary: exactly 200K uses standard pricing', () => {
+    const cost = calculateCost('claude-opus-4-6', {
+      inputTokens: 200_000,
+      outputTokens: 1_000,
+    });
+    // Standard: $5/M input, $25/M output
+    const expectedInput = (200_000 / 1_000_000) * 5;
+    const expectedOutput = (1_000 / 1_000_000) * 25;
+    expect(cost.inputCost).toBeCloseTo(expectedInput, 4);
+    expect(cost.outputCost).toBeCloseTo(expectedOutput, 4);
+  });
+
+  it('cache multipliers stack on top of long context multipliers', () => {
+    const cost = calculateCost('claude-opus-4-6', {
+      inputTokens: 500_000,
+      outputTokens: 0,
+      cacheCreationTokens: 200_000,
+      cacheReadTokens: 100_000,
+    });
+    // Long context rate: $10/M (2x of $5/M)
+    // Base input: (500K - 100K - 200K) = 200K at $10/M = $2.00
+    // Cache write: 200K at $10/M * 1.25 = $2.50
+    // Cache read: 100K at $10/M * 0.1 = $0.10
+    expect(cost.inputCost).toBeCloseTo(4.6, 4);
+    expect(cost.outputCost).toBeCloseTo(0, 4);
+  });
+
+  it('Opus 4.5 never gets long context pricing (regression)', () => {
+    const cost = calculateCost('claude-opus-4-5-20251101', {
+      inputTokens: 500_000,
+      outputTokens: 10_000,
+    });
+    // Standard Opus 4.5: 500K at $5/M = $2.50, 10K at $25/M = $0.25
+    expect(cost.inputCost).toBeCloseTo(2.5, 4);
+    expect(cost.outputCost).toBeCloseTo(0.25, 4);
+  });
+
+  it('getPricingTier matches opus-4-6 pattern', () => {
+    const tier = getPricingTier('claude-opus-4-6');
+    expect(tier.inputPerMillion).toBe(5);
+    expect(tier.longContextThreshold).toBe(200_000);
+    expect(tier.longContextInputMultiplier).toBe(2.0);
+    expect(tier.longContextOutputMultiplier).toBe(1.5);
+  });
+
+  it('getPricingTier matches opus-4.6 fuzzy pattern', () => {
+    const tier = getPricingTier('some-opus-4.6-variant');
+    expect(tier.longContextThreshold).toBe(200_000);
+  });
+});
+
 describe('getContextLimit', () => {
+  it('returns 1M for claude-opus-4-6', () => {
+    expect(getContextLimit('claude-opus-4-6')).toBe(1_000_000);
+  });
+
   it('returns exact limit for known models', () => {
     expect(getContextLimit('claude-opus-4-5-20251101')).toBe(200_000);
     expect(getContextLimit('gpt-4o')).toBe(128_000);
