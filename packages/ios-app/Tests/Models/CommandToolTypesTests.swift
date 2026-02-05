@@ -305,15 +305,14 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.id == "call_read_1")
-        #expect(chipData?.toolName == "Read")
-        #expect(chipData?.normalizedName == "read")
-        #expect(chipData?.displayName == "Read")
-        #expect(chipData?.icon == "doc.text")
-        #expect(chipData?.summary == "example.swift")
-        #expect(chipData?.status == .success)
-        #expect(chipData?.durationMs == 25)
+        #expect(chipData.id == "call_read_1")
+        #expect(chipData.toolName == "Read")
+        #expect(chipData.normalizedName == "read")
+        #expect(chipData.displayName == "Read")
+        #expect(chipData.icon == "doc.text")
+        #expect(chipData.summary == "example.swift")
+        #expect(chipData.status == .success)
+        #expect(chipData.durationMs == 25)
     }
 
     @Test("Factory creates chip data from ToolUseData for Bash tool")
@@ -329,12 +328,11 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.normalizedName == "bash")
-        #expect(chipData?.displayName == "Bash")
-        #expect(chipData?.icon == "terminal")
-        #expect(chipData?.summary == "git status --short")
-        #expect(chipData?.status == .running)
+        #expect(chipData.normalizedName == "bash")
+        #expect(chipData.displayName == "Bash")
+        #expect(chipData.icon == "terminal")
+        #expect(chipData.summary == "git status --short")
+        #expect(chipData.status == .running)
     }
 
     @Test("Factory creates chip data with error status")
@@ -350,9 +348,8 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.status == .error)
-        #expect(chipData?.result == "Error: File not found")
+        #expect(chipData.status == .error)
+        #expect(chipData.result == "Error: File not found")
     }
 
     @Test("Factory extracts Edit summary correctly")
@@ -368,12 +365,13 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.summary == "config.json")
+        #expect(chipData.summary == "config.json")
     }
 
-    @Test("Factory returns nil for special tools")
-    func testFactoryReturnsNilForSpecialTools() {
+    @Test("Factory still creates chip data for special tools")
+    func testFactoryCreatesChipDataForSpecialTools() {
+        // Factory always succeeds now (non-optional init)
+        // Special tools are filtered by isCommandTool, not the factory
         let toolUse = ToolUseData(
             toolName: "AskUserQuestion",
             toolCallId: "call_ask_1",
@@ -385,7 +383,8 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData == nil)
+        #expect(chipData.toolName == "AskUserQuestion")
+        #expect(chipData.normalizedName == "askuserquestion")
     }
 
     @Test("Factory truncates long commands in summary")
@@ -402,10 +401,9 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary should be truncated (40 chars + "...")
-        #expect(chipData!.summary.count <= 43)
-        #expect(chipData!.summary.hasSuffix("..."))
+        #expect(chipData.summary.count <= 43)
+        #expect(chipData.summary.hasSuffix("..."))
     }
 
     @Test("Factory unescapes JSON escaped file paths for Read")
@@ -421,9 +419,8 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary is shortened to filename only
-        #expect(chipData?.summary == "file.swift")
+        #expect(chipData.summary == "file.swift")
     }
 
     @Test("Factory unescapes JSON escaped URLs")
@@ -439,10 +436,9 @@ struct CommandToolTypesTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary shows domain (URL is unescaped internally)
-        #expect(chipData?.summary == "example.com")
-        #expect(!chipData!.summary.contains("\\/"))
+        #expect(chipData.summary == "example.com")
+        #expect(!chipData.summary.contains("\\/"))
     }
 }
 
@@ -625,9 +621,8 @@ struct ResultTruncationTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.isResultTruncated == true)
-        #expect(chipData?.result?.contains("[Output truncated") == true)
+        #expect(chipData.isResultTruncated == true)
+        #expect(chipData.result?.contains("[Output truncated") == true)
     }
 
     @Test("Factory does not truncate small results")
@@ -645,9 +640,8 @@ struct ResultTruncationTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.isResultTruncated == false)
-        #expect(chipData?.result == smallResult)
+        #expect(chipData.isResultTruncated == false)
+        #expect(chipData.result == smallResult)
     }
 
     @Test("Factory handles nil result without truncation flag")
@@ -663,9 +657,8 @@ struct ResultTruncationTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.isResultTruncated == false)
-        #expect(chipData?.result == nil)
+        #expect(chipData.isResultTruncated == false)
+        #expect(chipData.result == nil)
     }
 }
 
@@ -687,10 +680,9 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.normalizedName == "webfetch")
+        #expect(chipData.normalizedName == "webfetch")
         // Summary should show domain and truncated prompt
-        #expect(chipData?.summary.contains("docs.anthropic.com") == true)
+        #expect(chipData.summary.contains("docs.anthropic.com") == true)
     }
 
     @Test("Factory extracts domain from WebFetch URL")
@@ -706,9 +698,8 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Should strip www. prefix
-        #expect(chipData?.summary.contains("example.com") == true)
+        #expect(chipData.summary.contains("example.com") == true)
     }
 
     @Test("Factory shows prompt in WebFetch summary when URL is present")
@@ -724,9 +715,8 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary should include part of the prompt
-        #expect(chipData?.summary.contains("What are the main") == true)
+        #expect(chipData.summary.contains("What are the main") == true)
     }
 
     @Test("Factory truncates long prompts in WebFetch summary")
@@ -743,10 +733,9 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary should be reasonably short (domain + truncated prompt)
-        #expect(chipData!.summary.count <= 60)
-        #expect(chipData!.summary.contains("..."))
+        #expect(chipData.summary.count <= 60)
+        #expect(chipData.summary.contains("..."))
     }
 
     @Test("Factory handles WebFetch with escaped JSON URL")
@@ -762,10 +751,9 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Should unescape the URL properly
-        #expect(chipData?.summary.contains("docs.example.com") == true)
-        #expect(chipData?.summary.contains("\\/") == false)
+        #expect(chipData.summary.contains("docs.example.com") == true)
+        #expect(chipData.summary.contains("\\/") == false)
     }
 
     @Test("Factory handles WebFetch with missing URL gracefully")
@@ -781,9 +769,8 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Should fall back to showing prompt only
-        #expect(chipData?.summary.contains("What is this") == true)
+        #expect(chipData.summary.contains("What is this") == true)
     }
 
     @Test("Factory handles WebFetch with missing prompt gracefully")
@@ -799,9 +786,8 @@ struct WebFetchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Should show URL/domain at minimum
-        #expect(chipData?.summary.contains("example.com") == true)
+        #expect(chipData.summary.contains("example.com") == true)
     }
 }
 
@@ -823,9 +809,8 @@ struct WebSearchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
-        #expect(chipData?.normalizedName == "websearch")
-        #expect(chipData?.summary.contains("Swift async await tutorial") == true)
+        #expect(chipData.normalizedName == "websearch")
+        #expect(chipData.summary.contains("Swift async await tutorial") == true)
     }
 
     @Test("Factory shows WebSearch query in quotes")
@@ -841,10 +826,9 @@ struct WebSearchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary should be quoted
-        #expect(chipData?.summary.hasPrefix("\"") == true)
-        #expect(chipData?.summary.hasSuffix("\"") == true)
+        #expect(chipData.summary.hasPrefix("\"") == true)
+        #expect(chipData.summary.hasSuffix("\"") == true)
     }
 
     @Test("Factory truncates long WebSearch queries")
@@ -861,10 +845,9 @@ struct WebSearchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary should be truncated (40 chars for query + quotes + ellipsis)
-        #expect(chipData!.summary.count <= 45)
-        #expect(chipData!.summary.contains("..."))
+        #expect(chipData.summary.count <= 45)
+        #expect(chipData.summary.contains("..."))
     }
 
     @Test("Factory handles WebSearch with escaped JSON query")
@@ -880,9 +863,8 @@ struct WebSearchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Should unescape properly
-        #expect(chipData?.summary.contains("React") == true)
+        #expect(chipData.summary.contains("React") == true)
     }
 
     @Test("Factory handles WebSearch with missing query gracefully")
@@ -898,9 +880,8 @@ struct WebSearchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Summary should be empty or show placeholder
-        #expect(chipData?.summary.isEmpty == true || chipData?.summary == "\"\"")
+        #expect(chipData.summary.isEmpty == true || chipData.summary == "\"\"")
     }
 
     @Test("Factory handles WebSearch with domain filters")
@@ -916,8 +897,7 @@ struct WebSearchSummaryTests {
 
         let chipData = CommandToolChipData(from: toolUse)
 
-        #expect(chipData != nil)
         // Should still show the query in summary
-        #expect(chipData?.summary.contains("Swift tutorials") == true)
+        #expect(chipData.summary.contains("Swift tutorials") == true)
     }
 }
