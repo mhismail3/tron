@@ -8,6 +8,7 @@ import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '
 import type { EventStore } from '@infrastructure/events/index.js';
 import type { SessionId, EventType } from '@infrastructure/events/index.js';
 import type { SpawnSubagentParams, SubagentCompletionType } from '@capabilities/tools/subagent/index.js';
+import { spawn as spawnProcess } from 'child_process';
 import type {
   ActiveSession,
   AgentRunOptions,
@@ -27,6 +28,8 @@ const logger = createLogger('subagent-spawn');
  * Default guardrail timeout for subagent execution (1 hour)
  */
 const DEFAULT_GUARDRAIL_TIMEOUT_MS = 60 * 60 * 1000;
+const TMUX_STARTUP_TIMEOUT_MS = 10_000;
+const TMUX_SESSION_NAME_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
 
 /**
  * Dependencies for SpawnHandler
@@ -251,37 +254,80 @@ export class SpawnHandler {
     try {
       // Generate tmux session name
       const timestamp = Date.now().toString(36);
-      const tmuxSessionName =
-        params.sessionName ?? `tron-subagent-${timestamp}`;
+      const tmuxSessionName = this.resolveTmuxSessionName(
+        params.sessionName,
+        timestamp
+      );
 
       // Generate a session ID for the sub-agent (will be created by the spawned process)
       const subSessionId = `sess_${timestamp}${Math.random().toString(36).slice(2, 8)}`;
+      const maxTurns = this.resolveMaxTurns(params.maxTurns);
 
-      // Build the tron command with spawn flags
+      // Build tron command args as a tokenized vector. This avoids shell command
+      // string construction and prevents argument-injection via quoting tricks.
       const workDir = params.workingDirectory ?? parent.workingDirectory;
-      const tronCmd = [
-        'tron',
-        `--parent-session-id=${parentSessionId}`,
-        `--spawn-task="${params.task.replace(/"/g, '\\"')}"`,
-        `--db-path="${this.deps.eventStore.getDbPath()}"`,
-        `--working-directory="${workDir}"`,
-        params.model ? `--model=${params.model}` : '',
-        `--max-turns=${params.maxTurns ?? 100}`,
-      ]
-        .filter(Boolean)
-        .join(' ');
+      const dbPath = this.deps.eventStore.getDbPath();
+      this.validateTmuxSpawnInputs(params.task, workDir, dbPath);
 
-      // Spawn tmux session
-      const { spawn } = await import('child_process');
-      const tmuxProc = spawn(
+      const tronArgs = [
+        '--parent-session-id',
+        parentSessionId,
+        '--spawn-task',
+        params.task,
+        '--db-path',
+        dbPath,
+        '--working-directory',
+        workDir,
+        '--max-turns',
+        String(maxTurns),
+      ];
+
+      if (params.model) {
+        tronArgs.push('--model', params.model);
+      }
+
+      // Start tmux session and verify startup before reporting success.
+      const startResult = await this.runCommand(
         'tmux',
-        ['new-session', '-d', '-s', tmuxSessionName, '-c', workDir, tronCmd],
+        [
+          'new-session',
+          '-d',
+          '-s',
+          tmuxSessionName,
+          '-c',
+          workDir,
+          '--',
+          'tron',
+          ...tronArgs,
+        ],
         {
-          detached: true,
-          stdio: 'ignore',
+          detached: false,
+          stdio: ['ignore', 'ignore', 'pipe'],
         }
       );
-      tmuxProc.unref();
+
+      if (startResult.exitCode !== 0) {
+        throw new Error(
+          startResult.stderr ||
+            `tmux new-session failed with exit code ${startResult.exitCode ?? 'unknown'}`
+        );
+      }
+
+      const verifyResult = await this.runCommand(
+        'tmux',
+        ['has-session', '-t', tmuxSessionName],
+        {
+          detached: false,
+          stdio: ['ignore', 'ignore', 'pipe'],
+        }
+      );
+
+      if (verifyResult.exitCode !== 0) {
+        throw new Error(
+          verifyResult.stderr ||
+            `tmux session startup verification failed for ${tmuxSessionName}`
+        );
+      }
 
       // Emit subagent.spawned event in parent session
       this.deps.appendEventLinearized(
@@ -296,7 +342,7 @@ export class SpawnHandler {
           skills: params.skills,
           workingDirectory: workDir,
           tmuxSessionName,
-          maxTurns: params.maxTurns ?? 100,
+          maxTurns,
         }
       );
 
@@ -308,7 +354,7 @@ export class SpawnHandler {
         params.model ?? parent.model,
         workDir,
         '',
-        { tmuxSessionName, maxTurns: params.maxTurns ?? 100 }
+        { tmuxSessionName, maxTurns }
       );
 
       logger.info('Tmux agent spawned', {
@@ -757,6 +803,65 @@ export class SpawnHandler {
     }
 
     return { resultSummary, completionType, truncated, warning };
+  }
+
+  private resolveTmuxSessionName(sessionName: string | undefined, timestamp: string): string {
+    const rawName = (sessionName ?? `tron-subagent-${timestamp}`).trim();
+    if (!TMUX_SESSION_NAME_PATTERN.test(rawName)) {
+      throw new Error(
+        'Invalid tmux session name. Use only letters, numbers, ".", "_", ":" or "-".'
+      );
+    }
+    return rawName;
+  }
+
+  private resolveMaxTurns(maxTurns: number | undefined): number {
+    const value = maxTurns ?? 100;
+    if (!Number.isInteger(value) || value <= 0 || value > 10_000) {
+      throw new Error('maxTurns must be an integer between 1 and 10000');
+    }
+    return value;
+  }
+
+  private validateTmuxSpawnInputs(task: string, workDir: string, dbPath: string): void {
+    if (!task || typeof task !== 'string' || task.trim().length === 0) {
+      throw new Error('Subagent task is required');
+    }
+    if (!workDir || workDir.includes('\u0000')) {
+      throw new Error('Invalid working directory');
+    }
+    if (!dbPath || dbPath.includes('\u0000')) {
+      throw new Error('Invalid database path');
+    }
+  }
+
+  private runCommand(
+    command: string,
+    args: string[],
+    options: Parameters<typeof spawnProcess>[2]
+  ): Promise<{ exitCode: number | null; stderr: string }> {
+    return new Promise((resolve, reject) => {
+      const proc = spawnProcess(command, args, options);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`${command} timed out after ${TMUX_STARTUP_TIMEOUT_MS}ms`));
+      }, TMUX_STARTUP_TIMEOUT_MS);
+
+      proc.stderr?.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      proc.on('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+
+      proc.on('close', (exitCode) => {
+        clearTimeout(timeout);
+        resolve({ exitCode, stderr: stderr.trim() });
+      });
+    });
   }
 }
 

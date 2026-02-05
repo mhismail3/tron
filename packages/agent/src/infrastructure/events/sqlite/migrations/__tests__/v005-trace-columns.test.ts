@@ -15,7 +15,7 @@ describe('v005 migration - trace columns', () => {
   });
 
   afterEach(() => {
-    db.close();
+    db?.close();
   });
 
   describe('column creation', () => {

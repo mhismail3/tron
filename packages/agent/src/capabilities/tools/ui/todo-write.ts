@@ -128,7 +128,7 @@ export class TodoWriteTool implements TronTool<TodoWriteParams, TodoWriteDetails
     this.config = config;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult<TodoWriteDetails>> {
+  async execute(args: TodoWriteParams): Promise<TronToolResult<TodoWriteDetails>> {
     // Validate required parameters
     if (!args.todos) {
       return {
@@ -144,7 +144,7 @@ export class TodoWriteTool implements TronTool<TodoWriteParams, TodoWriteDetails
       };
     }
 
-    const inputTodos = args.todos as TodoWriteParams['todos'];
+    const inputTodos = args.todos;
 
     // Validate each todo
     for (let i = 0; i < inputTodos.length; i++) {

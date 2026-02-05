@@ -28,6 +28,7 @@ export interface AskUserQuestionConfig {
 
 export class AskUserQuestionTool implements TronTool<AskUserQuestionParams> {
   readonly name = 'AskUserQuestion';
+  readonly executionContract = 'options' as const;
   readonly description = `Ask the user interactive questions with multiple choice options.
 
 Use this tool when you need to:
@@ -125,14 +126,14 @@ add any explanatory text, summaries, or follow-up comments after the tool call.`
   }
 
   async execute(
-    args: Record<string, unknown>,
+    args: AskUserQuestionParams,
     options?: {
       toolCallId?: string;
       sessionId?: string;
       signal?: AbortSignal;
     }
   ): Promise<TronToolResult> {
-    const params = args as unknown as AskUserQuestionParams;
+    const params = args;
 
     // Validate parameters
     const validation = validateAskUserQuestionParams(params);

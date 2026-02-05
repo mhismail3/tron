@@ -92,6 +92,7 @@ export interface NotifyAppToolConfig {
  */
 export class NotifyAppTool implements TronTool<NotifyAppParams, NotifyAppResult> {
   readonly name = 'NotifyApp';
+  readonly executionContract = 'contextual' as const;
   readonly label = 'Push Notification';
   readonly description = `Send a push notification to the Tron iOS app.
 
@@ -162,7 +163,7 @@ export class NotifyAppTool implements TronTool<NotifyAppParams, NotifyAppResult>
 
   async execute(
     toolCallId: string,
-    args: Record<string, unknown>,
+    args: NotifyAppParams,
     _signal: AbortSignal
   ): Promise<TronToolResult<NotifyAppResult>> {
     // Validate required parameters

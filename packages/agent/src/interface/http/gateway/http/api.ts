@@ -13,6 +13,7 @@ import type {
 } from './types.js';
 import { DEFAULT_HTTP_API_CONFIG } from './types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { parseOptionalInteger } from '@infrastructure/settings/env-parsing.js';
 
 const logger = createLogger('http-api');
 
@@ -162,7 +163,12 @@ export class HttpApi {
     this.addRoute('GET', `${base}/sessions`, async (ctx, _, opts) => {
       const query = opts.query ?? {};
       const result = await ctx.listSessions({
-        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+        limit: parseOptionalInteger(query.limit, {
+          name: 'limit',
+          min: 1,
+          max: 1000,
+          logger,
+        }),
         workspaceId: query.workspaceId,
       });
 

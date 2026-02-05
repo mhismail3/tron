@@ -148,6 +148,7 @@ export interface SpawnSubagentToolConfig {
  */
 export class SpawnSubagentTool implements TronTool<SpawnSubagentParams> {
   readonly name = 'SpawnSubagent';
+  readonly executionContract = 'contextual' as const;
   readonly description = `Spawn an agent to handle a specific task. Supports two execution modes:
 
 **1. In-Process Mode (default):**
@@ -244,19 +245,19 @@ Returns (when mode=inProcess and blocking=true):
   }
 
   async execute(
-    toolCallIdOrArgs: string | Record<string, unknown>,
-    argsOrSignal?: Record<string, unknown> | AbortSignal,
+    toolCallIdOrArgs: string | SpawnSubagentParams,
+    argsOrSignal?: SpawnSubagentParams | AbortSignal,
     signalArg?: AbortSignal
   ): Promise<TronToolResult<SpawnSubagentResult>> {
     // Handle both old and new signatures
-    let args: Record<string, unknown>;
+    let args: SpawnSubagentParams;
     let toolCallId: string;
     let signal: AbortSignal | undefined;
 
     if (typeof toolCallIdOrArgs === 'string') {
       // New signature: (toolCallId, params, signal)
       toolCallId = toolCallIdOrArgs;
-      args = argsOrSignal as Record<string, unknown>;
+      args = argsOrSignal as SpawnSubagentParams;
       signal = signalArg;
     } else {
       // Old signature: (params) - generate a fallback ID
@@ -268,19 +269,19 @@ Returns (when mode=inProcess and blocking=true):
       }
     }
 
-    const task = args.task as string;
-    const mode = (args.mode as 'inProcess' | 'tmux') ?? 'inProcess';
-    const model = args.model as string | undefined;
-    const systemPrompt = args.systemPrompt as string | undefined;
-    const toolDenials = args.toolDenials as ToolDenialConfig | undefined;
-    const skills = args.skills as string[] | undefined;
-    const workingDirectory = args.workingDirectory as string | undefined;
-    const maxTurns = args.maxTurns as number | undefined;
-    const sessionName = args.sessionName as string | undefined;
+    const task = args.task;
+    const mode = args.mode ?? 'inProcess';
+    const model = args.model;
+    const systemPrompt = args.systemPrompt;
+    const toolDenials = args.toolDenials;
+    const skills = args.skills;
+    const workingDirectory = args.workingDirectory;
+    const maxTurns = args.maxTurns;
+    const sessionName = args.sessionName;
     // Default to blocking mode for inProcess, ignored for tmux
     const isBlocking = mode === 'inProcess' && args.blocking !== false;
     // Default 30 minute timeout
-    const timeout = (args.timeout as number | undefined) ?? 30 * 60 * 1000;
+    const timeout = args.timeout ?? 30 * 60 * 1000;
 
     // Validate required parameter
     if (!task || typeof task !== 'string' || task.trim() === '') {

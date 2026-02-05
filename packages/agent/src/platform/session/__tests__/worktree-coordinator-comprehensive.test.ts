@@ -359,6 +359,29 @@ describe('WorktreeCoordinator - Integration Tests', () => {
       expect(releaseCall).toBeDefined();
     });
 
+    it('preserves release path and branch metadata when worktree directory is already missing', async () => {
+      const mainSession = SessionId('sess_main_holder');
+      const missingSession = SessionId('sess_missing_dir');
+
+      await coordinator.acquire(mainSession, testDir);
+      const isolatedDir = await coordinator.acquire(missingSession, testDir);
+      expect(isolatedDir.isolated).toBe(true);
+
+      const expectedPath = isolatedDir.path;
+      const expectedBranch = isolatedDir.branch;
+      await fs.rm(expectedPath, { recursive: true, force: true });
+
+      mockEventStore.append.mockClear();
+      await coordinator.release(missingSession);
+
+      const releaseCall = mockEventStore.append.mock.calls.find(
+        call => call[0].type === 'worktree.released'
+      );
+      expect(releaseCall).toBeDefined();
+      expect(releaseCall?.[0].payload.path).toBe(expectedPath);
+      expect(releaseCall?.[0].payload.branch).toBe(expectedBranch);
+    });
+
     it('should delete isolated worktree on release', async () => {
       const session1 = SessionId('sess_first');
       const session2 = SessionId('sess_isolated');
@@ -374,6 +397,24 @@ describe('WorktreeCoordinator - Integration Tests', () => {
       // Worktree should be deleted
       const exists = await fs.access(worktreePath).then(() => true).catch(() => false);
       expect(exists).toBe(false);
+    });
+  });
+
+  describe('event append routing', () => {
+    it('uses configured appendEvent callback for worktree event persistence', async () => {
+      const appendEvent = vi.fn().mockResolvedValue('evt_linearized');
+      mockEventStore.append.mockClear();
+      const routedCoordinator = new WorktreeCoordinator(mockEventStore as any, {
+        isolationMode: 'lazy',
+        appendEvent,
+      });
+
+      const sessionId = SessionId('sess_append_route');
+      await routedCoordinator.acquire(sessionId, testDir);
+      await routedCoordinator.release(sessionId);
+
+      expect(appendEvent).toHaveBeenCalled();
+      expect(mockEventStore.append).not.toHaveBeenCalled();
     });
   });
 
@@ -463,6 +504,33 @@ describe('WorktreeCoordinator - Integration Tests', () => {
 
       expect(result.success).toBe(false);
       expect(result.conflicts).toBeDefined();
+    });
+
+    it('should support rebase merge strategy for isolated sessions', async () => {
+      const session1 = SessionId('sess_main_rebase');
+      const session2 = SessionId('sess_isolated_rebase');
+
+      await coordinator.acquire(session1, testDir);
+      const isolatedDir = await coordinator.acquire(session2, testDir);
+
+      // Commit on isolated branch
+      await fs.writeFile(path.join(isolatedDir.path, 'rebase-isolated.txt'), 'isolated change');
+      await execAsync('git add -A', { cwd: isolatedDir.path });
+      await execAsync('git commit -m "Isolated rebase change"', { cwd: isolatedDir.path });
+
+      // Advance target branch after fork to exercise rebase flow
+      await fs.writeFile(path.join(testDir, 'main-advance.txt'), 'main branch change');
+      await execAsync('git add -A', { cwd: testDir });
+      await execAsync('git commit -m "Main branch advance"', { cwd: testDir });
+
+      const { stdout: mainBranch } = await execAsync('git branch --show-current', { cwd: testDir });
+      const result = await coordinator.mergeSession(session2, mainBranch.trim(), 'rebase');
+
+      expect(result.success).toBe(true);
+      expect(result.mergeCommit).toBeDefined();
+
+      const mergedContent = await fs.readFile(path.join(testDir, 'rebase-isolated.txt'), 'utf8');
+      expect(mergedContent).toBe('isolated change');
     });
   });
 

@@ -21,8 +21,8 @@ function createMockConfig(overrides: Partial<AgentFactoryConfig> = {}): AgentFac
       type: 'api_key',
       apiKey: 'test-key',
     }),
-    spawnSubsession: vi.fn().mockResolvedValue({ sessionId: 'sub_test' }),
-    querySubagent: vi.fn().mockReturnValue({ status: 'pending' }),
+    spawnSubsession: vi.fn().mockResolvedValue({ sessionId: 'sub_test', success: true }),
+    querySubagent: vi.fn().mockResolvedValue({ success: true }),
     waitForSubagents: vi.fn().mockResolvedValue({ success: true }),
     forwardAgentEvent: vi.fn(),
     getSubagentTrackerForSession: vi.fn().mockReturnValue({

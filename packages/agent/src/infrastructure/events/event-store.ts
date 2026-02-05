@@ -132,53 +132,55 @@ export class EventStore {
       title: options.title,
     });
 
-    // Get or create workspace
-    const workspace = await this.backend.getOrCreateWorkspace(
-      options.workspacePath,
-      options.workspacePath.split('/').pop() // Use last segment as name
-    );
+    return this.backend.transactionAsync(async () => {
+      // Get or create workspace in the same transaction as session + root event.
+      const workspace = await this.backend.getOrCreateWorkspace(
+        options.workspacePath,
+        options.workspacePath.split('/').pop() // Use last segment as name
+      );
 
-    // Create session
-    const session = await this.backend.createSession({
-      workspaceId: workspace.id,
-      workingDirectory: options.workingDirectory,
-      model: options.model,
-      title: options.title,
-      tags: options.tags,
+      // Create session
+      const session = await this.backend.createSession({
+        workspaceId: workspace.id,
+        workingDirectory: options.workingDirectory,
+        model: options.model,
+        title: options.title,
+        tags: options.tags,
+      });
+
+      // Create root event using factory (provider stored in event payload for historical record)
+      const factory = createEventFactory({
+        sessionId: session.id,
+        workspaceId: workspace.id,
+        idGenerator: () => this.generateId(),
+      });
+      const rootEvent: SessionStartEvent = factory.createSessionStart({
+        workingDirectory: options.workingDirectory,
+        model: options.model,
+        provider: options.provider,
+        title: options.title,
+        metadata: options.metadata,
+      });
+
+      await this.backend.insertEvent(rootEvent);
+      await this.backend.updateSessionRoot(session.id, rootEvent.id);
+      await this.backend.updateSessionHead(session.id, rootEvent.id);
+      await this.backend.incrementSessionCounters(session.id, { eventCount: 1 });
+
+      const duration = Date.now() - startTime;
+      logger.info('Session created in EventStore', {
+        sessionId: session.id,
+        workspaceId: workspace.id,
+        model: options.model,
+        rootEventId: rootEvent.id,
+        duration,
+      });
+
+      return {
+        session: { ...session, rootEventId: rootEvent.id, headEventId: rootEvent.id },
+        rootEvent,
+      };
     });
-
-    // Create root event using factory (provider stored in event payload for historical record)
-    const factory = createEventFactory({
-      sessionId: session.id,
-      workspaceId: workspace.id,
-      idGenerator: () => this.generateId(),
-    });
-    const rootEvent: SessionStartEvent = factory.createSessionStart({
-      workingDirectory: options.workingDirectory,
-      model: options.model,
-      provider: options.provider,
-      title: options.title,
-      metadata: options.metadata,
-    });
-
-    await this.backend.insertEvent(rootEvent);
-    await this.backend.updateSessionRoot(session.id, rootEvent.id);
-    await this.backend.updateSessionHead(session.id, rootEvent.id);
-    await this.backend.incrementSessionCounters(session.id, { eventCount: 1 });
-
-    const duration = Date.now() - startTime;
-    logger.info('Session created in EventStore', {
-      sessionId: session.id,
-      workspaceId: workspace.id,
-      model: options.model,
-      rootEventId: rootEvent.id,
-      duration,
-    });
-
-    return {
-      session: { ...session, rootEventId: rootEvent.id, headEventId: rootEvent.id },
-      rootEvent,
-    };
   }
 
   // ===========================================================================
@@ -186,20 +188,21 @@ export class EventStore {
   // ===========================================================================
 
   async append(options: AppendEventOptions): Promise<SessionEvent> {
-    const session = await this.backend.getSession(options.sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${options.sessionId}`);
-    }
-
-    // Determine parent - use provided or session head
-    const parentId = options.parentId ?? session.headEventId;
-    if (!parentId) {
-      throw new Error('No parent ID available');
-    }
-
     // P1 FIX: Wrap sequence generation + insert in transaction to prevent race conditions
     // Without this, concurrent appends could get duplicate sequence numbers
     return this.backend.transactionAsync(async () => {
+      const session = await this.backend.getSession(options.sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${options.sessionId}`);
+      }
+
+      // Resolve implicit parent inside the transaction so concurrent appends
+      // always chain from the latest committed head.
+      const parentId = options.parentId ?? session.headEventId;
+      if (!parentId) {
+        throw new Error('No parent ID available');
+      }
+
       // Get next sequence number (atomic within transaction)
       const sequence = await this.backend.getNextSequence(options.sessionId);
 

@@ -15,7 +15,7 @@ describe('MigrationRunner', () => {
   });
 
   afterEach(() => {
-    db.close();
+    db?.close();
   });
 
   describe('run', () => {

@@ -15,7 +15,7 @@ describe('v004 migration - indexes', () => {
   });
 
   afterEach(() => {
-    db.close();
+    db?.close();
   });
 
   describe('index creation', () => {
@@ -94,7 +94,7 @@ describe('v004 migration - FTS triggers', () => {
   });
 
   afterEach(() => {
-    db.close();
+    db?.close();
   });
 
   describe('trigger creation', () => {

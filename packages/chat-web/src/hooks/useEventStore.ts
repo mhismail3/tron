@@ -16,7 +16,6 @@ import {
   type CachedEvent,
   type CachedSession,
   type EventTreeNode,
-  type SyncState,
 } from '../store/event-db.js';
 import type { DisplayMessage } from '../store/types.js';
 

@@ -29,6 +29,7 @@ export interface BashToolConfig {
 
 export class BashTool implements TronTool {
   readonly name = 'Bash';
+  readonly executionContract = 'contextual' as const;
   readonly description = 'Execute a shell command. Commands that are potentially destructive require confirmation.';
   readonly parameters = {
     type: 'object' as const,

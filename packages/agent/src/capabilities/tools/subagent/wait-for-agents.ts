@@ -63,6 +63,7 @@ export interface WaitForAgentsToolConfig {
  */
 export class WaitForAgentsTool implements TronTool<WaitForAgentsParams> {
   readonly name = 'WaitForAgents';
+  readonly executionContract = 'contextual' as const;
   readonly description = `Wait for spawned sub-agent(s) to complete and get their results.
 
 Use this when you need the output of a sub-agent before proceeding. The tool will block until:
@@ -121,22 +122,22 @@ WaitForAgents({ sessionIds: ["sess_abc", "sess_xyz"], mode: "any" })
   }
 
   async execute(
-    toolCallIdOrArgs: string | Record<string, unknown>,
-    argsOrSignal?: Record<string, unknown> | AbortSignal,
+    toolCallIdOrArgs: string | WaitForAgentsParams,
+    argsOrSignal?: WaitForAgentsParams | AbortSignal,
     _signal?: AbortSignal
   ): Promise<TronToolResult<WaitForAgentsResult>> {
     // Handle both old and new signatures
-    let args: Record<string, unknown>;
+    let args: WaitForAgentsParams;
 
     if (typeof toolCallIdOrArgs === 'string') {
-      args = argsOrSignal as Record<string, unknown>;
+      args = argsOrSignal as WaitForAgentsParams;
     } else {
       args = toolCallIdOrArgs;
     }
 
-    const sessionIds = args.sessionIds as string[];
-    const mode = (args.mode as 'all' | 'any') || 'all';
-    const timeout = (args.timeout as number) || 5 * 60 * 1000;
+    const sessionIds = args.sessionIds;
+    const mode = args.mode || 'all';
+    const timeout = args.timeout || 5 * 60 * 1000;
 
     // Validate
     if (sessionIds.length === 0) {

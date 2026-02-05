@@ -16,6 +16,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { TronSettings, UserSettings, DeepPartial } from './types.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
+import { parseEnvBoolean, parseEnvInteger } from './env-parsing.js';
 import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 
 const logger = createLogger('settings');
@@ -324,6 +325,17 @@ export function getSetting<T>(path: string): T | undefined {
  */
 export function applyEnvOverrides(settings: TronSettings): TronSettings {
   const result = { ...settings };
+  const parseServerInt = (
+    envName: string,
+    fallback: number,
+    options?: { min?: number; max?: number }
+  ): number => parseEnvInteger(process.env[envName], {
+    name: envName,
+    fallback,
+    min: options?.min,
+    max: options?.max,
+    logger,
+  });
 
   // API overrides
   if (process.env.ANTHROPIC_CLIENT_ID) {
@@ -340,13 +352,13 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
   if (process.env.TRON_WS_PORT) {
     result.server = {
       ...result.server,
-      wsPort: parseInt(process.env.TRON_WS_PORT, 10),
+      wsPort: parseServerInt('TRON_WS_PORT', result.server.wsPort, { min: 1, max: 65535 }),
     };
   }
   if (process.env.TRON_HEALTH_PORT) {
     result.server = {
       ...result.server,
-      healthPort: parseInt(process.env.TRON_HEALTH_PORT, 10),
+      healthPort: parseServerInt('TRON_HEALTH_PORT', result.server.healthPort, { min: 1, max: 65535 }),
     };
   }
   if (process.env.TRON_HOST) {
@@ -367,13 +379,21 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
   if (process.env.TRON_MAX_SESSIONS) {
     result.server = {
       ...result.server,
-      maxConcurrentSessions: parseInt(process.env.TRON_MAX_SESSIONS, 10),
+      maxConcurrentSessions: parseServerInt(
+        'TRON_MAX_SESSIONS',
+        result.server.maxConcurrentSessions,
+        { min: 1, max: 10000 }
+      ),
     };
   }
   if (process.env.TRON_HEARTBEAT_INTERVAL) {
     result.server = {
       ...result.server,
-      heartbeatIntervalMs: parseInt(process.env.TRON_HEARTBEAT_INTERVAL, 10),
+      heartbeatIntervalMs: parseServerInt(
+        'TRON_HEARTBEAT_INTERVAL',
+        result.server.heartbeatIntervalMs,
+        { min: 1000, max: 600000 }
+      ),
     };
   }
   if (process.env.TRON_SESSIONS_DIR) {
@@ -389,22 +409,28 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
     };
   }
   if (process.env.TRON_TRANSCRIBE_ENABLED) {
-    const enabled = process.env.TRON_TRANSCRIBE_ENABLED.toLowerCase();
     result.server = {
       ...result.server,
       transcription: {
         ...result.server.transcription,
-        enabled: enabled === 'true' || enabled === '1' || enabled === 'yes',
+        enabled: parseEnvBoolean(process.env.TRON_TRANSCRIBE_ENABLED, {
+          name: 'TRON_TRANSCRIBE_ENABLED',
+          fallback: result.server.transcription.enabled,
+          logger,
+        }),
       },
     };
   }
   if (process.env.TRON_TRANSCRIBE_MANAGE_SIDECAR) {
-    const manageSidecar = process.env.TRON_TRANSCRIBE_MANAGE_SIDECAR.toLowerCase();
     result.server = {
       ...result.server,
       transcription: {
         ...result.server.transcription,
-        manageSidecar: manageSidecar === 'true' || manageSidecar === '1' || manageSidecar === 'yes',
+        manageSidecar: parseEnvBoolean(process.env.TRON_TRANSCRIBE_MANAGE_SIDECAR, {
+          name: 'TRON_TRANSCRIBE_MANAGE_SIDECAR',
+          fallback: result.server.transcription.manageSidecar,
+          logger,
+        }),
       },
     };
   }
@@ -422,7 +448,11 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
       ...result.server,
       transcription: {
         ...result.server.transcription,
-        timeoutMs: parseInt(process.env.TRON_TRANSCRIBE_TIMEOUT_MS, 10),
+        timeoutMs: parseServerInt(
+          'TRON_TRANSCRIBE_TIMEOUT_MS',
+          result.server.transcription.timeoutMs,
+          { min: 1000, max: 3600000 }
+        ),
       },
     };
   }
@@ -431,7 +461,11 @@ export function applyEnvOverrides(settings: TronSettings): TronSettings {
       ...result.server,
       transcription: {
         ...result.server.transcription,
-        maxBytes: parseInt(process.env.TRON_TRANSCRIBE_MAX_BYTES, 10),
+        maxBytes: parseServerInt(
+          'TRON_TRANSCRIBE_MAX_BYTES',
+          result.server.transcription.maxBytes,
+          { min: 1024, max: 1024 * 1024 * 1024 }
+        ),
       },
     };
   }

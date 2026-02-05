@@ -178,7 +178,31 @@ describe('AgentToolExecutor', () => {
       );
     });
 
-    it('should use new signature for tools with 3+ parameters', async () => {
+    it('preserves class tool context for legacy contract execution', async () => {
+      class ContextAwareTool implements TronTool<Record<string, unknown>> {
+        readonly name = 'ContextAwareTool';
+        readonly description = 'Uses instance config in execute';
+        readonly parameters = { type: 'object' as const };
+        private readonly config = { prefix: 'ctx' };
+
+        async execute(args: Record<string, unknown>) {
+          return { content: `${this.config.prefix}:${String(args.value)}` };
+        }
+      }
+
+      mockTools.set('ContextAwareTool', new ContextAwareTool());
+
+      const result = await executor.execute({
+        toolCallId: 'call_ctx',
+        toolName: 'ContextAwareTool',
+        arguments: { value: 'ok' },
+      });
+
+      expect(result.result.isError).toBe(false);
+      expect(result.result.content).toBe('ctx:ok');
+    });
+
+    it('uses contextual execution contract when tool declares it', async () => {
       const executeFn = vi.fn(
         async (id: string, args: Record<string, unknown>, signal: AbortSignal) => ({
           content: `ID: ${id}, hasSignal: ${!!signal}`,
@@ -189,6 +213,7 @@ describe('AgentToolExecutor', () => {
         description: 'Tool with new signature',
         parameters: { type: 'object' },
         execute: executeFn,
+        executionContract: 'contextual',
       };
       mockTools.set('NewTool', tool);
 
@@ -200,6 +225,60 @@ describe('AgentToolExecutor', () => {
 
       expect(result.result.content).toContain('call_456');
       expect(result.result.content).toContain('hasSignal: true');
+    });
+
+    it('uses options execution contract when tool declares it', async () => {
+      const executeFn = vi.fn(
+        async (
+          args: Record<string, unknown>,
+          options?: { toolCallId?: string; sessionId?: string; signal?: AbortSignal }
+        ) => ({
+          content: `toolCallId=${options?.toolCallId}, sessionId=${options?.sessionId}, hasSignal=${!!options?.signal}`,
+        })
+      );
+      const tool: TronTool = {
+        name: 'OptionsTool',
+        description: 'Tool with options contract',
+        parameters: { type: 'object' },
+        execute: executeFn,
+        executionContract: 'options',
+      };
+      mockTools.set('OptionsTool', tool);
+
+      const result = await executor.execute({
+        toolCallId: 'call_options',
+        toolName: 'OptionsTool',
+        arguments: { arg: 'value' },
+      });
+
+      expect(result.result.content).toContain('toolCallId=call_options');
+      expect(result.result.content).toContain('sessionId=sess_test');
+      expect(result.result.content).toContain('hasSignal=true');
+    });
+
+    it('defaults to legacy execution contract when no contract is declared', async () => {
+      const executeFn = vi.fn(
+        async (_id: string, _args: Record<string, unknown>, _signal: AbortSignal) => ({
+          content: 'legacy fallback',
+        })
+      );
+      const tool: TronTool = {
+        name: 'LegacyFallback',
+        description: 'Tool with multi-param function but no contract metadata',
+        parameters: { type: 'object' },
+        execute: executeFn,
+      };
+      mockTools.set('LegacyFallback', tool);
+
+      await executor.execute({
+        toolCallId: 'call_legacy',
+        toolName: 'LegacyFallback',
+        arguments: { x: 1 },
+      });
+
+      expect(executeFn).toHaveBeenCalledWith(
+        expect.objectContaining({ x: 1 })
+      );
     });
 
     it('should handle stopTurn in tool result', async () => {

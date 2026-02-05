@@ -25,7 +25,7 @@ function createMockConfig(overrides: Partial<AgentFactoryConfig> = {}): AgentFac
       apiKey: 'test-anthropic-key',
     }),
     spawnSubsession: vi.fn().mockResolvedValue({ sessionId: 'sub_test', success: true }),
-    querySubagent: vi.fn().mockReturnValue({ status: 'pending' }),
+    querySubagent: vi.fn().mockResolvedValue({ success: true }),
     waitForSubagents: vi.fn().mockResolvedValue({ success: true }),
     forwardAgentEvent: vi.fn(),
     getSubagentTrackerForSession: vi.fn().mockReturnValue(undefined),

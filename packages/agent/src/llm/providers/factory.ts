@@ -128,6 +128,34 @@ export function getModelsForProvider(provider: ProviderType) {
   return PROVIDER_MODELS[provider] ?? {};
 }
 
+const PROVIDER_PREFIX_MAP: Record<string, ProviderType> = {
+  anthropic: 'anthropic',
+  openai: 'openai',
+  'openai-codex': 'openai-codex',
+  google: 'google',
+};
+
+function detectProviderByRegistry(modelId: string): ProviderType | null {
+  const target = modelId.toLowerCase();
+  const entries = Object.entries(PROVIDER_MODELS) as Array<[ProviderType, Record<string, unknown>]>;
+  for (const [provider, models] of entries) {
+    const hasMatch = Object.keys(models).some(modelKey => modelKey.toLowerCase() === target);
+    if (hasMatch) {
+      return provider;
+    }
+  }
+  return null;
+}
+
+function isOpenAICodexModel(modelId: string): boolean {
+  const lowerModel = modelId.toLowerCase();
+  if (lowerModel.includes('codex')) {
+    return true;
+  }
+  // o-series models map to the Codex provider family.
+  return /^o(?:1|3|4)(?:[-\d]|$)/.test(lowerModel);
+}
+
 /**
  * Detect provider from model ID
  *
@@ -137,35 +165,51 @@ export function getModelsForProvider(provider: ProviderType) {
  * - O-series reasoning models: o1-preview, o3-mini, o4-mini
  */
 export function detectProviderFromModel(modelId: string): ProviderType {
-  const lowerModel = modelId.toLowerCase();
-
-  // Anthropic Claude models
-  if (lowerModel.includes('claude')) {
+  const normalized = modelId.trim();
+  if (!normalized) {
     return 'anthropic';
   }
 
-  // OpenAI Codex models (use Responses API with fixed instructions)
-  // Check for codex first since it could be gpt-5.2-codex
-  if (lowerModel.includes('codex')) {
-    return 'openai-codex';
+  // Explicit provider prefix has highest priority.
+  const slashIndex = normalized.indexOf('/');
+  if (slashIndex > 0) {
+    const prefix = normalized.slice(0, slashIndex).toLowerCase();
+    const unprefixedModel = normalized.slice(slashIndex + 1);
+    const mapped = PROVIDER_PREFIX_MAP[prefix];
+    if (mapped) {
+      if (mapped === 'openai' && isOpenAICodexModel(unprefixedModel)) {
+        return 'openai-codex';
+      }
+      return mapped;
+    }
   }
 
-  // OpenAI o-series reasoning models (o1, o3, o4) - use Codex provider
-  if (lowerModel.includes('o1') || lowerModel.includes('o3') || lowerModel.includes('o4')) {
-    return 'openai-codex';
+  // Exact model registry match next.
+  const registryMatch = detectProviderByRegistry(normalized);
+  if (registryMatch) {
+    if (registryMatch === 'openai' && isOpenAICodexModel(normalized)) {
+      return 'openai-codex';
+    }
+    return registryMatch;
   }
 
-  // Other OpenAI models (GPT series)
-  if (lowerModel.includes('gpt') || lowerModel.startsWith('openai/')) {
+  const lowerModel = normalized.toLowerCase();
+
+  // Family heuristics fallback.
+  if (isOpenAICodexModel(lowerModel)) {
+    return 'openai-codex';
+  }
+  if (lowerModel.startsWith('gpt') || lowerModel.includes('gpt')) {
     return 'openai';
   }
-
-  // Google Gemini models
-  if (lowerModel.includes('gemini') || lowerModel.startsWith('google/')) {
+  if (lowerModel.startsWith('gemini') || lowerModel.includes('gemini')) {
     return 'google';
   }
+  if (lowerModel.startsWith('claude') || lowerModel.includes('claude')) {
+    return 'anthropic';
+  }
 
-  // Default to Anthropic
+  // Deterministic fallback.
   return 'anthropic';
 }
 
@@ -292,7 +336,7 @@ function createGoogleProvider(config: ProviderConfig): Provider {
       accessToken: config.auth.accessToken,
       refreshToken: config.auth.refreshToken,
       expiresAt: config.auth.expiresAt,
-      endpoint: (config as any).googleEndpoint as GoogleOAuthEndpoint | undefined,
+      endpoint: config.googleEndpoint,
     } as GoogleOAuthAuth;
   } else {
     // API key authentication - fallback

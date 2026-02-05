@@ -294,6 +294,7 @@ export class TronServer {
 // =============================================================================
 
 import { getSettings } from '@infrastructure/settings/loader.js';
+import { parseEnvInteger } from '@infrastructure/settings/env-parsing.js';
 import type { ServerSettings } from '@infrastructure/settings/types.js';
 
 /**
@@ -313,18 +314,38 @@ async function main(): Promise<void> {
   const settings = getServerSettings();
 
   const config: TronServerConfig = {
-    wsPort: parseInt(process.env.TRON_WS_PORT ?? String(settings.wsPort), 10),
-    healthPort: parseInt(process.env.TRON_HEALTH_PORT ?? String(settings.healthPort), 10),
+    wsPort: parseEnvInteger(process.env.TRON_WS_PORT, {
+      name: 'TRON_WS_PORT',
+      fallback: settings.wsPort,
+      min: 1,
+      max: 65535,
+      logger,
+    }),
+    healthPort: parseEnvInteger(process.env.TRON_HEALTH_PORT, {
+      name: 'TRON_HEALTH_PORT',
+      fallback: settings.healthPort,
+      min: 1,
+      max: 65535,
+      logger,
+    }),
     host: process.env.TRON_HOST ?? settings.host,
     eventStoreDbPath: process.env.TRON_EVENT_STORE_DB,
     defaultModel: process.env.TRON_DEFAULT_MODEL ?? settings.defaultModel,
     defaultProvider: process.env.TRON_DEFAULT_PROVIDER ?? settings.defaultProvider,
-    maxConcurrentSessions: process.env.TRON_MAX_SESSIONS
-      ? parseInt(process.env.TRON_MAX_SESSIONS, 10)
-      : settings.maxConcurrentSessions,
-    heartbeatInterval: process.env.TRON_HEARTBEAT_INTERVAL
-      ? parseInt(process.env.TRON_HEARTBEAT_INTERVAL, 10)
-      : settings.heartbeatIntervalMs,
+    maxConcurrentSessions: parseEnvInteger(process.env.TRON_MAX_SESSIONS, {
+      name: 'TRON_MAX_SESSIONS',
+      fallback: settings.maxConcurrentSessions,
+      min: 1,
+      max: 10000,
+      logger,
+    }),
+    heartbeatInterval: parseEnvInteger(process.env.TRON_HEARTBEAT_INTERVAL, {
+      name: 'TRON_HEARTBEAT_INTERVAL',
+      fallback: settings.heartbeatIntervalMs,
+      min: 1000,
+      max: 600000,
+      logger,
+    }),
   };
 
   const server = new TronServer(config);

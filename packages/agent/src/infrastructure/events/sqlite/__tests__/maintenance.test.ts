@@ -18,7 +18,7 @@ describe('DatabaseMaintenance', () => {
   });
 
   afterEach(() => {
-    db.close();
+    db?.close();
   });
 
   describe('runMaintenance', () => {

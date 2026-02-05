@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useMemo } from 'react';
-import { SessionTree, CompactTree, type TreeNode } from '../tree/index.js';
+import { SessionTree, type TreeNode } from '../tree/index.js';
 import type { CachedEvent } from '../../store/event-db.js';
 import './SessionHistoryPanel.css';
 
@@ -63,7 +63,6 @@ export function SessionHistoryPanel({
   onClose,
   events,
   headEventId,
-  sessionId,
   onFork,
   isLoading = false,
 }: SessionHistoryPanelProps) {

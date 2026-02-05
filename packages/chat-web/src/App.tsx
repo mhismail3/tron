@@ -44,7 +44,6 @@ function AppContent() {
     sessionId: rpcSessionId,
     client,
     connect,
-    disconnect,
     createSession,
     deleteSession,
     resumeSession,
@@ -53,7 +52,6 @@ function AppContent() {
     switchModel,
     setSessionId: setRpcSessionId,
     onEvent,
-    error,
   } = useRpc();
 
   const persistence = useSessionPersistence();
@@ -716,13 +714,12 @@ function AppContent() {
           workspaceId: workingDirectory,
           rootEventId: null,
           headEventId: null,
-          status: 'active',
           title: workingDirectory.split('/').pop() || 'New Session',
-          model: state.currentModel,
-          provider: 'anthropic',
+          latestModel: state.currentModel,
           workingDirectory,
           createdAt: now,
           lastActivityAt: now,
+          endedAt: null,
           eventCount: 0,
           messageCount: 0,
         });
@@ -763,13 +760,12 @@ function AppContent() {
           workspaceId: workingDirectory,
           rootEventId: null,
           headEventId: null,
-          status: 'active',
           title: workingDirectory.split('/').pop() || 'New Session',
-          model: state.currentModel,
-          provider: 'anthropic',
+          latestModel: state.currentModel,
           workingDirectory,
           createdAt: now,
           lastActivityAt: now,
+          endedAt: null,
           eventCount: 0,
           messageCount: 0,
         });

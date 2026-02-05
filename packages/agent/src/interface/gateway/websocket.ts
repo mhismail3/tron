@@ -34,10 +34,26 @@ export interface ClientConnection {
   isAlive: boolean;
   sessionId?: string;
   connectedAt: Date;
-  /** P1 FIX: Track pending messages for backpressure handling */
+  /** In-flight + queued messages for bounded backpressure accounting */
   pendingMessages: number;
-  /** Maximum pending messages before dropping events */
+  /** Maximum in-flight + queued messages before applying drop policy */
   maxPendingMessages: number;
+  /** FIFO queue of outbound messages waiting to be sent */
+  sendQueue: QueuedMessage[];
+  /** True while a socket.send callback is pending */
+  isSending: boolean;
+  /** Count of dropped outbound messages */
+  droppedMessages: number;
+  /** Count of socket send callback errors */
+  sendFailures: number;
+}
+
+type OutboundMessageKind = 'event' | 'response' | 'error';
+
+interface QueuedMessage {
+  kind: OutboundMessageKind;
+  payload: string;
+  meta: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -163,30 +179,7 @@ export class TronWebSocketServer extends EventEmitter {
         continue;
       }
 
-      // P1 FIX: Backpressure check - drop events for slow clients
-      if (client.pendingMessages >= client.maxPendingMessages) {
-        logger.warn('Client message queue full, dropping event', {
-          clientId: client.id,
-          pending: client.pendingMessages,
-          eventType: event.type,
-        });
-        continue;
-      }
-
-      client.pendingMessages++;
-      client.socket.send(message, (err) => {
-        client.pendingMessages--;
-        if (err) {
-          const structured = categorizeError(err, { clientId: client.id, operation: 'send_message' });
-          logger.error('Failed to send to client', {
-            clientId: client.id,
-            code: structured.code,
-            category: LogErrorCategory.NETWORK,
-            error: structured.message,
-            retryable: structured.retryable,
-          });
-        }
-      });
+      this.enqueueOutbound(client, 'event', message, { eventType: event.type });
     }
   }
 
@@ -195,11 +188,12 @@ export class TronWebSocketServer extends EventEmitter {
    */
   sendToClient(clientId: string, event: RpcEvent): boolean {
     const client = this.clients.get(clientId);
-    if (client && client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(JSON.stringify(event));
-      return true;
+    if (!client || client.socket.readyState !== WebSocket.OPEN) {
+      return false;
     }
-    return false;
+    return this.enqueueOutbound(client, 'event', JSON.stringify(event), {
+      eventType: event.type,
+    });
   }
 
   // ===========================================================================
@@ -216,6 +210,10 @@ export class TronWebSocketServer extends EventEmitter {
       connectedAt: new Date(),
       pendingMessages: 0,
       maxPendingMessages: 100, // P1 FIX: Limit to prevent memory exhaustion
+      sendQueue: [],
+      isSending: false,
+      droppedMessages: 0,
+      sendFailures: 0,
     };
 
     this.clients.set(clientId, client);
@@ -244,6 +242,9 @@ export class TronWebSocketServer extends EventEmitter {
 
     // Handle close
     socket.on('close', (code, reason) => {
+      client.sendQueue = [];
+      client.pendingMessages = 0;
+      client.isSending = false;
       this.clients.delete(clientId);
       logger.info('Client disconnected', { clientId, code, reason: reason.toString() });
       this.emit('client_disconnected', { clientId, code, reason: reason.toString() });
@@ -332,19 +333,128 @@ export class TronWebSocketServer extends EventEmitter {
   }
 
   private sendResponse(client: ClientConnection, response: RpcResponse): void {
-    if (client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(JSON.stringify(response));
-    }
+    this.enqueueOutbound(client, 'response', JSON.stringify(response), {
+      responseId: response.id,
+    });
   }
 
   private sendError(client: ClientConnection, code: string, message: string): void {
-    if (client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(JSON.stringify({
+    this.enqueueOutbound(
+      client,
+      'error',
+      JSON.stringify({
         type: 'system.error',
         timestamp: new Date().toISOString(),
         data: { code, message },
-      }));
+      }),
+      { errorCode: code }
+    );
+  }
+
+  private enqueueOutbound(
+    client: ClientConnection,
+    kind: OutboundMessageKind,
+    payload: string,
+    meta: Record<string, unknown>
+  ): boolean {
+    if (client.socket.readyState !== WebSocket.OPEN) {
+      return false;
     }
+
+    if (client.pendingMessages >= client.maxPendingMessages) {
+      // High-priority messages can evict one queued event deterministically.
+      if (kind === 'response' || kind === 'error') {
+        const evictIndex = client.sendQueue.findIndex((message) => message.kind === 'event');
+        if (evictIndex >= 0) {
+          client.sendQueue.splice(evictIndex, 1);
+          client.droppedMessages++;
+          this.refreshPendingCount(client);
+          this.emit('client_message_dropped', {
+            clientId: client.id,
+            droppedKind: 'event',
+            incomingKind: kind,
+            reason: 'evicted_for_priority',
+            pending: client.pendingMessages,
+          });
+        } else {
+          this.dropMessage(client, kind, meta, 'queue_full_no_evictable_event');
+          return false;
+        }
+      } else {
+        this.dropMessage(client, kind, meta, 'queue_full');
+        return false;
+      }
+    }
+
+    client.sendQueue.push({ kind, payload, meta });
+    this.refreshPendingCount(client);
+    this.flushClientQueue(client);
+    return true;
+  }
+
+  private flushClientQueue(client: ClientConnection): void {
+    if (client.isSending) {
+      return;
+    }
+
+    const next = client.sendQueue.shift();
+    if (!next) {
+      this.refreshPendingCount(client);
+      return;
+    }
+
+    client.isSending = true;
+    this.refreshPendingCount(client);
+    client.socket.send(next.payload, (err) => {
+      client.isSending = false;
+      this.refreshPendingCount(client);
+      if (err) {
+        client.sendFailures++;
+        const structured = categorizeError(err, { clientId: client.id, operation: 'send_message' });
+        logger.error('Failed to send to client', {
+          clientId: client.id,
+          code: structured.code,
+          category: LogErrorCategory.NETWORK,
+          error: structured.message,
+          retryable: structured.retryable,
+          kind: next.kind,
+        });
+        this.emit('client_send_error', {
+          clientId: client.id,
+          kind: next.kind,
+          error: structured.message,
+          meta: next.meta,
+        });
+      }
+      this.flushClientQueue(client);
+    });
+  }
+
+  private refreshPendingCount(client: ClientConnection): void {
+    client.pendingMessages = client.sendQueue.length + (client.isSending ? 1 : 0);
+  }
+
+  private dropMessage(
+    client: ClientConnection,
+    kind: OutboundMessageKind,
+    meta: Record<string, unknown>,
+    reason: string
+  ): void {
+    client.droppedMessages++;
+    logger.warn('Client message queue full, dropping outbound message', {
+      clientId: client.id,
+      pending: client.pendingMessages,
+      kind,
+      reason,
+      ...meta,
+    });
+    this.emit('client_message_dropped', {
+      clientId: client.id,
+      kind,
+      reason,
+      pending: client.pendingMessages,
+      ...meta,
+    });
   }
 
   private startHeartbeat(): void {

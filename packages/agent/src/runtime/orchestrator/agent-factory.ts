@@ -39,6 +39,9 @@ import {
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
+  type SpawnSubagentResult,
+  type QueryAgentResult,
+  type WaitForAgentsResult,
   type SubagentQueryType,
   type SubAgentTracker,
   type NotifyAppResult,
@@ -90,15 +93,32 @@ export function normalizeToUnifiedAuth(auth: ServerAuth | GoogleAuth): UnifiedAu
 // Types
 // =============================================================================
 
+type SpawnSubsessionResult = SpawnSubagentResult & {
+  /** Legacy field kept for compatibility with older spawn implementations. */
+  resultSummary?: string;
+};
+
 export interface AgentFactoryConfig {
   /** Get authentication for a model (returns GoogleAuth for Google models) */
   getAuthForProvider: (model: string) => Promise<ServerAuth | GoogleAuth>;
   /** Spawn subsession callback - toolCallId included for event correlation */
-  spawnSubsession: (parentId: string, params: SpawnSubagentParams, toolCallId?: string) => Promise<any>;
+  spawnSubsession: (
+    parentId: string,
+    params: SpawnSubagentParams,
+    toolCallId?: string
+  ) => Promise<SpawnSubsessionResult>;
   /** Query subagent callback */
-  querySubagent: (sessionId: string, queryType: SubagentQueryType, limit?: number) => any;
+  querySubagent: (
+    sessionId: string,
+    queryType: SubagentQueryType,
+    limit?: number
+  ) => Promise<QueryAgentResult>;
   /** Wait for subagents callback */
-  waitForSubagents: (sessionIds: string[], mode: 'all' | 'any', timeout: number) => Promise<any>;
+  waitForSubagents: (
+    sessionIds: string[],
+    mode: 'all' | 'any',
+    timeout: number
+  ) => Promise<WaitForAgentsResult>;
   /** Forward agent event callback */
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
   /** Get SubAgentTracker for a session (for blocking SpawnAgent) */
@@ -205,7 +225,7 @@ export class AgentFactory {
     // AskUserQuestion uses async mode - no delegate needed
     // Questions are presented immediately, user answers as a new prompt
     // Build ALL tools first, then apply denial filtering at the end
-    let tools: TronTool[] = [
+    let tools: TronTool<never>[] = [
       new ReadTool({ workingDirectory }),
       new WriteTool({ workingDirectory }),
       new EditTool({ workingDirectory }),
@@ -259,7 +279,7 @@ export class AgentFactory {
         return {
           sessionId: result.sessionId || `summarizer-${Date.now()}`,
           success: result.success !== false,
-          output: result.output || result.resultSummary,
+          output: result.output || result.summary || result.resultSummary,
           error: result.error,
           tokenUsage: result.tokenUsage,
         };

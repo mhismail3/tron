@@ -9,6 +9,7 @@
  */
 
 import { Database } from 'bun:sqlite';
+import { AsyncLocalStorage } from 'async_hooks';
 import type { DatabaseConfig, DatabaseState } from './types.js';
 
 /**
@@ -50,6 +51,9 @@ export function getDefaultConfig(): { enableWAL: boolean; busyTimeout: number; c
 export class DatabaseConnection {
   private state: DatabaseState;
   private readonly dbPath: string;
+  private readonly transactionContext = new AsyncLocalStorage<boolean>();
+  private transactionQueue: Promise<void> = Promise.resolve();
+  private managedTransactionActive = false;
 
   constructor(dbPath: string, config?: Partial<DatabaseConfig>) {
     this.dbPath = dbPath;
@@ -192,25 +196,44 @@ export class DatabaseConnection {
    * Execute an async function with manual transaction control
    * Uses BEGIN/COMMIT/ROLLBACK for async operations.
    *
-   * Note: If a transaction is already in progress, executes without
-   * a new transaction to avoid nested transaction errors.
+   * Nested calls in the same async chain reuse the outer transaction.
+   * Concurrent top-level calls are serialized to avoid interleaved writes
+   * on the shared SQLite connection.
    */
   async transactionAsync<T>(fn: () => Promise<T>): Promise<T> {
-    const db = this.getDatabase();
-
-    // Check if already in a transaction
-    if (db.inTransaction) {
+    if (this.transactionContext.getStore()) {
       return fn();
     }
 
-    db.exec('BEGIN IMMEDIATE');
+    const db = this.getDatabase();
+    if (db.inTransaction && !this.managedTransactionActive) {
+      return fn();
+    }
+
+    const previous = this.transactionQueue;
+    let releaseQueue: (() => void) | undefined;
+    this.transactionQueue = new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+
+    await previous;
     try {
-      const result = await fn();
-      db.exec('COMMIT');
-      return result;
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
+      return await this.transactionContext.run(true, async () => {
+        this.managedTransactionActive = true;
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const result = await fn();
+          db.exec('COMMIT');
+          return result;
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        } finally {
+          this.managedTransactionActive = false;
+        }
+      });
+    } finally {
+      releaseQueue?.();
     }
   }
 }

@@ -95,6 +95,10 @@ This will check prerequisites, install Bun, install dependencies, build all pack
 ### Manual Setup
 
 ```bash
+# Use the pinned Node runtime for native module compatibility
+# (or use your preferred version manager with .nvmrc / .node-version)
+nvm use
+
 # Install Bun (required)
 curl -fsSL https://bun.sh/install | bash
 
@@ -108,6 +112,9 @@ bun run dev:tui
 # Or start the server for web/iOS clients
 bun run dev:server
 ```
+
+Native module note:
+- `better-sqlite3` is compiled for your current Node ABI. If you switch Node major versions, run `bun run check:native` (or just `bun run test`, which runs it automatically) to verify compatibility and auto-rebuild when needed.
 
 ### Why Bun?
 
@@ -417,6 +424,9 @@ export default async function(tool: ToolCall, result: ToolResult) {
 ### Commands
 
 ```bash
+# Verify Node/native module compatibility (auto-rebuilds better-sqlite3 on ABI mismatch)
+bun run check:native
+
 # Build all packages
 bun run build
 

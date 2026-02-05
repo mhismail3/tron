@@ -62,6 +62,8 @@ export type {
   ToolResultContentType,
   TronToolResult,
   ToolProgressCallback,
+  ToolExecutionContract,
+  ToolExecutionOptions,
   ToolExecuteFunction,
   TronTool,
 } from './tools.js';

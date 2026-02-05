@@ -82,18 +82,58 @@ export interface TronToolResult<TDetails = unknown> {
 export type ToolProgressCallback = (update: string) => void;
 
 /**
- * Tool execution function signature
- * Supports multiple call patterns for flexibility
+ * Explicit execution contract for tool invocation.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type ToolExecuteFunction<_TParams = unknown, TDetails = unknown> = (
-  ...args: any[]
-) => Promise<TronToolResult<TDetails>>;
+export type ToolExecutionContract = 'legacy' | 'contextual' | 'options';
+
+/**
+ * Structured execution options for tools that use the options contract.
+ */
+export interface ToolExecutionOptions {
+  toolCallId?: string;
+  sessionId?: string;
+  signal?: AbortSignal;
+  onProgress?: ToolProgressCallback;
+}
+
+/**
+ * Tool execution function signatures.
+ *
+ * `legacy`:
+ * - execute(params)
+ *
+ * `contextual`:
+ * - execute(toolCallId, params, signal)
+ *
+ * `options`:
+ * - execute(params, { toolCallId, sessionId, signal, onProgress? })
+ */
+export type ToolExecuteFunction<
+  TParams = never,
+  TDetails = unknown,
+> =
+  | ((params: TParams) => Promise<TronToolResult<TDetails>>)
+  | ((
+      toolCallId: string,
+      params: TParams,
+      signal: AbortSignal
+    ) => Promise<TronToolResult<TDetails>>)
+  | ((
+      params: TParams,
+      options?: ToolExecutionOptions
+    ) => Promise<TronToolResult<TDetails>>);
+
+type BivariantToolExecuteFunction<TParams, TDetails> = {
+  bivarianceHack: ToolExecuteFunction<TParams, TDetails>;
+}['bivarianceHack'];
 
 /**
  * Full Tron tool definition with execution
  */
-export interface TronTool<TParams = unknown, TDetails = unknown> extends Tool {
+export interface TronTool<
+  TParams = never,
+  TDetails = unknown,
+> extends Tool {
   /**
    * Human-readable label for UI display
    */
@@ -103,7 +143,13 @@ export interface TronTool<TParams = unknown, TDetails = unknown> extends Tool {
    * Execute the tool with the given parameters
    * Supports both (params) and (toolCallId, params, signal, onProgress) signatures
    */
-  execute: ToolExecuteFunction<TParams, TDetails>;
+  execute: BivariantToolExecuteFunction<TParams, TDetails>;
+
+  /**
+   * Explicit invocation contract used by AgentToolExecutor.
+   * If omitted, executor defaults to the `legacy` contract.
+   */
+  executionContract?: ToolExecutionContract;
 
   /**
    * Optional timeout in milliseconds

@@ -3,7 +3,7 @@
  *
  * TDD: Tests for the high-level event store API
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventStore } from '../event-store.js';
 import {
   EventId,
@@ -97,6 +97,24 @@ describe('EventStore', () => {
       const updatedSession = await store.getSession(session.id);
       expect(updatedSession?.rootEventId).toBe(rootEvent.id);
       expect(updatedSession?.headEventId).toBe(rootEvent.id);
+    });
+
+    it('should rollback session creation if root event persistence fails', async () => {
+      const backend = (store as unknown as {
+        backend: { insertEvent: (event: unknown) => Promise<void> };
+      }).backend;
+      vi.spyOn(backend, 'insertEvent').mockRejectedValueOnce(new Error('insert failed'));
+
+      await expect(
+        store.createSession({
+          workspacePath: '/rollback/project',
+          workingDirectory: '/rollback/project',
+          model: 'test',
+        })
+      ).rejects.toThrow('insert failed');
+
+      const sessions = await store.listSessions();
+      expect(sessions).toHaveLength(0);
     });
   });
 
@@ -208,6 +226,30 @@ describe('EventStore', () => {
       expect(session?.messageCount).toBe(2);
       expect(session?.totalInputTokens).toBe(100);
       expect(session?.totalOutputTokens).toBe(50);
+    });
+
+    it('linearizes implicit-parent appends under concurrency', async () => {
+      const appendCount = 12;
+      await Promise.all(
+        Array.from({ length: appendCount }, (_, i) =>
+          store.append({
+            sessionId,
+            type: 'message.user',
+            payload: { content: `parallel-${i}`, turn: i + 1 },
+          })
+        )
+      );
+
+      const events = await store.getEventsBySession(sessionId);
+      const nonRoot = events
+        .filter((event) => event.type !== 'session.start')
+        .sort((a, b) => a.sequence - b.sequence);
+
+      expect(nonRoot).toHaveLength(appendCount);
+      expect(nonRoot[0]?.parentId).toBe(rootEventId);
+      for (let i = 1; i < nonRoot.length; i++) {
+        expect(nonRoot[i]?.parentId).toBe(nonRoot[i - 1]?.id);
+      }
     });
   });
 

@@ -54,6 +54,7 @@ export interface RenderAppUIConfig {
 
 export class RenderAppUITool implements TronTool<RenderAppUIParams> {
   readonly name = 'RenderAppUI';
+  readonly executionContract = 'options' as const;
 
   /**
    * Retry tracking per canvasId to prevent infinite loops on validation failure.
@@ -132,14 +133,14 @@ presented to the user, and their response will come back as a new message.`;
   }
 
   async execute(
-    args: Record<string, unknown>,
+    args: RenderAppUIParams,
     options?: {
       toolCallId?: string;
       sessionId?: string;
       signal?: AbortSignal;
     }
   ): Promise<TronToolResult> {
-    const params = args as unknown as RenderAppUIParams;
+    const params = args;
 
     // Auto-generate canvasId if not provided
     if (!params.canvasId) {

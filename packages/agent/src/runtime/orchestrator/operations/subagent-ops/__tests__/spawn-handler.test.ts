@@ -2,9 +2,17 @@
  * @fileoverview Tests for spawn-handler
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import { createSpawnHandler, type SpawnHandler } from '../spawn-handler.js';
 import type { EventStore } from '../../../../events/event-store.js';
 import type { ActiveSession } from '../../../types.js';
+
+vi.mock('child_process', () => ({
+  spawn: vi.fn(),
+}));
+
+import { spawn as childSpawn } from 'child_process';
 
 describe('SpawnHandler', () => {
   let updateSessionSpawnInfo: Mock;
@@ -16,12 +24,12 @@ describe('SpawnHandler', () => {
   let runAgent: Mock;
   let appendEventLinearized: Mock;
   let emit: Mock;
-  let spawn: Mock;
+  let trackerSpawn: Mock;
   let handler: SpawnHandler;
   let mockParentSession: ActiveSession;
 
   beforeEach(() => {
-    spawn = vi.fn();
+    trackerSpawn = vi.fn();
     const updateStatus = vi.fn();
     const complete = vi.fn();
     const fail = vi.fn();
@@ -30,7 +38,7 @@ describe('SpawnHandler', () => {
       workingDirectory: '/parent/dir',
       model: 'claude-3-sonnet',
       subagentTracker: {
-        spawn,
+        spawn: trackerSpawn,
         updateStatus,
         complete,
         fail,
@@ -46,6 +54,18 @@ describe('SpawnHandler', () => {
     runAgent = vi.fn().mockResolvedValue(undefined);
     appendEventLinearized = vi.fn();
     emit = vi.fn();
+
+    const mockedChildSpawn = vi.mocked(childSpawn);
+    mockedChildSpawn.mockImplementation(() => {
+      const proc = new EventEmitter() as EventEmitter & {
+        stderr: PassThrough;
+        kill: Mock;
+      };
+      proc.stderr = new PassThrough();
+      proc.kill = vi.fn();
+      queueMicrotask(() => proc.emit('close', 0));
+      return proc as unknown as ReturnType<typeof childSpawn>;
+    });
 
     const mockEventStore = {
       updateSessionSpawnInfo,
@@ -176,7 +196,7 @@ describe('SpawnHandler', () => {
         maxTurns: 40,
       });
 
-      expect(spawn).toHaveBeenCalledWith(
+      expect(trackerSpawn).toHaveBeenCalledWith(
         'sess_sub_123',
         'subsession',
         'Test task',
@@ -249,7 +269,7 @@ describe('SpawnHandler', () => {
         maxTurns: 75,
       });
 
-      expect(spawn).toHaveBeenCalledWith(
+      expect(trackerSpawn).toHaveBeenCalledWith(
         result.sessionId,
         'tmux',
         'Test task',

@@ -122,8 +122,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
     return this._db!;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
-    const params = args as unknown as IntrospectParams;
+  async execute(params: IntrospectParams): Promise<TronToolResult> {
     const limit = params.limit ?? 20;
     const offset = params.offset ?? 0;
 

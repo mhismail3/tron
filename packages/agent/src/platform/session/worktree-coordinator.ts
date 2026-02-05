@@ -41,6 +41,8 @@ import {
   createIsolationPolicy,
   WorktreeLifecycle,
   createWorktreeLifecycle,
+  MergeHandler,
+  createMergeHandler,
   WorktreeRecovery,
   createWorktreeRecovery,
 } from './worktree/index.js';
@@ -64,6 +66,12 @@ export interface WorktreeCoordinatorConfig {
   preserveBranches?: boolean;
   /** Delete worktree directory after release */
   deleteWorktreeOnRelease?: boolean;
+  /**
+   * Optional event append hook.
+   * Use this to route worktree events through a higher-level linearized pipeline
+   * (for example, SessionContext-based persistence for active sessions).
+   */
+  appendEvent?: (sessionId: SessionId, type: string, payload: Record<string, unknown>) => Promise<string>;
 }
 
 export interface AcquireOptions {
@@ -94,6 +102,11 @@ interface ActiveSession {
   acquiredAt: Date;
 }
 
+type ResolvedWorktreeCoordinatorConfig =
+  Omit<Required<WorktreeCoordinatorConfig>, 'appendEvent'> & {
+    appendEvent?: WorktreeCoordinatorConfig['appendEvent'];
+  };
+
 
 // =============================================================================
 // WorktreeCoordinator Class
@@ -109,7 +122,7 @@ interface ActiveSession {
  * - All worktree operations are logged as events
  */
 export class WorktreeCoordinator {
-  private config: Required<WorktreeCoordinatorConfig>;
+  private config: ResolvedWorktreeCoordinatorConfig;
   private activeSessions: Map<string, ActiveSession> = new Map();
   private mainDirectoryOwner: string | null = null;
   private repoRoot: string | null = null;
@@ -119,6 +132,7 @@ export class WorktreeCoordinator {
   private worktreeEvents: WorktreeEvents;
   private isolationPolicy: IsolationPolicy | null = null;
   private worktreeLifecycle: WorktreeLifecycle | null = null;
+  private mergeHandler: MergeHandler | null = null;
   private worktreeRecovery: WorktreeRecovery | null = null;
 
   constructor(
@@ -132,21 +146,26 @@ export class WorktreeCoordinator {
       autoCommitOnRelease: true,
       preserveBranches: true,
       deleteWorktreeOnRelease: true,
+      appendEvent: undefined,
       ...config,
     };
 
     // Initialize handlers that don't need repo root
     this.gitExecutor = createGitExecutor();
+    const appendWorktreeEvent =
+      this.config.appendEvent ??
+      (async (sessionId: SessionId, type: string, payload: Record<string, unknown>) => {
+        await this.eventStore.append({
+          sessionId,
+          type: type as import('../../infrastructure/events/types.js').EventType,
+          payload,
+        });
+        return 'event-id';
+      });
+
     this.worktreeEvents = createWorktreeEvents({
       eventStore: {
-        append: async (sessionId, type, payload) => {
-          await this.eventStore.append({
-            sessionId,
-            type: type as import('../../infrastructure/events/types.js').EventType,
-            payload: payload as Record<string, unknown>,
-          });
-          return 'event-id';
-        },
+        append: appendWorktreeEvent,
       },
     });
   }
@@ -171,6 +190,11 @@ export class WorktreeCoordinator {
       repoRoot: this.repoRoot,
       worktreeBaseDir,
       branchPrefix: this.config.branchPrefix,
+    });
+
+    // MergeHandler
+    this.mergeHandler = createMergeHandler({
+      gitExecutor: this.gitExecutor,
     });
 
     // WorktreeRecovery
@@ -301,18 +325,20 @@ export class WorktreeCoordinator {
         path: workingDir.path,
       });
 
+      // Emit release event indicating directory was already deleted
+      await this.emitReleasedEvent(sessionId, {
+        path: workingDir.path,
+        branch: workingDir.branch,
+        finalCommit: undefined,
+        deleted: true,
+        branchPreserved: this.config.preserveBranches,
+      });
+
       // Directory already gone - just clean up internal state
       this.activeSessions.delete(sessionId as string);
       if (this.mainDirectoryOwner === (sessionId as string)) {
         this.mainDirectoryOwner = null;
       }
-
-      // Emit release event indicating directory was already deleted
-      await this.emitReleasedEvent(sessionId, {
-        finalCommit: undefined,
-        deleted: true,
-        branchPreserved: this.config.preserveBranches,
-      });
 
       // Prune any stale worktree references if we have a repo root
       if (this.repoRoot && await this.gitExecutor.pathExists(this.repoRoot)) {
@@ -365,6 +391,8 @@ export class WorktreeCoordinator {
 
       // Emit release event
       await this.emitReleasedEvent(sessionId, {
+        path: workingDir.path,
+        branch: workingDir.branch,
         finalCommit,
         deleted: workingDir.isolated && this.config.deleteWorktreeOnRelease,
         branchPreserved: this.config.preserveBranches,
@@ -659,64 +687,32 @@ export class WorktreeCoordinator {
     const workingDir = session.workingDirectory;
 
     try {
+      if (!this.repoRoot || !this.mergeHandler) {
+        throw new Error('Merge subsystem is not initialized');
+      }
+
       // Ensure everything is committed
       if (await workingDir.hasUncommittedChanges()) {
         await workingDir.commit(`Pre-merge commit for ${sessionId}`, { addAll: true });
       }
 
-      // Check for conflicts
-      const checkResult = await this.gitExecutor.execGit(
-        ['merge', '--no-commit', '--no-ff', workingDir.branch],
-        this.repoRoot!
-      );
+      await this.checkoutBranch(targetBranch);
+      const mergeOutcome = await this.applyMergeStrategy({
+        sessionId,
+        sourceWorktreePath: workingDir.path,
+        sourceBranch: workingDir.branch,
+        targetBranch,
+        strategy,
+      });
 
-      if (checkResult.exitCode !== 0) {
-        // Abort the merge attempt
-        await this.gitExecutor.execGit(['merge', '--abort'], this.repoRoot!);
+      if (!mergeOutcome.success) {
         return {
           success: false,
-          conflicts: [checkResult.stderr],
+          conflicts: mergeOutcome.conflicts,
         };
       }
 
-      // Abort the test merge
-      await this.gitExecutor.execGit(['merge', '--abort'], this.repoRoot!);
-
-      // Perform actual merge
-      let mergeCommit: string;
-      if (strategy === 'squash') {
-        await this.gitExecutor.execGit(
-          ['checkout', targetBranch],
-          this.repoRoot!
-        );
-        await this.gitExecutor.execGit(
-          ['merge', '--squash', workingDir.branch],
-          this.repoRoot!
-        );
-        const commitResult = await this.gitExecutor.execGit(
-          ['commit', '-m', `Squash merge session ${sessionId}`],
-          this.repoRoot!
-        );
-        if (commitResult.exitCode !== 0) {
-          throw new Error(commitResult.stderr);
-        }
-        const hashResult = await this.gitExecutor.execGit(['rev-parse', 'HEAD'], this.repoRoot!);
-        mergeCommit = hashResult.stdout;
-      } else {
-        await this.gitExecutor.execGit(
-          ['checkout', targetBranch],
-          this.repoRoot!
-        );
-        const mergeResult = await this.gitExecutor.execGit(
-          ['merge', '--no-ff', '-m', `Merge session ${sessionId}`, workingDir.branch],
-          this.repoRoot!
-        );
-        if (mergeResult.exitCode !== 0) {
-          throw new Error(mergeResult.stderr);
-        }
-        const hashResult = await this.gitExecutor.execGit(['rev-parse', 'HEAD'], this.repoRoot!);
-        mergeCommit = hashResult.stdout;
-      }
+      const mergeCommit = mergeOutcome.mergeCommit;
 
       // Emit merge event
       await this.emitMergedEvent(sessionId, {
@@ -750,6 +746,111 @@ export class WorktreeCoordinator {
     }
   }
 
+  private async checkoutBranch(branch: string): Promise<void> {
+    if (!this.repoRoot) {
+      throw new Error('Repository root not initialized');
+    }
+
+    const checkoutResult = await this.gitExecutor.execGit(
+      ['checkout', branch],
+      this.repoRoot
+    );
+
+    if (checkoutResult.exitCode !== 0) {
+      throw new Error(checkoutResult.stderr || `Failed to checkout branch ${branch}`);
+    }
+  }
+
+  private async applyMergeStrategy(options: {
+    sessionId: SessionId;
+    sourceWorktreePath: string;
+    sourceBranch: string;
+    targetBranch: string;
+    strategy: 'merge' | 'rebase' | 'squash';
+  }): Promise<{ success: boolean; mergeCommit?: string; conflicts?: string[] }> {
+    if (!this.repoRoot || !this.mergeHandler) {
+      throw new Error('Merge subsystem is not initialized');
+    }
+
+    if (options.strategy === 'rebase') {
+      return this.applyRebaseMerge(options);
+    }
+
+    const mergeResult = await this.mergeHandler.mergeSession(
+      this.repoRoot,
+      options.sourceBranch,
+      {
+        strategy: options.strategy,
+        commitMessage:
+          options.strategy === 'squash'
+            ? `Squash merge session ${options.sessionId}`
+            : undefined,
+      }
+    );
+
+    if (!mergeResult.success) {
+      return {
+        success: false,
+        conflicts: this.getMergeConflicts(mergeResult),
+      };
+    }
+
+    return {
+      success: true,
+      mergeCommit: mergeResult.commitHash,
+    };
+  }
+
+  private async applyRebaseMerge(options: {
+    sourceWorktreePath: string;
+    sourceBranch: string;
+    targetBranch: string;
+  }): Promise<{ success: boolean; mergeCommit?: string; conflicts?: string[] }> {
+    if (!this.repoRoot || !this.mergeHandler) {
+      throw new Error('Merge subsystem is not initialized');
+    }
+
+    const rebaseResult = await this.mergeHandler.rebase(
+      options.sourceWorktreePath,
+      options.targetBranch
+    );
+
+    if (!rebaseResult.success) {
+      return {
+        success: false,
+        conflicts: this.getMergeConflicts(rebaseResult),
+      };
+    }
+
+    const ffMergeResult = await this.gitExecutor.execGit(
+      ['merge', '--ff-only', options.sourceBranch],
+      this.repoRoot
+    );
+
+    if (ffMergeResult.exitCode !== 0) {
+      return {
+        success: false,
+        conflicts: [ffMergeResult.stderr || 'Fast-forward merge failed after rebase'],
+      };
+    }
+
+    const mergeCommit = await this.gitExecutor.getCurrentCommit(this.repoRoot);
+    return { success: true, mergeCommit };
+  }
+
+  private getMergeConflicts(mergeResult: {
+    conflicts?: string[];
+    error?: string;
+  }): string[] {
+    if (mergeResult.conflicts && mergeResult.conflicts.length > 0) {
+      return mergeResult.conflicts;
+    }
+    if (mergeResult.error) {
+      return [mergeResult.error];
+    }
+    return ['Merge failed'];
+  }
+
   // ===========================================================================
   // Event Emission (delegated to WorktreeEvents)
   // ===========================================================================
@@ -773,15 +874,18 @@ export class WorktreeCoordinator {
 
   private async emitReleasedEvent(
     sessionId: SessionId,
-    payload: { finalCommit?: string; deleted?: boolean; branchPreserved?: boolean }
+    payload: {
+      path: string;
+      branch: string;
+      finalCommit?: string;
+      deleted?: boolean;
+      branchPreserved?: boolean;
+    }
   ): Promise<void> {
     try {
-      const session = this.activeSessions.get(sessionId as string);
-      const path = session?.workingDirectory?.path ?? '';
-      const branch = session?.workingDirectory?.branch ?? '';
       await this.worktreeEvents.emitReleased(sessionId, {
-        path,
-        branch,
+        path: payload.path,
+        branch: payload.branch,
         finalCommit: payload.finalCommit,
         branchDeleted: !payload.branchPreserved,
         worktreeDeleted: payload.deleted,

@@ -100,7 +100,7 @@ function SessionListItem({ session, isSelected, onSelect }: SessionItemProps) {
         <span className="session-list-item-date">{formattedDate}</span>
       </div>
       <div className="session-list-item-meta">
-        <span className="session-list-item-model">{session.model}</span>
+        <span className="session-list-item-model">{session.latestModel}</span>
         <span className="session-list-item-separator">•</span>
         <span className="session-list-item-count">{session.messageCount} messages</span>
       </div>
@@ -164,7 +164,7 @@ export function NewSessionDialog({
 
   // Handle node click in tree
   const handleNodeClick = useCallback(
-    (nodeId: string, action: 'fork' | 'select') => {
+    (nodeId: string, _action: 'fork' | 'select') => {
       setSelectedEventId(nodeId);
     },
     []

@@ -119,6 +119,7 @@ export interface QueryAgentToolConfig {
  */
 export class QueryAgentTool implements TronTool<QueryAgentParams> {
   readonly name = 'QueryAgent';
+  readonly executionContract = 'contextual' as const;
   readonly description = `Query the status, events, logs, or output of a spawned sub-agent.
 
 Query types:
@@ -159,24 +160,24 @@ Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAge
   }
 
   async execute(
-    toolCallIdOrArgs: string | Record<string, unknown>,
-    argsOrSignal?: Record<string, unknown> | AbortSignal,
+    toolCallIdOrArgs: string | QueryAgentParams,
+    argsOrSignal?: QueryAgentParams | AbortSignal,
     _signal?: AbortSignal
   ): Promise<TronToolResult<QueryAgentResult>> {
     // Handle both old and new signatures
-    let args: Record<string, unknown>;
+    let args: QueryAgentParams;
 
     if (typeof toolCallIdOrArgs === 'string') {
       // New signature: (toolCallId, params, signal)
-      args = argsOrSignal as Record<string, unknown>;
+      args = argsOrSignal as QueryAgentParams;
     } else {
       // Old signature: (params)
       args = toolCallIdOrArgs;
     }
 
-    const sessionId = args.sessionId as string;
-    const queryType = args.queryType as SubagentQueryType;
-    const limit = args.limit as number | undefined;
+    const sessionId = args.sessionId;
+    const queryType = args.queryType;
+    const limit = args.limit;
 
     // Validate required parameters
     if (!sessionId || typeof sessionId !== 'string') {

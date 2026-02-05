@@ -307,18 +307,40 @@ export class AgentToolExecutor implements IToolExecutor {
     toolCallId: string,
     args: Record<string, unknown>
   ): Promise<TronToolResult> {
-    // Handle both old (params) and new (toolCallId, params, signal) signatures
-    if (tool.execute.length >= 3) {
-      // New signature: (toolCallId, params, signal, onProgress)
-      const signal = this.getAbortSignal() ?? new AbortController().signal;
-      return (tool.execute as (
-        id: string,
-        p: Record<string, unknown>,
-        s: AbortSignal
-      ) => Promise<TronToolResult>)(toolCallId, args, signal);
-    } else {
-      // Old signature: (params)
-      return (tool.execute as (p: Record<string, unknown>) => Promise<TronToolResult>)(args);
+    const contract = tool.executionContract ?? 'legacy';
+    const signal = this.getAbortSignal() ?? new AbortController().signal;
+
+    switch (contract) {
+      case 'contextual': {
+        const contextualExecute = tool.execute as (
+          id: string,
+          params: Record<string, unknown>,
+          abortSignal: AbortSignal
+        ) => Promise<TronToolResult>;
+        return contextualExecute.call(tool, toolCallId, args, signal);
+      }
+      case 'options': {
+        const optionsExecute = tool.execute as (
+          params: Record<string, unknown>,
+          options?: {
+            toolCallId?: string;
+            sessionId?: string;
+            signal?: AbortSignal;
+          }
+        ) => Promise<TronToolResult>;
+        return optionsExecute.call(tool, args, {
+          toolCallId,
+          sessionId: this.sessionId,
+          signal,
+        });
+      }
+      case 'legacy':
+      default: {
+        const legacyExecute = tool.execute as (
+          params: Record<string, unknown>
+        ) => Promise<TronToolResult>;
+        return legacyExecute.call(tool, args);
+      }
     }
   }
 

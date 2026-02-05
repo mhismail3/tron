@@ -240,6 +240,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       autoCommitOnRelease: config.worktree?.autoCommitOnRelease ?? true,
       deleteWorktreeOnRelease: config.worktree?.deleteWorktreeOnRelease ?? true,
       preserveBranches: config.worktree?.preserveBranches ?? true,
+      appendEvent: (sessionId, type, payload) =>
+        this.appendWorktreeEvent(sessionId, type, payload),
       ...config.worktree,
     });
 
@@ -575,6 +577,35 @@ export class EventStoreOrchestrator extends EventEmitter {
     }
     // Use SessionContext for linearized append
     active.sessionContext!.appendEventFireAndForget(type, payload, onCreated);
+  }
+
+  /**
+   * Append a worktree event, using linearized SessionContext persistence for
+   * active sessions and direct EventStore appends otherwise.
+   */
+  private async appendWorktreeEvent(
+    sessionId: SessionId,
+    type: string,
+    payload: Record<string, unknown>
+  ): Promise<string> {
+    const active = this.activeSessions.get(sessionId);
+    if (active?.sessionContext) {
+      const event = await active.sessionContext.appendEvent(
+        type as EventType,
+        payload
+      );
+      if (!event) {
+        throw new Error(`Failed to append ${type} event for active session ${sessionId}`);
+      }
+      return event.id;
+    }
+
+    const event = await this.eventStore.append({
+      sessionId,
+      type: type as EventType,
+      payload,
+    });
+    return event.id;
   }
 
   /**

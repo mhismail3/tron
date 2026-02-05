@@ -77,7 +77,7 @@ Note: Results are cached for 15 minutes. Same URL + same prompt = instant cached
     this.cache = new WebCache(config.cache);
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult<WebFetchResult>> {
+  async execute(args: WebFetchParams): Promise<TronToolResult<WebFetchResult>> {
     // Validate required parameters
     const url = args.url as string | undefined;
     const prompt = args.prompt as string | undefined;
