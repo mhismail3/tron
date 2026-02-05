@@ -85,6 +85,9 @@ struct ChatSheetContent: View {
 
         case .commandToolDetail(let data):
             CommandToolDetailSheet(data: data)
+
+        case .adaptDetail(let data):
+            AdaptDetailSheet(data: data)
         }
     }
 

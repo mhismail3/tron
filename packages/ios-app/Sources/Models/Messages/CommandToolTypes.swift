@@ -114,7 +114,8 @@ enum CommandToolRegistry {
         "spawnsubagent", "queryagent", "waitforagents",
         "renderappui",
         "todowrite",
-        "notifyapp"
+        "notifyapp",
+        "adapt"
     ]
 
     /// Check if a tool should be rendered as a command tool chip

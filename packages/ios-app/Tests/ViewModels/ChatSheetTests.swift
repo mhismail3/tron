@@ -209,6 +209,14 @@ struct ChatSheetTests {
             isResultTruncated: false
         )
 
+        let adaptData = AdaptChipData(
+            toolCallId: "adapt_tool",
+            action: .deploy,
+            status: .running,
+            resultContent: nil,
+            isError: false
+        )
+
         let sheets: [ChatSheet] = [
             .safari(URL(string: "https://example.com")!),
             .browser,
@@ -223,7 +231,8 @@ struct ChatSheetTests {
             .todoList,
             .notifyApp(notifyData),
             .thinkingDetail("content"),
-            .commandToolDetail(commandToolData)
+            .commandToolDetail(commandToolData),
+            .adaptDetail(adaptData)
         ]
 
         // Extract base ids (before any dynamic suffix)

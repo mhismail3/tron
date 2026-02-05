@@ -9,6 +9,8 @@
  * Phase 7 of orchestrator refactoring.
  */
 // Direct imports to avoid circular dependencies through index.js
+import { homedir } from 'os';
+import { join } from 'path';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { TronAgent } from '../agent/tron-agent.js';
 import type { AgentConfig } from '../agent/types.js';
@@ -33,6 +35,7 @@ import {
   BraveProvider,
   ExaProvider,
   IntrospectTool,
+  AdaptTool,
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
@@ -220,6 +223,15 @@ export class AgentFactory {
       new IntrospectTool({ dbPath: this.config.dbPath }),
     ];
 
+    // Add Adapt tool if TRON_REPO_ROOT is set and this is not a subagent
+    const repoRoot = process.env.TRON_REPO_ROOT;
+    if (!isSubagent && repoRoot) {
+      tools.push(new AdaptTool({
+        repoRoot,
+        tronHome: process.env.TRON_DATA_DIR ?? join(homedir(), '.tron'),
+      }));
+    }
+
     // Add NotifyApp tool if push notifications are configured
     if (this.config.onNotify) {
       tools.push(
@@ -335,7 +347,7 @@ export class AgentFactory {
     let effectiveDenials = toolDenials;
     if (isSubagent) {
       const subagentToolsDenial: ToolDenialConfig = {
-        tools: ['SpawnSubagent', 'QueryAgent', 'WaitForAgents'],
+        tools: ['SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'Adapt'],
       };
       // Merge with any existing denials
       if (effectiveDenials) {

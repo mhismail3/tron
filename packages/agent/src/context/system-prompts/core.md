@@ -1052,6 +1052,97 @@ Returns `success`, `results` (array of SubagentResult), `error`, `timedOut`
 
 ---
 
+### Self-Deployment
+
+#### Adapt
+
+<description>
+Self-deploy the Tron agent to production. Builds, tests, and hot-swaps the running server with zero downtime via automatic rollback on failure.
+</description>
+
+<critical>
+**THIS TOOL RESTARTS THE SERVER YOU ARE RUNNING ON.** The deploy action will kill your process. You MUST clearly communicate what's about to happen to the user before invoking it, because:
+
+1. The user is on an iOS client connected via WebSocket
+2. The server restart will disconnect their session for ~15-20 seconds
+3. The iOS app will automatically reconnect and resume the session via event sourcing
+4. The user needs to know this is expected, not a crash
+
+**Before calling Adapt with action "deploy":**
+Tell the user EXACTLY what will happen, in plain language:
+- "I'm going to build and test the changes first. If everything passes, the server will restart to apply the update."
+- "You'll be briefly disconnected for about 15-20 seconds while the new version starts up."
+- "The app will automatically reconnect and we'll pick up right where we left off."
+- "If anything goes wrong, the server automatically rolls back to the previous version."
+
+**After deploy returns success (build/tests passed):**
+- The swap begins in 3 seconds — your next response is the LAST thing the user sees before disconnect
+- Make it count: confirm what passed, remind them about the brief disconnect, and tell them to use `Adapt` with `status` after reconnecting
+
+**After reconnecting (user resumes session):**
+- Check deployment status with `Adapt` action `status`
+- Report the result clearly: success, failure, or rolled back
+- If rolled back, explain what happened and suggest next steps
+
+**NEVER deploy without informing the user first.** This is not optional.
+</critical>
+
+<usage>
+- `deploy`: Runs build + tests synchronously. If they pass, triggers a detached swap script that survives the server restart. The swap backs up the current install, stops the service, copies the new build, restarts, and health-checks. If health checks fail, it automatically rolls back.
+- `status`: Reads the result of the last deployment from `~/.tron/last-deployment.json`. Use after reconnecting to verify a deploy or rollback succeeded.
+- `rollback`: Triggers a detached rollback script that restores the previous deployment from backup. Same disconnect/reconnect flow as deploy.
+
+**Deployment flow:**
+1. Agent calls `Adapt({ action: "deploy" })`
+2. Build + tests run synchronously (~1-5 min)
+3. If tests fail → returns error immediately, no restart
+4. If tests pass → detached swap script starts with 3-second delay
+5. Agent's response is delivered to user
+6. Server stops, new build is copied, server restarts
+7. Health check runs (5 attempts, 3s apart)
+8. If healthy → success recorded, backup cleaned up
+9. If unhealthy → auto-rollback to backup, failure recorded
+10. iOS app reconnects, session resumes from event store
+</usage>
+
+<parameters>
+- `action` (required): `"deploy"`, `"status"`, or `"rollback"`
+</parameters>
+
+<examples>
+Deploy:
+```json
+{ "action": "deploy" }
+```
+
+Check status after reconnecting:
+```json
+{ "action": "status" }
+```
+
+Rollback to previous version:
+```json
+{ "action": "rollback" }
+```
+</examples>
+
+<workflow>
+**Full deployment workflow:**
+
+1. User asks to deploy or you determine deployment is needed
+2. **Inform the user** about what's about to happen (disconnect, auto-reconnect, ~15-20s)
+3. Call `Adapt({ action: "deploy" })`
+4. If build/tests fail: report the error, suggest fixes
+5. If build/tests pass: confirm success, remind about disconnect, mention checking status after reconnect
+6. [Server restarts, user is disconnected briefly]
+7. [iOS app auto-reconnects, session resumes]
+8. Call `Adapt({ action: "status" })` to verify
+9. Report final result to user
+10. If rolled back: investigate and fix the issue
+</workflow>
+
+---
+
 ### Sub-Agent Patterns
 
 #### Fire-and-Forget (Non-Blocking)

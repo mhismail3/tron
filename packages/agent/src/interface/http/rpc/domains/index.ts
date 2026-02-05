@@ -33,7 +33,6 @@
  * New Capabilities:
  * - client: Client identification and capabilities
  * - communication: Inter-agent messaging
- * - deployment: Self-deployment pipeline
  */
 
 // Core domains
@@ -66,7 +65,6 @@ export * from './tool/index.js';
 // New capability domains
 export * from './client/index.js';
 export * from './communication/index.js';
-export * from './deployment/index.js';
 
 // Re-export base utilities for backward compatibility
 export {

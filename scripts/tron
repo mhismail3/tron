@@ -402,6 +402,8 @@ create_launchd_plist() {
         <string>$(dirname "$bun_path"):/usr/local/bin:/usr/bin:/bin</string>
         <key>TRON_DATA_DIR</key>
         <string>$TRON_HOME</string>
+        <key>TRON_REPO_ROOT</key>
+        <string>$PROJECT_DIR</string>
         <key>TRON_WS_PORT</key>
         <string>$PROD_WS_PORT</string>
         <key>TRON_HEALTH_PORT</key>
@@ -717,7 +719,159 @@ cmd_dev() {
     fi
 }
 
+write_deployment_result() {
+    local status="$1"
+    local error_msg="${2:-null}"
+    local commit
+    local previous_commit
+
+    commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
+
+    if [ "$error_msg" = "null" ]; then
+        error_msg="null"
+    else
+        error_msg="\"$error_msg\""
+    fi
+
+    cat > "$TRON_HOME/last-deployment.json" << RESULT
+{
+  "status": "$status",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "commit": "$commit",
+  "previousCommit": "$previous_commit",
+  "error": $error_msg
+}
+RESULT
+}
+
+deploy_prepare() {
+    require_project_dir
+    cd "$PROJECT_DIR"
+
+    if ! run_tests; then
+        print_error "Tests failed"
+        return 1
+    fi
+
+    build_production
+    return $?
+}
+
+deploy_swap() {
+    local delay="${1:-3}"
+    local lock_file="$TRON_HOME/deploy.lock"
+
+    require_project_dir
+    require_installed
+    cd "$PROJECT_DIR"
+
+    # Write lock
+    echo "$$" > "$lock_file"
+
+    # Cleanup trap: always release lock and write result on exit
+    trap 'rm -f "$lock_file"' EXIT
+
+    sleep "$delay"
+
+    # Record previous commit
+    local previous_commit
+    previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
+
+    # Backup current installation
+    if [ -d "$INSTALL_DIR" ] && [ "$(ls -A "$INSTALL_DIR" 2>/dev/null)" ]; then
+        print_status "Backing up current installation..."
+        rm -rf "$INSTALL_DIR.bak"
+        cp -a "$INSTALL_DIR" "$INSTALL_DIR.bak"
+        if [ $? -ne 0 ]; then
+            write_deployment_result "failed" "Backup copy failed"
+            return 1
+        fi
+    fi
+
+    # Stop service
+    print_status "Stopping service..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    sleep 1
+
+    # Copy new files
+    print_status "Installing new version..."
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
+
+    # Record new commit
+    local new_commit
+    new_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo "$new_commit" > "$DEPLOYED_COMMIT_FILE"
+
+    # Start service
+    print_status "Starting service..."
+    launchctl load "$PLIST_PATH"
+
+    # Health check loop: 5 attempts, 3 seconds apart
+    local healthy=false
+    for i in 1 2 3 4 5; do
+        sleep 3
+        if curl -sf "http://localhost:$PROD_HEALTH_PORT/health" > /dev/null 2>&1; then
+            healthy=true
+            break
+        fi
+        print_warning "Health check attempt $i/5 failed..."
+    done
+
+    if $healthy; then
+        print_success "Service healthy"
+        write_deployment_result "success"
+        rm -rf "$INSTALL_DIR.bak"
+        return 0
+    fi
+
+    # Auto-rollback
+    print_error "Health check failed after 5 attempts, rolling back..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    sleep 1
+
+    if [ -d "$INSTALL_DIR.bak" ]; then
+        rm -rf "$INSTALL_DIR"/*
+        cp -r "$INSTALL_DIR.bak/"* "$INSTALL_DIR/"
+        echo "$previous_commit" > "$DEPLOYED_COMMIT_FILE"
+        launchctl load "$PLIST_PATH"
+        write_deployment_result "rolled_back" "Health check failed after 5 attempts"
+        rm -rf "$INSTALL_DIR.bak"
+        print_warning "Rolled back to previous version"
+    else
+        write_deployment_result "failed" "Health check failed and no backup available"
+        print_error "No backup available for rollback"
+    fi
+
+    return 1
+}
+
 cmd_deploy() {
+    local prepare_only=false
+    local swap_only=false
+    local delay=3
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --prepare) prepare_only=true; shift ;;
+            --swap)    swap_only=true; shift ;;
+            --delay)   delay="$2"; shift 2 ;;
+            *)         shift ;;
+        esac
+    done
+
+    if $prepare_only; then
+        deploy_prepare
+        return $?
+    fi
+
+    if $swap_only; then
+        deploy_swap "$delay"
+        return $?
+    fi
+
+    # Interactive deploy (existing flow)
     require_project_dir
     require_installed
     cd "$PROJECT_DIR"
@@ -738,50 +892,19 @@ cmd_deploy() {
         fi
     fi
 
-    # Run tests
-    if ! run_tests; then
-        print_warning "Tests failed!"
+    # Run tests + build
+    if ! deploy_prepare; then
         echo ""
         if ! confirm_action "Continue deployment anyway?"; then
             print_error "Deployment cancelled."
             exit 1
         fi
-        print_warning "Continuing deployment despite test failure..."
+        print_warning "Continuing deployment despite failure..."
+        build_production
     fi
 
-    # Build production bundle
-    build_production
-
-    # Stop service if running
-    if service_is_running; then
-        print_status "Stopping production service..."
-        launchctl unload "$PLIST_PATH" 2>/dev/null || true
-        sleep 1
-    fi
-
-    # Copy to install directory
-    print_status "Installing to $INSTALL_DIR..."
-    rm -rf "$INSTALL_DIR"/*
-    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
-    print_success "Installed to: $INSTALL_DIR"
-
-    # Record deployed commit
-    local current_commit=$(git rev-parse HEAD)
-    echo "$current_commit" > "$DEPLOYED_COMMIT_FILE"
-    print_success "Recorded deploy: ${current_commit:0:7}"
-
-    # Start service
-    print_status "Starting production service..."
-    launchctl load "$PLIST_PATH"
-    sleep 3
-
-    if service_is_running; then
-        local pid=$(get_service_pid)
-        print_success "Production service started (PID: ${pid:-unknown})"
-    else
-        print_error "Failed to start service. Check: tron logs"
-        exit 1
-    fi
+    # Swap with 0 delay (interactive = immediate)
+    deploy_swap 0
 
     echo ""
     print_success "Deploy complete!"
@@ -860,81 +983,67 @@ cmd_install() {
 }
 
 cmd_rollback() {
+    local skip_confirm=false
+    local delay=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes)   skip_confirm=true; shift ;;
+            --delay) delay="$2"; shift 2 ;;
+            *)       shift ;;
+        esac
+    done
+
     require_project_dir
     cd "$PROJECT_DIR"
 
     print_header "Rolling Back to Last Deployed State"
 
-    if [ ! -f "$DEPLOYED_COMMIT_FILE" ]; then
-        print_error "No deployed commit found. Cannot rollback."
-        echo "  Run 'tron deploy' first to record a deployment."
+    if [ ! -d "$INSTALL_DIR.bak" ]; then
+        print_error "No backup found. Cannot rollback."
+        echo "  A backup is only available immediately after a deploy."
         exit 1
     fi
 
-    local deployed_commit=$(cat "$DEPLOYED_COMMIT_FILE")
-    local deployed_msg=$(git log -1 --format="%s" "$deployed_commit" 2>/dev/null | head -c 60)
-    local current_commit=$(git rev-parse HEAD)
-
-    if [ "$current_commit" = "$deployed_commit" ]; then
-        print_success "Already at deployed commit: ${deployed_commit:0:7}"
-        exit 0
-    fi
-
-    echo "  Current:  ${current_commit:0:7} - $(git log -1 --format='%s' HEAD | head -c 50)"
-    echo "  Deployed: ${deployed_commit:0:7} - $deployed_msg"
-    echo ""
-
-    # Check for uncommitted changes
-    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-        print_warning "You have uncommitted changes that will be stashed!"
-        echo ""
-        git status --short
-        echo ""
-    fi
-
-    if ! confirm_action "Reset working directory to deployed commit?"; then
-        print_error "Aborted."
-        exit 1
-    fi
-
-    # Stash changes
-    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-        print_status "Stashing uncommitted changes..."
-        git stash push -m "Auto-stash before rollback to $deployed_commit"
-    fi
-
-    # Reset to deployed commit
-    print_status "Resetting to ${deployed_commit:0:7}..."
-    git checkout "$deployed_commit" -- .
-    git reset HEAD
-    print_success "Working directory restored"
-
-    # Build and redeploy
-    build_production
-
-    print_status "Redeploying..."
-    if service_is_running; then
-        launchctl unload "$PLIST_PATH" 2>/dev/null || true
-        sleep 1
-    fi
-
-    rm -rf "$INSTALL_DIR"/*
-    cp -r "$PROJECT_DIR/dist/prod/"* "$INSTALL_DIR/"
-
-    echo "$deployed_commit" > "$DEPLOYED_COMMIT_FILE"
-
-    if [ -f "$PLIST_PATH" ]; then
-        launchctl load "$PLIST_PATH"
-        sleep 3
-        if service_is_running; then
-            print_success "Production service restarted"
-        else
-            print_error "Failed to restart service"
+    if ! $skip_confirm; then
+        if ! confirm_action "Restore previous deployment from backup?"; then
+            print_error "Aborted."
+            exit 1
         fi
     fi
 
+    if [ "$delay" -gt 0 ]; then
+        sleep "$delay"
+    fi
+
+    local previous_commit
+    previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
+
+    # Stop service
+    print_status "Stopping service..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    sleep 1
+
+    # Restore backup
+    print_status "Restoring backup..."
+    rm -rf "$INSTALL_DIR"/*
+    cp -r "$INSTALL_DIR.bak/"* "$INSTALL_DIR/"
+
+    # Start service
+    launchctl load "$PLIST_PATH"
+    sleep 3
+
+    if service_is_running; then
+        print_success "Production service restarted from backup"
+    else
+        print_error "Failed to restart service after rollback"
+    fi
+
+    write_deployment_result "rolled_back" "Manual rollback"
+    rm -rf "$INSTALL_DIR.bak"
+
     echo ""
-    print_success "Rollback complete! Now at: ${deployed_commit:0:7}"
+    print_success "Rollback complete!"
     echo ""
 }
 
@@ -1224,9 +1333,9 @@ cmd_help() {
     echo "  setup      First-time project setup"
     echo ""
     echo "Production:"
-    echo "  deploy     Build, test, and deploy to production"
+    echo "  deploy     Build, test, and deploy to production (--prepare, --swap, --delay N)"
     echo "  install    Initial production setup (launchd + CLI)"
-    echo "  rollback   Restore previous deployment"
+    echo "  rollback   Restore previous deployment (--yes, --delay N)"
     echo "  uninstall  Remove service (preserves data)"
     echo ""
     echo "Service:"
@@ -1256,9 +1365,9 @@ ensure_tron_home
 
 case "${1:-help}" in
     dev)       shift; cmd_dev "$@" ;;
-    deploy)    cmd_deploy ;;
+    deploy)    shift; cmd_deploy "$@" ;;
     install)   cmd_install ;;
-    rollback)  cmd_rollback ;;
+    rollback)  shift; cmd_rollback "$@" ;;
     setup)     shift; cmd_setup "$@" ;;
     status)    cmd_status ;;
     start)     cmd_start ;;

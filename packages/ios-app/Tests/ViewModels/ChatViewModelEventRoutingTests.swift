@@ -600,7 +600,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             fullOutput: "Full output text here",
             totalTurns: 5,
             duration: 10000,
-            tokenUsage: nil
+            tokenUsage: nil,
+            model: nil
         )
         viewModel.handleSubagentCompletedResult(completedResult)
 

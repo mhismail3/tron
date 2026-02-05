@@ -380,6 +380,9 @@ struct ChatView: View {
                                 onCommandToolTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showCommandToolDetail(data)
                                 },
+                                onAdaptTap: { [sheetCoordinator] data in
+                                    sheetCoordinator.showAdaptDetail(data)
+                                },
                                 onSubagentResultTap: { sessionId in
                                     viewModel.subagentState.showDetails(for: sessionId)
                                 }

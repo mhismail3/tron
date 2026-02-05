@@ -14,6 +14,7 @@ struct MessageBubble: View {
     var onTodoWriteTap: (() -> Void)?
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
+    var onAdaptTap: ((AdaptChipData) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
 
     private var isUserMessage: Bool {
@@ -182,6 +183,22 @@ struct MessageBubble: View {
                     } else {
                         NotifyAppChipFallback(data: chipData) {
                             onNotifyAppTap?(chipData)
+                        }
+                    }
+                } else {
+                    // Fallback to regular tool view if parsing fails
+                    ToolResultRouter(tool: tool)
+                }
+            case "adapt":
+                // Show Adapt as deployment chip with action status
+                if let chipData = ToolResultParser.parseAdapt(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        AdaptChip(data: chipData) {
+                            onAdaptTap?(chipData)
+                        }
+                    } else {
+                        AdaptChipFallback(data: chipData) {
+                            onAdaptTap?(chipData)
                         }
                     }
                 } else {

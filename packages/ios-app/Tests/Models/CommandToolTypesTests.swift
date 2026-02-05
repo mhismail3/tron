@@ -287,6 +287,7 @@ struct CommandToolTypesTests {
         #expect(!CommandToolRegistry.isCommandTool("renderappui"))
         #expect(!CommandToolRegistry.isCommandTool("todowrite"))
         #expect(!CommandToolRegistry.isCommandTool("notifyapp"))
+        #expect(!CommandToolRegistry.isCommandTool("adapt"))
     }
 
     // MARK: - CommandToolChipData Factory Tests

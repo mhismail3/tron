@@ -10,7 +10,7 @@
  * - ui/            - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
  * - web/           - Web fetching and searching (web-fetch, web-search)
  * - communication/ - Inter-agent messaging (send-message, receive-messages)
- * - deployment/    - Self-deployment (deploy, check-deployment)
+ * - deployment/    - Self-deployment (Adapt)
  */
 
 // Filesystem tools
@@ -201,14 +201,10 @@ export {
 
 // Deployment tools
 export {
-  DeployTool,
-  type DeployToolConfig,
-  CheckDeploymentTool,
-  type CheckDeploymentToolConfig,
-  type DeployToolParams,
-  type DeployToolResult,
-  type CheckDeploymentParams,
-  type CheckDeploymentResult,
+  AdaptTool,
+  type AdaptToolConfig,
+  type AdaptParams,
+  type DeploymentRecord,
 } from './deployment/index.js';
 
 // Utility functions for token estimation and output truncation
