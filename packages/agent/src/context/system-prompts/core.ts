@@ -8,23 +8,26 @@
  * This allows editing the prompt as plain markdown without escaping.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Core Tron system prompt defining the assistant's role and capabilities.
  *
  * This is the DEFAULT prompt loaded from core.md at module initialization.
  * Users can override it by creating .tron/SYSTEM.md in their project directory.
+ *
+ * Path resolution supports both tsc build (core.md is sibling) and
+ * esbuild production bundle (core.md is in system-prompts/ subdirectory).
  */
-export const TRON_CORE_PROMPT: string = fs.readFileSync(
-  path.join(__dirname, 'core.md'),
-  'utf-8'
-);
+const coreMdPath = existsSync(join(__dirname, 'core.md'))
+  ? join(__dirname, 'core.md')
+  : join(__dirname, 'system-prompts', 'core.md');
+
+export const TRON_CORE_PROMPT: string = readFileSync(coreMdPath, 'utf-8');
 
 /**
  * Working directory template - append to system prompt

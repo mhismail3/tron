@@ -29,7 +29,7 @@ describe('BashTool Interrupt', () => {
 
       const result = await bashTool.execute(
         'test-id',
-        { command: 'sleep 10' },
+        { command: 'sleep 2' },
         abortController.signal
       );
 
@@ -44,7 +44,7 @@ describe('BashTool Interrupt', () => {
       // Start a long-running command
       const resultPromise = bashTool.execute(
         'test-id',
-        { command: 'sleep 10 && echo "done"' },
+        { command: 'sleep 2 && echo "done"' },
         abortController.signal
       );
 
@@ -66,7 +66,7 @@ describe('BashTool Interrupt', () => {
       // Start a command that produces output then sleeps
       const resultPromise = bashTool.execute(
         'test-id',
-        { command: 'echo "line 1" && echo "line 2" && sleep 10' },
+        { command: 'echo "line 1" && echo "line 2" && sleep 2' },
         abortController.signal
       );
 

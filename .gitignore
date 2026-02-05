@@ -9,6 +9,7 @@ __pycache__/
 dist/
 *.tsbuildinfo
 .turbo/
+meta.json
 
 # TypeScript build artifacts (outside dist/)
 *.js

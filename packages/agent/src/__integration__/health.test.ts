@@ -8,21 +8,12 @@ import type { EventStoreOrchestrator } from '@runtime/orchestrator/persistence/e
 
 // Mock http module
 vi.mock('http', () => ({
-  createServer: vi.fn(() => ({
-    listen: vi.fn((port, host, callback) => callback?.()),
-    close: vi.fn((callback) => callback?.()),
-    on: vi.fn(),
-  })),
+  createServer: vi.fn(),
 }));
 
 // Mock orchestrator
 const mockOrchestrator = {
-  getHealth: vi.fn().mockReturnValue({
-    status: 'healthy',
-    activeSessions: 2,
-    processingSessions: 1,
-    uptime: 1000,
-  }),
+  getHealth: vi.fn(),
 } as unknown as EventStoreOrchestrator;
 
 describe('HealthServer', () => {
@@ -30,6 +21,19 @@ describe('HealthServer', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    (http.createServer as any).mockReturnValue({
+      listen: vi.fn((port: number, host: string, callback: () => void) => callback?.()),
+      close: vi.fn((callback: () => void) => callback?.()),
+      on: vi.fn(),
+    });
+
+    mockOrchestrator.getHealth = vi.fn().mockReturnValue({
+      status: 'healthy',
+      activeSessions: 2,
+      processingSessions: 1,
+      uptime: 1000,
+    });
 
     server = new HealthServer({
       port: 8081,
@@ -93,12 +97,19 @@ describe('HealthServer - Request Handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
+    mockOrchestrator.getHealth = vi.fn().mockReturnValue({
+      status: 'healthy',
+      activeSessions: 2,
+      processingSessions: 1,
+      uptime: 1000,
+    });
+
     // Capture the request handler
     (http.createServer as any).mockImplementation((handler: any) => {
       requestHandler = handler;
       return {
-        listen: vi.fn((port, host, callback) => callback?.()),
-        close: vi.fn((callback) => callback?.()),
+        listen: vi.fn((port: number, host: string, callback: () => void) => callback?.()),
+        close: vi.fn((callback: () => void) => callback?.()),
         on: vi.fn(),
       };
     });

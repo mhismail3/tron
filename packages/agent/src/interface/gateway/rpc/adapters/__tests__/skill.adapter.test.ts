@@ -14,15 +14,11 @@ vi.mock('@capabilities/extensions/skills/index.js', async () => {
   const actual = await vi.importActual('@capabilities/extensions/skills/index.js');
   return {
     ...actual,
-    SkillRegistry: vi.fn().mockImplementation(() => ({
-      initialize: vi.fn().mockResolvedValue(undefined),
-      list: vi.fn().mockReturnValue([]),
-      listFull: vi.fn().mockReturnValue([]),
-      get: vi.fn().mockReturnValue(null),
-      size: 0,
-    })),
+    SkillRegistry: vi.fn(),
   };
 });
+
+import { SkillRegistry } from '@capabilities/extensions/skills/index.js';
 
 describe('SkillAdapter', () => {
   let mockOrchestrator: Partial<EventStoreOrchestrator>;
@@ -30,6 +26,14 @@ describe('SkillAdapter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    vi.mocked(SkillRegistry).mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      list: vi.fn().mockReturnValue([]),
+      listFull: vi.fn().mockReturnValue([]),
+      get: vi.fn().mockReturnValue(null),
+      size: 0,
+    }) as any);
 
     mockSkillTracker = {
       hasSkill: vi.fn(),

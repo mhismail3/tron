@@ -14,82 +14,35 @@ import type { EventStoreOrchestrator } from '@runtime/orchestrator/index.js';
 
 // Mock all adapter modules
 vi.mock('../adapters/session.adapter.js', () => ({
-  createSessionAdapter: vi.fn().mockReturnValue({
-    createSession: vi.fn(),
-    getSession: vi.fn(),
-    resumeSession: vi.fn(),
-    listSessions: vi.fn(),
-    deleteSession: vi.fn(),
-    forkSession: vi.fn(),
-    switchModel: vi.fn(),
-  }),
+  createSessionAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/agent.adapter.js', () => ({
-  createAgentAdapter: vi.fn().mockReturnValue({
-    prompt: vi.fn(),
-    abort: vi.fn(),
-    getState: vi.fn(),
-  }),
+  createAgentAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/transcription.adapter.js', () => ({
-  createTranscriptionAdapter: vi.fn().mockReturnValue({
-    transcribeAudio: vi.fn(),
-    listModels: vi.fn(),
-  }),
+  createTranscriptionAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/event-store.adapter.js', () => ({
-  createEventStoreAdapter: vi.fn().mockReturnValue({
-    getEventHistory: vi.fn(),
-    getEventsSince: vi.fn(),
-    appendEvent: vi.fn(),
-    getTreeVisualization: vi.fn(),
-    getBranches: vi.fn(),
-    getSubtree: vi.fn(),
-    getAncestors: vi.fn(),
-    searchContent: vi.fn(),
-    deleteMessage: vi.fn(),
-  }),
+  createEventStoreAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/worktree.adapter.js', () => ({
-  createWorktreeAdapter: vi.fn().mockReturnValue({
-    getWorktreeStatus: vi.fn(),
-    commitWorktree: vi.fn(),
-    mergeWorktree: vi.fn(),
-    listWorktrees: vi.fn(),
-  }),
+  createWorktreeAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/context.adapter.js', () => ({
-  createContextAdapter: vi.fn().mockReturnValue({
-    getContextSnapshot: vi.fn(),
-    getDetailedContextSnapshot: vi.fn(),
-    shouldCompact: vi.fn(),
-    previewCompaction: vi.fn(),
-    confirmCompaction: vi.fn(),
-    canAcceptTurn: vi.fn(),
-    clearContext: vi.fn(),
-  }),
+  createContextAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/browser.adapter.js', () => ({
-  createBrowserAdapter: vi.fn().mockReturnValue({
-    startStream: vi.fn(),
-    stopStream: vi.fn(),
-    getStatus: vi.fn(),
-  }),
+  createBrowserAdapter: vi.fn(),
 }));
 
 vi.mock('../adapters/skill.adapter.js', () => ({
-  createSkillAdapter: vi.fn().mockReturnValue({
-    listSkills: vi.fn(),
-    getSkill: vi.fn(),
-    refreshSkills: vi.fn(),
-    removeSkill: vi.fn(),
-  }),
+  createSkillAdapter: vi.fn(),
 }));
 
 // Import mocked functions to verify calls
@@ -111,6 +64,70 @@ describe('RpcContextFactory', () => {
     mockOrchestrator = {
       getActiveSession: vi.fn(),
     } as unknown as EventStoreOrchestrator;
+
+    // Re-establish mock return values after restoreMocks resets them
+    vi.mocked(createSessionAdapter).mockReturnValue({
+      createSession: vi.fn(),
+      getSession: vi.fn(),
+      resumeSession: vi.fn(),
+      listSessions: vi.fn(),
+      deleteSession: vi.fn(),
+      forkSession: vi.fn(),
+      switchModel: vi.fn(),
+    } as any);
+
+    vi.mocked(createAgentAdapter).mockReturnValue({
+      prompt: vi.fn(),
+      abort: vi.fn(),
+      getState: vi.fn(),
+    } as any);
+
+    vi.mocked(createTranscriptionAdapter).mockReturnValue({
+      transcribeAudio: vi.fn(),
+      listModels: vi.fn(),
+    } as any);
+
+    vi.mocked(createEventStoreAdapter).mockReturnValue({
+      getEventHistory: vi.fn(),
+      getEventsSince: vi.fn(),
+      appendEvent: vi.fn(),
+      getTreeVisualization: vi.fn(),
+      getBranches: vi.fn(),
+      getSubtree: vi.fn(),
+      getAncestors: vi.fn(),
+      searchContent: vi.fn(),
+      deleteMessage: vi.fn(),
+    } as any);
+
+    vi.mocked(createWorktreeAdapter).mockReturnValue({
+      getWorktreeStatus: vi.fn(),
+      commitWorktree: vi.fn(),
+      mergeWorktree: vi.fn(),
+      listWorktrees: vi.fn(),
+    } as any);
+
+    vi.mocked(createContextAdapter).mockReturnValue({
+      getContextSnapshot: vi.fn(),
+      getDetailedContextSnapshot: vi.fn(),
+      shouldCompact: vi.fn(),
+      previewCompaction: vi.fn(),
+      confirmCompaction: vi.fn(),
+      canAcceptTurn: vi.fn(),
+      clearContext: vi.fn(),
+    } as any);
+
+    vi.mocked(createBrowserAdapter).mockReturnValue({
+      startStream: vi.fn(),
+      stopStream: vi.fn(),
+      getStatus: vi.fn(),
+    } as any);
+
+    vi.mocked(createSkillAdapter).mockReturnValue({
+      listSkills: vi.fn(),
+      getSkill: vi.fn(),
+      refreshSkills: vi.fn(),
+      removeSkill: vi.fn(),
+    } as any);
   });
 
   describe('createRpcContext', () => {

@@ -33,6 +33,7 @@ export default defineConfig({
     },
     testTimeout: 30000,
     hookTimeout: 10000,
+    restoreMocks: true,
     reporters: ['verbose'],
     pool: 'threads',
     poolOptions: {

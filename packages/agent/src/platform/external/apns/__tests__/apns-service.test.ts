@@ -10,7 +10,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import type { APNSConfig, APNSNotification } from '../types.js';
 
 // Track mock http2 connect behavior
@@ -116,18 +118,20 @@ const MOCK_CONFIG: APNSConfig = {
 
 describe('loadAPNSConfig', () => {
   const originalEnv = process.env.HOME;
-  const mockHome = '/tmp/test-home';
-  const configPath = path.join(mockHome, '.tron', 'mods', 'apns', 'config.json');
-  const keyPath = path.join(mockHome, '.tron', 'mods', 'apns', 'AuthKey_ABCD1234EF.p8');
+  let mockHome: string;
+  let configPath: string;
+  let keyPath: string;
 
   beforeEach(() => {
+    mockHome = path.join(os.tmpdir(), `apns-test-${randomUUID()}`);
+    configPath = path.join(mockHome, '.tron', 'mods', 'apns', 'config.json');
+    keyPath = path.join(mockHome, '.tron', 'mods', 'apns', 'AuthKey_ABCD1234EF.p8');
     process.env.HOME = mockHome;
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     process.env.HOME = originalEnv;
-    // Clean up test files
     try {
       fs.rmSync(mockHome, { recursive: true, force: true });
     } catch {
@@ -228,11 +232,14 @@ describe('loadAPNSConfig', () => {
 
 describe('createAPNSService', () => {
   const originalEnv = process.env.HOME;
-  const mockHome = '/tmp/test-home-service';
-  const configPath = path.join(mockHome, '.tron', 'mods', 'apns', 'config.json');
-  const keyPath = path.join(mockHome, '.tron', 'mods', 'apns', 'AuthKey_ABCD1234EF.p8');
+  let mockHome: string;
+  let configPath: string;
+  let keyPath: string;
 
   beforeEach(() => {
+    mockHome = path.join(os.tmpdir(), `apns-svc-test-${randomUUID()}`);
+    configPath = path.join(mockHome, '.tron', 'mods', 'apns', 'config.json');
+    keyPath = path.join(mockHome, '.tron', 'mods', 'apns', 'AuthKey_ABCD1234EF.p8');
     process.env.HOME = mockHome;
     vi.clearAllMocks();
   });
@@ -275,16 +282,16 @@ describe('createAPNSService', () => {
 });
 
 describe('APNSService', () => {
-  const mockHome = '/tmp/test-home-apns';
-  const keyPath = path.join(mockHome, 'test-key.p8');
+  let mockHome: string;
+  let keyPath: string;
 
   beforeEach(() => {
+    mockHome = path.join(os.tmpdir(), `apns-svc-inst-test-${randomUUID()}`);
+    keyPath = path.join(mockHome, 'test-key.p8');
     vi.clearAllMocks();
-    // Reset mock behavior
     mockHttp2ConnectBehavior = 'success';
     mockHttp2Response = { status: 200 };
     mockConnectCallback = null;
-    // Create test key file
     fs.mkdirSync(mockHome, { recursive: true });
     fs.writeFileSync(keyPath, MOCK_PRIVATE_KEY);
   });

@@ -262,6 +262,7 @@ describe('TronDeploymentController', () => {
 
   describe('history management', () => {
     it('should limit history to maxHistoryEntries', async () => {
+      vi.useFakeTimers();
       const smallHistoryController = new TronDeploymentController({
         ...mockConfig,
         maxHistoryEntries: 3,
@@ -272,13 +273,16 @@ describe('TronDeploymentController', () => {
         json: async () => ({ status: 'ok' }),
       } as Response));
 
-      // Do 5 deployments
+      // Do 5 deployments (fake timers make the 1s swap delay instant)
       for (let i = 0; i < 5; i++) {
-        await smallHistoryController.deploy(defaultOptions);
+        const promise = smallHistoryController.deploy(defaultOptions);
+        await vi.advanceTimersByTimeAsync(2000);
+        await promise;
       }
 
       const status = smallHistoryController.getStatus();
       expect(status.history).toHaveLength(3);
+      vi.useRealTimers();
     });
   });
 

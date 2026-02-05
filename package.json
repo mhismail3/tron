@@ -9,7 +9,6 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "./scripts/init-tron-home.sh",
     "setup": "./scripts/tron setup",
     "build": "bun run --cwd packages/agent build && bun run --cwd packages/tui build && bun run --cwd packages/chat-web build",
     "test": "vitest run && cd packages/chat-web && bun run test",
@@ -21,7 +20,7 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint packages/*/src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf packages/*/dist packages/*/.turbo packages/*/tsconfig*.tsbuildinfo node_modules/.cache dist && rm -f bun.lockb",
+    "clean": "rm -rf packages/*/dist packages/*/.turbo packages/*/tsconfig*.tsbuildinfo node_modules/.cache dist && rm -f bun.lock",
     "dev": "./scripts/tron dev",
     "dev:server": "cd packages/agent && bun run dev",
     "dev:tui": "cd packages/tui && bun run dev",
@@ -30,12 +29,6 @@
     "logout": "cd packages/tui && bun run logout",
     "auth": "cd packages/tui && bun run auth",
     "tron": "./scripts/tron",
-    "tron:status": "./scripts/tron status",
-    "tron:start": "./scripts/tron start",
-    "tron:stop": "./scripts/tron stop",
-    "tron:dev": "./scripts/tron dev",
-    "tron:deploy": "./scripts/tron deploy",
-    "tron:install": "./scripts/tron install",
     "deploy": "./scripts/tron deploy"
   },
   "devDependencies": {
@@ -57,7 +50,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/tron.git"
+    "url": ""
   },
   "keywords": [
     "ai",

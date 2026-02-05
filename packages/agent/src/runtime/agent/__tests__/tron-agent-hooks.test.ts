@@ -15,11 +15,25 @@ vi.mock('@llm/providers/index.js', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    createProvider: vi.fn().mockImplementation(() => ({
+    createProvider: vi.fn(),
+    detectProviderFromModel: vi.fn(),
+  };
+});
+
+import { createProvider, detectProviderFromModel } from '@llm/providers/index.js';
+
+describe('TronAgent Lifecycle Hooks', () => {
+  let config: AgentConfig;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    vi.mocked(detectProviderFromModel).mockReturnValue('anthropic' as any);
+    vi.mocked(createProvider).mockImplementation(() => ({
       id: 'anthropic',
       model: 'claude-sonnet-4-20250514',
       stream: vi.fn().mockImplementation(async function* () {
-        // Simulate proper stream events that the stream processor expects
         yield { type: 'start' };
         yield { type: 'text_start' };
         yield { type: 'text_delta', delta: 'Hello!' };
@@ -34,17 +48,7 @@ vi.mock('@llm/providers/index.js', async (importOriginal) => {
           usage: { inputTokens: 100, outputTokens: 10 },
         };
       }),
-    })),
-    detectProviderFromModel: vi.fn().mockReturnValue('anthropic'),
-  };
-});
-
-describe('TronAgent Lifecycle Hooks', () => {
-  let config: AgentConfig;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    }) as any);
 
     config = {
       provider: {

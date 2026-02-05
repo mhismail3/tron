@@ -8,7 +8,7 @@
  * - Streaming responses via Responses API
  */
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { AssistantMessage, Context, StreamEvent } from '@core/types/index.js';
@@ -35,9 +35,14 @@ const logger = createLogger('openai');
  * Load system instructions from markdown file.
  * The ChatGPT backend API requires an instructions field - it cannot be omitted.
  * ChatGPT OAuth validates instructions EXACTLY - we cannot modify them at all.
+ *
+ * Path resolution supports both tsc build (../prompts/) and
+ * esbuild production bundle (./prompts/).
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const INSTRUCTIONS_PATH = join(__dirname, '..', 'prompts', 'codex-instructions.md');
+const INSTRUCTIONS_PATH = existsSync(join(__dirname, '..', 'prompts', 'codex-instructions.md'))
+  ? join(__dirname, '..', 'prompts', 'codex-instructions.md')
+  : join(__dirname, 'prompts', 'codex-instructions.md');
 const DEFAULT_INSTRUCTIONS = readFileSync(INSTRUCTIONS_PATH, 'utf-8');
 
 // =============================================================================
