@@ -165,7 +165,6 @@ private struct FamilySection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                     .foregroundStyle(.white.opacity(0.4))
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
             .padding(10)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
