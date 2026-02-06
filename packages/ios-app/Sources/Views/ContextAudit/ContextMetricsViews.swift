@@ -65,7 +65,7 @@ struct ContextUsageGaugeView: View {
             VStack(spacing: 12) {
                 // Header
                 HStack {
-                    Image(systemName: "brain.head.profile")
+                    Image(systemName: "brain.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(usageColor)
 

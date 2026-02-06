@@ -43,7 +43,7 @@ struct ReasoningLevelPicker: View {
         switch level.lowercased() {
         case "low": return "hare"
         case "medium": return "brain"
-        case "high": return "brain.head.profile"
+        case "high": return "brain.fill"
         case "xhigh": return "sparkles"
         case "max": return "flame"
         default: return "brain"

@@ -1,8 +1,8 @@
 /**
  * @fileoverview System Tools
  *
- * Tools for executing system commands and database introspection.
+ * Tools for executing system commands and database recall.
  */
 
 export { BashTool, getDefaultBashSettings, type BashToolConfig } from './bash.js';
-export { IntrospectTool, type IntrospectToolConfig, type IntrospectParams } from './introspect.js';
+export { RememberTool, type RememberToolConfig, type RememberParams } from './remember.js';

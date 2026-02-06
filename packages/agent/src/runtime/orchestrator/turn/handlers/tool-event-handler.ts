@@ -67,7 +67,7 @@ function truncateWithBlobRef(content: string, maxLength: number, blobId: string)
   const truncated = content.slice(0, maxLength);
   const remaining = content.length - maxLength;
 
-  return `${truncated}\n\n... [truncated ${remaining.toLocaleString()} bytes → ${blobId}]\n[Use Introspect tool with action "read_blob" and blob_id "${blobId}" to retrieve full content]`;
+  return `${truncated}\n\n... [truncated ${remaining.toLocaleString()} bytes → ${blobId}]\n[Use Remember tool with action "read_blob" and blob_id "${blobId}" to retrieve full content]`;
 }
 
 /**

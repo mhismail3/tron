@@ -1,10 +1,12 @@
 /**
- * @fileoverview Introspect Tool
+ * @fileoverview Remember Tool
  *
- * Allows the agent to explore its own database for debugging, self-analysis,
- * and retrieving stored content (e.g., offloaded tool results).
+ * The agent's memory recall and self-analysis tool. Queries the internal
+ * event database to remember past work, retrieve stored content, and
+ * debug session behavior.
  *
  * Actions:
+ * - memory: Recall past work from memory ledger entries
  * - schema: List tables and columns
  * - sessions: List recent sessions
  * - session: Get session details
@@ -20,18 +22,20 @@ import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import type { TronTool, TronToolResult } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
-const logger = createLogger('tool:introspect');
+const logger = createLogger('tool:remember');
+
+const MAX_LIMIT = 500;
 
 // =============================================================================
 // Types
 // =============================================================================
 
-export interface IntrospectToolConfig {
+export interface RememberToolConfig {
   /** Path to the SQLite database */
   dbPath: string;
 }
 
-export interface IntrospectParams {
+export interface RememberParams {
   action: string;
   session_id?: string;
   blob_id?: string;
@@ -46,33 +50,33 @@ export interface IntrospectParams {
 // Implementation
 // =============================================================================
 
-export class IntrospectTool implements TronTool<IntrospectParams> {
-  readonly name = 'Introspect';
+export class RememberTool implements TronTool<RememberParams> {
+  readonly name = 'Remember';
 
-  readonly description = `Explore the agent's internal database for debugging and analysis.
+  readonly description = `Your memory and self-analysis tool. Query your internal database to recall past work, review session history, and retrieve stored content.
 
 Available actions:
-- schema: List tables and their columns
-- sessions: List recent sessions
+- memory: Recall past work from structured memory ledger entries — what you did, what you learned, files changed, decisions made. Use this to build on previous sessions.
+- sessions: List recent sessions (title, tokens, cost)
 - session: Get details for a specific session
-- events: Get events (filter by session_id, type, turn)
+- events: Get raw events (filter by session_id, type, turn)
 - messages: Get conversation messages for a session
 - tools: Get tool calls and results for a session
 - logs: Get application logs
 - stats: Get database statistics
+- schema: List database tables and columns
 - read_blob: Read stored content from blob storage
-- memory: Get memory ledger entries (structured summaries of past work)
 
-Use read_blob to retrieve full content when tool results reference a blob_id.
-Use memory to recall what was done in previous sessions.`;
+Use memory to recall what was done in previous sessions — patterns, lessons, and decisions carry forward.
+Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
   readonly parameters = {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string' as const,
-        enum: ['schema', 'sessions', 'session', 'events', 'messages', 'tools', 'logs', 'stats', 'read_blob', 'memory'],
-        description: 'The introspection action to perform',
+        enum: ['memory', 'sessions', 'session', 'events', 'messages', 'tools', 'logs', 'stats', 'schema', 'read_blob'],
+        description: 'The action to perform',
       },
       session_id: {
         type: 'string' as const,
@@ -84,7 +88,7 @@ Use memory to recall what was done in previous sessions.`;
       },
       type: {
         type: 'string' as const,
-        description: 'Filter events by type (e.g., "message.user", "tool.call")',
+        description: 'Filter events by type (e.g., "message.user", "memory.ledger")',
       },
       turn: {
         type: 'number' as const,
@@ -97,7 +101,7 @@ Use memory to recall what was done in previous sessions.`;
       },
       limit: {
         type: 'number' as const,
-        description: 'Maximum results to return (default: 20)',
+        description: 'Maximum results to return (default: 20, max: 500)',
       },
       offset: {
         type: 'number' as const,
@@ -107,13 +111,13 @@ Use memory to recall what was done in previous sessions.`;
     required: ['action'] as string[],
   };
 
-  readonly label = 'Introspect Database';
+  readonly label = 'Remember';
   readonly category = 'custom' as const;
 
   private dbPath: string;
   private _db: Database | null = null;
 
-  constructor(config: IntrospectToolConfig) {
+  constructor(config: RememberToolConfig) {
     this.dbPath = config.dbPath;
   }
 
@@ -124,12 +128,22 @@ Use memory to recall what was done in previous sessions.`;
     return this._db!;
   }
 
-  async execute(params: IntrospectParams): Promise<TronToolResult> {
-    const limit = params.limit ?? 20;
-    const offset = params.offset ?? 0;
+  close(): void {
+    if (this._db) {
+      this._db.close();
+      this._db = null;
+    }
+  }
+
+  async execute(params: RememberParams): Promise<TronToolResult> {
+    const limit = Math.max(1, Math.min(params.limit ?? 20, MAX_LIMIT));
+    const offset = Math.max(0, params.offset ?? 0);
 
     try {
       switch (params.action) {
+        case 'memory':
+          return this.getMemoryLedger(params.session_id, limit, offset);
+
         case 'schema':
           return this.getSchema();
 
@@ -169,14 +183,11 @@ Use memory to recall what was done in previous sessions.`;
           }
           return this.readBlob(params.blob_id);
 
-        case 'memory':
-          return this.getMemoryLedger(params.session_id, limit, offset);
-
         default:
           return { content: `Unknown action: ${params.action}`, isError: true };
       }
     } catch (error) {
-      logger.error('Introspect tool error', { action: params.action, error });
+      logger.error('Remember tool error', { action: params.action, error });
       return {
         content: `Error: ${error instanceof Error ? error.message : String(error)}`,
         isError: true,
@@ -185,7 +196,78 @@ Use memory to recall what was done in previous sessions.`;
   }
 
   // ===========================================================================
-  // Action Implementations
+  // Memory — the primary recall action
+  // ===========================================================================
+
+  private getMemoryLedger(
+    sessionId: string | undefined,
+    limit: number,
+    offset: number
+  ): TronToolResult {
+    let query = `
+      SELECT id, session_id, timestamp, payload
+      FROM events
+      WHERE type = 'memory.ledger'
+    `;
+    const params: SQLQueryBindings[] = [];
+
+    if (sessionId) {
+      query += ` AND (session_id = ? OR session_id LIKE ?)`;
+      params.push(sessionId, `${sessionId}%`);
+    }
+
+    query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      id: string;
+      session_id: string;
+      timestamp: string;
+      payload: string;
+    }>;
+
+    if (rows.length === 0) {
+      return { content: 'No memory ledger entries found', isError: false };
+    }
+
+    const lines = ['Memory Ledger:', ''];
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload);
+        lines.push(`[${row.timestamp}] ${payload.title ?? 'Untitled'}`);
+        lines.push(`  Session: ${row.session_id}`);
+        lines.push(`  Type: ${payload.entryType ?? '?'} | Status: ${payload.status ?? '?'}`);
+        if (payload.input) lines.push(`  Request: ${payload.input}`);
+        if (Array.isArray(payload.actions) && payload.actions.length > 0) {
+          lines.push(`  Actions: ${payload.actions.join('; ')}`);
+        }
+        if (Array.isArray(payload.files) && payload.files.length > 0) {
+          const fileStrs = payload.files.map((f: Record<string, unknown>) =>
+            `${f.op ?? '?'}:${f.path ?? '?'}`
+          );
+          lines.push(`  Files: ${fileStrs.join(', ')}`);
+        }
+        if (Array.isArray(payload.decisions) && payload.decisions.length > 0) {
+          for (const d of payload.decisions) {
+            if (d && typeof d === 'object') {
+              lines.push(`  Decision: ${(d as Record<string, unknown>).choice ?? '?'} — ${(d as Record<string, unknown>).reason ?? ''}`);
+            }
+          }
+        }
+        if (Array.isArray(payload.lessons) && payload.lessons.length > 0) {
+          lines.push(`  Lessons: ${payload.lessons.join('; ')}`);
+        }
+      } catch {
+        lines.push(`[${row.timestamp}] (could not parse payload)`);
+      }
+      lines.push('');
+    }
+
+    return { content: lines.join('\n'), isError: false };
+  }
+
+  // ===========================================================================
+  // Schema
   // ===========================================================================
 
   private getSchema(): TronToolResult {
@@ -198,7 +280,7 @@ Use memory to recall what was done in previous sessions.`;
     for (const { name } of tables) {
       if (name.startsWith('sqlite_') || name.endsWith('_fts')) continue;
 
-      const columns = this.db.prepare(`PRAGMA table_info(${name})`).all() as Array<{
+      const columns = this.db.prepare(`PRAGMA table_info("${name.replace(/"/g, '""')}")`).all() as Array<{
         name: string;
         type: string;
       }>;
@@ -219,6 +301,10 @@ Use memory to recall what was done in previous sessions.`;
 
     return { content: lines.join('\n'), isError: false };
   }
+
+  // ===========================================================================
+  // Sessions
+  // ===========================================================================
 
   private listSessions(limit: number, offset: number): TronToolResult {
     const rows = this.db
@@ -257,8 +343,11 @@ Use memory to recall what was done in previous sessions.`;
     return { content: lines.join('\n'), isError: false };
   }
 
+  // ===========================================================================
+  // Session detail
+  // ===========================================================================
+
   private getSession(sessionId: string): TronToolResult {
-    // Support prefix matching
     const row = this.db
       .prepare(
         `SELECT s.*, w.path as workspace_path
@@ -282,6 +371,10 @@ Use memory to recall what was done in previous sessions.`;
 
     return { content: lines.join('\n'), isError: false };
   }
+
+  // ===========================================================================
+  // Events
+  // ===========================================================================
 
   private getEvents(
     sessionId: string | undefined,
@@ -352,6 +445,10 @@ Use memory to recall what was done in previous sessions.`;
     return { content: lines.join('\n'), isError: false };
   }
 
+  // ===========================================================================
+  // Messages
+  // ===========================================================================
+
   private getMessages(sessionId: string, limit: number): TronToolResult {
     const rows = this.db
       .prepare(
@@ -385,8 +482,8 @@ Use memory to recall what was done in previous sessions.`;
         if (typeof content === 'string') {
           lines.push(`  ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}`);
         } else if (Array.isArray(content)) {
-          const textBlocks = content.filter((b: { type: string }) => b.type === 'text');
-          const text = textBlocks.map((b: { text: string }) => b.text).join(' ');
+          const textBlocks = content.filter((b: Record<string, unknown>) => b?.type === 'text');
+          const text = textBlocks.map((b: Record<string, unknown>) => String(b?.text ?? '')).join(' ');
           lines.push(`  ${text.slice(0, 200)}${text.length > 200 ? '...' : ''}`);
         }
       } catch {
@@ -397,6 +494,10 @@ Use memory to recall what was done in previous sessions.`;
 
     return { content: lines.join('\n'), isError: false };
   }
+
+  // ===========================================================================
+  // Tool calls
+  // ===========================================================================
 
   private getToolCalls(sessionId: string, limit: number): TronToolResult {
     const rows = this.db
@@ -448,6 +549,10 @@ Use memory to recall what was done in previous sessions.`;
 
     return { content: lines.join('\n'), isError: false };
   }
+
+  // ===========================================================================
+  // Logs
+  // ===========================================================================
 
   private getLogs(
     sessionId: string | undefined,
@@ -509,95 +614,50 @@ Use memory to recall what was done in previous sessions.`;
     return { content: lines.join('\n'), isError: false };
   }
 
+  // ===========================================================================
+  // Stats
+  // ===========================================================================
+
   private getStats(): TronToolResult {
-    const stats = {
-      sessions: (this.db.prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number }).count,
-      events: (this.db.prepare('SELECT COUNT(*) as count FROM events').get() as { count: number }).count,
-      blobs: (this.db.prepare('SELECT COUNT(*) as count FROM blobs').get() as { count: number }).count,
-      blobSize: (this.db.prepare('SELECT COALESCE(SUM(size_original), 0) as size FROM blobs').get() as { size: number }).size,
-      totalCost: (this.db.prepare('SELECT COALESCE(SUM(total_cost), 0) as cost FROM sessions').get() as { cost: number }).cost,
+    const count = (table: string): number => {
+      try {
+        return (this.db.prepare(`SELECT COUNT(*) as count FROM "${table.replace(/"/g, '""')}"`).get() as { count: number }).count;
+      } catch {
+        return 0;
+      }
     };
 
-    let logCount = 0;
+    const sessions = count('sessions');
+    const events = count('events');
+    const blobs = count('blobs');
+    const logCount = count('logs');
+
+    let blobSize = 0;
+    let totalCost = 0;
     try {
-      logCount = (this.db.prepare('SELECT COUNT(*) as count FROM logs').get() as { count: number }).count;
-    } catch {
-      // logs table may not exist
-    }
+      blobSize = (this.db.prepare('SELECT COALESCE(SUM(size_original), 0) as size FROM blobs').get() as { size: number }).size;
+    } catch { /* table may not exist */ }
+    try {
+      totalCost = (this.db.prepare('SELECT COALESCE(SUM(total_cost), 0) as cost FROM sessions').get() as { cost: number }).cost;
+    } catch { /* table may not exist */ }
 
     const lines = [
       'Database Statistics:',
       '',
-      `Sessions: ${stats.sessions.toLocaleString()}`,
-      `Events: ${stats.events.toLocaleString()}`,
+      `Sessions: ${sessions.toLocaleString()}`,
+      `Events: ${events.toLocaleString()}`,
       `Logs: ${logCount.toLocaleString()}`,
-      `Blobs: ${stats.blobs.toLocaleString()}`,
-      `Blob storage: ${(stats.blobSize / 1024).toFixed(1)} KB`,
-      `Total cost: $${stats.totalCost.toFixed(4)}`,
+      `Blobs: ${blobs.toLocaleString()}`,
+      `Blob storage: ${(blobSize / 1024).toFixed(1)} KB`,
+      `Total cost: $${totalCost.toFixed(4)}`,
     ];
 
     return { content: lines.join('\n'), isError: false };
   }
 
-  private getMemoryLedger(
-    sessionId: string | undefined,
-    limit: number,
-    offset: number
-  ): TronToolResult {
-    let query = `
-      SELECT id, session_id, timestamp, substr(payload, 1, 2000) as payload
-      FROM events
-      WHERE type = 'memory.ledger'
-    `;
-    const params: SQLQueryBindings[] = [];
-
-    if (sessionId) {
-      query += ` AND (session_id = ? OR session_id LIKE ?)`;
-      params.push(sessionId, `${sessionId}%`);
-    }
-
-    query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
-    params.push(limit, offset);
-
-    const rows = this.db.prepare(query).all(...params) as Array<{
-      id: string;
-      session_id: string;
-      timestamp: string;
-      payload: string;
-    }>;
-
-    if (rows.length === 0) {
-      return { content: 'No memory ledger entries found', isError: false };
-    }
-
-    const lines = ['Memory Ledger:', ''];
-    for (const row of rows) {
-      try {
-        const payload = JSON.parse(row.payload);
-        lines.push(`[${row.timestamp}] ${payload.title ?? 'Untitled'}`);
-        lines.push(`  Session: ${row.session_id}`);
-        lines.push(`  Type: ${payload.entryType ?? '?'} | Status: ${payload.status ?? '?'}`);
-        if (payload.input) lines.push(`  Request: ${payload.input}`);
-        if (Array.isArray(payload.actions) && payload.actions.length > 0) {
-          lines.push(`  Actions: ${payload.actions.join('; ')}`);
-        }
-        if (Array.isArray(payload.files) && payload.files.length > 0) {
-          lines.push(`  Files: ${payload.files.map((f: any) => `${f.op}:${f.path}`).join(', ')}`);
-        }
-        if (Array.isArray(payload.lessons) && payload.lessons.length > 0) {
-          lines.push(`  Lessons: ${payload.lessons.join('; ')}`);
-        }
-        if (Array.isArray(payload.tags) && payload.tags.length > 0) {
-          lines.push(`  Tags: ${payload.tags.join(', ')}`);
-        }
-      } catch {
-        lines.push(`[${row.timestamp}] (could not parse payload)`);
-      }
-      lines.push('');
-    }
-
-    return { content: lines.join('\n'), isError: false };
-  }
+  // ===========================================================================
+  // Blob reader
+  // ===========================================================================
 
   private readBlob(blobId: string): TronToolResult {
     const row = this.db

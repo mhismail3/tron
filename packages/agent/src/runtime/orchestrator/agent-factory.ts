@@ -34,7 +34,7 @@ import {
   UnifiedSearchTool,
   BraveProvider,
   ExaProvider,
-  IntrospectTool,
+  RememberTool,
   AdaptTool,
   filterToolsByDenial,
   type BrowserDelegate,
@@ -261,7 +261,7 @@ export class AgentFactory {
         generateId: () => this.config.generateTodoId(),
         onTodosUpdated: (todos) => this.config.onTodosUpdated(sessionId, todos),
       }),
-      new IntrospectTool({ dbPath: this.config.dbPath }),
+      new RememberTool({ dbPath: this.config.dbPath }),
     ];
 
     // Add Adapt tool if TRON_REPO_ROOT is set and this is not a subagent

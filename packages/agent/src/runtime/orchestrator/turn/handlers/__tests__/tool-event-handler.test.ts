@@ -527,7 +527,7 @@ describe('ToolEventHandler', () => {
       expect(toolResultPersist!.payload.content.length).toBeLessThan(veryLargeContent.length);
       expect(toolResultPersist!.payload.content).toContain('blob_1');
       expect(toolResultPersist!.payload.content).toContain('truncated');
-      expect(toolResultPersist!.payload.content).toContain('Introspect');
+      expect(toolResultPersist!.payload.content).toContain('Remember');
       expect(toolResultPersist!.payload.blobId).toBe('blob_1');
       expect(toolResultPersist!.payload.truncated).toBe(true);
     });

@@ -1,7 +1,8 @@
 /**
- * @fileoverview Tests for Introspect tool
+ * @fileoverview Tests for Remember tool
  *
- * Tests database introspection functionality for agent self-analysis.
+ * Tests the agent's ability to query its own database for memory recall,
+ * session debugging, and self-analysis.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -9,20 +10,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Database } from 'bun:sqlite';
-import { IntrospectTool } from '../system/introspect.js';
+import { RememberTool } from '../system/remember.js';
 
-describe('IntrospectTool', () => {
+describe('RememberTool', () => {
   let dbPath: string;
   let db: Database;
-  let tool: IntrospectTool;
+  let tool: RememberTool;
 
   beforeEach(() => {
-    // Create temp database
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'introspect-test-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remember-test-'));
     dbPath = path.join(tmpDir, 'test.db');
     db = new Database(dbPath);
 
-    // Create minimal schema
     db.exec(`
       CREATE TABLE workspaces (
         id TEXT PRIMARY KEY,
@@ -84,29 +83,37 @@ describe('IntrospectTool', () => {
       );
     `);
 
-    tool = new IntrospectTool({ dbPath });
+    tool = new RememberTool({ dbPath });
   });
 
   afterEach(() => {
+    tool.close();
     db.close();
-    // Clean up temp directory
     if (dbPath) {
       const tmpDir = path.dirname(dbPath);
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
+  // ===========================================================================
+  // Tool definition
+  // ===========================================================================
+
   describe('tool definition', () => {
-    it('should have correct name and description', () => {
-      expect(tool.name).toBe('Introspect');
-      expect(tool.description).toContain('database');
-      expect(tool.description).toContain('debugging');
+    it('should have correct name', () => {
+      expect(tool.name).toBe('Remember');
     });
 
-    it('should define action parameter', () => {
+    it('should mention memory in description', () => {
+      expect(tool.description).toContain('memory');
+    });
+
+    it('should define action parameter with all actions', () => {
       const params = tool.parameters;
       expect(params.properties).toHaveProperty('action');
       expect(params.required).toContain('action');
+      expect(params.properties.action.enum).toContain('memory');
+      expect(params.properties.action.enum).toContain('read_blob');
     });
 
     it('should define optional parameters', () => {
@@ -116,6 +123,52 @@ describe('IntrospectTool', () => {
       expect(params.properties).toHaveProperty('limit');
     });
   });
+
+  // ===========================================================================
+  // Input validation
+  // ===========================================================================
+
+  describe('input validation', () => {
+    it('should cap limit at 500', async () => {
+      // Insert many sessions
+      for (let i = 0; i < 10; i++) {
+        db.exec(`INSERT INTO sessions (id, created_at, last_activity_at) VALUES ('sess_${i}', '2024-01-15T10:00:00Z', '2024-01-15T10:00:00Z')`);
+      }
+
+      const result = await tool.execute({ action: 'sessions', limit: 99999 });
+      expect(result.isError).toBe(false);
+      // Should not crash — limit is capped internally
+    });
+
+    it('should handle zero limit gracefully', async () => {
+      const result = await tool.execute({ action: 'sessions', limit: 0 });
+      expect(result.isError).toBe(false);
+    });
+
+    it('should handle negative offset gracefully', async () => {
+      const result = await tool.execute({ action: 'sessions', offset: -5 });
+      expect(result.isError).toBe(false);
+    });
+  });
+
+  // ===========================================================================
+  // Resource management
+  // ===========================================================================
+
+  describe('resource management', () => {
+    it('should have a close method', () => {
+      expect(typeof tool.close).toBe('function');
+    });
+
+    it('should handle multiple close calls', () => {
+      tool.close();
+      tool.close(); // Should not throw
+    });
+  });
+
+  // ===========================================================================
+  // Schema action
+  // ===========================================================================
 
   describe('schema action', () => {
     it('should return database schema', async () => {
@@ -135,6 +188,10 @@ describe('IntrospectTool', () => {
       expect(result.content).toContain('read_blob');
     });
   });
+
+  // ===========================================================================
+  // Sessions action
+  // ===========================================================================
 
   describe('sessions action', () => {
     it('should return empty message when no sessions', async () => {
@@ -174,6 +231,10 @@ describe('IntrospectTool', () => {
       expect(result.content).not.toContain('sess_1');
     });
   });
+
+  // ===========================================================================
+  // Session action
+  // ===========================================================================
 
   describe('session action', () => {
     it('should require session_id', async () => {
@@ -219,6 +280,10 @@ describe('IntrospectTool', () => {
       expect(result.content).toContain('Session not found');
     });
   });
+
+  // ===========================================================================
+  // Events action
+  // ===========================================================================
 
   describe('events action', () => {
     it('should return events', async () => {
@@ -267,6 +332,10 @@ describe('IntrospectTool', () => {
     });
   });
 
+  // ===========================================================================
+  // Messages action
+  // ===========================================================================
+
   describe('messages action', () => {
     it('should require session_id', async () => {
       const result = await tool.execute({ action: 'messages' });
@@ -293,6 +362,10 @@ describe('IntrospectTool', () => {
       expect(result.content).not.toContain('tool.call');
     });
   });
+
+  // ===========================================================================
+  // Tools action
+  // ===========================================================================
 
   describe('tools action', () => {
     it('should require session_id', async () => {
@@ -332,6 +405,10 @@ describe('IntrospectTool', () => {
       expect(result.content).toContain('Stored in blob');
     });
   });
+
+  // ===========================================================================
+  // Logs action
+  // ===========================================================================
 
   describe('logs action', () => {
     it('should return logs', async () => {
@@ -375,6 +452,10 @@ describe('IntrospectTool', () => {
     });
   });
 
+  // ===========================================================================
+  // Stats action
+  // ===========================================================================
+
   describe('stats action', () => {
     it('should return database statistics', async () => {
       db.exec(`
@@ -397,6 +478,10 @@ describe('IntrospectTool', () => {
       expect(result.content).toContain('Total cost');
     });
   });
+
+  // ===========================================================================
+  // Read blob action
+  // ===========================================================================
 
   describe('read_blob action', () => {
     it('should require blob_id', async () => {
@@ -444,6 +529,164 @@ describe('IntrospectTool', () => {
     });
   });
 
+  // ===========================================================================
+  // Memory action
+  // ===========================================================================
+
+  describe('memory action', () => {
+    it('should return empty message when no entries', async () => {
+      const result = await tool.execute({ action: 'memory' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('No memory ledger entries found');
+    });
+
+    it('should return ledger entries with all fields', async () => {
+      const payload = JSON.stringify({
+        title: 'Add user auth',
+        entryType: 'feature',
+        status: 'completed',
+        input: 'Add OAuth login flow',
+        actions: ['Created auth module', 'Added Google provider'],
+        files: [{ path: 'src/auth.ts', op: 'C', why: 'New auth module' }],
+        lessons: ['Use passport.js for OAuth'],
+        tags: ['auth', 'oauth'],
+      });
+
+      db.exec(`
+        INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z');
+        INSERT INTO events (id, session_id, sequence, type, timestamp, payload)
+        VALUES ('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z', '${payload.replace(/'/g, "''")}')
+      `);
+
+      const result = await tool.execute({ action: 'memory' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('Add user auth');
+      expect(result.content).toContain('feature');
+      expect(result.content).toContain('completed');
+      expect(result.content).toContain('Add OAuth login flow');
+      expect(result.content).toContain('Created auth module');
+      expect(result.content).toContain('src/auth.ts');
+      expect(result.content).toContain('Use passport.js for OAuth');
+    });
+
+    it('should filter by session_id', async () => {
+      db.exec(`
+        INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z');
+        INSERT INTO sessions (id, created_at) VALUES ('sess_2', '2024-01-15T11:00:00Z');
+      `);
+
+      const payload1 = JSON.stringify({ title: 'Session 1 work', entryType: 'feature' });
+      const payload2 = JSON.stringify({ title: 'Session 2 work', entryType: 'bugfix' });
+
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z', payload1);
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_2', 'sess_2', 1, 'memory.ledger', '2024-01-15T11:30:00Z', payload2);
+
+      const result = await tool.execute({ action: 'memory', session_id: 'sess_1' });
+
+      expect(result.content).toContain('Session 1 work');
+      expect(result.content).not.toContain('Session 2 work');
+    });
+
+    it('should handle large payloads without truncation', async () => {
+      // Create a payload that exceeds 2000 chars (the old truncation limit)
+      const longLessons = Array.from({ length: 50 }, (_, i) =>
+        `Lesson ${i}: This is a detailed lesson about software architecture patterns and best practices that spans multiple words.`
+      );
+      const payload = JSON.stringify({
+        title: 'Large entry',
+        entryType: 'research',
+        status: 'completed',
+        input: 'Research complex topic',
+        actions: ['Did extensive research'],
+        lessons: longLessons,
+      });
+
+      // Verify payload is >2000 chars
+      expect(payload.length).toBeGreaterThan(2000);
+
+      db.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z', payload);
+
+      const result = await tool.execute({ action: 'memory', session_id: 'sess_1' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('Large entry');
+      // Should contain lessons from the end of the array (proves no truncation)
+      expect(result.content).toContain('Lesson 49');
+      expect(result.content).not.toContain('could not parse');
+    });
+
+    it('should handle entries with missing optional fields', async () => {
+      const payload = JSON.stringify({ title: 'Minimal entry' });
+
+      db.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z', payload);
+
+      const result = await tool.execute({ action: 'memory' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('Minimal entry');
+    });
+
+    it('should handle malformed JSON payload gracefully', async () => {
+      db.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+      db.exec(`
+        INSERT INTO events (id, session_id, sequence, type, timestamp, payload)
+        VALUES ('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z', 'not valid json{{{')
+      `);
+
+      const result = await tool.execute({ action: 'memory' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('could not parse');
+    });
+
+    it('should support pagination with limit and offset', async () => {
+      db.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      for (let i = 0; i < 5; i++) {
+        const payload = JSON.stringify({ title: `Entry ${i}`, entryType: 'feature' });
+        db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+          .run(`evt_${i}`, 'sess_1', i + 1, 'memory.ledger', `2024-01-15T10:0${i}:00Z`, payload);
+      }
+
+      // Get first 2 (most recent)
+      const page1 = await tool.execute({ action: 'memory', limit: 2 });
+      expect(page1.content).toContain('Entry 4');
+      expect(page1.content).toContain('Entry 3');
+      expect(page1.content).not.toContain('Entry 2');
+
+      // Get next 2
+      const page2 = await tool.execute({ action: 'memory', limit: 2, offset: 2 });
+      expect(page2.content).toContain('Entry 2');
+      expect(page2.content).toContain('Entry 1');
+      expect(page2.content).not.toContain('Entry 4');
+    });
+
+    it('should support session_id prefix matching', async () => {
+      db.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_abc123def', '2024-01-15T10:00:00Z')`);
+
+      const payload = JSON.stringify({ title: 'Prefix match test' });
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_1', 'sess_abc123def', 1, 'memory.ledger', '2024-01-15T10:30:00Z', payload);
+
+      const result = await tool.execute({ action: 'memory', session_id: 'sess_abc' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('Prefix match test');
+    });
+  });
+
+  // ===========================================================================
+  // Unknown action
+  // ===========================================================================
+
   describe('unknown action', () => {
     it('should return error for unknown action', async () => {
       const result = await tool.execute({ action: 'unknown_action' });
@@ -453,10 +696,13 @@ describe('IntrospectTool', () => {
     });
   });
 
+  // ===========================================================================
+  // Error handling
+  // ===========================================================================
+
   describe('error handling', () => {
     it('should handle database errors gracefully', async () => {
-      // Create tool with invalid path
-      const badTool = new IntrospectTool({ dbPath: '/nonexistent/path/db.sqlite' });
+      const badTool = new RememberTool({ dbPath: '/nonexistent/path/db.sqlite' });
 
       const result = await badTool.execute({ action: 'schema' });
 
