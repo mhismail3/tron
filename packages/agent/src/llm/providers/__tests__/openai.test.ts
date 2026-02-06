@@ -134,6 +134,18 @@ describe('OpenAI Provider', () => {
   });
 
   describe('Model Registry', () => {
+    it('should define GPT-5.3 Codex model with correct values', () => {
+      const model = OPENAI_MODELS['gpt-5.3-codex'];
+      expect(model).toBeDefined();
+      expect(model.contextWindow).toBe(272000);
+      expect(model.maxOutput).toBe(128000);
+      expect(model.tier).toBe('flagship');
+      expect(model.inputCostPerMillion).toBe(1.75);
+      expect(model.outputCostPerMillion).toBe(14);
+      expect(model.cacheReadCostPerMillion).toBe(0.175);
+      expect(model.recommended).toBe(true);
+    });
+
     it('should define GPT-5.2 Codex model', () => {
       expect(OPENAI_MODELS['gpt-5.2-codex']).toBeDefined();
       expect(OPENAI_MODELS['gpt-5.2-codex'].contextWindow).toBe(192000);
@@ -149,14 +161,20 @@ describe('OpenAI Provider', () => {
     });
 
     it('should indicate reasoning support for all models', () => {
-      for (const [modelId, model] of Object.entries(OPENAI_MODELS)) {
+      for (const [, model] of Object.entries(OPENAI_MODELS)) {
         expect(model.supportsReasoning).toBe(true);
       }
     });
 
-    it('should indicate thinking support for all models', () => {
-      for (const [modelId, model] of Object.entries(OPENAI_MODELS)) {
-        expect(model.supportsThinking).toBe(true);
+    it('should have recommended field for all models', () => {
+      for (const [, model] of Object.entries(OPENAI_MODELS)) {
+        expect(typeof model.recommended).toBe('boolean');
+      }
+    });
+
+    it('should have cacheReadCostPerMillion for all models', () => {
+      for (const [, model] of Object.entries(OPENAI_MODELS)) {
+        expect(typeof model.cacheReadCostPerMillion).toBe('number');
       }
     });
   });

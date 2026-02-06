@@ -13,6 +13,7 @@ import {
   type OpenAIStreamOptions,
   type ReasoningEffort,
   OPENAI_MODELS,
+  DEFAULT_OPENAI_MODEL,
 } from './openai/index.js';
 import {
   GoogleProvider,
@@ -223,7 +224,7 @@ export function getDefaultModel(provider: ProviderType): string {
       return DEFAULT_MODEL;
     case 'openai':
     case 'openai-codex':
-      return 'gpt-5.2-codex';
+      return DEFAULT_OPENAI_MODEL;
     case 'google':
       return 'gemini-2.5-flash';
     default:
@@ -438,14 +439,24 @@ export function getModelCapabilities(provider: ProviderType, modelId: string): M
     };
   }
 
-  const supportsEffort = typeof info.supportsEffort === 'boolean' ? info.supportsEffort : false;
+  // Anthropic uses supportsEffort/effortLevels/defaultEffortLevel
+  // OpenAI uses supportsReasoning/reasoningLevels/defaultReasoningLevel
+  const supportsEffort = (typeof info.supportsEffort === 'boolean' && info.supportsEffort) ||
+    (typeof info.supportsReasoning === 'boolean' && info.supportsReasoning);
+  const effortLevels = Array.isArray(info.effortLevels) ? info.effortLevels as string[]
+    : Array.isArray(info.reasoningLevels) ? info.reasoningLevels as string[]
+    : undefined;
+  const defaultEffortLevel = typeof info.defaultEffortLevel === 'string' ? info.defaultEffortLevel
+    : typeof info.defaultReasoningLevel === 'string' ? info.defaultReasoningLevel
+    : undefined;
+
   return {
     supportsTools: typeof info.supportsTools === 'boolean' ? info.supportsTools : true,
     supportsThinking: typeof info.supportsThinking === 'boolean' ? info.supportsThinking : false,
     supportsStreaming: true,
     supportsEffort,
-    effortLevels: supportsEffort && Array.isArray(info.effortLevels) ? info.effortLevels as string[] : undefined,
-    defaultEffortLevel: supportsEffort && typeof info.defaultEffortLevel === 'string' ? info.defaultEffortLevel : undefined,
+    effortLevels: supportsEffort ? effortLevels : undefined,
+    defaultEffortLevel: supportsEffort ? defaultEffortLevel : undefined,
     maxOutput: typeof info.maxOutput === 'number' ? info.maxOutput : 4096,
     contextWindow: typeof info.contextWindow === 'number' ? info.contextWindow : 128000,
   };

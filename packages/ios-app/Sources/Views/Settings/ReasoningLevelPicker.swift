@@ -206,8 +206,8 @@ struct InlineReasoningControl: View {
     VStack(spacing: 20) {
         // Mock Codex model
         let mockModel = ModelInfo(
-            id: "gpt-5.2-codex",
-            name: "Codex 5.2",
+            id: "gpt-5.3-codex",
+            name: "Codex 5.3",
             provider: "openai-codex",
             contextWindow: 400000,
             maxOutputTokens: 128000,

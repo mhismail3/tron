@@ -16,6 +16,7 @@ export type {
   OpenAIApiSettings,
   ReasoningEffort,
   OpenAIModelId,
+  OpenAICodexModelInfo,
   ResponsesInputItem,
   ResponsesTool,
   ResponsesOutputItem,
@@ -24,7 +25,7 @@ export type {
 } from './types.js';
 
 // Model constants
-export { OPENAI_MODELS } from './types.js';
+export { OPENAI_MODELS, DEFAULT_OPENAI_MODEL } from './types.js';
 
 // Auth utilities (for testing/advanced use)
 export {

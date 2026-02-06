@@ -20,6 +20,7 @@ final class ModelFilteringServiceTests: XCTestCase {
             makeModel(id: "claude-3-haiku-20240307", provider: "anthropic"),
 
             // OpenAI Codex models
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex"),
             makeModel(id: "gpt-5.2-codex", provider: "openai-codex"),
             makeModel(id: "gpt-5.1-codex", provider: "openai-codex"),
             makeModel(id: "gpt-5.0-codex", provider: "openai-codex"),
@@ -75,9 +76,9 @@ final class ModelFilteringServiceTests: XCTestCase {
 
         let codexLatest = groups.first { $0.tier == "OpenAI Codex (Latest)" }
         XCTAssertNotNil(codexLatest)
-        XCTAssertEqual(codexLatest?.models.count, 1) // Only 5.2
+        XCTAssertEqual(codexLatest?.models.count, 1) // Only 5.3
 
-        XCTAssertEqual(codexLatest?.models.first?.id, "gpt-5.2-codex")
+        XCTAssertEqual(codexLatest?.models.first?.id, "gpt-5.3-codex")
     }
 
     func test_categorizeModels_separatesGeminiByVersion() {
@@ -127,12 +128,12 @@ final class ModelFilteringServiceTests: XCTestCase {
         let models = makeModels()
         let latest = ModelFilteringService.filterLatest(models)
 
-        // Should include: Anthropic 4.5, Codex 5.2, Gemini 3
+        // Should include: Anthropic 4.5, Codex 5.3, Gemini 3
         XCTAssertEqual(latest.count, 8) // 4 + 1 + 3
 
         latest.forEach { model in
             let isLatest = model.isLatestGeneration ||
-                          (model.isCodex && model.id.contains("5.2")) ||
+                          (model.isCodex && model.id.contains("5.3")) ||
                           model.isGemini3
             XCTAssertTrue(isLatest, "Expected \(model.id) to be latest")
         }
@@ -142,10 +143,10 @@ final class ModelFilteringServiceTests: XCTestCase {
         let models = makeModels()
         let legacy = ModelFilteringService.filterLegacy(models)
 
-        // Should exclude: Anthropic 4.5, Codex 5.2, Gemini 3
+        // Should exclude: Anthropic 4.5, Codex 5.3, Gemini 3
         legacy.forEach { model in
             XCTAssertFalse(model.isLatestGeneration && model.isAnthropic)
-            XCTAssertFalse(model.isCodex && model.id.contains("5.2"))
+            XCTAssertFalse(model.isCodex && model.id.contains("5.3"))
             XCTAssertFalse(model.isGemini3)
         }
     }
@@ -166,18 +167,20 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertEqual(sorted[2].id, "claude-haiku-4-5-20250501")
     }
 
-    func test_sortByTier_codex52BeforeCodex51() {
+    func test_sortByTier_codex53BeforeCodex52() {
         let models = [
             makeModel(id: "gpt-5.0-codex", provider: "openai-codex"),
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex"),
             makeModel(id: "gpt-5.2-codex", provider: "openai-codex"),
             makeModel(id: "gpt-5.1-codex", provider: "openai-codex"),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
 
-        XCTAssertEqual(sorted[0].id, "gpt-5.2-codex")
-        XCTAssertEqual(sorted[1].id, "gpt-5.1-codex")
-        XCTAssertEqual(sorted[2].id, "gpt-5.0-codex")
+        XCTAssertEqual(sorted[0].id, "gpt-5.3-codex")
+        XCTAssertEqual(sorted[1].id, "gpt-5.2-codex")
+        XCTAssertEqual(sorted[2].id, "gpt-5.1-codex")
+        XCTAssertEqual(sorted[3].id, "gpt-5.0-codex")
     }
 
     func test_sortByTier_geminiProBeforeFlash() {

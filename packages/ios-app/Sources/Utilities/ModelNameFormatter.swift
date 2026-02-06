@@ -92,9 +92,11 @@ enum ModelNameFormatter {
     private static func formatCodexModel(_ modelId: String, style: Style) -> String {
         let lowered = modelId.lowercased()
 
-        // Extract version (5.2, 5.1, etc.)
+        // Extract version (5.3, 5.2, 5.1, etc.)
         var version = ""
-        if lowered.contains("5.2") {
+        if lowered.contains("5.3") {
+            version = "5.3"
+        } else if lowered.contains("5.2") {
             version = "5.2"
         } else if lowered.contains("5.1") {
             version = "5.1"

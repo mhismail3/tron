@@ -13,7 +13,8 @@ import type {
   ModelListResult,
 } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
-import { ANTHROPIC_MODELS, OPENAI_CODEX_MODELS } from '@llm/providers/models.js';
+import { ANTHROPIC_MODELS } from '@llm/providers/models.js';
+import { OPENAI_MODELS } from '@llm/providers/openai/index.js';
 import { GEMINI_MODELS } from '@llm/providers/google/index.js';
 import { InvalidParamsError } from './base.js';
 
@@ -32,7 +33,7 @@ export function createModelHandlers(): MethodRegistration[] {
 
     // Validate model exists (check all providers)
     const anthropicModel = ANTHROPIC_MODELS.find((m) => m.id === params.model);
-    const codexModel = OPENAI_CODEX_MODELS.find((m) => m.id === params.model);
+    const codexModel = params.model in OPENAI_MODELS ? OPENAI_MODELS[params.model] : undefined;
     const geminiModel = params.model in GEMINI_MODELS ? GEMINI_MODELS[params.model] : undefined;
     if (!anthropicModel && !codexModel && !geminiModel) {
       throw new InvalidParamsError(`Unknown model: ${params.model}`);
@@ -59,8 +60,8 @@ export function createModelHandlers(): MethodRegistration[] {
         isLegacy: m.legacy ?? false,
       })),
       // OpenAI Codex models
-      ...OPENAI_CODEX_MODELS.map((m) => ({
-        id: m.id,
+      ...Object.entries(OPENAI_MODELS).map(([id, m]) => ({
+        id,
         name: m.shortName,
         provider: 'openai-codex',
         contextWindow: m.contextWindow,

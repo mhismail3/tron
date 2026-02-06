@@ -21,8 +21,8 @@ enum ModelFilteringService {
             groups.append(ModelGroup(tier: "Anthropic (Latest)", models: latestAnthropic))
         }
 
-        // OpenAI Codex 5.2 (latest)
-        let latestCodex = models.filter { $0.isCodex && $0.id.lowercased().contains("5.2") }
+        // OpenAI Codex 5.3 (latest)
+        let latestCodex = models.filter { $0.isCodex && $0.id.lowercased().contains("5.3") }
         if !latestCodex.isEmpty {
             groups.append(ModelGroup(tier: "OpenAI Codex (Latest)", models: latestCodex))
         }
@@ -43,8 +43,8 @@ enum ModelFilteringService {
             |> sortByTier
         legacyModels.append(contentsOf: legacyAnthropic)
 
-        // Legacy Codex (5.1, 5.0, etc.)
-        let legacyCodex = models.filter { $0.isCodex && !$0.id.lowercased().contains("5.2") }
+        // Legacy Codex (5.2, 5.1, 5.0, etc.)
+        let legacyCodex = models.filter { $0.isCodex && !$0.id.lowercased().contains("5.3") }
             |> sortByCodexVersion
         legacyModels.append(contentsOf: legacyCodex)
 
@@ -68,11 +68,11 @@ enum ModelFilteringService {
 
     // MARK: - Filtering
 
-    /// Filter to latest versions only (4.5, 5.2, Gemini 3)
+    /// Filter to latest versions only (4.5, 5.3, Gemini 3)
     static func filterLatest(_ models: [ModelInfo]) -> [ModelInfo] {
         models.filter { model in
             (model.isAnthropic && model.isLatestGeneration) ||
-            (model.isCodex && model.id.lowercased().contains("5.2")) ||
+            (model.isCodex && model.id.lowercased().contains("5.3")) ||
             model.isGemini3
         }
     }
@@ -81,7 +81,7 @@ enum ModelFilteringService {
     static func filterLegacy(_ models: [ModelInfo]) -> [ModelInfo] {
         models.filter { model in
             if model.isAnthropic { return !model.isLatestGeneration }
-            if model.isCodex { return !model.id.lowercased().contains("5.2") }
+            if model.isCodex { return !model.id.lowercased().contains("5.3") }
             if model.isGemini { return !model.isGemini3 }
             return true
         }
@@ -177,6 +177,7 @@ enum ModelFilteringService {
 
     private static func codexVersionPriority(_ model: ModelInfo) -> Int {
         let id = model.id.lowercased()
+        if id.contains("5.3") { return 53 }
         if id.contains("5.2") { return 52 }
         if id.contains("5.1") { return 51 }
         if id.contains("5.0") || id.contains("-5-") { return 50 }

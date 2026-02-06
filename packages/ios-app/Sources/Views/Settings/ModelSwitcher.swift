@@ -63,6 +63,7 @@ struct ModelPickerMenu: View {
 
     private func codexVersionPriority(_ model: ModelInfo) -> Int {
         let id = model.id.lowercased()
+        if id.contains("5.3") { return 53 }
         if id.contains("5.2") { return 52 }
         if id.contains("5.1") { return 51 }
         if id.contains("5.0") || id.contains("-5-") { return 50 }

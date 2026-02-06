@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { detectProviderFromModel, getModelCapabilities, createProvider } from '../factory.js';
+import { detectProviderFromModel, getModelCapabilities, getDefaultModel, createProvider } from '../factory.js';
 import { AnthropicProvider } from '../anthropic/index.js';
 
 // Mock Anthropic provider to capture stream options
@@ -35,6 +35,10 @@ describe('detectProviderFromModel', () => {
     expect(detectProviderFromModel('claude-opus-4-6')).toBe('anthropic');
   });
 
+  it('detects gpt-5.3-codex as openai-codex', () => {
+    expect(detectProviderFromModel('gpt-5.3-codex')).toBe('openai-codex');
+  });
+
   it('uses deterministic anthropic fallback for unknown models', () => {
     expect(detectProviderFromModel('custom-provider-unknown-model')).toBe('anthropic');
     expect(detectProviderFromModel('   ')).toBe('anthropic');
@@ -61,6 +65,32 @@ describe('getModelCapabilities', () => {
     expect(caps.maxOutput).toBe(64000);
     expect(caps.effortLevels).toBeUndefined();
     expect(caps.defaultEffortLevel).toBeUndefined();
+  });
+
+  it('returns supportsEffort=true for gpt-5.3-codex', () => {
+    const caps = getModelCapabilities('openai-codex', 'gpt-5.3-codex');
+    expect(caps.supportsEffort).toBe(true);
+    expect(caps.effortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(caps.defaultEffortLevel).toBe('medium');
+    expect(caps.maxOutput).toBe(128000);
+    expect(caps.contextWindow).toBe(272000);
+  });
+
+  it('returns supportsEffort=true for gpt-5.2-codex', () => {
+    const caps = getModelCapabilities('openai-codex', 'gpt-5.2-codex');
+    expect(caps.supportsEffort).toBe(true);
+    expect(caps.effortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(caps.defaultEffortLevel).toBe('medium');
+  });
+});
+
+describe('getDefaultModel', () => {
+  it('returns gpt-5.3-codex for openai-codex', () => {
+    expect(getDefaultModel('openai-codex')).toBe('gpt-5.3-codex');
+  });
+
+  it('returns gpt-5.3-codex for openai', () => {
+    expect(getDefaultModel('openai')).toBe('gpt-5.3-codex');
   });
 });
 

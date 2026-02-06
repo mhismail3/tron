@@ -142,10 +142,45 @@ export interface ResponsesStreamEvent {
 }
 
 // =============================================================================
-// Model Constants
+// Model Types & Constants
 // =============================================================================
 
-export const OPENAI_MODELS = {
+export interface OpenAICodexModelInfo {
+  name: string;
+  shortName: string;
+  family: string;
+  tier: 'flagship' | 'standard';
+  contextWindow: number;
+  maxOutput: number;
+  supportsTools: boolean;
+  supportsReasoning: boolean;
+  reasoningLevels: ReasoningEffort[];
+  defaultReasoningLevel: ReasoningEffort;
+  inputCostPerMillion: number;
+  outputCostPerMillion: number;
+  cacheReadCostPerMillion: number;
+  description: string;
+  recommended: boolean;
+}
+
+export const OPENAI_MODELS: Record<string, OpenAICodexModelInfo> = {
+  'gpt-5.3-codex': {
+    name: 'OpenAI GPT-5.3 Codex',
+    shortName: 'GPT-5.3 Codex',
+    family: 'GPT-5.3',
+    tier: 'flagship',
+    contextWindow: 272000,
+    maxOutput: 128000,
+    supportsTools: true,
+    supportsReasoning: true,
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningLevel: 'medium',
+    inputCostPerMillion: 1.75,
+    outputCostPerMillion: 14,
+    cacheReadCostPerMillion: 0.175,
+    description: 'GPT-5.3 Codex — fastest and most capable coding model',
+    recommended: true,
+  },
   'gpt-5.2-codex': {
     name: 'OpenAI GPT-5.2 Codex',
     shortName: 'GPT-5.2 Codex',
@@ -155,12 +190,13 @@ export const OPENAI_MODELS = {
     maxOutput: 16384,
     supportsTools: true,
     supportsReasoning: true,
-    supportsThinking: true,
-    reasoningLevels: ['low', 'medium', 'high', 'xhigh'] as ReasoningEffort[],
-    defaultReasoningLevel: 'medium' as ReasoningEffort,
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningLevel: 'medium',
     inputCostPerMillion: 0,
     outputCostPerMillion: 0,
-    description: 'Latest GPT-5.2 Codex - most advanced coding model',
+    cacheReadCostPerMillion: 0,
+    description: 'GPT-5.2 Codex — proven coding model',
+    recommended: false,
   },
   'gpt-5.1-codex-max': {
     name: 'OpenAI GPT-5.1 Codex Max',
@@ -171,12 +207,13 @@ export const OPENAI_MODELS = {
     maxOutput: 16384,
     supportsTools: true,
     supportsReasoning: true,
-    supportsThinking: true,
-    reasoningLevels: ['low', 'medium', 'high', 'xhigh'] as ReasoningEffort[],
-    defaultReasoningLevel: 'high' as ReasoningEffort,
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningLevel: 'high',
     inputCostPerMillion: 0,
     outputCostPerMillion: 0,
-    description: 'GPT-5.1 Codex Max - deep reasoning capabilities',
+    cacheReadCostPerMillion: 0,
+    description: 'GPT-5.1 Codex Max — deep reasoning capabilities',
+    recommended: false,
   },
   'gpt-5.1-codex-mini': {
     name: 'OpenAI GPT-5.1 Codex Mini',
@@ -187,13 +224,16 @@ export const OPENAI_MODELS = {
     maxOutput: 16384,
     supportsTools: true,
     supportsReasoning: true,
-    supportsThinking: true,
-    reasoningLevels: ['low', 'medium', 'high'] as ReasoningEffort[],
-    defaultReasoningLevel: 'low' as ReasoningEffort,
+    reasoningLevels: ['low', 'medium', 'high'],
+    defaultReasoningLevel: 'low',
     inputCostPerMillion: 0,
     outputCostPerMillion: 0,
-    description: 'GPT-5.1 Codex Mini - faster and more efficient',
+    cacheReadCostPerMillion: 0,
+    description: 'GPT-5.1 Codex Mini — faster and more efficient',
+    recommended: false,
   },
-} as const;
+};
 
 export type OpenAIModelId = keyof typeof OPENAI_MODELS;
+
+export const DEFAULT_OPENAI_MODEL = 'gpt-5.3-codex' as OpenAIModelId;
