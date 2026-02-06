@@ -137,7 +137,7 @@ describe('OpenAI Provider', () => {
     it('should define GPT-5.3 Codex model with correct values', () => {
       const model = OPENAI_MODELS['gpt-5.3-codex'];
       expect(model).toBeDefined();
-      expect(model.contextWindow).toBe(272000);
+      expect(model.contextWindow).toBe(400000);
       expect(model.maxOutput).toBe(128000);
       expect(model.tier).toBe('flagship');
       expect(model.inputCostPerMillion).toBe(1.75);
@@ -147,17 +147,34 @@ describe('OpenAI Provider', () => {
     });
 
     it('should define GPT-5.2 Codex model', () => {
-      expect(OPENAI_MODELS['gpt-5.2-codex']).toBeDefined();
-      expect(OPENAI_MODELS['gpt-5.2-codex'].contextWindow).toBe(192000);
+      const model = OPENAI_MODELS['gpt-5.2-codex'];
+      expect(model).toBeDefined();
+      expect(model.contextWindow).toBe(400000);
+      expect(model.maxOutput).toBe(128000);
+      expect(model.inputCostPerMillion).toBe(1.75);
+      expect(model.outputCostPerMillion).toBe(14);
+      expect(model.cacheReadCostPerMillion).toBe(0.175);
     });
 
     it('should define GPT-5.1 Codex Max model', () => {
-      expect(OPENAI_MODELS['gpt-5.1-codex-max']).toBeDefined();
-      expect(OPENAI_MODELS['gpt-5.1-codex-max'].supportsReasoning).toBe(true);
+      const model = OPENAI_MODELS['gpt-5.1-codex-max'];
+      expect(model).toBeDefined();
+      expect(model.contextWindow).toBe(400000);
+      expect(model.maxOutput).toBe(128000);
+      expect(model.supportsReasoning).toBe(true);
+      expect(model.inputCostPerMillion).toBe(1.25);
+      expect(model.outputCostPerMillion).toBe(10);
+      expect(model.cacheReadCostPerMillion).toBe(0.125);
     });
 
     it('should define GPT-5.1 Codex Mini model', () => {
-      expect(OPENAI_MODELS['gpt-5.1-codex-mini']).toBeDefined();
+      const model = OPENAI_MODELS['gpt-5.1-codex-mini'];
+      expect(model).toBeDefined();
+      expect(model.contextWindow).toBe(400000);
+      expect(model.maxOutput).toBe(128000);
+      expect(model.inputCostPerMillion).toBe(0.25);
+      expect(model.outputCostPerMillion).toBe(2);
+      expect(model.cacheReadCostPerMillion).toBe(0.025);
     });
 
     it('should indicate reasoning support for all models', () => {

@@ -73,7 +73,7 @@ describe('getModelCapabilities', () => {
     expect(caps.effortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
     expect(caps.defaultEffortLevel).toBe('medium');
     expect(caps.maxOutput).toBe(128000);
-    expect(caps.contextWindow).toBe(272000);
+    expect(caps.contextWindow).toBe(400000);
   });
 
   it('returns supportsEffort=true for gpt-5.2-codex', () => {
@@ -81,6 +81,8 @@ describe('getModelCapabilities', () => {
     expect(caps.supportsEffort).toBe(true);
     expect(caps.effortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
     expect(caps.defaultEffortLevel).toBe('medium');
+    expect(caps.maxOutput).toBe(128000);
+    expect(caps.contextWindow).toBe(400000);
   });
 });
 
