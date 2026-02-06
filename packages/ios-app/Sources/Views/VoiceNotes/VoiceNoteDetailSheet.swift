@@ -47,7 +47,6 @@ struct VoiceNoteDetailSheet: View {
                         Image(systemName: "xmark")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
-                            .frame(width: 24, height: 24)
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -60,7 +59,6 @@ struct VoiceNoteDetailSheet: View {
                         Image(systemName: "square.and.arrow.up")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronEmerald)
-                            .frame(width: 24, height: 24)
                     }
                     .disabled(note.transcript.isEmpty)
                 }

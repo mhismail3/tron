@@ -154,7 +154,8 @@ struct TextFieldWithHistory: View {
                 Image(systemName: "chevron.up")
                     .font(TronTypography.caption)
                     .foregroundStyle(.tronTextSecondary)
-                    .frame(width: 24, height: 16)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(isProcessing || inputHistory?.history.isEmpty == true)
 
@@ -164,7 +165,8 @@ struct TextFieldWithHistory: View {
                 Image(systemName: "chevron.down")
                     .font(TronTypography.caption)
                     .foregroundStyle(.tronTextSecondary)
-                    .frame(width: 24, height: 16)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(isProcessing || inputHistory?.isNavigating != true)
         }

@@ -81,7 +81,7 @@ struct FloatingBrowserView: View {
                 Image(systemName: isMinimized ? "arrow.up.left.and.arrow.down.right" : "minus")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -91,7 +91,7 @@ struct FloatingBrowserView: View {
                 Image(systemName: "xmark")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
