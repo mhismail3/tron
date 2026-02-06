@@ -174,6 +174,16 @@ extension ChatViewModel {
         }
     }
 
+    func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
+        logger.info("Memory updated: \(pluginResult.title) (type: \(pluginResult.entryType))", category: .events)
+
+        let message = ChatMessage.memoryUpdated(
+            title: pluginResult.title,
+            entryType: pluginResult.entryType
+        )
+        messages.append(message)
+    }
+
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
         // Process event through handler
         let result = eventHandler.handleContextCleared(pluginResult)

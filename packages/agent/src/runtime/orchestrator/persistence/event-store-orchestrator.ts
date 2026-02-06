@@ -337,6 +337,38 @@ export class EventStoreOrchestrator extends EventEmitter {
         startScreencast: async (sid, options) => { await this.browserService.startScreencast(sid, options); },
         hasSession: (sid) => this.browserService.hasSession(sid),
       } : undefined,
+      memoryConfig: {
+        appendEvent: async (sessionId, type, payload) => {
+          const event = await this.eventStore.append({
+            sessionId: sessionId as SessionId,
+            type,
+            payload,
+          });
+          return { id: event.id };
+        },
+        getEventsBySession: (sessionId) =>
+          this.eventStore.getEventsBySession(sessionId as SessionId),
+        emitMemoryUpdated: (data) => this.emit('memory_updated', data),
+        getTokenRatio: (sessionId) => {
+          const active = this.activeSessions.get(sessionId);
+          if (!active?.agent) return 0;
+          const snapshot = active.agent.getContextManager().getSnapshot();
+          return snapshot.usagePercent / 100;
+        },
+        getRecentEventTypes: (sid) => this.getRecentEventTypesForSession(sid),
+        getRecentToolCalls: (sid) => this.getRecentToolCallsForSession(sid),
+        executeCompaction: async (sessionId) => {
+          const active = this.activeSessions.get(sessionId);
+          if (!active?.agent) return { success: false };
+          if (!active.agent.canAutoCompact()) return { success: false };
+          try {
+            const result = await active.agent.attemptCompaction('threshold_exceeded');
+            return { success: result.success };
+          } catch {
+            return { success: false };
+          }
+        },
+      },
     });
 
     // Forward browser events
@@ -703,6 +735,71 @@ export class EventStoreOrchestrator extends EventEmitter {
    */
   private estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Get recent event types for a session since the last compaction.
+   * Used by the CompactionTrigger to detect progress signals (e.g. worktree.commit).
+   */
+  private getRecentEventTypesForSession(sessionId: string): Promise<string[]> {
+    return this.getRecentEventsForSession(sessionId).then(events =>
+      events.map(e => e.type)
+    );
+  }
+
+  /**
+   * Get recent Bash tool commands for a session since the last compaction.
+   * Used by the CompactionTrigger to detect progress signals (e.g. git push, gh pr create).
+   */
+  private getRecentToolCallsForSession(sessionId: string): Promise<string[]> {
+    return this.getRecentEventsForSession(sessionId).then(events => {
+      const commands: string[] = [];
+      for (const event of events) {
+        if (event.type === 'tool.call') {
+          const payload = event.payload as Record<string, unknown>;
+          if (payload.name === 'Bash') {
+            const args = payload.arguments as Record<string, unknown> | undefined;
+            const command = args?.command;
+            if (typeof command === 'string') {
+              commands.push(command);
+            }
+          }
+        }
+      }
+      return commands;
+    });
+  }
+
+  /**
+   * Get events since the last compaction boundary (or all events if no compaction).
+   * Fetches from EventStore — the data is already persisted, no duplication needed.
+   */
+  private async getRecentEventsForSession(sessionId: string): Promise<TronSessionEvent[]> {
+    try {
+      const allEvents = await this.eventStore.getEventsBySession(sessionId as SessionId);
+      // Find the last compact.boundary event — everything after it is "recent"
+      let lastCompactionIdx = -1;
+      for (let i = allEvents.length - 1; i >= 0; i--) {
+        if (allEvents[i]!.type === 'compact.boundary') {
+          lastCompactionIdx = i;
+          break;
+        }
+      }
+      const recent = allEvents.slice(lastCompactionIdx + 1);
+      logger.debug('Queried recent events for memory system', {
+        sessionId,
+        totalEvents: allEvents.length,
+        recentEvents: recent.length,
+        hadCompactionBoundary: lastCompactionIdx >= 0,
+      });
+      return recent;
+    } catch (error) {
+      logger.warn('Failed to query recent events for memory system', {
+        sessionId,
+        error: (error as Error).message,
+      });
+      return [];
+    }
   }
 
   private startCleanupTimer(): void {

@@ -92,6 +92,11 @@ final class SheetCoordinator {
         )))
     }
 
+    /// Show memory detail sheet
+    func showMemoryDetail(title: String, entryType: String) {
+        present(.memoryDetail(MemoryDetailData(title: title, entryType: entryType)))
+    }
+
     /// Show ask user question sheet
     func showAskUserQuestion() {
         present(.askUserQuestion)

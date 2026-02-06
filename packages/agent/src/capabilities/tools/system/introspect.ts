@@ -61,15 +61,17 @@ Available actions:
 - logs: Get application logs
 - stats: Get database statistics
 - read_blob: Read stored content from blob storage
+- memory: Get memory ledger entries (structured summaries of past work)
 
-Use read_blob to retrieve full content when tool results reference a blob_id.`;
+Use read_blob to retrieve full content when tool results reference a blob_id.
+Use memory to recall what was done in previous sessions.`;
 
   readonly parameters = {
     type: 'object' as const,
     properties: {
       action: {
         type: 'string' as const,
-        enum: ['schema', 'sessions', 'session', 'events', 'messages', 'tools', 'logs', 'stats', 'read_blob'],
+        enum: ['schema', 'sessions', 'session', 'events', 'messages', 'tools', 'logs', 'stats', 'read_blob', 'memory'],
         description: 'The introspection action to perform',
       },
       session_id: {
@@ -166,6 +168,9 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
             return { content: 'blob_id is required for read_blob action', isError: true };
           }
           return this.readBlob(params.blob_id);
+
+        case 'memory':
+          return this.getMemoryLedger(params.session_id, limit, offset);
 
         default:
           return { content: `Unknown action: ${params.action}`, isError: true };
@@ -530,6 +535,66 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
       `Blob storage: ${(stats.blobSize / 1024).toFixed(1)} KB`,
       `Total cost: $${stats.totalCost.toFixed(4)}`,
     ];
+
+    return { content: lines.join('\n'), isError: false };
+  }
+
+  private getMemoryLedger(
+    sessionId: string | undefined,
+    limit: number,
+    offset: number
+  ): TronToolResult {
+    let query = `
+      SELECT id, session_id, timestamp, substr(payload, 1, 2000) as payload
+      FROM events
+      WHERE type = 'memory.ledger'
+    `;
+    const params: SQLQueryBindings[] = [];
+
+    if (sessionId) {
+      query += ` AND (session_id = ? OR session_id LIKE ?)`;
+      params.push(sessionId, `${sessionId}%`);
+    }
+
+    query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      id: string;
+      session_id: string;
+      timestamp: string;
+      payload: string;
+    }>;
+
+    if (rows.length === 0) {
+      return { content: 'No memory ledger entries found', isError: false };
+    }
+
+    const lines = ['Memory Ledger:', ''];
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload);
+        lines.push(`[${row.timestamp}] ${payload.title ?? 'Untitled'}`);
+        lines.push(`  Session: ${row.session_id}`);
+        lines.push(`  Type: ${payload.entryType ?? '?'} | Status: ${payload.status ?? '?'}`);
+        if (payload.input) lines.push(`  Request: ${payload.input}`);
+        if (Array.isArray(payload.actions) && payload.actions.length > 0) {
+          lines.push(`  Actions: ${payload.actions.join('; ')}`);
+        }
+        if (Array.isArray(payload.files) && payload.files.length > 0) {
+          lines.push(`  Files: ${payload.files.map((f: any) => `${f.op}:${f.path}`).join(', ')}`);
+        }
+        if (Array.isArray(payload.lessons) && payload.lessons.length > 0) {
+          lines.push(`  Lessons: ${payload.lessons.join('; ')}`);
+        }
+        if (Array.isArray(payload.tags) && payload.tags.length > 0) {
+          lines.push(`  Tags: ${payload.tags.join(', ')}`);
+        }
+      } catch {
+        lines.push(`[${row.timestamp}] (could not parse payload)`);
+      }
+      lines.push('');
+    }
 
     return { content: lines.join('\n'), isError: false };
   }

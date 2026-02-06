@@ -28,7 +28,7 @@ import type { Message } from '../../types/index.js';
 // =============================================================================
 
 const CONTEXT_LIMIT = 200_000;
-const DEFAULT_PRESERVE_TURNS = 3; // 3 turns = 6 messages
+const DEFAULT_PRESERVE_TURNS = 5; // 5 turns = 10 messages
 
 // =============================================================================
 // Edge Cases Tests
@@ -105,25 +105,25 @@ describe('Compaction Edge Cases', () => {
   });
 
   describe('message preservation', () => {
-    it('preserves exactly preserveRecentTurns turns (default 3)', async () => {
+    it('preserves exactly preserveRecentTurns turns (default 5)', async () => {
       const harness = CompactionTestHarness.atThreshold('critical');
       harness.inject();
 
       const messagesBefore = harness.contextManager.getMessages();
-      const preserveCount = DEFAULT_PRESERVE_TURNS * 2; // 6 messages
-      const lastSixBefore = messagesBefore.slice(-preserveCount);
+      const preserveCount = DEFAULT_PRESERVE_TURNS * 2; // 10 messages
+      const lastPreservedBefore = messagesBefore.slice(-preserveCount);
 
       await harness.executeCompaction();
 
       const messagesAfter = harness.contextManager.getMessages();
 
-      // Should have: 2 (summary + ack) + 6 (preserved) = 8
-      expect(messagesAfter.length).toBe(8);
+      // Should have: 2 (summary + ack) + 10 (preserved) = 12
+      expect(messagesAfter.length).toBe(12);
 
-      // Last 6 should match original last 6
-      const lastSixAfter = messagesAfter.slice(-preserveCount);
+      // Last preserved should match original last preserved
+      const lastPreservedAfter = messagesAfter.slice(-preserveCount);
       for (let i = 0; i < preserveCount; i++) {
-        expect(lastSixAfter[i]?.role).toBe(lastSixBefore[i]?.role);
+        expect(lastPreservedAfter[i]?.role).toBe(lastPreservedBefore[i]?.role);
       }
     });
 

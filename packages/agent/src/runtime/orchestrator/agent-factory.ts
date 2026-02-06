@@ -57,6 +57,10 @@ import type { TodoItem } from '@capabilities/todos/types.js';
 import { detectProviderFromModel, getModelCapabilities, type UnifiedAuth } from '@llm/providers/factory.js';
 import type { ServerAuth } from '@infrastructure/auth/types.js';
 import { WEB_CONTENT_SUMMARIZER_PROMPT } from '@context/system-prompts.js';
+import { createMemoryLedgerHook } from '@capabilities/extensions/hooks/builtin/memory-ledger.js';
+import { LedgerWriter, CompactionTrigger, MemoryManager } from '@capabilities/memory/index.js';
+import { LLMSummarizer } from '@context/llm-summarizer.js';
+import type { EventType } from '@infrastructure/events/types/index.js';
 import type { GoogleAuth } from '@infrastructure/auth/google-oauth.js';
 
 const logger = createLogger('agent-factory');
@@ -153,6 +157,23 @@ export interface AgentFactoryConfig {
     /** The tool call ID - used for deep linking so iOS can scroll to the notification */
     toolCallId: string
   ) => Promise<NotifyAppResult>;
+  /** Memory system callbacks (optional — enables memory ledger for non-subagent sessions) */
+  memoryConfig?: {
+    /** Append an event to the session */
+    appendEvent: (sessionId: string, type: EventType, payload: Record<string, unknown>) => Promise<{ id: string }>;
+    /** Get all events for a session */
+    getEventsBySession: (sessionId: string) => Promise<import('@infrastructure/events/types/index.js').SessionEvent[]>;
+    /** Emit memory_updated event to WebSocket clients */
+    emitMemoryUpdated: (data: { sessionId: string; title?: string; entryType?: string }) => void;
+    /** Get current context token ratio for a session */
+    getTokenRatio: (sessionId: string) => number;
+    /** Get recent event types from the current cycle (queries EventStore) */
+    getRecentEventTypes: (sessionId: string) => Promise<string[]>;
+    /** Get recent Bash tool call commands (queries EventStore) */
+    getRecentToolCalls: (sessionId: string) => Promise<string[]>;
+    /** Execute compaction for a session */
+    executeCompaction: (sessionId: string) => Promise<{ success: boolean }>;
+  };
   /** Browser service (optional) */
   browserService?: {
     execute: (sessionId: string, action: string, params: Record<string, unknown>) => Promise<{
@@ -454,6 +475,85 @@ export class AgentFactory {
     agent.onEvent((event) => {
       this.config.forwardAgentEvent(sessionId, event);
     });
+
+    // Wire LLM summarizer for non-subagent sessions (enables auto-compaction)
+    if (!isSubagent) {
+      const llmSummarizer = new LLMSummarizer({
+        spawnSubsession: (params) => this.config.spawnSubsession(sessionId, params),
+      });
+      agent.setSummarizer(llmSummarizer);
+    }
+
+    // Register memory ledger hook for non-subagent sessions
+    if (!isSubagent && this.config.memoryConfig) {
+      const memCfg = this.config.memoryConfig;
+      const compactionTrigger = new CompactionTrigger();
+
+      const ledgerWriter = new LedgerWriter({
+        spawnSubsession: (params) => this.config.spawnSubsession(sessionId, {
+          task: params.task,
+          model: params.model,
+          systemPrompt: params.systemPrompt,
+          toolDenials: params.toolDenials,
+          maxTurns: params.maxTurns,
+          blocking: params.blocking,
+          timeout: params.timeout,
+        }),
+        appendEvent: (params) => memCfg.appendEvent(sessionId, params.type, params.payload),
+        getEventsBySession: () => memCfg.getEventsBySession(sessionId),
+        sessionId,
+        workspaceId: '', // Not needed for ledger writing
+      });
+
+      const memoryManager = new MemoryManager({
+        writeLedgerEntry: (opts) => ledgerWriter.writeLedgerEntry(opts),
+        shouldCompact: (input) => compactionTrigger.shouldCompact(input),
+        resetCompactionTrigger: () => compactionTrigger.reset(),
+        executeCompaction: () => memCfg.executeCompaction(sessionId),
+        emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
+        sessionId,
+      });
+
+      // Track cycle state for the hook
+      let cycleFirstEventId = '';
+      let cycleLastEventId = '';
+      let cycleFirstTurn = 0;
+      let cycleLastTurn = 0;
+
+      // Listen for events to track cycle range
+      agent.onEvent((event) => {
+        if (event.type === 'turn_start') {
+          const turn = (event as any).data?.turn ?? 0;
+          if (!cycleFirstEventId) {
+            cycleFirstTurn = turn;
+          }
+          cycleLastTurn = turn;
+        }
+        // Track first/last event IDs from persisted events
+        const eventId = (event as any).data?.eventId ?? (event as any).id ?? '';
+        if (eventId) {
+          if (!cycleFirstEventId) cycleFirstEventId = eventId;
+          cycleLastEventId = eventId;
+        }
+      });
+
+      agent.registerHook(createMemoryLedgerHook({
+        onCycleComplete: (info) => memoryManager.onCycleComplete(info),
+        getCycleRange: () => ({
+          firstEventId: cycleFirstEventId || 'unknown',
+          lastEventId: cycleLastEventId || 'unknown',
+          firstTurn: cycleFirstTurn,
+          lastTurn: cycleLastTurn,
+        }),
+        getModel: () => model,
+        getWorkingDirectory: () => workingDirectory,
+        getTokenRatio: () => memCfg.getTokenRatio(sessionId),
+        getRecentEventTypes: () => memCfg.getRecentEventTypes(sessionId),
+        getRecentToolCalls: () => memCfg.getRecentToolCalls(sessionId),
+      }));
+
+      logger.debug('Memory ledger hook registered', { sessionId });
+    }
 
     return agent;
   }

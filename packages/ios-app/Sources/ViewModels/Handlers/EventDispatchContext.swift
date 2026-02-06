@@ -43,6 +43,9 @@ protocol EventDispatchContext: AnyObject {
     /// Handle context compaction event
     func handleCompaction(_ result: CompactionPlugin.Result)
 
+    /// Handle memory updated event
+    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result)
+
     /// Handle context cleared event
     func handleContextCleared(_ result: ContextClearedPlugin.Result)
 

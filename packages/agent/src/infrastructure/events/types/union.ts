@@ -27,6 +27,7 @@ import type {
   HookBackgroundStartedEvent,
   HookBackgroundCompletedEvent,
 } from './hook.js';
+import type { MemoryLedgerEvent } from './memory.js';
 
 // =============================================================================
 // Union Type
@@ -94,4 +95,6 @@ export type SessionEvent =
   | HookTriggeredEvent
   | HookCompletedEvent
   | HookBackgroundStartedEvent
-  | HookBackgroundCompletedEvent;
+  | HookBackgroundCompletedEvent
+  // Memory events
+  | MemoryLedgerEvent;

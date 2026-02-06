@@ -6,6 +6,7 @@ import SwiftUI
 struct SystemEventView: View {
     let event: SystemEvent
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
+    var onMemoryUpdatedTap: ((String, String) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
 
     var body: some View {
@@ -60,6 +61,15 @@ struct SystemEventView: View {
                 success: success,
                 onTap: {
                     onSubagentResultTap?(subagentSessionId)
+                }
+            )
+
+        case .memoryUpdated(let title, let entryType):
+            MemoryUpdatedNotificationView(
+                title: title,
+                entryType: entryType,
+                onTap: {
+                    onMemoryUpdatedTap?(title, entryType)
                 }
             )
         }

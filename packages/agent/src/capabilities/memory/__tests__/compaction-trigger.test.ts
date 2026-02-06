@@ -1,0 +1,174 @@
+/**
+ * @fileoverview Tests for CompactionTrigger
+ *
+ * Tests smart compaction timing based on token ratio,
+ * progress signals, and turn count.
+ */
+import { describe, it, expect, beforeEach } from 'vitest';
+import { CompactionTrigger } from '../compaction-trigger.js';
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+describe('CompactionTrigger', () => {
+  let trigger: CompactionTrigger;
+
+  beforeEach(() => {
+    trigger = new CompactionTrigger();
+  });
+
+  describe('token threshold', () => {
+    it('should trigger at >= 0.70 ratio', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.70,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('token');
+    });
+
+    it('should trigger at > 0.70 ratio', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.85,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+    });
+
+    it('should not trigger below 0.70 without other signals', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.30,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(false);
+    });
+  });
+
+  describe('progress signals', () => {
+    it('should trigger on worktree.commit event', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.40,
+        recentEventTypes: ['worktree.commit'],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('commit');
+    });
+
+    it('should trigger on git push tool call', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.40,
+        recentEventTypes: [],
+        recentToolCalls: ['git push origin main'],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('push');
+    });
+
+    it('should trigger on gh pr create tool call', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.40,
+        recentEventTypes: [],
+        recentToolCalls: ['gh pr create --title "Fix bug"'],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('progress');
+    });
+
+    it('should not trigger on non-progress tool calls', () => {
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.40,
+        recentEventTypes: [],
+        recentToolCalls: ['ls -la', 'cat file.txt'],
+      });
+
+      expect(result.compact).toBe(false);
+    });
+  });
+
+  describe('turn-count fallback', () => {
+    it('should trigger after 8 turns without compaction', () => {
+      // Simulate 8 turns without triggering
+      for (let i = 0; i < 7; i++) {
+        trigger.shouldCompact({
+          currentTokenRatio: 0.30,
+          recentEventTypes: [],
+          recentToolCalls: [],
+        });
+      }
+
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.30,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('turn');
+    });
+
+    it('should not trigger before 8 turns', () => {
+      for (let i = 0; i < 7; i++) {
+        const result = trigger.shouldCompact({
+          currentTokenRatio: 0.30,
+          recentEventTypes: [],
+          recentToolCalls: [],
+        });
+
+        expect(result.compact).toBe(false);
+      }
+    });
+
+    it('should lower fallback to 5 turns in alert zone (>= 0.50)', () => {
+      for (let i = 0; i < 4; i++) {
+        trigger.shouldCompact({
+          currentTokenRatio: 0.55,
+          recentEventTypes: [],
+          recentToolCalls: [],
+        });
+      }
+
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.55,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('turn');
+    });
+  });
+
+  describe('reset', () => {
+    it('should reset turn counter after compaction trigger', () => {
+      // Trigger via commit
+      const result1 = trigger.shouldCompact({
+        currentTokenRatio: 0.40,
+        recentEventTypes: ['worktree.commit'],
+        recentToolCalls: [],
+      });
+      expect(result1.compact).toBe(true);
+
+      // Reset
+      trigger.reset();
+
+      // Should not trigger immediately after reset
+      const result2 = trigger.shouldCompact({
+        currentTokenRatio: 0.30,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result2.compact).toBe(false);
+    });
+  });
+});

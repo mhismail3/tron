@@ -1,18 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 15 9" width="15" height="9" shape-rendering="crispEdges">
   <!-- Claude pixel character -->
-  <!-- Head (flat top) -->
-  <rect x="3" y="0" width="9" height="2" fill="white"/>
-  <!-- Eyes rows (2 tall): gaps at col 5 and 9 -->
-  <rect x="3" y="2" width="2" height="2" fill="white"/>
-  <rect x="6" y="2" width="3" height="2" fill="white"/>
-  <rect x="10" y="2" width="2" height="2" fill="white"/>
-  <!-- Arms + body connected (1px shorter each side) -->
-  <rect x="1" y="4" width="13" height="2" fill="white"/>
-  <!-- Lower body -->
-  <rect x="3" y="6" width="9" height="1" fill="white"/>
-  <!-- 4 Legs: right pair shifted right by 1 -->
-  <rect x="3" y="7" width="1" height="2" fill="white"/>
-  <rect x="5" y="7" width="1" height="2" fill="white"/>
-  <rect x="9" y="7" width="1" height="2" fill="white"/>
-  <rect x="11" y="7" width="1" height="2" fill="white"/>
+  <!-- Head (flat top, +0.1 overlap into eye row) -->
+  <rect x="3" y="0" width="9" height="2.1" fill="white"/>
+  <!-- Eyes row (1.5px): gaps at 4.5 and 9.5 -->
+  <rect x="3" y="2" width="1.5" height="1.5" fill="white"/>
+  <rect x="5.5" y="2" width="4" height="1.5" fill="white"/>
+  <rect x="10.5" y="2" width="1.5" height="1.5" fill="white"/>
+  <!-- Below eyes (solid, overlaps into eye row and arms) -->
+  <rect x="3" y="3.4" width="9" height="0.7" fill="white"/>
+  <!-- Arms + body connected (overlaps into lower body) -->
+  <rect x="1" y="3.9" width="13" height="1.7" fill="white"/>
+  <!-- Lower body (overlaps into arms and legs) -->
+  <rect x="3" y="5.4" width="9" height="1.7" fill="white"/>
+  <!-- 4 Legs (overlap into lower body) -->
+  <rect x="3.5" y="6.9" width="1" height="2.1" fill="white"/>
+  <rect x="5.5" y="6.9" width="1" height="2.1" fill="white"/>
+  <rect x="8.5" y="6.9" width="1" height="2.1" fill="white"/>
+  <rect x="10.5" y="6.9" width="1" height="2.1" fill="white"/>
 </svg>

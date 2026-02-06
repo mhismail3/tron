@@ -32,6 +32,8 @@ export interface ExtractedData {
   userPreferences: string[];
   /** Critical context that must be preserved */
   importantContext: string[];
+  /** Key reasoning insights from thinking blocks */
+  thinkingInsights?: string[];
 }
 
 // =============================================================================
@@ -90,9 +92,10 @@ export class KeywordSummarizer implements Summarizer {
     const toolsUsed = new Set<string>();
     const filesModified = new Set<string>();
     const topics = new Set<string>();
+    const thinkingInsights: string[] = [];
 
     for (const message of messages) {
-      // Extract tool names
+      // Extract tool names and thinking blocks
       if (message.role === 'assistant' && Array.isArray(message.content)) {
         for (const block of message.content) {
           if (typeof block === 'object' && 'type' in block && block.type === 'tool_use') {
@@ -107,6 +110,17 @@ export class KeywordSummarizer implements Summarizer {
               }
               if (typeof args.path === 'string') {
                 filesModified.add(args.path);
+              }
+            }
+          }
+          // Extract thinking block insights
+          if (typeof block === 'object' && 'type' in block && block.type === 'thinking') {
+            const thinking = (block as { thinking?: string }).thinking;
+            if (thinking && thinking.length > 20) {
+              // Take the first sentence or first 200 chars as insight
+              const firstSentence = thinking.split(/[.!?]\s/)[0];
+              if (firstSentence) {
+                thinkingInsights.push(firstSentence.slice(0, 200));
               }
             }
           }
@@ -134,6 +148,7 @@ export class KeywordSummarizer implements Summarizer {
       importantContext: toolsUsed.size > 0
         ? [`Tools used: ${[...toolsUsed].join(', ')}`]
         : [],
+      thinkingInsights: thinkingInsights.slice(0, 5),
     };
   }
 
@@ -150,6 +165,10 @@ export class KeywordSummarizer implements Summarizer {
 
     if (data.importantContext.length > 0) {
       parts.push(data.importantContext.join('. '));
+    }
+
+    if (data.thinkingInsights && data.thinkingInsights.length > 0) {
+      parts.push(`Key reasoning: ${data.thinkingInsights.slice(0, 3).join('; ')}`);
     }
 
     parts.push(`(${messageCount} messages summarized)`);

@@ -24,6 +24,7 @@ import type {
   HookBackgroundStartedEvent,
   HookBackgroundCompletedEvent,
 } from './hook.js';
+import type { MemoryLedgerEvent } from './memory.js';
 
 // =============================================================================
 // Type Guards
@@ -175,4 +176,12 @@ export function isSkillRemovedEvent(event: SessionEvent): event is SkillRemovedE
 
 export function isSkillEvent(event: SessionEvent): event is SkillAddedEvent | SkillRemovedEvent {
   return event.type === 'skill.added' || event.type === 'skill.removed';
+}
+
+export function isMemoryLedgerEvent(event: SessionEvent): event is MemoryLedgerEvent {
+  return event.type === 'memory.ledger';
+}
+
+export function isMemoryEvent(event: SessionEvent): event is MemoryLedgerEvent {
+  return event.type.startsWith('memory.');
 }

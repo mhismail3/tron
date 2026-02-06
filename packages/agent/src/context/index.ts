@@ -48,6 +48,11 @@ export {
 } from './summarizer.js';
 
 export {
+  LLMSummarizer,
+  type LLMSummarizerDeps,
+} from './llm-summarizer.js';
+
+export {
   TRON_CORE_PROMPT,
   WORKING_DIRECTORY_SUFFIX,
   buildSystemPrompt,

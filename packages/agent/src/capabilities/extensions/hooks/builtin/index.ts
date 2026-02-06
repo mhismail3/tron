@@ -38,6 +38,11 @@ export {
   type PostToolUseHookConfig,
 } from './post-tool-use.js';
 
+export {
+  createMemoryLedgerHook,
+  type MemoryLedgerHookConfig,
+} from './memory-ledger.js';
+
 const logger = createLogger('hooks:builtin');
 
 /**
@@ -59,6 +64,7 @@ export interface BuiltinHooksConfig {
       trackFiles?: boolean;
       maxTrackedFiles?: number;
     };
+    memoryLedger?: import('./memory-ledger.js').MemoryLedgerHookConfig;
   };
 }
 
@@ -108,7 +114,14 @@ export function registerBuiltinHooks(
     })
   );
 
-  logger.info('Built-in hooks registered', {
-    hooks: ['session-start', 'session-end', 'pre-compact', 'post-tool-use'],
-  });
+  // Register MemoryLedger hook (optional — requires external config)
+  if (options.memoryLedger) {
+    const { createMemoryLedgerHook } = require('./memory-ledger.js');
+    engine.register(createMemoryLedgerHook(options.memoryLedger));
+  }
+
+  const hooks = ['session-start', 'session-end', 'pre-compact', 'post-tool-use'];
+  if (options.memoryLedger) hooks.push('memory-ledger');
+
+  logger.info('Built-in hooks registered', { hooks });
 }

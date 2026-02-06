@@ -70,6 +70,11 @@ final class EventDispatchCoordinator {
                 context.handleCompaction(r)
             }
 
+        case MemoryUpdatedPlugin.eventType:
+            if let r = result as? MemoryUpdatedPlugin.Result {
+                context.handleMemoryUpdated(r)
+            }
+
         case ContextClearedPlugin.eventType:
             if let r = result as? ContextClearedPlugin.Result {
                 context.handleContextCleared(r)

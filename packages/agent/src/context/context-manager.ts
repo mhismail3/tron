@@ -94,7 +94,7 @@ export class ContextManager {
     this.compactionEngine = new CompactionEngine(
       {
         threshold: config.compaction?.threshold ?? 0.70,
-        preserveRecentTurns: config.compaction?.preserveRecentTurns ?? 3,
+        preserveRecentTurns: config.compaction?.preserveRecentTurns ?? 5,
       },
       {
         getMessages: () => this.messageStore.get(),

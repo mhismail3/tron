@@ -15,6 +15,7 @@ struct MessageBubble: View {
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
     var onAdaptTap: ((AdaptChipData) -> Void)?
+    var onMemoryUpdatedTap: ((String, String) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
 
     private var isUserMessage: Bool {
@@ -240,6 +241,7 @@ struct MessageBubble: View {
                 SystemEventView(
                     event: event,
                     onCompactionTap: onCompactionTap,
+                    onMemoryUpdatedTap: onMemoryUpdatedTap,
                     onSubagentResultTap: onSubagentResultTap
                 )
             } else {

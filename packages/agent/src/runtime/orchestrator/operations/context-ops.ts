@@ -168,7 +168,7 @@ export class ContextOps {
       throw new Error('Session not active');
     }
 
-    const summarizer = this.getSummarizer();
+    const summarizer = this.getSummarizer(sessionId);
     return active.agent.getContextManager().previewCompaction({ summarizer });
   }
 
@@ -187,7 +187,7 @@ export class ContextOps {
 
     const cm = active.agent.getContextManager();
     const tokensBefore = cm.getCurrentTokens();
-    const summarizer = this.getSummarizer();
+    const summarizer = this.getSummarizer(sessionId);
 
     const result = await cm.executeCompaction({
       summarizer,
@@ -347,10 +347,11 @@ export class ContextOps {
 
   /**
    * Get a summarizer instance for compaction operations.
+   * Prefers the agent's LLM summarizer if available.
    */
-  private getSummarizer(): Summarizer {
-    // Use KeywordSummarizer for now - in production this would use LLM
-    return new KeywordSummarizer();
+  private getSummarizer(sessionId: string): Summarizer {
+    const active = this.config.getActiveSession(sessionId);
+    return active?.agent.getSummarizer() ?? new KeywordSummarizer();
   }
 }
 

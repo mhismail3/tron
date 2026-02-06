@@ -216,6 +216,14 @@ export class TronServer {
       ));
     });
 
+    this.orchestrator.on('memory_updated', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.AGENT_MEMORY_UPDATED,
+        { title: data.title, entryType: data.entryType },
+        data.sessionId
+      ));
+    });
+
     // Forward browser frame events for live streaming
     this.orchestrator.on('browser.frame', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(

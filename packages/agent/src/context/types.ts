@@ -40,7 +40,7 @@ export interface ContextManagerConfig {
   compaction?: {
     /** Threshold ratio (0-1) to trigger compaction suggestion (default: 0.70) */
     threshold?: number;
-    /** Number of recent turns to preserve during compaction (default: 3) */
+    /** Number of recent turns to preserve during compaction (default: 5) */
     preserveRecentTurns?: number;
   };
 }

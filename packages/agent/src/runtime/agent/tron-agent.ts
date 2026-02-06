@@ -307,6 +307,13 @@ export class TronAgent {
   }
 
   /**
+   * Get the current summarizer (if set).
+   */
+  getSummarizer(): Summarizer | null {
+    return this.compactionHandler.getSummarizer();
+  }
+
+  /**
    * Enable or disable auto-compaction.
    */
   setAutoCompaction(enabled: boolean): void {
@@ -318,6 +325,18 @@ export class TronAgent {
    */
   canAutoCompact(): boolean {
     return this.compactionHandler.canAutoCompact();
+  }
+
+  /**
+   * Attempt compaction using the agent's configured LLM summarizer.
+   */
+  async attemptCompaction(reason: 'pre_turn_guardrail' | 'threshold_exceeded' | 'manual' = 'manual'): Promise<{
+    success: boolean;
+    tokensBefore?: number;
+    tokensAfter?: number;
+    error?: string;
+  }> {
+    return this.compactionHandler.attemptCompaction(reason);
   }
 
   // ===========================================================================

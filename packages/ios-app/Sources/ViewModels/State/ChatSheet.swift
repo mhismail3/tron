@@ -8,6 +8,12 @@ struct CompactionDetailData: Equatable {
     let summary: String?
 }
 
+/// Data for memory detail sheet
+struct MemoryDetailData: Equatable {
+    let title: String
+    let entryType: String
+}
+
 /// Identifiable enum representing all possible sheets in ChatView.
 /// Uses single sheet(item:) modifier pattern per SwiftUI best practices.
 /// This avoids Swift compiler type-checking timeout with multiple .sheet() modifiers.
@@ -24,6 +30,7 @@ enum ChatSheet: Identifiable, Equatable {
     // Skill/Spell details
     case skillDetail(Skill, ChipMode)
     case compactionDetail(CompactionDetailData)
+    case memoryDetail(MemoryDetailData)
 
     // Tool sheets
     case askUserQuestion
@@ -60,6 +67,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "skillDetail-\(skill.id)"
         case .compactionDetail:
             return "compaction"
+        case .memoryDetail:
+            return "memoryDetail"
         case .askUserQuestion:
             return "askUserQuestion"
         case .subagentDetail:
@@ -98,6 +107,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.skillDetail(let skill1, let mode1), .skillDetail(let skill2, let mode2)):
             return skill1.id == skill2.id && mode1 == mode2
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
+            return data1 == data2
+        case (.memoryDetail(let data1), .memoryDetail(let data2)):
             return data1 == data2
         case (.askUserQuestion, .askUserQuestion):
             return true

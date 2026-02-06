@@ -58,6 +58,7 @@
 		2130D6AA40D603B50FA41D3F /* ChatViewModel+EventDispatchContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F3184BA596501A715C760BC /* ChatViewModel+EventDispatchContext.swift */; };
 		218FC01C78AF9818B618E5ED /* SubagentTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B094D2A4DA03D6547650380 /* SubagentTypes.swift */; };
 		220EE905D1B68C9C82C9D21C /* AttachmentBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5916B2C51BF52310DD2E9907 /* AttachmentBubble.swift */; };
+		225E21C270FF1F05161BD8E0 /* MemoryUpdatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4D7932E415EF8FCCB9ADDC /* MemoryUpdatedPlugin.swift */; };
 		228402E7C48043B06F698A20 /* NotificationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10F44727A46F0F661FB6C0E /* NotificationViews.swift */; };
 		2309FC999210AE944C84646A /* RPCTypes+Worktree.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA26A8F532955876995002CE /* RPCTypes+Worktree.swift */; };
 		2310BE4C23993CC491219502 /* Recursive-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 5E837774214A074AC646428E /* Recursive-Variable.ttf */; };
@@ -296,6 +297,7 @@
 		B3D8CB8BC012FC10D0E5E595 /* ScrollGeometryHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E0F63274B2F8CDC465DF95E /* ScrollGeometryHandler.swift */; };
 		B4442D14DEA3295B00CB88B5 /* ModelFilteringServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586CC1009C7B6D0D091CA9FD /* ModelFilteringServiceTests.swift */; };
 		B523893BDC7E79D4FBF86800 /* TronLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF550C99638AAC41D6ACAD87 /* TronLogger.swift */; };
+		B54913E5EDC75D502E3866A7 /* MemoryDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C41554BF7D7AB58A7A42AF /* MemoryDetailSheet.swift */; };
 		B77FADD339F30EDF27379464 /* AskUserQuestionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637D018D17FB22BE188D582B /* AskUserQuestionState.swift */; };
 		B80C830CFC5883B7A622AAFB /* AskUserQuestionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1BA093BE42A0EE7FD7F2EE /* AskUserQuestionSheet.swift */; };
 		B88F6EEB81F285616AFE665B /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = 3ACFA2E1D7E2775277E8E1C4 /* Fonts */; };
@@ -506,6 +508,7 @@
 		3507F8C0D51118AC5B58E4C6 /* ChatSheetModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSheetModifier.swift; sourceTree = "<group>"; };
 		35BDCD7F29207A366C356FF4 /* MessageHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageHandlers.swift; sourceTree = "<group>"; };
 		36BF7D12E0DCA9197B5D45EF /* ThinkingDeltaPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingDeltaPlugin.swift; sourceTree = "<group>"; };
+		36C41554BF7D7AB58A7A42AF /* MemoryDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDetailSheet.swift; sourceTree = "<group>"; };
 		36D5C1A94E170CFF37A3544A /* ToolPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPayloads.swift; sourceTree = "<group>"; };
 		36D732E1A6C2929176A5B88D /* WorktreeStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeStatusView.swift; sourceTree = "<group>"; };
 		3740E0093C7AA75C04BB7E2B /* TurnEndPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnEndPlugin.swift; sourceTree = "<group>"; };
@@ -755,6 +758,7 @@
 		CEB09852325E4D08BEEFADF7 /* UseCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UseCase.swift; sourceTree = "<group>"; };
 		CEE3B9CE86236E7F465571D9 /* CommandToolTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandToolTypesTests.swift; sourceTree = "<group>"; };
 		CF073F6CCB005DB21A21BE2B /* ToolResultViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolResultViews.swift; sourceTree = "<group>"; };
+		CF4D7932E415EF8FCCB9ADDC /* MemoryUpdatedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUpdatedPlugin.swift; sourceTree = "<group>"; };
 		D03763F7691E2B2DCB2413C3 /* PushNotificationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationServiceTests.swift; sourceTree = "<group>"; };
 		D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelNameFormatter.swift; sourceTree = "<group>"; };
 		D076DC777C96062660E08386 /* UIRenderStartPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIRenderStartPlugin.swift; sourceTree = "<group>"; };
@@ -1280,6 +1284,7 @@
 			children = (
 				1F88902FF851CB3600BB8054 /* CompactionDetailSheet.swift */,
 				6BCC3CF17E11CB993CBEF33D /* LogViewer.swift */,
+				36C41554BF7D7AB58A7A42AF /* MemoryDetailSheet.swift */,
 				36D732E1A6C2929176A5B88D /* WorktreeStatusView.swift */,
 			);
 			path = System;
@@ -1521,6 +1526,7 @@
 				778EBE6FA27F00677570A951 /* CompletePlugin.swift */,
 				9F02C32D8D43B7DC9E958BAC /* ContextClearedPlugin.swift */,
 				1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */,
+				CF4D7932E415EF8FCCB9ADDC /* MemoryUpdatedPlugin.swift */,
 				A208757B29D974B8B65009CB /* MessageDeletedPlugin.swift */,
 				EA3AD6BC883E889FAA49FBB2 /* SkillRemovedPlugin.swift */,
 				7A0089B84FFEBA67C05982B8 /* TurnFailedPlugin.swift */,
@@ -2366,6 +2372,8 @@
 				02FE389EB93928871C55206C /* LogViewer.swift in Sources */,
 				68F10F5CFF9AE69C663A5567 /* LoggingContext.swift in Sources */,
 				DE697ED282ADD5F00BA2EB3C /* MediaClient.swift in Sources */,
+				B54913E5EDC75D502E3866A7 /* MemoryDetailSheet.swift in Sources */,
+				225E21C270FF1F05161BD8E0 /* MemoryUpdatedPlugin.swift in Sources */,
 				D227BCFF3007E6E8AB7698A3 /* MessageBubble.swift in Sources */,
 				F37F6FEA38DE1C3F1DB3C743 /* MessageContent.swift in Sources */,
 				8F04072E5B3C1220094C8F6D /* MessageDeletedPlugin.swift in Sources */,

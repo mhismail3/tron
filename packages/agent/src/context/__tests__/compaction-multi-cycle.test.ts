@@ -206,8 +206,8 @@ describe('Multiple Compaction Cycles', () => {
 
       const messagesAfter = harness.contextManager.getMessages().length;
 
-      // Should have: 2 (summary + ack) + 6 (3 turns) = 8 messages
-      expect(messagesAfter).toBe(8);
+      // Should have: 2 (summary + ack) + 10 (5 turns) = 12 messages
+      expect(messagesAfter).toBe(12);
       expect(messagesAfter).toBeLessThan(messagesBefore * 0.1);
     });
 
@@ -218,7 +218,7 @@ describe('Multiple Compaction Cycles', () => {
       await harness.executeCompaction();
 
       const baseCount = harness.contextManager.getMessages().length;
-      expect(baseCount).toBe(8); // 2 + 6
+      expect(baseCount).toBe(12); // 2 + 10
 
       // Add 5 more turns (10 messages)
       const additionalMessages = PreciseTokenGenerator.generateForTokens(10000, {

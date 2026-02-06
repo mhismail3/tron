@@ -475,3 +475,43 @@ struct TurnFailedNotificationView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 }
+
+// MARK: - Memory Updated Notification View (Purple pill-style in-chat notification)
+
+struct MemoryUpdatedNotificationView: View {
+    let title: String
+    let entryType: String
+    var onTap: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "brain.fill")
+                .font(TronTypography.codeSM)
+                .foregroundStyle(.purple)
+
+            Text("Memory updated")
+                .font(TronTypography.filePath)
+                .foregroundStyle(.purple.opacity(0.9))
+
+            Text("\u{2022}")
+                .font(TronTypography.badge)
+                .foregroundStyle(.purple.opacity(0.5))
+
+            Text(title)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(.purple.opacity(0.7))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.purple.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.purple.opacity(0.3), lineWidth: 0.5)
+        )
+        .contentShape(Capsule())
+        .onTapGesture { onTap?() }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}

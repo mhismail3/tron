@@ -75,7 +75,9 @@ export type EventType =
   | 'hook.triggered'
   | 'hook.completed'
   | 'hook.background_started'
-  | 'hook.background_completed';
+  | 'hook.background_completed'
+  // Memory events
+  | 'memory.ledger';
 
 // =============================================================================
 // Base Event Structure

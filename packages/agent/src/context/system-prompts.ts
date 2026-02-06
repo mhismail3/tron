@@ -19,6 +19,8 @@ import { createLogger } from '@infrastructure/logging/index.js';
 // Re-export prompts from the system-prompts directory
 export { TRON_CORE_PROMPT, WORKING_DIRECTORY_SUFFIX } from './system-prompts/index.js';
 export { WEB_CONTENT_SUMMARIZER_PROMPT } from './system-prompts/index.js';
+export { MEMORY_LEDGER_PROMPT } from './system-prompts/index.js';
+export { COMPACTION_SUMMARIZER_PROMPT } from './system-prompts/index.js';
 
 // Import for local use in this file
 import { TRON_CORE_PROMPT, WORKING_DIRECTORY_SUFFIX } from './system-prompts/index.js';
