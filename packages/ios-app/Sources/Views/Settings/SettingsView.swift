@@ -34,6 +34,7 @@ struct SettingsView: View {
     // Quick Session settings
     @AppStorage("quickSessionWorkspace") private var quickSessionWorkspace = "/Users/moose/Workspace"
     @State private var showQuickSessionWorkspaceSelector = false
+    @State private var showModelPicker = false
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
 
@@ -186,19 +187,17 @@ struct SettingsView: View {
                         }
 
                         // Default Model Picker
-                        ModelPickerMenuContent(
-                            models: availableModels,
-                            selectedModelId: defaultModelBinding,
-                            isLoading: isLoadingModels
-                        ) {
-                            HStack {
-                                Label("Model", systemImage: "cpu")
-                                    .font(TronTypography.subheadline)
-                                Spacer()
-                                Text(selectedModelDisplayName)
-                                    .font(TronTypography.codeSM)
-                                    .foregroundStyle(.tronTextSecondary)
-                            }
+                        HStack {
+                            Label("Model", systemImage: "cpu")
+                                .font(TronTypography.subheadline)
+                            Spacer()
+                            Text(selectedModelDisplayName)
+                                .font(TronTypography.codeSM)
+                                .foregroundStyle(.tronTextSecondary)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            showModelPicker = true
                         }
                     } header: {
                         Text("Quick Session")
@@ -260,6 +259,17 @@ struct SettingsView: View {
                     rpcClient: rpcClient,
                     selectedPath: $quickSessionWorkspace
                 )
+            }
+            .sheet(isPresented: $showModelPicker) {
+                if #available(iOS 26.0, *) {
+                    ModelPickerSheet(
+                        models: availableModels,
+                        currentModelId: defaultModelValue,
+                        onSelect: { model in
+                            defaultModelBinding.wrappedValue = model.id
+                        }
+                    )
+                }
             }
             .task {
                 await loadModels()

@@ -336,6 +336,7 @@ struct InputBar: View {
                 hasAppeared: hasAppeared,
                 reasoningPillNamespace: reasoningPillNamespace,
                 onContextTap: actions.onContextTap,
+                onModelPickerTap: actions.onModelPickerTap,
                 readOnly: config.readOnly
             )
             .opacity(shouldShowStatusPills ? 1 : 0)

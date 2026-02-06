@@ -123,6 +123,9 @@ struct ChatView: View {
                             onContextTap: { [sheetCoordinator] in
                                 sheetCoordinator.showContextAudit()
                             },
+                            onModelPickerTap: { [sheetCoordinator] in
+                                sheetCoordinator.showModelPicker()
+                            },
                             onSkillSelect: nil,
                             onSkillRemove: { _ in
                                 // Skill removed from selection - no additional action needed

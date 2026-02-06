@@ -20,6 +20,7 @@ struct NewSessionFlow: View {
     @State private var showWorkspaceSelector = false
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
+    @State private var showModelPicker = false
 
     // Server sessions state (sessions from ALL devices, not just local)
     @State private var serverSessions: [SessionInfo] = []
@@ -141,11 +142,9 @@ struct NewSessionFlow: View {
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.white.opacity(0.6))
 
-                        ModelPickerMenuContent(
-                            models: availableModels,
-                            selectedModelId: $selectedModel,
-                            isLoading: isLoadingModels
-                        ) {
+                        Button {
+                            showModelPicker = true
+                        } label: {
                             HStack {
                                 if isLoadingModels && selectedModel.isEmpty {
                                     Text("Loading...")
@@ -165,13 +164,9 @@ struct NewSessionFlow: View {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
-                            .background {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(.clear)
-                                    .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
                             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
+                        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         Text(modelDescription)
                             .font(TronTypography.codeCaption)
@@ -235,6 +230,15 @@ struct NewSessionFlow: View {
                 WorkspaceSelector(
                     rpcClient: rpcClient,
                     selectedPath: $workingDirectory
+                )
+            }
+            .sheet(isPresented: $showModelPicker) {
+                ModelPickerSheet(
+                    models: availableModels,
+                    currentModelId: selectedModel,
+                    onSelect: { model in
+                        selectedModel = model.id
+                    }
                 )
             }
             .sheet(isPresented: $showCloneSheet) {

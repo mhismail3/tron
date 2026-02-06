@@ -132,6 +132,9 @@ struct InputBarActions {
     // MARK: - Context
     let onContextTap: (() -> Void)?
 
+    // MARK: - Model Picker Sheet
+    let onModelPickerTap: (() -> Void)?
+
     // MARK: - Skills
     let onSkillSelect: ((Skill) -> Void)?
     let onSkillRemove: ((Skill) -> Void)?
@@ -151,6 +154,7 @@ struct InputBarActions {
         onModelSelect: ((ModelInfo) -> Void)? = nil,
         onReasoningLevelChange: ((String) -> Void)? = nil,
         onContextTap: (() -> Void)? = nil,
+        onModelPickerTap: (() -> Void)? = nil,
         onSkillSelect: ((Skill) -> Void)? = nil,
         onSkillRemove: ((Skill) -> Void)? = nil,
         onSkillDetailTap: ((Skill) -> Void)? = nil,
@@ -166,6 +170,7 @@ struct InputBarActions {
         self.onModelSelect = onModelSelect
         self.onReasoningLevelChange = onReasoningLevelChange
         self.onContextTap = onContextTap
+        self.onModelPickerTap = onModelPickerTap
         self.onSkillSelect = onSkillSelect
         self.onSkillRemove = onSkillRemove
         self.onSkillDetailTap = onSkillDetailTap

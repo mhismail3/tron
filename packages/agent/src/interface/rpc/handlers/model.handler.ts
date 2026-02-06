@@ -19,6 +19,22 @@ import { GEMINI_MODELS } from '@llm/providers/google/index.js';
 import { InvalidParamsError } from './base.js';
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Derive Gemini family from model ID.
+ * "gemini-3-pro-preview" → "Gemini 3"
+ * "gemini-2.5-flash" → "Gemini 2.5"
+ */
+function deriveGeminiFamily(modelId: string): string {
+  if (modelId.includes('gemini-3')) return 'Gemini 3';
+  if (modelId.includes('gemini-2.5')) return 'Gemini 2.5';
+  if (modelId.includes('gemini-2')) return 'Gemini 2';
+  return 'Gemini';
+}
+
+// =============================================================================
 // Handler Factory
 // =============================================================================
 
@@ -45,7 +61,7 @@ export function createModelHandlers(): MethodRegistration[] {
   const listHandler: MethodHandler = async () => {
     // Build model list from all providers
     const models: ModelListResult['models'] = [
-      // Anthropic models
+      // Anthropic models — all metadata directly from ANTHROPIC_MODELS
       ...ANTHROPIC_MODELS.map((m) => ({
         id: m.id,
         name: m.shortName,
@@ -58,8 +74,15 @@ export function createModelHandlers(): MethodRegistration[] {
         defaultReasoningLevel: m.defaultReasoningLevel,
         tier: m.tier,
         isLegacy: m.legacy ?? false,
+        family: m.family,
+        maxOutput: m.maxOutput,
+        description: m.description,
+        inputCostPerMillion: m.inputCostPerMillion,
+        outputCostPerMillion: m.outputCostPerMillion,
+        recommended: m.recommended ?? false,
+        releaseDate: m.releaseDate,
       })),
-      // OpenAI Codex models
+      // OpenAI Codex models — all metadata directly from OPENAI_MODELS
       ...Object.entries(OPENAI_MODELS).map(([id, m]) => ({
         id,
         name: m.shortName,
@@ -72,8 +95,14 @@ export function createModelHandlers(): MethodRegistration[] {
         defaultReasoningLevel: m.defaultReasoningLevel,
         tier: m.tier,
         isLegacy: false,
+        family: m.family,
+        maxOutput: m.maxOutput,
+        description: m.description,
+        inputCostPerMillion: m.inputCostPerMillion,
+        outputCostPerMillion: m.outputCostPerMillion,
+        recommended: m.recommended,
       })),
-      // Google Gemini models
+      // Google Gemini models — derive family from ID, normalize pricing from per-1k
       ...Object.entries(GEMINI_MODELS).map(([id, m]) => ({
         id,
         name: m.shortName,
@@ -86,6 +115,12 @@ export function createModelHandlers(): MethodRegistration[] {
         isPreview: m.preview ?? false,
         thinkingLevel: m.defaultThinkingLevel,
         supportedThinkingLevels: m.supportedThinkingLevels,
+        family: deriveGeminiFamily(id),
+        maxOutput: m.maxOutput,
+        description: `${m.name} — ${m.tier} tier${m.preview ? ' (preview)' : ''}`,
+        inputCostPerMillion: m.inputCostPer1k * 1000,
+        outputCostPerMillion: m.outputCostPer1k * 1000,
+        recommended: m.tier === 'pro' && id.includes('gemini-3'),
       })),
     ];
 

@@ -39,16 +39,28 @@ final class ModelFilteringServiceTests: XCTestCase {
         provider: String,
         name: String? = nil,
         contextWindow: Int = 200_000,
-        maxOutputTokens: Int? = 16_000
+        maxOutputTokens: Int? = 16_000,
+        family: String? = nil,
+        maxOutput: Int? = nil,
+        description: String? = nil,
+        inputCostPerMillion: Double? = nil,
+        outputCostPerMillion: Double? = nil,
+        recommended: Bool? = nil
     ) -> ModelInfo {
         // Use JSONDecoder to create ModelInfo since it has no public init
-        let json: [String: Any] = [
+        var json: [String: Any] = [
             "id": id,
             "name": name ?? id,
             "provider": provider,
             "contextWindow": contextWindow,
             "maxOutputTokens": maxOutputTokens as Any
         ]
+        if let family { json["family"] = family }
+        if let maxOutput { json["maxOutput"] = maxOutput }
+        if let description { json["description"] = description }
+        if let inputCostPerMillion { json["inputCostPerMillion"] = inputCostPerMillion }
+        if let outputCostPerMillion { json["outputCostPerMillion"] = outputCostPerMillion }
+        if let recommended { json["recommended"] = recommended }
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(ModelInfo.self, from: data)
     }
@@ -275,6 +287,103 @@ final class ModelFilteringServiceTests: XCTestCase {
         let unique = ModelFilteringService.uniqueByFormattedName(models)
 
         XCTAssertEqual(unique.count, 3)
+    }
+
+    // MARK: - organizeByProviderFamily Tests
+
+    func test_organizeByProviderFamily_groups3Providers() {
+        let models = makeModels()
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+
+        XCTAssertEqual(groups.count, 3)
+        XCTAssertEqual(groups[0].id, "anthropic")
+        XCTAssertEqual(groups[1].id, "openai-codex")
+        XCTAssertEqual(groups[2].id, "google")
+    }
+
+    func test_organizeByProviderFamily_groupsByFamily() {
+        let models = [
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+
+        XCTAssertEqual(groups.count, 1) // Only Anthropic
+        let anthropic = groups[0]
+        XCTAssertEqual(anthropic.families.count, 2) // Claude 4.6 and Claude 4.5
+    }
+
+    func test_organizeByProviderFamily_newestFamilyFirst() {
+        let models = [
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
+            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", family: "Claude 4"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+        let families = groups[0].families
+
+        XCTAssertEqual(families[0].id, "Claude 4.6")
+        XCTAssertEqual(families[1].id, "Claude 4.5")
+        XCTAssertEqual(families[2].id, "Claude 4")
+    }
+
+    func test_organizeByProviderFamily_latestFamilyMarked() {
+        let models = [
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+        let families = groups[0].families
+
+        XCTAssertTrue(families[0].isLatest)  // Claude 4.6
+        XCTAssertFalse(families[1].isLatest) // Claude 4.5
+    }
+
+    func test_organizeByProviderFamily_emptyProviderExcluded() {
+        let models = [
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+
+        // Only anthropic - no openai-codex or google
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].id, "anthropic")
+    }
+
+    func test_organizeByProviderFamily_handlesEmptyArray() {
+        let groups = ModelFilteringService.organizeByProviderFamily([])
+        XCTAssertTrue(groups.isEmpty)
+    }
+
+    func test_organizeByProviderFamily_fallsBackToIdParsing() {
+        // No family field — should derive from ID
+        let models = [
+            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex"),
+            makeModel(id: "gemini-3-pro-preview", provider: "google"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+
+        XCTAssertEqual(groups.count, 3)
+        XCTAssertEqual(groups[0].families[0].id, "Claude 4.6")
+        XCTAssertEqual(groups[1].families[0].id, "GPT-5.3")
+        XCTAssertEqual(groups[2].families[0].id, "Gemini 3")
+    }
+
+    func test_organizeByProviderFamily_modelsSortedByTier() {
+        let models = [
+            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+        ]
+        let groups = ModelFilteringService.organizeByProviderFamily(models)
+        let familyModels = groups[0].families[0].models
+
+        // Opus > Sonnet > Haiku
+        XCTAssertEqual(familyModels[0].id, "claude-opus-4-5-20250501")
+        XCTAssertEqual(familyModels[1].id, "claude-sonnet-4-5-20250501")
+        XCTAssertEqual(familyModels[2].id, "claude-haiku-4-5-20250501")
     }
 
     // MARK: - Integration Tests

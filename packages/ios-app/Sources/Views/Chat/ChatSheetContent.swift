@@ -88,6 +88,15 @@ struct ChatSheetContent: View {
 
         case .adaptDetail(let data):
             AdaptDetailSheet(data: data)
+
+        case .modelPicker:
+            ModelPickerSheet(
+                models: viewModel.modelPickerState.cachedModels,
+                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
+                onSelect: { model in
+                    NotificationCenter.default.post(name: .modelPickerAction, object: model)
+                }
+            )
         }
     }
 

@@ -33,6 +33,111 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// For Gemini models: available thinking levels
     let supportedThinkingLevels: [String]?
 
+    // MARK: - Rich Metadata (from model.list v2)
+
+    /// Model family (e.g., "Claude 4.6", "GPT-5.3", "Gemini 3")
+    let family: String?
+    /// Maximum output tokens
+    let maxOutput: Int?
+    /// Brief description of the model
+    let modelDescription: String?
+    /// Input cost per million tokens (USD)
+    let inputCostPerMillion: Double?
+    /// Output cost per million tokens (USD)
+    let outputCostPerMillion: Double?
+    /// Whether this is the recommended model in its tier
+    let recommended: Bool?
+    /// Release date (YYYY-MM-DD)
+    let releaseDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, provider, contextWindow, maxOutputTokens
+        case supportsThinking, supportsImages, tier, isLegacy
+        case supportsReasoning, reasoningLevels, defaultReasoningLevel
+        case thinkingLevel, supportedThinkingLevels
+        case family, maxOutput, recommended, releaseDate
+        case inputCostPerMillion, outputCostPerMillion
+        case modelDescription = "description"
+    }
+
+    /// Manual init preserving backward compatibility — new metadata fields default to nil
+    init(
+        id: String,
+        name: String,
+        provider: String,
+        contextWindow: Int,
+        maxOutputTokens: Int? = nil,
+        supportsThinking: Bool? = nil,
+        supportsImages: Bool? = nil,
+        tier: String? = nil,
+        isLegacy: Bool? = nil,
+        supportsReasoning: Bool? = nil,
+        reasoningLevels: [String]? = nil,
+        defaultReasoningLevel: String? = nil,
+        thinkingLevel: String? = nil,
+        supportedThinkingLevels: [String]? = nil,
+        family: String? = nil,
+        maxOutput: Int? = nil,
+        modelDescription: String? = nil,
+        inputCostPerMillion: Double? = nil,
+        outputCostPerMillion: Double? = nil,
+        recommended: Bool? = nil,
+        releaseDate: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.provider = provider
+        self.contextWindow = contextWindow
+        self.maxOutputTokens = maxOutputTokens
+        self.supportsThinking = supportsThinking
+        self.supportsImages = supportsImages
+        self.tier = tier
+        self.isLegacy = isLegacy
+        self.supportsReasoning = supportsReasoning
+        self.reasoningLevels = reasoningLevels
+        self.defaultReasoningLevel = defaultReasoningLevel
+        self.thinkingLevel = thinkingLevel
+        self.supportedThinkingLevels = supportedThinkingLevels
+        self.family = family
+        self.maxOutput = maxOutput
+        self.modelDescription = modelDescription
+        self.inputCostPerMillion = inputCostPerMillion
+        self.outputCostPerMillion = outputCostPerMillion
+        self.recommended = recommended
+        self.releaseDate = releaseDate
+    }
+
+    // MARK: - Formatted Display Helpers
+
+    /// Formatted pricing string, e.g. "$3/M in · $15/M out"
+    var formattedPricing: String? {
+        guard let input = inputCostPerMillion, let output = outputCostPerMillion else { return nil }
+        let fmtIn = input < 1 ? String(format: "$%.2f/M in", input) : "$\(Int(input))/M in"
+        let fmtOut = output < 1 ? String(format: "$%.2f/M out", output) : "$\(Int(output))/M out"
+        return "\(fmtIn) · \(fmtOut)"
+    }
+
+    /// Formatted max output, e.g. "128K output"
+    var formattedMaxOutput: String? {
+        guard let tokens = maxOutput ?? maxOutputTokens else { return nil }
+        if tokens >= 1_000_000 {
+            return "\(tokens / 1_000_000)M output"
+        } else if tokens >= 1_000 {
+            return "\(tokens / 1_000)K output"
+        }
+        return "\(tokens) output"
+    }
+
+    /// Formatted context window, e.g. "200K context"
+    var formattedContextWindow: String {
+        if contextWindow >= 1_000_000 {
+            return "\(contextWindow / 1_000_000)M context"
+        } else if contextWindow >= 1_000 {
+            return "\(contextWindow / 1_000)K context"
+        }
+        return "\(contextWindow) context"
+    }
+
     /// Properly formatted display name (e.g., "Claude Opus 4.5", "Claude Sonnet 4")
     var displayName: String {
         // For OpenAI models, use the name directly

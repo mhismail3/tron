@@ -43,5 +43,19 @@ export interface ModelListResult {
     reasoningLevels?: string[];
     /** Default reasoning level */
     defaultReasoningLevel?: string;
+    /** Model family (e.g., "Claude 4.6", "GPT-5.3", "Gemini 3") */
+    family?: string;
+    /** Maximum output tokens */
+    maxOutput?: number;
+    /** Brief description of the model */
+    description?: string;
+    /** Input cost per million tokens (USD) */
+    inputCostPerMillion?: number;
+    /** Output cost per million tokens (USD) */
+    outputCostPerMillion?: number;
+    /** Whether this is the recommended model in its tier */
+    recommended?: boolean;
+    /** Release date (YYYY-MM-DD) */
+    releaseDate?: string;
   }>;
 }
