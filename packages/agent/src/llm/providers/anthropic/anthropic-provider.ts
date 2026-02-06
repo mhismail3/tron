@@ -92,15 +92,10 @@ export class AnthropicProvider {
 
     // Initialize Anthropic client
     if (config.auth.type === 'api_key') {
-      const modelInfo = CLAUDE_MODELS[config.model];
-      const betaHeader = modelInfo?.betaFeatures?.length
-        ? modelInfo.betaFeatures.join(',')
-        : undefined;
       this.client = new Anthropic({
         apiKey: config.auth.apiKey,
         baseURL: config.baseURL,
         maxRetries: sdkMaxRetries,
-        ...(betaHeader && { defaultHeaders: { 'anthropic-beta': betaHeader } }),
       });
     } else {
       this.tokens = {
@@ -125,32 +120,15 @@ export class AnthropicProvider {
     });
   }
 
-  private getBetaHeaderValue(): string {
-    const modelInfo = CLAUDE_MODELS[this.config.model];
-    const parts: string[] = [];
-
-    if (this.isOAuth) {
-      if (!modelInfo || modelInfo.requiresThinkingBetaHeaders) {
-        parts.push(...this.providerSettings.api.oauthBetaHeaders.split(','));
-      } else {
-        parts.push('oauth-2025-04-20');
-      }
-    }
-
-    if (modelInfo?.betaFeatures) {
-      for (const feature of modelInfo.betaFeatures) {
-        if (!parts.includes(feature)) parts.push(feature);
-      }
-    }
-
-    return parts.join(',');
-  }
-
   private getOAuthHeaders(): Record<string, string> {
+    const modelInfo = CLAUDE_MODELS[this.config.model];
+    const betaHeaders = (!modelInfo || modelInfo.requiresThinkingBetaHeaders)
+      ? this.providerSettings.api.oauthBetaHeaders
+      : 'oauth-2025-04-20';
     return {
       'accept': 'application/json',
       'anthropic-dangerous-direct-browser-access': 'true',
-      'anthropic-beta': this.getBetaHeaderValue(),
+      'anthropic-beta': betaHeaders,
     };
   }
 
@@ -218,9 +196,9 @@ export class AnthropicProvider {
     // Add thinking if enabled
     if (options.enableThinking) {
       if (modelInfo?.supportsAdaptiveThinking) {
-        (params as any).thinking = { type: 'adaptive' };
+        params.thinking = { type: 'adaptive' };
       } else {
-        (params as any).thinking = {
+        params.thinking = {
           type: 'enabled',
           budget_tokens: options.thinkingBudget ?? Math.floor((modelInfo?.maxOutput ?? 16384) / 4),
         };
@@ -228,7 +206,7 @@ export class AnthropicProvider {
 
       // Add effort parameter for models that support it
       if (modelInfo?.supportsEffort && options.effortLevel) {
-        (params as any).output_config = { effort: options.effortLevel };
+        params.output_config = { effort: options.effortLevel as 'low' | 'medium' | 'high' | 'max' };
       }
     }
 
@@ -401,6 +379,22 @@ export class AnthropicProvider {
         return;
       } catch (error) {
         attempt++;
+
+        // Log raw error before parseError strips details
+        const apiError = error as Error & { status?: number; error?: { type?: string; message?: string }; headers?: Record<string, string> };
+        logger.warn('Anthropic API raw error', {
+          status: apiError.status,
+          message: apiError.message,
+          errorType: apiError.error?.type,
+          errorMessage: apiError.error?.message,
+          model,
+          maxTokens,
+          hasThinking: !!params.thinking,
+          thinkingType: (params.thinking as { type?: string })?.type,
+          hasOutputConfig: !!params.output_config,
+          authType: this.config.auth.type,
+        });
+
         const parsed = parseError(error);
 
         logger.trace('Anthropic stream error - full details', {

@@ -10,7 +10,7 @@ final class ContextTrackingState {
     var totalTokenUsage: TokenUsage?
 
     /// Current model's context window size (from server's model.list)
-    var currentContextWindow: Int = 1_000_000
+    var currentContextWindow: Int = 200_000
 
     // MARK: - Server-Provided Values (from tokenRecord)
 

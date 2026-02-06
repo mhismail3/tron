@@ -325,16 +325,9 @@ describe('Anthropic Provider', () => {
   });
 
   describe('Opus 4.6 Beta Headers', () => {
-    it('includes context-1m beta header alongside oauth for claude-opus-4-6 (OAuth)', () => {
+    it('sends only oauth-2025-04-20 for claude-opus-4-6 (OAuth)', () => {
       createOAuthProv('claude-opus-4-6');
-      const betaHeader = lastConstructorArgs.defaultHeaders['anthropic-beta'];
-      expect(betaHeader).toContain('oauth-2025-04-20');
-      expect(betaHeader).toContain('context-1m-2025-08-07');
-    });
-
-    it('includes context-1m beta header for claude-opus-4-6 (API key)', () => {
-      createApiKeyProvider('claude-opus-4-6');
-      expect(lastConstructorArgs.defaultHeaders['anthropic-beta']).toBe('context-1m-2025-08-07');
+      expect(lastConstructorArgs.defaultHeaders['anthropic-beta']).toBe('oauth-2025-04-20');
     });
 
     // REGRESSION
@@ -350,11 +343,6 @@ describe('Anthropic Provider', () => {
       expect(lastConstructorArgs.defaultHeaders['anthropic-beta']).toBe(
         'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14'
       );
-    });
-
-    it('opus 4.5 has no context-1m in headers (API key, regression)', () => {
-      createApiKeyProvider('claude-opus-4-5-20251101');
-      expect(lastConstructorArgs.defaultHeaders).toBeUndefined();
     });
   });
 });

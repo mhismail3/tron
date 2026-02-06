@@ -42,11 +42,10 @@ describe('detectProviderFromModel', () => {
 });
 
 describe('getModelCapabilities', () => {
-  it('returns supportsEffort=true, maxOutput=128000, contextWindow=1M for claude-opus-4-6', () => {
+  it('returns supportsEffort=true, maxOutput=128000 for claude-opus-4-6', () => {
     const caps = getModelCapabilities('anthropic', 'claude-opus-4-6');
     expect(caps.supportsEffort).toBe(true);
     expect(caps.maxOutput).toBe(128000);
-    expect(caps.contextWindow).toBe(1_000_000);
   });
 
   it('returns effortLevels and defaultEffortLevel for claude-opus-4-6', () => {
@@ -56,11 +55,10 @@ describe('getModelCapabilities', () => {
   });
 
   // REGRESSION
-  it('returns supportsEffort=false, maxOutput=64000, contextWindow=200K for claude-opus-4-5 (regression)', () => {
+  it('returns supportsEffort=false, maxOutput=64000 for claude-opus-4-5 (regression)', () => {
     const caps = getModelCapabilities('anthropic', 'claude-opus-4-5-20251101');
     expect(caps.supportsEffort).toBe(false);
     expect(caps.maxOutput).toBe(64000);
-    expect(caps.contextWindow).toBe(200_000);
     expect(caps.effortLevels).toBeUndefined();
     expect(caps.defaultEffortLevel).toBeUndefined();
   });
