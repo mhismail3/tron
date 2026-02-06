@@ -76,10 +76,11 @@ private struct ProviderSection: View {
         VStack(alignment: .leading, spacing: 0) {
             // Provider header
             HStack(spacing: 8) {
-                Image(systemName: provider.icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                Image(provider.icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
                     .foregroundStyle(provider.color)
-                    .frame(width: 18)
+                    .frame(width: 18, height: 18)
                 Text(provider.displayName)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(provider.color)
