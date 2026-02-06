@@ -215,7 +215,8 @@ export class AgentFactory {
     model: string,
     systemPrompt?: string,
     isSubagent?: boolean,
-    toolDenials?: ToolDenialConfig
+    toolDenials?: ToolDenialConfig,
+    compactionConfig?: { preserveRecentTurns?: number; forceAlways?: boolean }
   ): Promise<TronAgent> {
     // Get auth for the model (handles Codex OAuth vs standard auth)
     const auth = await this.config.getAuthForProvider(model);
@@ -426,6 +427,10 @@ export class AgentFactory {
       isOAuth: auth.type === 'oauth',
       providerType,
       googleEndpoint,
+      compactionConfig: compactionConfig ? {
+        preserveRecentTurns: compactionConfig.preserveRecentTurns,
+        forceAlways: compactionConfig.forceAlways,
+      } : undefined,
     });
 
     // Normalize auth to UnifiedAuth format for provider factory
@@ -465,6 +470,9 @@ export class AgentFactory {
       maxTurns: 50,
       maxTokens,  // Set for subagents, undefined for regular agents (uses default)
       enableThinking,
+      compaction: compactionConfig?.preserveRecentTurns !== undefined
+        ? { preserveRecentTurns: compactionConfig.preserveRecentTurns }
+        : undefined,
     };
 
     const agent = new TronAgent(agentConfig, {
@@ -488,6 +496,10 @@ export class AgentFactory {
     if (!isSubagent && this.config.memoryConfig) {
       const memCfg = this.config.memoryConfig;
       const compactionTrigger = new CompactionTrigger();
+      if (compactionConfig?.forceAlways) {
+        compactionTrigger.setForceAlways(true);
+        logger.info('Compaction force-always enabled', { sessionId });
+      }
 
       const ledgerWriter = new LedgerWriter({
         spawnSubsession: (params) => this.config.spawnSubsession(sessionId, {

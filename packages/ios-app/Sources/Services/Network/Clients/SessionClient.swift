@@ -14,7 +14,8 @@ final class SessionClient {
 
     func create(
         workingDirectory: String,
-        model: String? = nil
+        model: String? = nil,
+        compactionConfig: CompactionConfig? = nil
     ) async throws -> SessionCreateResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
@@ -22,7 +23,8 @@ final class SessionClient {
         let params = SessionCreateParams(
             workingDirectory: workingDirectory,
             model: model,
-            contextFiles: nil
+            contextFiles: nil,
+            compactionConfig: compactionConfig
         )
 
         let result: SessionCreateResult = try await ws.send(

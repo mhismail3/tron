@@ -48,13 +48,12 @@ describe('Compaction Edge Cases', () => {
       const summarizer = new MockSummarizer();
       const result = await contextManager.executeCompaction({ summarizer });
 
-      // Should complete successfully but with minimal effect
+      // Nothing to summarize — messages stay empty, no-op compaction
       expect(result.success).toBe(true);
-      // After compaction of empty: 2 messages (summary + ack)
-      expect(contextManager.getMessages().length).toBe(2);
+      expect(contextManager.getMessages().length).toBe(0);
     });
 
-    it('compaction with 1 message preserves it', async () => {
+    it('compaction with 1 message preserves it (within default preserve window)', async () => {
       const contextManager = createContextManager({
         model: 'claude-sonnet-4-20250514',
         workingDirectory: '/test',
@@ -71,8 +70,8 @@ describe('Compaction Edge Cases', () => {
       expect(result.success).toBe(true);
       const messages = contextManager.getMessages();
 
-      // Should have: summary + ack + original message
-      expect(messages.length).toBeGreaterThanOrEqual(2);
+      // 1 message fits within default preserve window (5 turns = 10 messages) — no-op
+      expect(messages.length).toBe(1);
     });
 
     it('compaction with fewer messages than preserveRecentTurns preserves all', async () => {
@@ -98,15 +97,17 @@ describe('Compaction Edge Cases', () => {
 
       expect(result.success).toBe(true);
 
-      // All original messages should be preserved (plus summary + ack)
+      // All 4 messages fit within preserve window (5 turns = 10 messages) — no-op
       const afterMessages = contextManager.getMessages();
-      expect(afterMessages.length).toBe(6); // 2 (summary + ack) + 4 (original)
+      expect(afterMessages.length).toBe(4);
     });
   });
 
   describe('message preservation', () => {
-    it('preserves exactly preserveRecentTurns turns (default 5)', async () => {
-      const harness = CompactionTestHarness.atThreshold('critical');
+    it('preserves exactly preserveRecentTurns turns (5)', async () => {
+      const harness = CompactionTestHarness.atThreshold('critical', {
+        compaction: { preserveRecentTurns: 5 },
+      });
       harness.inject();
 
       const messagesBefore = harness.contextManager.getMessages();

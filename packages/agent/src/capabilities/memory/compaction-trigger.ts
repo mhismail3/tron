@@ -45,9 +45,18 @@ const PROGRESS_TOOL_PATTERNS = [
 
 export class CompactionTrigger {
   private turnsSinceCompaction = 0;
+  private forceAlwaysEnabled = false;
+
+  setForceAlways(enabled: boolean): void {
+    this.forceAlwaysEnabled = enabled;
+  }
 
   shouldCompact(input: CompactionTriggerInput): CompactionTriggerResult {
     this.turnsSinceCompaction++;
+
+    if (this.forceAlwaysEnabled) {
+      return { compact: true, reason: 'force-always mode (testing)' };
+    }
 
     // 1. Token threshold — safety net
     if (input.currentTokenRatio >= TOKEN_THRESHOLD) {

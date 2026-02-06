@@ -51,6 +51,8 @@ export interface AgentConfig {
   thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
   /** Thinking budget for Gemini 2.5 models (token count 0-32768) */
   geminiThinkingBudget?: number;
+  /** Compaction configuration overrides */
+  compaction?: { preserveRecentTurns?: number };
 }
 
 /**

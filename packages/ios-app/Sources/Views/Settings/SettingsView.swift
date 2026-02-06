@@ -33,6 +33,10 @@ struct SettingsView: View {
 
     // Quick Session settings
     @AppStorage("quickSessionWorkspace") private var quickSessionWorkspace = "/Users/moose/Workspace"
+
+    // Compaction settings
+    @AppStorage("preserveRecentTurns") private var preserveRecentTurns: Int = 5
+    @AppStorage("forceAlwaysCompact") private var forceAlwaysCompact: Bool = false
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showModelPicker = false
     @State private var availableModels: [ModelInfo] = []
@@ -209,6 +213,36 @@ struct SettingsView: View {
                     .listSectionSpacing(16)
                 }
 
+                // Compaction Section
+                Section {
+                    HStack {
+                        Label("Preserve Turns", systemImage: "arrow.counterclockwise.circle")
+                            .font(TronTypography.subheadline)
+                        Spacer()
+                        Text("\(preserveRecentTurns)")
+                            .font(TronTypography.subheadline)
+                            .foregroundStyle(.tronEmerald)
+                            .monospacedDigit()
+                            .frame(minWidth: 20)
+                        Stepper("", value: $preserveRecentTurns, in: 0...10)
+                            .labelsHidden()
+                            .fixedSize()
+                            .controlSize(.small)
+                    }
+
+                    Toggle(isOn: $forceAlwaysCompact) {
+                        Label("Compact Every Cycle", systemImage: "arrow.triangle.2.circlepath")
+                            .font(TronTypography.subheadline)
+                    }
+                } header: {
+                    Text("Compaction")
+                        .font(TronTypography.caption)
+                } footer: {
+                    Text("Preserve Turns: number of recent turns kept after compaction (default 5). Compact Every Cycle: trigger compaction after every response (for testing).")
+                        .font(TronTypography.caption2)
+                }
+                .listSectionSpacing(16)
+
                 // Font Style Section
                 if #available(iOS 26.0, *) {
                     FontStyleSection()
@@ -332,6 +366,8 @@ struct SettingsView: View {
         serverHost = "localhost"
         serverPort = ""  // Empty = use Beta (8082) as default
         confirmArchive = true
+        preserveRecentTurns = 5
+        forceAlwaysCompact = false
         // Trigger server reconnection with Beta port
         dependencies?.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
     }

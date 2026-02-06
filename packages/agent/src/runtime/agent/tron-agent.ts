@@ -126,6 +126,7 @@ export class TronAgent {
         description: tool.description,
         parameters: tool.parameters,
       })),
+      compaction: config.compaction,
     });
 
     this.currentTurn = 0;

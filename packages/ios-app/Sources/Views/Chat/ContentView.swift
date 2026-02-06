@@ -420,11 +420,22 @@ struct ContentView: View {
 
     /// Creates a quick session using the configured defaults (workspace and model from Settings)
     private func createQuickSession() {
+        // Read compaction settings from AppStorage via DependencyContainer
+        let preserveTurns = dependencies?.preserveRecentTurns ?? 5
+        let forceCompact = dependencies?.forceAlwaysCompact ?? false
+        let compaction: CompactionConfig? = (preserveTurns != 5 || forceCompact)
+            ? CompactionConfig(
+                preserveRecentTurns: preserveTurns != 5 ? preserveTurns : nil,
+                forceAlways: forceCompact ? true : nil
+            )
+            : nil
+
         Task {
             do {
                 let result = try await rpcClient.session.create(
                     workingDirectory: quickSessionWorkspace,
-                    model: defaultModel
+                    model: defaultModel,
+                    compactionConfig: compaction
                 )
 
                 try eventStoreManager.cacheNewSession(

@@ -42,6 +42,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @ObservationIgnored
     @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = "/Users/moose/Workspace"
 
+    @ObservationIgnored
+    @AppStorage("preserveRecentTurns") var preserveRecentTurns: Int = 5
+
+    @ObservationIgnored
+    @AppStorage("forceAlwaysCompact") var forceAlwaysCompact: Bool = false
+
     // MARK: - Core Services (Created Once)
 
     /// Local SQLite event database - persists across server changes

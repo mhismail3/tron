@@ -72,7 +72,8 @@ export interface SessionManagerConfig {
     workingDirectory: string,
     model: string,
     systemPrompt?: string,
-    isSubagent?: boolean
+    isSubagent?: boolean,
+    compactionConfig?: { preserveRecentTurns?: number; forceAlways?: boolean }
   ) => Promise<TronAgent>;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
@@ -140,7 +141,8 @@ export class SessionManager {
       workingDir.path,
       model,
       options.systemPrompt,
-      isSubagent
+      isSubagent,
+      options.compactionConfig
     );
 
     // Load rules files for the session

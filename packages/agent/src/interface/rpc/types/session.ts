@@ -18,6 +18,11 @@ export interface SessionCreateParams {
   model?: string;
   /** Initial context files to load */
   contextFiles?: string[];
+  /** Compaction configuration overrides */
+  compactionConfig?: {
+    preserveRecentTurns?: number;
+    forceAlways?: boolean;
+  };
 }
 
 export interface SessionCreateResult {

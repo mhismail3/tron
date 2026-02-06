@@ -16,10 +16,14 @@ import { commonSchemas, createSchemaRegistry, type SchemaRegistry } from '../mid
  */
 export const sessionCreateSchema = z.object({
   workingDirectory: z.string().min(1, 'workingDirectory is required'),
-  initialModel: z.string().optional(),
+  model: z.string().optional(),
   resumeIfExists: z.boolean().optional(),
   title: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
+  compactionConfig: z.object({
+    preserveRecentTurns: z.number().int().min(0).max(10).optional(),
+    forceAlways: z.boolean().optional(),
+  }).optional(),
 });
 
 /**

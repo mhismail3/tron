@@ -134,6 +134,21 @@ export class CompactionEngine {
       preserveCount
     );
 
+    // Nothing to summarize — conversation fits within preserve window
+    if (messagesToSummarize.length === 0) {
+      logger.info('Compaction skipped: all messages within preserve window', {
+        totalMessages: messages.length,
+        preserveCount,
+      });
+      return {
+        success: true,
+        tokensBefore,
+        tokensAfter: tokensBefore,
+        compressionRatio: 1,
+        summary: '',
+      };
+    }
+
     // Log before summarizer call
     logger.trace('Compaction: calling summarizer', {
       totalMessages: messages.length,
