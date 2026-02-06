@@ -60,9 +60,19 @@ struct SessionSidebar: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    onDeleteSession(session.id)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Menu {
+                                    Section("This will archive the session from your device. Server data will remain.") {
+                                        Button {
+                                            onDeleteSession(session.id)
+                                        } label: {
+                                            Label("Archive", systemImage: "archivebox")
+                                        }
+                                    }
+                                    Button(role: .cancel) {
+                                    } label: {
+                                        Label("Cancel", systemImage: "xmark")
+                                    }
                                 } label: {
                                     Image(systemName: "archivebox")
                                 }
