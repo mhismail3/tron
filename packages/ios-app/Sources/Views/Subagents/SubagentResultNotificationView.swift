@@ -55,16 +55,11 @@ struct SubagentResultNotificationView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(accentColor.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(accentColor.opacity(0.3), lineWidth: 1)
-            }
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(accentColor.opacity(0.15)).interactive(),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }

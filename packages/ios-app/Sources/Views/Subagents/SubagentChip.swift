@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Subagent Chip
 
 /// In-chat chip for spawned subagents
-/// Shows real-time status updates: spawning → running (with turn count) → completed/failed
+/// Shows real-time status updates: running (with turn count) → completed/failed
 /// Tappable to open detail sheet with full output
 @available(iOS 26.0, *)
 struct SubagentChip: View {
@@ -23,7 +23,7 @@ struct SubagentChip: View {
                     .lineLimit(1)
 
                 // Turn count badge (while running)
-                if data.status == .running || data.status == .spawning {
+                if data.status == .running {
                     Text("(T\(data.currentTurn))")
                         .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
@@ -43,38 +43,24 @@ struct SubagentChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(tintColor.opacity(0.35)),
-                        in: .capsule
-                    )
-            }
-            .overlay(
-                Capsule()
-                    .strokeBorder(tintColor.opacity(0.4), lineWidth: 0.5)
-            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(tintColor.opacity(0.35)).interactive(),
+            in: .capsule
+        )
     }
 
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
-        case .spawning:
-            ProgressView()
-                .progressViewStyle(.circular)
-                .scaleEffect(0.6)
-                .frame(width: 12, height: 12)
-                .tint(.tronBlue)       // Blue while spawning
         case .running:
             ProgressView()
                 .progressViewStyle(.circular)
                 .scaleEffect(0.6)
                 .frame(width: 12, height: 12)
-                .tint(.tronAmber)      // Amber while running
+                .tint(.tronAmber)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -88,8 +74,6 @@ struct SubagentChip: View {
 
     private var statusText: String {
         switch data.status {
-        case .spawning:
-            return "Spawning agent..."
         case .running:
             return "Agent running"
         case .completed:
@@ -101,27 +85,23 @@ struct SubagentChip: View {
 
     private var textColor: Color {
         switch data.status {
-        case .spawning:
-            return .tronBlue       // Blue while spawning
         case .running:
-            return .tronAmber      // Amber while running
+            return .tronAmber
         case .completed:
-            return .tronSuccess    // Green when completed
+            return .tronSuccess
         case .failed:
-            return .tronError      // Red when failed
+            return .tronError
         }
     }
 
     private var tintColor: Color {
         switch data.status {
-        case .spawning:
-            return .tronBlue       // Blue while spawning
         case .running:
-            return .tronAmber      // Amber while running
+            return .tronAmber
         case .completed:
-            return .tronSuccess    // Green when completed
+            return .tronSuccess
         case .failed:
-            return .tronError      // Red when failed
+            return .tronError
         }
     }
 }
@@ -146,7 +126,7 @@ struct SubagentChipFallback: View {
                     .lineLimit(1)
 
                 // Turn count badge (while running)
-                if data.status == .running || data.status == .spawning {
+                if data.status == .running {
                     Text("(T\(data.currentTurn))")
                         .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
@@ -182,12 +162,6 @@ struct SubagentChipFallback: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
-        case .spawning:
-            ProgressView()
-                .progressViewStyle(.circular)
-                .scaleEffect(0.6)
-                .frame(width: 12, height: 12)
-                .tint(.tronBlue)
         case .running:
             ProgressView()
                 .progressViewStyle(.circular)
@@ -207,7 +181,6 @@ struct SubagentChipFallback: View {
 
     private var statusText: String {
         switch data.status {
-        case .spawning: return "Spawning agent..."
         case .running: return "Agent running"
         case .completed: return "Agent completed"
         case .failed: return "Agent failed"
@@ -216,7 +189,6 @@ struct SubagentChipFallback: View {
 
     private var textColor: Color {
         switch data.status {
-        case .spawning: return .tronBlue
         case .running: return .tronAmber
         case .completed: return .tronSuccess
         case .failed: return .tronError
@@ -225,7 +197,6 @@ struct SubagentChipFallback: View {
 
     private var tintColor: Color {
         switch data.status {
-        case .spawning: return .tronBlue
         case .running: return .tronAmber
         case .completed: return .tronSuccess
         case .failed: return .tronError
@@ -239,23 +210,6 @@ struct SubagentChipFallback: View {
 @available(iOS 26.0, *)
 #Preview("Subagent States") {
     VStack(spacing: 16) {
-        SubagentChip(
-            data: SubagentToolData(
-                toolCallId: "call_1",
-                subagentSessionId: "sess_abc123",
-                task: "Search for files matching pattern",
-                model: "claude-sonnet-4",
-                status: .spawning,
-                currentTurn: 0,
-                resultSummary: nil,
-                fullOutput: nil,
-                duration: nil,
-                error: nil,
-                tokenUsage: nil
-            ),
-            onTap: { }
-        )
-
         SubagentChip(
             data: SubagentToolData(
                 toolCallId: "call_2",

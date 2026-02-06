@@ -241,12 +241,7 @@ struct CompactionNotificationView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.cyan.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.cyan.opacity(0.3), lineWidth: 0.5)
-        )
+        .modifier(InteractiveCapsuleGlass(tint: .cyan))
         .contentShape(Capsule())
         .onTapGesture {
             onTap?()
@@ -504,14 +499,34 @@ struct MemoryUpdatedNotificationView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.purple.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.purple.opacity(0.3), lineWidth: 0.5)
-        )
+        .modifier(InteractiveCapsuleGlass(tint: .purple))
         .contentShape(Capsule())
         .onTapGesture { onTap?() }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+// MARK: - Interactive Capsule Glass Modifier
+
+/// Applies interactive liquid glass on iOS 26+, falls back to tinted background + stroke on older iOS
+private struct InteractiveCapsuleGlass: ViewModifier {
+    let tint: Color
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(
+                    .regular.tint(tint.opacity(0.35)).interactive(),
+                    in: .capsule
+                )
+        } else {
+            content
+                .background(tint.opacity(0.1))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(tint.opacity(0.3), lineWidth: 0.5)
+                )
+        }
     }
 }

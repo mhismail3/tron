@@ -4,7 +4,6 @@ import Foundation
 
 /// Status for a spawned subagent
 enum SubagentStatus: String, Codable, Equatable {
-    case spawning
     case running
     case completed
     case failed

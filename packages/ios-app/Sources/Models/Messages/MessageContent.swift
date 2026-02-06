@@ -103,8 +103,6 @@ enum MessageContent: Equatable {
             return "Answered \(count) \(count == 1 ? "question" : "questions")"
         case .subagent(let data):
             switch data.status {
-            case .spawning:
-                return "Spawning subagent..."
             case .running:
                 return "Subagent running (turn \(data.currentTurn))"
             case .completed:

@@ -414,7 +414,7 @@ extension ChatViewModel {
     func handleSubagentStatusResult(_ result: SubagentStatusPlugin.Result) {
         logger.debug("Subagent status: \(result.subagentSessionId) - \(result.status) turn \(result.currentTurn)", category: .chat)
 
-        let status: SubagentStatus = result.status == "running" ? .running : .spawning
+        let status: SubagentStatus = .running
         subagentState.updateStatus(
             subagentSessionId: result.subagentSessionId,
             status: status,

@@ -93,13 +93,19 @@ struct SubagentDetailSheet: View {
                         Button {
                             onSendResults?(data)
                         } label: {
-                            HStack(spacing: 4) {
+                            HStack(spacing: 6) {
                                 Text("Send")
-                                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
                                 Image(systemName: "paperplane.fill")
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.system(size: 13, weight: .semibold))
                             }
-                            .foregroundStyle(data.status == .completed ? .tronSuccess : .tronError)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(data.status == .completed ? Color.tronSuccess : Color.tronError)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -231,7 +237,7 @@ struct SubagentDetailSheet: View {
 
                 Spacer()
 
-                if data.status == .running || data.status == .spawning {
+                if data.status == .running {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .scaleEffect(0.5)
@@ -254,7 +260,7 @@ struct SubagentDetailSheet: View {
                             Text("Loading activity...")
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
-                        } else if data.status == .running || data.status == .spawning {
+                        } else if data.status == .running {
                             Image(systemName: "ellipsis")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                                 .foregroundStyle(.white.opacity(0.4))
@@ -466,7 +472,6 @@ struct SubagentDetailSheet: View {
 
     private var titleText: String {
         switch data.status {
-        case .spawning: return "Sub-Agent Spawning"
         case .running: return "Sub-Agent Running (Turn \(data.currentTurn))"
         case .completed: return "Sub-Agent Completed"
         case .failed: return "Sub-Agent Failed"
@@ -475,8 +480,7 @@ struct SubagentDetailSheet: View {
 
     private var titleColor: Color {
         switch data.status {
-        case .spawning: return .tronBlue       // Blue while spawning
-        case .running: return .tronAmber       // Amber while running
+        case .running: return .tronAmber
         case .completed: return .tronSuccess
         case .failed: return .tronError
         }

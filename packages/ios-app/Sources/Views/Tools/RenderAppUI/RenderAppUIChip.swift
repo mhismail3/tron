@@ -17,9 +17,17 @@ struct RenderAppUIChip: View {
                 chipContent
             }
             .buttonStyle(.plain)
+            .glassEffect(
+                .regular.tint(tintColor.opacity(0.35)).interactive(),
+                in: .capsule
+            )
         } else {
             // Non-tappable view for rendering/error states
             chipContent
+                .glassEffect(
+                    .regular.tint(tintColor.opacity(0.35)).interactive(),
+                    in: .capsule
+                )
         }
     }
 
@@ -43,18 +51,6 @@ struct RenderAppUIChip: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(
-                    .regular.tint(tintColor.opacity(0.35)),
-                    in: .capsule
-                )
-        }
-        .overlay(
-            Capsule()
-                .strokeBorder(tintColor.opacity(0.4), lineWidth: 0.5)
-        )
         .contentShape(Capsule())
     }
 

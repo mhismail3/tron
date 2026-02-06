@@ -38,21 +38,13 @@ struct CommandToolChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(statusColor.opacity(0.25)),
-                        in: .capsule
-                    )
-            }
-            .overlay(
-                Capsule()
-                    .strokeBorder(statusColor.opacity(0.3), lineWidth: 0.5)
-            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(statusColor.opacity(0.25)).interactive(),
+            in: .capsule
+        )
     }
 
     @ViewBuilder

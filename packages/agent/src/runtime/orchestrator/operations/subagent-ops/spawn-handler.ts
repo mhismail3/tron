@@ -157,7 +157,8 @@ export class SpawnHandler {
         parentSessionId,
         params.task,
         params.maxTurns ?? 50,
-        params.guardrailTimeout ?? DEFAULT_GUARDRAIL_TIMEOUT_MS
+        params.guardrailTimeout ?? DEFAULT_GUARDRAIL_TIMEOUT_MS,
+        toolCallId
       ).catch((error) => {
         const structured = categorizeError(error, { parentSessionId, subagentSessionId: subSession.sessionId, operation: 'subagent_execution' });
         logger.error('Subagent execution failed (escaped try-finally)', {
@@ -399,7 +400,8 @@ export class SpawnHandler {
     parentSessionId: string,
     task: string,
     _maxTurns: number,
-    guardrailTimeoutMs: number = DEFAULT_GUARDRAIL_TIMEOUT_MS
+    guardrailTimeoutMs: number = DEFAULT_GUARDRAIL_TIMEOUT_MS,
+    toolCallId?: string
   ): Promise<void> {
     const startTime = Date.now();
     let resultDelivered = false;
@@ -537,9 +539,11 @@ export class SpawnHandler {
         );
         resultDelivered = true;
 
-        // Emit notification if parent is idle (not processing)
-        // This allows iOS to show a chip for the user to review and send results
-        if (!currentParent.sessionContext.isProcessing()) {
+        // Emit notification for explicitly invoked subagents (has a toolCallId).
+        // Background subagents (LedgerWriter, LLMSummarizer) don't have toolCallIds.
+        // We emit regardless of parent processing state — fast subagents may complete
+        // before the parent finishes its turn, and the iOS client handles display timing.
+        if (toolCallId) {
           const notificationData = {
             parentSessionId,
             subagentSessionId: sessionId,
@@ -653,9 +657,9 @@ export class SpawnHandler {
         });
         resultDelivered = true;
 
-        // Emit notification if parent is idle (not processing)
-        // This allows iOS to show a chip for the user to review the failure
-        if (!currentParent.sessionContext.isProcessing()) {
+        // Emit notification for explicitly invoked subagents only (has toolCallId).
+        // Background subagents should not show result chips to the user.
+        if (toolCallId) {
           const notificationData = {
             parentSessionId,
             subagentSessionId: sessionId,

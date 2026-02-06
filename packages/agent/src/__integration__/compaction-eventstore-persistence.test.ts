@@ -27,7 +27,7 @@ const createTestOrchestrator = async (testDir: string) => {
     eventStore,
   });
 
-  (orchestrator as any).cachedAuth = { type: 'api_key', apiKey: 'test-key' };
+  (orchestrator as any).authProvider.setCachedAuth({ type: 'api_key', apiKey: 'test-key' });
   (orchestrator as any).initialized = true;
 
   return { orchestrator, eventStore };

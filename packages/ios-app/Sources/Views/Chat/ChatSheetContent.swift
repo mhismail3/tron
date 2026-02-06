@@ -61,8 +61,13 @@ struct ChatSheetContent: View {
             .adaptivePresentationDetents([.medium, .large])
 
         case .memoryDetail(let data):
-            MemoryDetailSheet(title: data.title, entryType: data.entryType)
-                .adaptivePresentationDetents([.medium])
+            MemoryDetailSheet(
+                title: data.title,
+                entryType: data.entryType,
+                sessionId: data.sessionId,
+                rpcClient: rpcClient
+            )
+            .adaptivePresentationDetents([.medium, .large])
 
         case .askUserQuestion:
             askUserQuestionSheet

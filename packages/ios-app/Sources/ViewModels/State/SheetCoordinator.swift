@@ -93,8 +93,8 @@ final class SheetCoordinator {
     }
 
     /// Show memory detail sheet
-    func showMemoryDetail(title: String, entryType: String) {
-        present(.memoryDetail(MemoryDetailData(title: title, entryType: entryType)))
+    func showMemoryDetail(title: String, entryType: String, sessionId: String) {
+        present(.memoryDetail(MemoryDetailData(title: title, entryType: entryType, sessionId: sessionId)))
     }
 
     /// Show ask user question sheet

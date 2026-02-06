@@ -55,17 +55,9 @@ struct SkillChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background {
-            Capsule()
-                .fill(.clear)
-                .glassEffect(
-                    .regular.tint(chipTintColor.opacity(0.4)),
-                    in: .capsule
-                )
-        }
-        .overlay(
-            Capsule()
-                .strokeBorder(chipBorderColor.opacity(0.3), lineWidth: 0.5)
+        .glassEffect(
+            .regular.tint(chipTintColor.opacity(0.4)).interactive(),
+            in: .capsule
         )
         .contentShape(Capsule())
         .onTapGesture {

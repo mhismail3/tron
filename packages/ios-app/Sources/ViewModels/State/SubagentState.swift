@@ -77,7 +77,7 @@ final class SubagentState {
             subagentSessionId: subagentSessionId,
             task: task,
             model: model,
-            status: .spawning,
+            status: .running,
             currentTurn: 0,
             resultSummary: nil,
             fullOutput: nil,
@@ -542,7 +542,7 @@ final class SubagentState {
 
     /// Check if there are any running subagents
     var hasRunningSubagents: Bool {
-        subagents.values.contains { $0.status == .spawning || $0.status == .running }
+        subagents.values.contains { $0.status == .running }
     }
 
     /// Get all subagents sorted by creation (most recent first)

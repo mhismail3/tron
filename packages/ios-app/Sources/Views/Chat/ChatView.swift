@@ -386,8 +386,8 @@ struct ChatView: View {
                                 onAdaptTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showAdaptDetail(data)
                                 },
-                                onMemoryUpdatedTap: { [sheetCoordinator] title, entryType in
-                                    sheetCoordinator.showMemoryDetail(title: title, entryType: entryType)
+                                onMemoryUpdatedTap: { [sheetCoordinator, sessionId] title, entryType in
+                                    sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId)
                                 },
                                 onSubagentResultTap: { sessionId in
                                     viewModel.subagentState.showDetails(for: sessionId)

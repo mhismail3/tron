@@ -31,21 +31,13 @@ struct TodoWriteChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background {
-                Capsule()
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(Color.tronSlate.opacity(0.35)),
-                        in: .capsule
-                    )
-            }
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.tronSlate.opacity(0.4), lineWidth: 0.5)
-            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(Color.tronSlate.opacity(0.35)).interactive(),
+            in: .capsule
+        )
     }
 
     private var statusText: String {

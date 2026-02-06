@@ -12,6 +12,7 @@ struct CompactionDetailData: Equatable {
 struct MemoryDetailData: Equatable {
     let title: String
     let entryType: String
+    let sessionId: String
 }
 
 /// Identifiable enum representing all possible sheets in ChatView.
