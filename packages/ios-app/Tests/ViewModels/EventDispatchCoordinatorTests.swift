@@ -12,6 +12,9 @@ final class EventDispatchCoordinatorTests: XCTestCase {
     override func setUp() async throws {
         coordinator = EventDispatchCoordinator()
         mockContext = MockEventDispatchContext()
+        // Ensure all plugins are registered for dispatch lookup
+        EventRegistry.shared.clearForTesting()
+        EventRegistry.shared.registerAll()
     }
 
     override func tearDown() async throws {
@@ -528,17 +531,19 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             context: mockContext
         )
 
-        // Then: No handler should be called (connection events handled elsewhere)
+        // Then: No handler should be called (ConnectedPlugin is not dispatchable)
         XCTAssertFalse(mockContext.handleCompleteCalled)
         XCTAssertNil(mockContext.handleTextDeltaCalledWith)
+        // ConnectedPlugin's box returns false from dispatch → logged as unhandled
+        XCTAssertTrue(mockContext.logDebugCalled)
     }
 }
 
 // MARK: - Mock Context
 
-/// Mock implementation of EventDispatchContext for testing
+/// Mock implementation of EventDispatchTarget for testing
 @MainActor
-final class MockEventDispatchContext: EventDispatchContext {
+final class MockEventDispatchContext: EventDispatchTarget {
     // MARK: - Text/Thinking
     var handleTextDeltaCalledWith: String?
     var handleThinkingDeltaCalledWith: String?
@@ -556,6 +561,7 @@ final class MockEventDispatchContext: EventDispatchContext {
 
     // MARK: - Context Operations
     var handleCompactionCalledWith: CompactionPlugin.Result?
+    var handleMemoryUpdatedCalledWith: MemoryUpdatedPlugin.Result?
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
     var handleSkillRemovedCalledWith: SkillRemovedPlugin.Result?
@@ -584,6 +590,7 @@ final class MockEventDispatchContext: EventDispatchContext {
     // MARK: - Logging
     var logWarningCalled = false
     var logDebugCalled = false
+    var logDebugCalledWith: String?
 
     // MARK: - Protocol Implementation
 
@@ -625,6 +632,10 @@ final class MockEventDispatchContext: EventDispatchContext {
 
     func handleCompaction(_ result: CompactionPlugin.Result) {
         handleCompactionCalledWith = result
+    }
+
+    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result) {
+        handleMemoryUpdatedCalledWith = result
     }
 
     func handleContextCleared(_ result: ContextClearedPlugin.Result) {
@@ -701,5 +712,6 @@ final class MockEventDispatchContext: EventDispatchContext {
 
     func logDebug(_ message: String) {
         logDebugCalled = true
+        logDebugCalledWith = message
     }
 }

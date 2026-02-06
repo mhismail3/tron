@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling agent error events.
 /// These events signal errors during agent execution.
-enum ErrorPlugin: EventPlugin {
+enum ErrorPlugin: DispatchableEventPlugin {
     static let eventType = "agent.error"
 
     // MARK: - Event Data
@@ -34,5 +34,11 @@ enum ErrorPlugin: EventPlugin {
             code: event.data?.code ?? "UNKNOWN",
             message: event.data?.message ?? event.data?.error ?? "Unknown error"
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleAgentError(r.message)
     }
 }

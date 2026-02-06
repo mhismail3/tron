@@ -83,6 +83,16 @@ extension EventPlugin {
     }
 }
 
+// MARK: - Self-Dispatching Plugin Protocol
+
+/// Extended protocol for plugins that know how to dispatch themselves.
+/// Plugins conforming to this protocol carry their own dispatch logic,
+/// eliminating the need for a switch case in EventDispatchCoordinator.
+protocol DispatchableEventPlugin: EventPlugin {
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget)
+}
+
 // MARK: - Type Erasure for Registry Storage
 
 /// Type-erased wrapper to store heterogeneous EventPlugin types in a collection.
@@ -90,9 +100,16 @@ extension EventPlugin {
 protocol EventPluginBox: Sendable {
     var eventType: String { get }
     func parse(data: Data) -> ParsedEventV2?
+    /// Dispatch a result to a target. Returns true if this plugin supports self-dispatch.
+    @MainActor func dispatch(result: any EventResult, context: any EventDispatchTarget) -> Bool
 }
 
-/// Concrete implementation of EventPluginBox for a specific plugin type.
+/// Default: no self-dispatch support.
+extension EventPluginBox {
+    @MainActor func dispatch(result: any EventResult, context: any EventDispatchTarget) -> Bool { false }
+}
+
+/// Concrete implementation of EventPluginBox for a standard plugin type.
 struct EventPluginBoxImpl<P: EventPlugin>: EventPluginBox, Sendable {
     var eventType: String { P.eventType }
 
@@ -100,12 +117,7 @@ struct EventPluginBoxImpl<P: EventPlugin>: EventPluginBox, Sendable {
         do {
             let event = try P.parse(from: data)
             let sessionId = P.sessionId(from: event)
-            // Wrap the event in ParsedEventData for Sendable compliance.
-            // The actual event is Sendable (per EventPlugin protocol), but we need
-            // type erasure so we wrap it.
             let wrappedEvent = ParsedEventData(value: event)
-            // Capture the transform result immediately to avoid capturing P.Type in closure.
-            // This sidesteps the non-Sendable metatype warning while maintaining the same behavior.
             let transformResult = P.transform(event)
             return .plugin(
                 type: P.eventType,
@@ -117,5 +129,33 @@ struct EventPluginBoxImpl<P: EventPlugin>: EventPluginBox, Sendable {
             logger.warning("Failed to decode \(P.eventType): \(error.localizedDescription)", category: .events)
             return nil
         }
+    }
+}
+
+/// Concrete implementation for dispatchable plugins — adds dispatch support.
+struct DispatchablePluginBoxImpl<P: DispatchableEventPlugin>: EventPluginBox, Sendable {
+    var eventType: String { P.eventType }
+
+    func parse(data: Data) -> ParsedEventV2? {
+        do {
+            let event = try P.parse(from: data)
+            let sessionId = P.sessionId(from: event)
+            let wrappedEvent = ParsedEventData(value: event)
+            let transformResult = P.transform(event)
+            return .plugin(
+                type: P.eventType,
+                event: wrappedEvent,
+                sessionId: sessionId,
+                transform: { transformResult }
+            )
+        } catch {
+            logger.warning("Failed to decode \(P.eventType): \(error.localizedDescription)", category: .events)
+            return nil
+        }
+    }
+
+    @MainActor func dispatch(result: any EventResult, context: any EventDispatchTarget) -> Bool {
+        P.dispatch(result: result, context: context)
+        return true
     }
 }

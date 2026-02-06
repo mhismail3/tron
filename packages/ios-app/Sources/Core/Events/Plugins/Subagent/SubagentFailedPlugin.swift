@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling subagent failure events.
 /// These events signal that a subagent failed.
-enum SubagentFailedPlugin: EventPlugin {
+enum SubagentFailedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.subagent_failed"
 
     // MARK: - Event Data
@@ -36,5 +36,11 @@ enum SubagentFailedPlugin: EventPlugin {
             error: event.data.error,
             duration: event.data.duration
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSubagentFailed(r)
     }
 }

@@ -7,15 +7,15 @@ paths:
 
 # Event Plugins
 
-Self-contained handlers that parse WebSocket JSON, extract sessionId, and transform to UI-ready Result.
+Self-contained handlers that parse WebSocket JSON, extract sessionId, transform to UI-ready Result, and dispatch to the appropriate handler.
 
 ## Adding a New Event
 
-### 1. Create Plugin
+### 1. Create Self-Dispatching Plugin
 
 ```swift
 // Core/Events/Plugins/<Category>/MyEventPlugin.swift
-enum MyEventPlugin: EventPlugin {
+enum MyEventPlugin: DispatchableEventPlugin {
     static let eventType = "agent.my_event"  // Must match backend
 
     struct EventData: StandardEventData {
@@ -37,60 +37,61 @@ enum MyEventPlugin: EventPlugin {
             optionalField: event.optionalField ?? 0
         )
     }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleMyEvent(r)
+    }
 }
 ```
 
 ### 2. Register Plugin
 
 ```swift
-// Core/Events/EventRegistry.swift
-func registerAll() {
-    register(MyEventPlugin.self)
-}
+// Core/Events/EventRegistry.swift — registerAll()
+register(MyEventPlugin.self)
 ```
 
-### 3. Add Dispatch Case
-
-```swift
-// Core/Events/EventDispatchCoordinator.swift
-func dispatch(_ event: any EventResult, to context: EventDispatchContext) {
-    switch event {
-    case let e as MyEventPlugin.Result:
-        context.handleMyEvent(e)
-    // ...
-    }
-}
-```
-
-### 4. Add Handler Protocol
+### 3. Add Handler to Domain Protocol
 
 ```swift
 // ViewModels/Handlers/EventDispatchContext.swift
-protocol EventDispatchContext: AnyObject {
-    func handleMyEvent(_ event: MyEventPlugin.Result)
+// Add to the appropriate domain protocol (e.g., ContextEventHandler)
+@MainActor protocol ContextEventHandler: AnyObject {
+    func handleMyEvent(_ result: MyEventPlugin.Result)
+    // ... existing methods
 }
 ```
 
-### 5. Implement Handler
+### 4. Implement Handler
 
 ```swift
 // ViewModels/Chat/ChatViewModel+EventDispatchContext.swift
-extension ChatViewModel: EventDispatchContext {
-    func handleMyEvent(_ event: MyEventPlugin.Result) {
-        myState.updateWith(event)
+extension ChatViewModel: EventDispatchTarget {
+    func handleMyEvent(_ result: MyEventPlugin.Result) {
+        myState.updateWith(result)
     }
 }
 ```
 
-### 6. Add State Object (if needed)
+That's it — no coordinator switch case needed. The plugin dispatches itself.
 
-```swift
-// ViewModels/State/MyEventState.swift
-@Observable
-final class MyEventState {
-    var items: [MyItem] = []
-}
-```
+## Domain Handler Protocols
+
+| Protocol | Domain |
+|----------|--------|
+| `StreamingEventHandler` | Text/thinking deltas |
+| `ToolEventHandler` | Tool start/end |
+| `TurnLifecycleEventHandler` | Turn start/end, complete, error |
+| `ContextEventHandler` | Compaction, memory, context cleared |
+| `BrowserEventHandler` | Browser frames, closed |
+| `SubagentEventHandler` | Subagent lifecycle |
+| `UICanvasEventHandler` | UI render lifecycle |
+| `TodoEventHandler` | Todo updates |
+| `EventDispatchLogger` | Logging |
+
+All compose into `EventDispatchTarget` which ChatViewModel conforms to.
 
 ## Plugin Categories
 
@@ -103,12 +104,8 @@ Streaming, Tool, Lifecycle, Session, Subagent, UICanvas, Browser, Todo
 Override `parse(from:)` for complex payloads:
 
 ```swift
-static func parse(from data: Data) -> (any EventResult)? {
-    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let type = json["type"] as? String,
-          type == eventType else { return nil }
-    let customField = json["nested"]?["field"] as? String ?? ""
-    return Result(customField: customField)
+static func parse(from data: Data) throws -> EventData {
+    // Custom decoding logic
 }
 ```
 
@@ -118,9 +115,9 @@ Also update `UnifiedEventTransformer` if event should appear in reconstructed hi
 
 ## Verification Checklist
 
+- [ ] Plugin conforms to `DispatchableEventPlugin`
 - [ ] Plugin registered in `EventRegistry.registerAll()`
-- [ ] Dispatch case in `EventDispatchCoordinator`
-- [ ] Handler in `EventDispatchContext` protocol
+- [ ] Handler added to appropriate domain protocol
 - [ ] Handler implemented in ChatViewModel extension
 - [ ] Event payload matches backend schema
 - [ ] Live event triggers UI update
@@ -130,6 +127,7 @@ Also update `UnifiedEventTransformer` if event should appear in reconstructed hi
 - Conform EventData to `StandardEventData` for automatic sessionId extraction
 - Keep Result flat and UI-ready; logic goes in handler
 - Override `parse(from:)` only for non-standard JSON
+- Use `DispatchableEventPlugin` for all new plugins (self-dispatch pattern)
 
 ---
 

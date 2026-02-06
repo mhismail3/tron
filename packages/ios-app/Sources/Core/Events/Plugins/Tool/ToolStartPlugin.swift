@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling tool start events.
 /// These events signal the beginning of a tool invocation.
-enum ToolStartPlugin: EventPlugin {
+enum ToolStartPlugin: DispatchableEventPlugin {
     static let eventType = "agent.tool_start"
 
     // MARK: - Event Data
@@ -49,5 +49,11 @@ enum ToolStartPlugin: EventPlugin {
             toolCallId: event.data.toolCallId,
             arguments: event.data.arguments
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleToolStart(r)
     }
 }

@@ -9,22 +9,25 @@ Two systems handle events: **plugins** for live WebSocket events, **transformer*
 
 ## Directory Structure
 
-- `Plugins/` - Live event parsing (WebSocket -> UI)
+- `Plugins/` - Live event parsing and self-dispatch (WebSocket -> UI)
 - `Transformer/` - History reconstruction (stored events -> ChatMessage)
 - `Payloads/` - Shared Decodable structs for both systems
 
 ## Data Flow
 
 ```
-Live:   WebSocket -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
+Live:   WebSocket -> EventRegistry -> Plugin.parse() -> Plugin.dispatch() -> ChatViewModel
 Stored: EventDatabase -> Transformer -> ChatMessage array
 ```
+
+Plugins are self-dispatching (`DispatchableEventPlugin`). The `EventDispatchCoordinator` simply looks up the plugin box from `EventRegistry` and delegates — no switch statement.
 
 ## Rules
 
 - Plugins handle WebSocket events only, transformer handles reconstruction only
 - All live events flow through `eventPublisherV2`, never create parallel paths
 - Payloads are shared between systems - changes affect both
+- New plugins should conform to `DispatchableEventPlugin` for self-dispatch
 
 ---
 

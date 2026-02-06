@@ -9,15 +9,14 @@ struct ToolResultParser {
 
     /// Parse SpawnSubagent tool to create SubagentToolData for chip display
     static func parseSpawnSubagent(from tool: ToolUseData) -> SubagentToolData? {
-        // Extract task and model from arguments
-        let task = extractTaskFromArguments(tool.arguments)
-        let model = extractModelFromArguments(tool.arguments)
+        let task = ToolArgumentParser.string("task", from: tool.arguments)
+            .map { $0.replacingOccurrences(of: "\\n", with: "\n").replacingOccurrences(of: "\\\"", with: "\"") }
+            ?? "Sub-agent task"
+        let model = ToolArgumentParser.string("model", from: tool.arguments)
 
-        // Extract session ID and other info from result
         let sessionId = extractSessionId(from: tool.result) ?? tool.toolCallId
         let resultStatus = extractSubagentStatus(from: tool.result)
 
-        // Determine status based on tool status and result
         let status: SubagentStatus
         switch tool.status {
         case .running:
@@ -28,7 +27,6 @@ struct ToolResultParser {
             status = .failed
         }
 
-        // Extract additional info from result
         let resultSummary = extractResultSummary(from: tool.result)
         let turns = extractTurns(from: tool.result)
         let error = tool.status == .error ? tool.result : nil
@@ -50,12 +48,10 @@ struct ToolResultParser {
 
     /// Parse WaitForSubagent tool result to create SubagentToolData for chip display
     static func parseWaitForSubagent(from tool: ToolUseData) -> SubagentToolData? {
-        // Extract sessionId from arguments (WaitForSubagent uses sessionId parameter)
-        let sessionId = extractSessionIdFromArguments(tool.arguments)
+        let sessionId = ToolArgumentParser.string("sessionId", from: tool.arguments)
             ?? extractSessionId(from: tool.result)
             ?? tool.toolCallId
 
-        // Determine status based on tool status
         let status: SubagentStatus
         switch tool.status {
         case .running:
@@ -66,7 +62,6 @@ struct ToolResultParser {
             status = .failed
         }
 
-        // Extract output and summary from result
         let (summary, fullOutput) = extractWaitForSubagentOutput(from: tool.result)
         let turns = extractTurns(from: tool.result)
         let duration = extractDurationMs(from: tool.result)
@@ -75,7 +70,7 @@ struct ToolResultParser {
         return SubagentToolData(
             toolCallId: tool.toolCallId,
             subagentSessionId: sessionId,
-            task: "Sub-agent task",  // WaitForSubagent doesn't have the original task
+            task: "Sub-agent task",
             model: nil,
             status: status,
             currentTurn: turns,
@@ -91,11 +86,9 @@ struct ToolResultParser {
 
     /// Parse RenderAppUI tool arguments to create RenderAppUIChipData for chip display
     static func parseRenderAppUI(from tool: ToolUseData) -> RenderAppUIChipData? {
-        // Extract canvasId from arguments
-        let canvasId = extractCanvasId(from: tool.arguments) ?? tool.toolCallId
-        let title = extractTitle(from: tool.arguments)
+        let canvasId = ToolArgumentParser.string("canvasId", from: tool.arguments) ?? tool.toolCallId
+        let title = ToolArgumentParser.string("title", from: tool.arguments)
 
-        // Determine status based on tool status
         let status: RenderAppUIStatus
         switch tool.status {
         case .running:
@@ -119,16 +112,12 @@ struct ToolResultParser {
 
     /// Parse TodoWrite tool result to create TodoWriteChipData for chip display
     static func parseTodoWrite(from tool: ToolUseData) -> TodoWriteChipData? {
-        // Parse the last line of the result which has format:
-        // "X completed, Y in progress, Z pending"
         guard let result = tool.result else { return nil }
 
-        // Extract counts using regex pattern
         var completed = 0
         var inProgress = 0
         var pending = 0
 
-        // Match pattern: "X completed, Y in progress, Z pending"
         if let match = result.firstMatch(of: /(\d+)\s+completed,\s+(\d+)\s+in\s+progress,\s+(\d+)\s+pending/) {
             completed = Int(match.1) ?? 0
             inProgress = Int(match.2) ?? 0
@@ -150,16 +139,13 @@ struct ToolResultParser {
 
     /// Parse NotifyApp tool to create NotifyAppChipData for chip display
     static func parseNotifyApp(from tool: ToolUseData) -> NotifyAppChipData? {
-        // Extract title and body from arguments
-        guard let title = extractNotifyAppTitle(from: tool.arguments),
-              let body = extractNotifyAppBody(from: tool.arguments) else {
+        guard let title = ToolArgumentParser.string("title", from: tool.arguments),
+              let body = ToolArgumentParser.string("body", from: tool.arguments) else {
             return nil
         }
 
-        // Extract optional sheetContent
-        let sheetContent = extractNotifyAppSheetContent(from: tool.arguments)
+        let sheetContent = ToolArgumentParser.string("sheetContent", from: tool.arguments)
 
-        // Determine status based on tool status
         let status: NotifyAppStatus
         switch tool.status {
         case .running:
@@ -170,21 +156,17 @@ struct ToolResultParser {
             status = .failed
         }
 
-        // Parse result for success/failure counts
         var successCount: Int?
         var failureCount: Int?
         var errorMessage: String?
 
         if let result = tool.result {
-            // Extract counts from result like "Notification sent successfully to 1 device."
             if let match = result.firstMatch(of: /to\s+(\d+)\s+device/) {
                 successCount = Int(match.1)
             }
-            // Extract failure count if present
             if let match = result.firstMatch(of: /failed\s+for\s+(\d+)/) {
                 failureCount = Int(match.1)
             }
-            // For errors, use the result as error message
             if status == .failed {
                 errorMessage = result
             }
@@ -206,9 +188,8 @@ struct ToolResultParser {
 
     /// Parse Adapt tool to create AdaptChipData for chip display
     static func parseAdapt(from tool: ToolUseData) -> AdaptChipData? {
-        // Extract action from arguments
         let action: AdaptAction
-        if let actionStr = extractAction(from: tool.arguments) {
+        if let actionStr = ToolArgumentParser.string("action", from: tool.arguments) {
             switch actionStr {
             case "deploy": action = .deploy
             case "status": action = .status
@@ -219,7 +200,6 @@ struct ToolResultParser {
             action = .deploy
         }
 
-        // Determine status based on tool status
         let status: AdaptStatus
         switch tool.status {
         case .running:
@@ -239,52 +219,21 @@ struct ToolResultParser {
         )
     }
 
-    // MARK: - Private Extraction Helpers
-
-    /// Extract "task" field from JSON arguments
-    private static func extractTaskFromArguments(_ args: String) -> String {
-        if let match = args.firstMatch(of: /"task"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return String(match.1)
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        return "Sub-agent task"
-    }
-
-    /// Extract "sessionId" field from JSON arguments
-    private static func extractSessionIdFromArguments(_ args: String) -> String? {
-        if let match = args.firstMatch(of: /"sessionId"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return nil
-    }
-
-    /// Extract "model" field from JSON arguments
-    private static func extractModelFromArguments(_ args: String) -> String? {
-        if let match = args.firstMatch(of: /"model"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return nil
-    }
+    // MARK: - Private Result Extraction Helpers
+    // These parse free-text result strings (not JSON arguments), so regex is appropriate.
 
     /// Extract output and summary from WaitForSubagent result
     private static func extractWaitForSubagentOutput(from result: String?) -> (summary: String?, fullOutput: String?) {
         guard let result = result else { return (nil, nil) }
 
-        // Look for **Output**: section
         if let match = result.firstMatch(of: /\*\*Output\*\*:\s*\n([\s\S]*)/) {
             let output = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
-            // Remove trailing markdown separators
             let cleaned = output.components(separatedBy: "\n---\n").first ?? output
-
-            // Create summary from first meaningful line
             let lines = cleaned.components(separatedBy: "\n").filter { !$0.isEmpty }
             let summary = lines.first.map { $0.count > 100 ? String($0.prefix(100)) + "..." : $0 }
-
             return (summary, cleaned)
         }
 
-        // Fallback: look for "Completed" status
         if result.lowercased().contains("completed") {
             return ("Sub-agent completed", result)
         }
@@ -295,7 +244,6 @@ struct ToolResultParser {
     /// Extract turn count from result
     private static func extractTurns(from result: String?) -> Int {
         guard let result = result else { return 0 }
-        // Look for "Turns: X" or "**Turns**: X"
         if let match = result.firstMatch(of: /\*?\*?Turns\*?\*?\s*[:\|]\s*(\d+)/) {
             return Int(match.1) ?? 0
         }
@@ -305,7 +253,6 @@ struct ToolResultParser {
     /// Extract duration in milliseconds from result
     private static func extractDurationMs(from result: String?) -> Int? {
         guard let result = result else { return nil }
-        // Look for "Duration: X.Xs" or "Xms" or "X.X seconds"
         if let match = result.firstMatch(of: /Duration[:\s*\|]+\s*(\d+\.?\d*)\s*(ms|s|seconds?)/) {
             let value = Double(match.1) ?? 0
             let unit = String(match.2).lowercased()
@@ -320,11 +267,9 @@ struct ToolResultParser {
     /// Extract session ID from result text
     private static func extractSessionId(from result: String?) -> String? {
         guard let result = result else { return nil }
-        // Look for sess_xxx pattern directly (most reliable)
         if let match = result.firstMatch(of: /sess_[a-zA-Z0-9_-]+/) {
             return String(match.0)
         }
-        // Also try: sessionId: "..."
         if let match = result.firstMatch(of: /sessionId[:\s"]+([a-zA-Z0-9_-]+)/) {
             return String(match.1)
         }
@@ -350,72 +295,13 @@ struct ToolResultParser {
     /// Extract result summary from result text
     private static func extractResultSummary(from result: String?) -> String? {
         guard let result = result else { return nil }
-        // Look for **Output**: section in WaitForSubagent results
         if let match = result.firstMatch(of: /\*\*Output\*\*:\s*\n(.+)/) {
             let output = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
-            // Take first line or first 200 chars
             let firstLine = output.components(separatedBy: "\n").first ?? output
             return firstLine.count > 200 ? String(firstLine.prefix(200)) + "..." : firstLine
         }
-        // For spawned messages, just return a simple summary
         if result.lowercased().contains("spawned") {
             return "Sub-agent spawned successfully"
-        }
-        return nil
-    }
-
-    /// Extract "canvasId" field from JSON arguments
-    private static func extractCanvasId(from args: String) -> String? {
-        if let match = args.firstMatch(of: /"canvasId"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return nil
-    }
-
-    /// Extract "title" field from JSON arguments
-    private static func extractTitle(from args: String) -> String? {
-        if let match = args.firstMatch(of: /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return String(match.1)
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        return nil
-    }
-
-    /// Extract "title" field from NotifyApp JSON arguments
-    private static func extractNotifyAppTitle(from args: String) -> String? {
-        if let match = args.firstMatch(of: /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return String(match.1)
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        return nil
-    }
-
-    /// Extract "body" field from NotifyApp JSON arguments
-    private static func extractNotifyAppBody(from args: String) -> String? {
-        if let match = args.firstMatch(of: /"body"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return String(match.1)
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        return nil
-    }
-
-    /// Extract "sheetContent" field from NotifyApp JSON arguments
-    private static func extractNotifyAppSheetContent(from args: String) -> String? {
-        if let match = args.firstMatch(of: /"sheetContent"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return String(match.1)
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        return nil
-    }
-
-    /// Extract "action" field from JSON arguments
-    private static func extractAction(from args: String) -> String? {
-        if let match = args.firstMatch(of: /"action"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
         }
         return nil
     }

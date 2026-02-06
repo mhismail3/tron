@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling UI render start events.
 /// These events signal the beginning of UI canvas rendering.
-enum UIRenderStartPlugin: EventPlugin {
+enum UIRenderStartPlugin: DispatchableEventPlugin {
     static let eventType = "agent.ui_render_start"
 
     // MARK: - Event Data
@@ -36,5 +36,11 @@ enum UIRenderStartPlugin: EventPlugin {
             title: event.data.title,
             toolCallId: event.data.toolCallId
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleUIRenderStart(r)
     }
 }

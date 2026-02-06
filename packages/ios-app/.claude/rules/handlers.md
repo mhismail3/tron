@@ -33,11 +33,22 @@ extension ChatViewModel: FeatureContext {
 
 ## Key Coordinators
 
-- `EventDispatchCoordinator` - Routes plugin events to handlers
+- `EventDispatchCoordinator` - Delegates to self-dispatching plugin boxes via `EventRegistry`
 - `ToolEventCoordinator` - Handles tool start/end events
 - `TurnLifecycleCoordinator` - Manages turn state transitions
 - `PaginationCoordinator` - Handles event loading and pagination
 - `MessagingCoordinator` - Sends messages and handles responses
+
+## Event Dispatch
+
+`EventDispatchCoordinator` uses plugin box delegation instead of a switch statement. Each `DispatchableEventPlugin` carries its own dispatch logic. The coordinator looks up the plugin box from `EventRegistry` and calls `box.dispatch(result:context:)`.
+
+Handler protocols are split by domain (see `EventDispatchContext.swift`):
+- `StreamingEventHandler`, `ToolEventHandler`, `TurnLifecycleEventHandler`
+- `ContextEventHandler`, `BrowserEventHandler`, `SubagentEventHandler`
+- `UICanvasEventHandler`, `TodoEventHandler`, `EventDispatchLogger`
+
+These compose into `EventDispatchTarget` which ChatViewModel conforms to.
 
 ## Rules
 

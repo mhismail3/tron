@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling message deleted events.
 /// These events signal that a message was deleted from the conversation.
-enum MessageDeletedPlugin: EventPlugin {
+enum MessageDeletedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.message_deleted"
 
     // MARK: - Event Data
@@ -39,5 +39,11 @@ enum MessageDeletedPlugin: EventPlugin {
             targetTurn: event.data.targetTurn,
             reason: event.data.reason
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleMessageDeleted(r)
     }
 }

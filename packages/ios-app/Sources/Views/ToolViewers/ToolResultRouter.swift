@@ -1,18 +1,20 @@
 import SwiftUI
 
 // MARK: - Tool Result Router
-// Handles core Tron tools: Read, Write, Edit, Bash, Search, Find, BrowseTheWeb, OpenURL
+// Routes tool display through ToolRegistry — single source of truth for icon, name, summary, viewer.
 
 struct ToolResultRouter: View {
     let tool: ToolUseData
     @State private var isExpanded = false
 
+    private var descriptor: ToolDescriptor {
+        ToolRegistry.descriptor(for: tool.toolName)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Tool header
             toolHeader
 
-            // Tool-specific result viewer
             if let result = tool.result, !result.isEmpty {
                 resultViewer(for: result)
             }
@@ -27,14 +29,18 @@ struct ToolResultRouter: View {
 
     private var toolHeader: some View {
         HStack(spacing: 8) {
-            toolIcon
+            Image(systemName: descriptor.icon)
+                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                .foregroundStyle(descriptor.iconColor)
+                .frame(width: 16)
 
-            Text(displayToolName)
+            Text(descriptor.displayName)
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
 
-            if !toolDetail.isEmpty {
-                Text(toolDetail)
+            let detail = descriptor.summaryExtractor(tool.arguments)
+            if !detail.isEmpty {
+                Text(detail)
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
@@ -55,47 +61,6 @@ struct ToolResultRouter: View {
         .background(Color.tronSurfaceElevated)
     }
 
-    // MARK: - Tool Icon (distinct for each tool)
-
-    private var toolIcon: some View {
-        let (iconName, iconColor) = toolIconConfig
-        return Image(systemName: iconName)
-            .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
-            .foregroundStyle(iconColor)
-            .frame(width: 16)
-    }
-
-    private var toolIconConfig: (name: String, color: Color) {
-        switch normalizedToolName {
-        case "read":
-            return ("doc.text", .tronSlate)
-        case "write":
-            return ("doc.badge.plus", .tronPink)
-        case "edit":
-            return ("pencil.line", .orange)
-        case "bash":
-            return ("terminal", .tronEmerald)
-        case "search":
-            return ("magnifyingglass", .purple)
-        case "find", "glob":
-            return ("doc.text.magnifyingglass", .cyan)
-        case "browsetheweb":
-            return ("globe", .blue)
-        case "openurl":
-            return ("safari", .blue)
-        case "webfetch":
-            return ("arrow.down.doc", .tronInfo)
-        case "websearch":
-            return ("magnifyingglass.circle", .tronInfo)
-        case "askuserquestion":
-            return ("questionmark.circle.fill", .tronAmber)
-        default:
-            return ("gearshape", .tronTextMuted)
-        }
-    }
-
-    // MARK: - Status Badge
-
     @ViewBuilder
     private var statusBadge: some View {
         switch tool.status {
@@ -114,130 +79,11 @@ struct ToolResultRouter: View {
         }
     }
 
-    /// Display name - properly capitalized for each tool
-    private var displayToolName: String {
-        switch normalizedToolName {
-        case "read": return "Read"
-        case "write": return "Write"
-        case "edit": return "Edit"
-        case "bash": return "Bash"
-        case "search": return "Search"
-        case "find": return "Find"
-        case "glob": return "Glob"
-        case "browsetheweb": return "Browse Web"
-        case "openurl": return "Open URL"
-        case "webfetch": return "WebFetch"
-        case "websearch": return "WebSearch"
-        default: return tool.toolName.capitalized
-        }
-    }
-
-    /// Normalized tool name for routing (lowercase)
-    private var normalizedToolName: String {
-        tool.toolName.lowercased()
-    }
-
-    /// Detail string shown after tool name
-    private var toolDetail: String {
-        let args = tool.arguments
-
-        switch normalizedToolName {
-        case "read":
-            return shortenPath(extractFilePath(from: args))
-        case "write":
-            return shortenPath(extractFilePath(from: args))
-        case "edit":
-            return shortenPath(extractFilePath(from: args))
-        case "bash":
-            return truncateCommand(extractCommand(from: args))
-        case "search":
-            let pattern = extractPattern(from: args)
-            let path = extractPath(from: args)
-            if !path.isEmpty && path != "." {
-                return "\"\(pattern)\" in \(shortenPath(path))"
-            }
-            return "\"\(pattern)\""
-        case "find", "glob":
-            return extractPattern(from: args)
-        case "browsetheweb":
-            return extractBrowserAction(from: args)
-        case "openurl":
-            return extractOpenBrowserUrl(from: args)
-        case "webfetch":
-            return extractWebFetchDetail(from: args)
-        case "websearch":
-            return extractWebSearchDetail(from: args)
-        default:
-            return ""
-        }
-    }
-
-    // MARK: - Result Viewer Routing
-
     @ViewBuilder
     private func resultViewer(for result: String) -> some View {
-        switch normalizedToolName {
-        case "read":
-            ReadResultViewer(
-                filePath: extractFilePath(from: tool.arguments),
-                content: result,
-                isExpanded: $isExpanded
-            )
-        case "write":
-            WriteResultViewer(
-                filePath: extractFilePath(from: tool.arguments),
-                content: extractContent(from: tool.arguments),
-                result: result
-            )
-        case "edit":
-            EditResultViewer(
-                filePath: extractFilePath(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "bash":
-            BashResultViewer(
-                command: extractCommand(from: tool.arguments),
-                output: result,
-                isExpanded: $isExpanded
-            )
-        case "search":
-            SearchToolViewer(
-                pattern: extractPattern(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "find", "glob":
-            FindResultViewer(
-                pattern: extractPattern(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "browsetheweb":
-            BrowserToolViewer(
-                action: extractBrowserAction(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "openurl":
-            OpenURLResultViewer(
-                url: extractOpenBrowserUrl(from: tool.arguments),
-                result: result,
-                isExpanded: $isExpanded
-            )
-        case "webfetch":
-            WebFetchResultViewer(
-                result: result,
-                arguments: tool.arguments,
-                isExpanded: $isExpanded
-            )
-        case "websearch":
-            WebSearchResultViewer(
-                result: result,
-                arguments: tool.arguments,
-                isExpanded: $isExpanded
-            )
-        default:
+        if let factory = descriptor.viewerFactory {
+            factory(tool, $isExpanded)
+        } else {
             GenericResultViewer(result: result, isExpanded: $isExpanded)
         }
     }
@@ -249,167 +95,6 @@ struct ToolResultRouter: View {
         case .error: return .tronError.opacity(0.3)
         }
     }
-
-    // MARK: - Argument Parsing Helpers
-
-    private func extractFilePath(from args: String) -> String {
-        if let match = args.firstMatch(of: /"file_path"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        if let match = args.firstMatch(of: /"path"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return ""
-    }
-
-    private func extractPath(from args: String) -> String {
-        if let match = args.firstMatch(of: /"path"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return "."
-    }
-
-    private func extractCommand(from args: String) -> String {
-        if let match = args.firstMatch(of: /"command"\s*:\s*"([^"]+)"/) {
-            return String(match.1).replacingOccurrences(of: "\\n", with: " ")
-        }
-        return ""
-    }
-
-    private func extractPattern(from args: String) -> String {
-        if let match = args.firstMatch(of: /"pattern"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return ""
-    }
-
-    private func extractContent(from args: String) -> String {
-        // Try to extract content field from JSON arguments
-        // Handle escaped content in JSON
-        if let match = args.firstMatch(of: /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
-            return String(match.1)
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\t", with: "\t")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        return ""
-    }
-
-    /// Shorten a file path to just the filename for display
-    private func shortenPath(_ path: String) -> String {
-        guard !path.isEmpty else { return "" }
-        return URL(fileURLWithPath: path).lastPathComponent
-    }
-
-    /// Truncate long commands for the header
-    private func truncateCommand(_ cmd: String) -> String {
-        guard cmd.count > 40 else { return cmd }
-        return String(cmd.prefix(40)) + "..."
-    }
-
-    /// Extract browser action from arguments
-    private func extractBrowserAction(from args: String) -> String {
-        if let match = args.firstMatch(of: /"action"\s*:\s*"([^"]+)"/) {
-            let action = String(match.1)
-            // Also try to get URL for navigate action
-            if action == "navigate", let urlMatch = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
-                // Unescape JSON escape sequences in URL
-                let url = String(urlMatch.1)
-                    .replacingOccurrences(of: "\\/", with: "/")
-                    .replacingOccurrences(of: "\\\"", with: "\"")
-                return "\(action): \(url)"
-            }
-            // Get selector for click/fill/type actions
-            if ["click", "fill", "type", "select"].contains(action),
-               let selectorMatch = args.firstMatch(of: /"selector"\s*:\s*"([^"]+)"/) {
-                let selector = String(selectorMatch.1)
-                return "\(action): \(selector)"
-            }
-            return action
-        }
-        return ""
-    }
-
-    /// Extract AST Grep pattern from arguments
-    private func extractAstGrepPattern(from args: String) -> String {
-        // Try "pattern" field first
-        if let match = args.firstMatch(of: /"pattern"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        // Try "rule" field (some AST grep implementations use this)
-        if let match = args.firstMatch(of: /"rule"\s*:\s*"([^"]+)"/) {
-            return String(match.1)
-        }
-        return ""
-    }
-
-    /// Extract Open Browser URL from arguments
-    private func extractOpenBrowserUrl(from args: String) -> String {
-        if let match = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
-            // Unescape JSON escape sequences
-            let url = String(match.1)
-                .replacingOccurrences(of: "\\/", with: "/")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-            // Shorten long URLs
-            if url.count > 50 {
-                return String(url.prefix(50)) + "..."
-            }
-            return url
-        }
-        return ""
-    }
-
-    /// Extract WebFetch detail (domain + truncated prompt)
-    private func extractWebFetchDetail(from args: String) -> String {
-        var url = ""
-        var prompt = ""
-
-        if let match = args.firstMatch(of: /"url"\s*:\s*"([^"]+)"/) {
-            url = String(match.1)
-                .replacingOccurrences(of: "\\/", with: "/")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-        if let match = args.firstMatch(of: /"prompt"\s*:\s*"([^"]+)"/) {
-            prompt = String(match.1)
-                .replacingOccurrences(of: "\\n", with: " ")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-        }
-
-        if !url.isEmpty {
-            let domain = extractDomainFromUrl(url)
-            if !prompt.isEmpty {
-                let shortPrompt = prompt.count > 25 ? String(prompt.prefix(22)) + "..." : prompt
-                return "\(domain): \(shortPrompt)"
-            }
-            return domain
-        }
-        return prompt.isEmpty ? "" : (prompt.count > 40 ? String(prompt.prefix(37)) + "..." : prompt)
-    }
-
-    /// Extract domain from URL
-    private func extractDomainFromUrl(_ url: String) -> String {
-        if let urlObj = URL(string: url), let host = urlObj.host {
-            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        }
-        // Fallback: extract domain manually
-        if url.contains("://") {
-            let afterProtocol = url.components(separatedBy: "://").last ?? url
-            let domain = afterProtocol.components(separatedBy: "/").first ?? afterProtocol
-            return domain.hasPrefix("www.") ? String(domain.dropFirst(4)) : domain
-        }
-        return String(url.prefix(30))
-    }
-
-    /// Extract WebSearch detail (quoted query)
-    private func extractWebSearchDetail(from args: String) -> String {
-        if let match = args.firstMatch(of: /"query"\s*:\s*"([^"]+)"/) {
-            let query = String(match.1)
-                .replacingOccurrences(of: "\\\"", with: "\"")
-            let truncated = query.count > 35 ? String(query.prefix(32)) + "..." : query
-            return "\"\(truncated)\""
-        }
-        return ""
-    }
 }
 
 // MARK: - Preview
@@ -417,7 +102,6 @@ struct ToolResultRouter: View {
 #Preview("Core Tools") {
     ScrollView {
         VStack(spacing: 16) {
-            // 1. Read - Read file contents
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Read",
                 toolCallId: "read-123",
@@ -427,7 +111,6 @@ struct ToolResultRouter: View {
                 durationMs: 15
             ))
 
-            // 2. Write - Create/overwrite files
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Write",
                 toolCallId: "write-123",
@@ -437,7 +120,6 @@ struct ToolResultRouter: View {
                 durationMs: 8
             ))
 
-            // 3. Edit - Make precise edits
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Edit",
                 toolCallId: "edit-123",
@@ -447,7 +129,6 @@ struct ToolResultRouter: View {
                 durationMs: 23
             ))
 
-            // 4. Bash - Execute shell commands
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Bash",
                 toolCallId: "bash-123",
@@ -457,7 +138,6 @@ struct ToolResultRouter: View {
                 durationMs: 45
             ))
 
-            // 5. Grep - Search file contents
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Grep",
                 toolCallId: "grep-123",
@@ -467,7 +147,6 @@ struct ToolResultRouter: View {
                 durationMs: 120
             ))
 
-            // 6. Find - Find files by pattern
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Find",
                 toolCallId: "find-123",
@@ -477,47 +156,6 @@ struct ToolResultRouter: View {
                 durationMs: 35
             ))
 
-            // 7. Ls - List directory contents
-            ToolResultRouter(tool: ToolUseData(
-                toolName: "Ls",
-                toolCallId: "ls-123",
-                arguments: "{\"path\": \"./src\"}",
-                status: .success,
-                result: "drwxr-xr-x  5 user staff  160 Jan  4 10:00 components\ndrwxr-xr-x  3 user staff   96 Jan  4 09:30 utils\n-rw-r--r--  1 user staff 1234 Jan  4 10:00 app.ts\n-rw-r--r--  1 user staff  567 Jan  4 09:00 index.ts",
-                durationMs: 12
-            ))
-
-            // 8. AST Grep - with matches
-            ToolResultRouter(tool: ToolUseData(
-                toolName: "Astgrep",
-                toolCallId: "astgrep-123",
-                arguments: "{\"pattern\": \"const $NAME = $VALUE\"}",
-                status: .success,
-                result: "/Users/moose/Downloads/test/test_code.js:\n  6:0: const user = \"Moose\";\n    captured: VALUE=\"Moose\", NAME=\"user\"",
-                durationMs: 21
-            ))
-
-            // 9. AST Grep - no matches
-            ToolResultRouter(tool: ToolUseData(
-                toolName: "Astgrep",
-                toolCallId: "astgrep-empty",
-                arguments: "{\"pattern\": \"async function $FN\"}",
-                status: .success,
-                result: "Found 0 matches in 0 files",
-                durationMs: 13
-            ))
-
-            // 10. Open Browser - success
-            ToolResultRouter(tool: ToolUseData(
-                toolName: "Openbrowser",
-                toolCallId: "browser-123",
-                arguments: "{\"url\": \"https://example.com\"}",
-                status: .success,
-                result: "Opening https://example.com in Safari",
-                durationMs: 0
-            ))
-
-            // 11. WebFetch - Fetch and summarize web content
             ToolResultRouter(tool: ToolUseData(
                 toolName: "WebFetch",
                 toolCallId: "webfetch-123",
@@ -527,17 +165,15 @@ struct ToolResultRouter: View {
                 durationMs: 850
             ))
 
-            // 12. WebSearch - Search the web
             ToolResultRouter(tool: ToolUseData(
                 toolName: "WebSearch",
                 toolCallId: "websearch-123",
                 arguments: "{\"query\": \"Swift async await tutorial\"}",
                 status: .success,
-                result: "Found 5 results for 'Swift async await tutorial':\n\n1. **Swift Concurrency - Apple Developer**\n   https://developer.apple.com/documentation/swift/concurrency\n   Learn about Swift's modern approach to async code.\n\n2. **Async/Await in Swift**\n   https://www.swiftbysundell.com/articles/async-await-in-swift/\n   A guide to using async/await.",
+                result: "Found 5 results for 'Swift async await tutorial':\n\n1. **Swift Concurrency - Apple Developer**\n   https://developer.apple.com/documentation/swift/concurrency\n   Learn about Swift's modern approach to async code.",
                 durationMs: 620
             ))
 
-            // Also show running and error states
             ToolResultRouter(tool: ToolUseData(
                 toolName: "Bash",
                 toolCallId: "bash-running",

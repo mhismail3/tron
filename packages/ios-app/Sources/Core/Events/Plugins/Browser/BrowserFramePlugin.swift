@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling browser frame events.
 /// These events deliver browser screenshot frames.
-enum BrowserFramePlugin: EventPlugin {
+enum BrowserFramePlugin: DispatchableEventPlugin {
     static let eventType = "browser.frame"
 
     // MARK: - Event Data
@@ -50,5 +50,11 @@ enum BrowserFramePlugin: EventPlugin {
             width: event.data.metadata?.deviceWidth.map { Int($0) },
             height: event.data.metadata?.deviceHeight.map { Int($0) }
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleBrowserFrame(r)
     }
 }

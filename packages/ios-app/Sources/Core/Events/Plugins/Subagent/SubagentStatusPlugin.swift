@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling subagent status update events.
 /// These events signal status changes in a running subagent.
-enum SubagentStatusPlugin: EventPlugin {
+enum SubagentStatusPlugin: DispatchableEventPlugin {
     static let eventType = "agent.subagent_status"
 
     // MARK: - Event Data
@@ -36,5 +36,11 @@ enum SubagentStatusPlugin: EventPlugin {
             status: event.data.status,
             currentTurn: event.data.currentTurn
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSubagentStatus(r)
     }
 }

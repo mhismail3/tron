@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling forwarded subagent events.
 /// These events forward inner events from subagents to the parent session.
-enum SubagentEventPlugin: EventPlugin {
+enum SubagentEventPlugin: DispatchableEventPlugin {
     static let eventType = "agent.subagent_event"
 
     // MARK: - Event Data
@@ -43,5 +43,11 @@ enum SubagentEventPlugin: EventPlugin {
             innerEventData: event.data.event.data,
             innerEventTimestamp: event.data.event.timestamp
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSubagentEvent(r)
     }
 }

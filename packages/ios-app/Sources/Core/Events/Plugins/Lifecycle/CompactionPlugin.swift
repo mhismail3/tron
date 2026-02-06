@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling context compaction events.
 /// These events signal that the context was compacted to reduce token usage.
-enum CompactionPlugin: EventPlugin {
+enum CompactionPlugin: DispatchableEventPlugin {
     static let eventType = "agent.compaction"
 
     // MARK: - Event Data
@@ -46,5 +46,11 @@ enum CompactionPlugin: EventPlugin {
             reason: event.data.reason ?? "auto",
             summary: event.data.summary
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleCompaction(r)
     }
 }

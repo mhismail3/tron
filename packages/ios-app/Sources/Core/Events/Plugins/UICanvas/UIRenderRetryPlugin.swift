@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling UI render retry events.
 /// These events signal that UI canvas rendering is being retried after a validation failure.
-enum UIRenderRetryPlugin: EventPlugin {
+enum UIRenderRetryPlugin: DispatchableEventPlugin {
     static let eventType = "agent.ui_render_retry"
 
     // MARK: - Event Data
@@ -36,5 +36,11 @@ enum UIRenderRetryPlugin: EventPlugin {
             attempt: event.data.attempt,
             errors: event.data.errors
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleUIRenderRetry(r)
     }
 }

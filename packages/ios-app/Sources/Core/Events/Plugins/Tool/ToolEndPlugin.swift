@@ -4,7 +4,7 @@ import Foundation
 /// These events signal the completion of a tool invocation with results.
 ///
 /// Note: Uses custom parsing to handle output as either String or [ContentBlock] array.
-enum ToolEndPlugin: EventPlugin {
+enum ToolEndPlugin: DispatchableEventPlugin {
     static let eventType = "agent.tool_end"
 
     // MARK: - Event Data
@@ -98,5 +98,11 @@ enum ToolEndPlugin: EventPlugin {
             durationMs: event.data.durationMs ?? event.data.duration,
             details: event.data.details
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleToolEnd(r)
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling agent completion events.
 /// These events signal the end of the agent's response.
-enum CompletePlugin: EventPlugin {
+enum CompletePlugin: DispatchableEventPlugin {
     static let eventType = "agent.complete"
 
     // MARK: - Event Data
@@ -36,5 +36,10 @@ enum CompletePlugin: EventPlugin {
             totalTokens: event.data?.totalTokens,
             totalTurns: event.data?.totalTurns
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        context.handleComplete()
     }
 }

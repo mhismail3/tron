@@ -5,18 +5,18 @@ The iOS app handles events through two systems: **plugins** for live WebSocket e
 ## Architecture Overview
 
 ```
-Live:   WebSocket → EventRegistry → Plugin → EventDispatchCoordinator → ChatViewModel
+Live:   WebSocket → EventRegistry → Plugin.parse() → Plugin.dispatch() → ChatViewModel
 Stored: EventDatabase → Transformer → ChatMessage array
 ```
 
 ## Event Plugin System
 
-Plugins are self-contained handlers that parse WebSocket JSON and transform to UI-ready results.
+Plugins are self-contained handlers that parse WebSocket JSON, transform to UI-ready results, and dispatch to the appropriate handler.
 
 ### Plugin Structure
 
 ```swift
-enum MyEventPlugin: EventPlugin {
+enum MyEventPlugin: DispatchableEventPlugin {
     static let eventType = "agent.my_event"
 
     struct EventData: StandardEventData {
@@ -33,6 +33,12 @@ enum MyEventPlugin: EventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(/* map fields */)
     }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleMyEvent(r)
+    }
 }
 ```
 
@@ -40,14 +46,14 @@ enum MyEventPlugin: EventPlugin {
 
 | Category | Location | Events |
 |----------|----------|--------|
-| Streaming | `Plugins/Streaming/` | text_delta, turn_complete |
+| Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
 | Tool | `Plugins/Tool/` | tool_start, tool_end |
-| Lifecycle | `Plugins/Lifecycle/` | session_start, session_end |
-| Session | `Plugins/Session/` | fork, status |
-| Subagent | `Plugins/Subagent/` | spawn, progress, complete |
-| UICanvas | `Plugins/UICanvas/` | render_app_ui |
-| Browser | `Plugins/Browser/` | browser events |
-| Todo | `Plugins/Todo/` | todo_write |
+| Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_removed, turn_failed |
+| Session | `Plugins/Session/` | connected |
+| Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
+| UICanvas | `Plugins/UICanvas/` | render_start, render_chunk, render_complete, render_error, render_retry |
+| Browser | `Plugins/Browser/` | browser_frame, browser_closed |
+| Todo | `Plugins/Todo/` | todos_updated |
 
 ### Registration
 
@@ -65,30 +71,41 @@ func registerAll() {
 
 ## Event Dispatch
 
-`EventDispatchCoordinator` routes parsed events to handlers:
+`EventDispatchCoordinator` delegates to self-dispatching plugin boxes via `EventRegistry`:
 
 ```swift
-func dispatch(_ event: any EventResult, to context: EventDispatchContext) {
-    switch event {
-    case let e as TextDeltaPlugin.Result:
-        context.handleTextDelta(e)
-    case let e as ToolStartPlugin.Result:
-        context.handleToolStart(e)
-    // ... all cases
-    }
+func dispatch(type: String, transform: () -> (any EventResult)?, context: EventDispatchTarget) {
+    guard let result = transform() else { return }
+    guard let box = EventRegistry.shared.pluginBox(for: type) else { return }
+    box.dispatch(result: result, context: context)
 }
 ```
 
-### Handler Protocol
+No switch statement — each plugin carries its own dispatch logic.
+
+### Handler Protocols
+
+Handlers are split into domain-specific protocols:
 
 ```swift
-@MainActor
-protocol EventDispatchContext: AnyObject {
-    func handleTextDelta(_ event: TextDeltaPlugin.Result)
-    func handleToolStart(_ event: ToolStartPlugin.Result)
-    func handleToolEnd(_ event: ToolEndPlugin.Result)
-    // ... all handlers
+@MainActor protocol StreamingEventHandler: AnyObject {
+    func handleTextDelta(_ delta: String)
+    func handleThinkingDelta(_ delta: String)
 }
+
+@MainActor protocol ToolEventHandler: AnyObject {
+    func handleToolStart(_ result: ToolStartPlugin.Result)
+    func handleToolEnd(_ result: ToolEndPlugin.Result)
+}
+
+// ... TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
+//     SubagentEventHandler, UICanvasEventHandler, TodoEventHandler, EventDispatchLogger
+
+// Composed target — ChatViewModel conforms to this
+@MainActor protocol EventDispatchTarget:
+    StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
+    ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
+    UICanvasEventHandler, TodoEventHandler, EventDispatchLogger {}
 ```
 
 ### Implementation
@@ -97,14 +114,11 @@ ChatViewModel extensions implement handlers:
 
 ```swift
 // ChatViewModel+EventDispatchContext.swift
-extension ChatViewModel: EventDispatchContext {
-    func handleTextDelta(_ event: TextDeltaPlugin.Result) {
-        streamingManager.appendDelta(event.delta)
+extension ChatViewModel: EventDispatchTarget {
+    func handleBrowserFrame(_ result: BrowserFramePlugin.Result) {
+        handleBrowserFrameResult(result)
     }
-
-    func handleToolStart(_ event: ToolStartPlugin.Result) {
-        activeTools[event.toolId] = ToolState(name: event.toolName)
-    }
+    // ... wrapper methods for existing implementations
 }
 ```
 
@@ -147,11 +161,11 @@ protocol EventTransformable {
 
 ## Adding a New Event
 
-### 1. Create Plugin
+### 1. Create Self-Dispatching Plugin
 
 ```swift
 // Core/Events/Plugins/<Category>/MyEventPlugin.swift
-enum MyEventPlugin: EventPlugin {
+enum MyEventPlugin: DispatchableEventPlugin {
     static let eventType = "agent.my_event"
 
     struct EventData: StandardEventData {
@@ -168,47 +182,34 @@ enum MyEventPlugin: EventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(customField: event.customField)
     }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleMyEvent(r)
+    }
 }
 ```
 
 ### 2. Register Plugin
 
 ```swift
-// EventRegistry.swift
-func registerAll() {
-    // ... existing
-    register(MyEventPlugin.self)
-}
+// EventRegistry.swift — registerAll()
+register(MyEventPlugin.self)
 ```
 
-### 3. Add Dispatch Case
+### 3. Add Handler to Domain Protocol
 
 ```swift
-// EventDispatchCoordinator.swift
-func dispatch(_ event: any EventResult, to context: EventDispatchContext) {
-    switch event {
-    // ... existing
-    case let e as MyEventPlugin.Result:
-        context.handleMyEvent(e)
-    }
-}
+// EventDispatchContext.swift — add to appropriate domain protocol
+func handleMyEvent(_ result: MyEventPlugin.Result)
 ```
 
-### 4. Add Handler Protocol
-
-```swift
-// EventDispatchContext.swift
-protocol EventDispatchContext {
-    // ... existing
-    func handleMyEvent(_ event: MyEventPlugin.Result)
-}
-```
-
-### 5. Implement Handler
+### 4. Implement Handler
 
 ```swift
 // ChatViewModel+EventDispatchContext.swift
-func handleMyEvent(_ event: MyEventPlugin.Result) {
+func handleMyEvent(_ result: MyEventPlugin.Result) {
     // Update state based on event
 }
 ```
@@ -221,3 +222,4 @@ func handleMyEvent(_ event: MyEventPlugin.Result) {
 - Payloads are shared between systems - changes affect both
 - Use `StandardEventData` for automatic sessionId extraction
 - Keep Result structs flat and UI-ready
+- Use `DispatchableEventPlugin` for all new plugins

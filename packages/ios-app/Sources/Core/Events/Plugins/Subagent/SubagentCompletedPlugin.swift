@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling subagent completion events.
 /// These events signal that a subagent completed successfully.
-enum SubagentCompletedPlugin: EventPlugin {
+enum SubagentCompletedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.subagent_completed"
 
     // MARK: - Event Data
@@ -48,5 +48,11 @@ enum SubagentCompletedPlugin: EventPlugin {
             tokenUsage: event.data.tokenUsage,
             model: event.data.model
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSubagentCompleted(r)
     }
 }

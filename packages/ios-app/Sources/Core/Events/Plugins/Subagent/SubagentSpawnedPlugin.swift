@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling subagent spawned events.
 /// These events signal that a new subagent was created.
-enum SubagentSpawnedPlugin: EventPlugin {
+enum SubagentSpawnedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.subagent_spawned"
 
     // MARK: - Event Data
@@ -42,5 +42,11 @@ enum SubagentSpawnedPlugin: EventPlugin {
             workingDirectory: event.data.workingDirectory,
             toolCallId: event.data.toolCallId
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSubagentSpawned(r)
     }
 }

@@ -44,6 +44,24 @@ final class EventRegistry: @unchecked Sendable {
         plugins[P.eventType] = EventPluginBoxImpl<P>()
     }
 
+    /// Register a dispatchable plugin (supports self-dispatch).
+    func register<P: DispatchableEventPlugin>(_ plugin: P.Type) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if plugins[P.eventType] != nil {
+            logger.warning("Overwriting existing plugin for event type: \(P.eventType)", category: .events)
+        }
+        plugins[P.eventType] = DispatchablePluginBoxImpl<P>()
+    }
+
+    /// Get the plugin box for a given event type (used for self-dispatch).
+    func pluginBox(for type: String) -> (any EventPluginBox)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return plugins[type]
+    }
+
     /// Register all built-in event plugins.
     /// Call this at app startup to enable the plugin system.
     func registerAll() {

@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling turn start events.
 /// These events signal the beginning of an agent turn.
-enum TurnStartPlugin: EventPlugin {
+enum TurnStartPlugin: DispatchableEventPlugin {
     static let eventType = "agent.turn_start"
 
     // MARK: - Event Data
@@ -32,5 +32,11 @@ enum TurnStartPlugin: EventPlugin {
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(turnNumber: event.data?.number ?? 1)
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleTurnStart(r)
     }
 }

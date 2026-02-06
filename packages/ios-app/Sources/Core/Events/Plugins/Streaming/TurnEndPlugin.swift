@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling turn end events.
 /// These events signal the completion of an agent turn with usage statistics.
-enum TurnEndPlugin: EventPlugin {
+enum TurnEndPlugin: DispatchableEventPlugin {
     static let eventType = "agent.turn_end"
 
     // MARK: - Event Data
@@ -83,5 +83,11 @@ enum TurnEndPlugin: EventPlugin {
             cost: data.cost,
             contextLimit: data.contextLimit
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleTurnEnd(r)
     }
 }

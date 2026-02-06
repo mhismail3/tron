@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling UI render complete events.
 /// These events signal the completion of UI canvas rendering with final state.
-enum UIRenderCompletePlugin: EventPlugin {
+enum UIRenderCompletePlugin: DispatchableEventPlugin {
     static let eventType = "agent.ui_render_complete"
 
     // MARK: - Event Data
@@ -36,5 +36,11 @@ enum UIRenderCompletePlugin: EventPlugin {
             ui: event.data.ui,
             state: event.data.state
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleUIRenderComplete(r)
     }
 }

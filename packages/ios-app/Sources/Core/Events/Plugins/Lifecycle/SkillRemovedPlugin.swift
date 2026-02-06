@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling skill removed events.
 /// These events signal that a skill was removed from the session.
-enum SkillRemovedPlugin: EventPlugin {
+enum SkillRemovedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.skill_removed"
 
     // MARK: - Event Data
@@ -28,5 +28,11 @@ enum SkillRemovedPlugin: EventPlugin {
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(skillName: event.data.skillName)
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSkillRemoved(r)
     }
 }

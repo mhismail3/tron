@@ -3,7 +3,7 @@ import Foundation
 /// Plugin for handling subagent result available notification events.
 /// These events are emitted when a non-blocking subagent completes while the parent is idle,
 /// allowing the user to review and send results to the agent.
-enum SubagentResultAvailablePlugin: EventPlugin {
+enum SubagentResultAvailablePlugin: DispatchableEventPlugin {
     static let eventType = "agent.subagent_result_available"
 
     // MARK: - Event Data
@@ -58,5 +58,11 @@ enum SubagentResultAvailablePlugin: EventPlugin {
             error: event.data.error,
             completedAt: event.data.completedAt
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleSubagentResultAvailable(r)
     }
 }

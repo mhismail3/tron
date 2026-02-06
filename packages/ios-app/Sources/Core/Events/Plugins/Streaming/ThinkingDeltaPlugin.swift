@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling thinking delta streaming events.
 /// These events deliver incremental thinking/reasoning content.
-enum ThinkingDeltaPlugin: EventPlugin {
+enum ThinkingDeltaPlugin: DispatchableEventPlugin {
     static let eventType = "agent.thinking_delta"
 
     // MARK: - Event Data
@@ -28,5 +28,11 @@ enum ThinkingDeltaPlugin: EventPlugin {
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(delta: event.data.delta)
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleThinkingDelta(r.delta)
     }
 }

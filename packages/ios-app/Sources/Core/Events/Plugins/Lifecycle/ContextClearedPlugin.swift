@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling context cleared events.
 /// These events signal that the context was cleared (e.g., via /clear command).
-enum ContextClearedPlugin: EventPlugin {
+enum ContextClearedPlugin: DispatchableEventPlugin {
     static let eventType = "agent.context_cleared"
 
     // MARK: - Event Data
@@ -35,5 +35,11 @@ enum ContextClearedPlugin: EventPlugin {
             tokensBefore: event.data.tokensBefore,
             tokensAfter: event.data.tokensAfter
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleContextCleared(r)
     }
 }

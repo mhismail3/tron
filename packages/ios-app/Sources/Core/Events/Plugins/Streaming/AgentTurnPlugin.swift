@@ -2,7 +2,7 @@ import Foundation
 
 /// Plugin for handling agent turn events.
 /// These events contain the full message history with tool content blocks for a turn.
-enum AgentTurnPlugin: EventPlugin {
+enum AgentTurnPlugin: DispatchableEventPlugin {
     static let eventType = "agent.turn"
 
     // MARK: - Event Data
@@ -163,5 +163,11 @@ enum AgentTurnPlugin: EventPlugin {
             messages: event.data.messages,
             turnNumber: event.data.number
         )
+    }
+
+    @MainActor
+    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
+        guard let r = result as? Result else { return }
+        context.handleAgentTurn(r)
     }
 }

@@ -1,13 +1,13 @@
 import Foundation
 
-/// Extension making ChatViewModel conform to EventDispatchContext.
+/// Extension making ChatViewModel conform to EventDispatchTarget.
 /// This provides the bridge between the EventDispatchCoordinator and
 /// the existing event handler methods in ChatViewModel.
 ///
 /// Most handler methods are already implemented in ChatViewModel+Events.swift
 /// and ChatViewModel+Browser.swift. This extension only provides wrappers
 /// for methods that need to adapt plugin Result types to existing signatures.
-extension ChatViewModel: EventDispatchContext {
+extension ChatViewModel: EventDispatchTarget {
 
     // MARK: - Browser Event Wrappers
 
