@@ -40,7 +40,7 @@ The deploy action runs build+test synchronously, then triggers a detached swap s
     this.config = config;
     this.tronScript = config.tronScript ?? join(config.repoRoot, 'scripts', 'tron');
     this.lockPath = join(config.tronHome, 'deploy.lock');
-    this.resultPath = join(config.tronHome, 'last-deployment.json');
+    this.resultPath = join(config.tronHome, 'app', 'last-deployment.json');
   }
 
   async execute(args: AdaptParams): Promise<TronToolResult> {

@@ -701,7 +701,7 @@ write_deployment_result() {
         error_msg="\"$error_msg\""
     fi
 
-    cat > "$TRON_HOME/last-deployment.json" << RESULT
+    cat > "$INSTALL_DIR/last-deployment.json" << RESULT
 {
   "status": "$status",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",

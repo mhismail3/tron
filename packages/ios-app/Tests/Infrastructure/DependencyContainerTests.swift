@@ -102,20 +102,22 @@ final class DependencyContainerTests: XCTestCase {
         // Test origin formatting with known values
         let container = DependencyContainer()
         container.updateServerSettings(host: "testhost", port: "9999", useTLS: false)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
         let origin = container.currentServerOrigin
 
         XCTAssertEqual(origin, "testhost:9999")
     }
 
     // MARK: - Server Settings Update Tests (need fresh container - modifies state)
+    // Each test restores defaults after mutating, so UserDefaults don't leak
+    // garbage values (like "newhost-36060.com") into the real app on the simulator.
 
     func test_updateServerSettings_recreatesRPCClient() async throws {
         let container = DependencyContainer()
         let originalClient = container.rpcClient
 
-        // Use a unique port to guarantee settings change (avoids UserDefaults collision)
-        let uniquePort = String(Int.random(in: 10000...60000))
-        container.updateServerSettings(host: "test-server-\(uniquePort).example.com", port: uniquePort, useTLS: true)
+        container.updateServerSettings(host: "test-server.example.com", port: "19001", useTLS: true)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
 
         XCTAssert(originalClient !== container.rpcClient, "RPC client should be recreated after settings change")
     }
@@ -124,8 +126,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalDB = container.eventDatabase
 
-        let uniquePort = String(Int.random(in: 10000...60000))
-        container.updateServerSettings(host: "test-\(uniquePort).example.com", port: uniquePort, useTLS: true)
+        container.updateServerSettings(host: "test.example.com", port: "19002", useTLS: true)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
 
         XCTAssert(originalDB === container.eventDatabase, "EventDatabase should NOT be recreated after settings change")
     }
@@ -134,8 +136,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalService = container.pushNotificationService
 
-        let uniquePort = String(Int.random(in: 10000...60000))
-        container.updateServerSettings(host: "test-\(uniquePort).example.com", port: uniquePort, useTLS: true)
+        container.updateServerSettings(host: "test.example.com", port: "19003", useTLS: true)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
 
         XCTAssert(originalService === container.pushNotificationService, "PushNotificationService should NOT be recreated")
     }
@@ -144,8 +146,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalRouter = container.deepLinkRouter
 
-        let uniquePort = String(Int.random(in: 10000...60000))
-        container.updateServerSettings(host: "test-\(uniquePort).example.com", port: uniquePort, useTLS: true)
+        container.updateServerSettings(host: "test.example.com", port: "19004", useTLS: true)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
 
         XCTAssert(originalRouter === container.deepLinkRouter, "DeepLinkRouter should NOT be recreated")
     }
@@ -154,8 +156,8 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         let originalVersion = container.serverSettingsVersion
 
-        let uniquePort = String(Int.random(in: 10000...60000))
-        container.updateServerSettings(host: "test-\(uniquePort).example.com", port: uniquePort, useTLS: true)
+        container.updateServerSettings(host: "test.example.com", port: "19005", useTLS: true)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
 
         XCTAssertEqual(container.serverSettingsVersion, originalVersion + 1, "serverSettingsVersion should increment")
     }
@@ -176,8 +178,8 @@ final class DependencyContainerTests: XCTestCase {
     func test_updateServerSettings_updatesServerURL() async throws {
         let container = DependencyContainer()
 
-        let uniquePort = String(Int.random(in: 10000...60000))
-        container.updateServerSettings(host: "newhost-\(uniquePort).com", port: uniquePort, useTLS: true)
+        container.updateServerSettings(host: "newhost.example.com", port: "19006", useTLS: true)
+        defer { container.updateServerSettings(host: "localhost", port: "8082", useTLS: false) }
 
         let url = container.serverURL
         XCTAssertEqual(url.scheme, "wss")
@@ -194,7 +196,9 @@ final class DependencyContainerTests: XCTestCase {
 
     func test_effectiveWorkingDirectory_usesWorkingDirectoryWhenSet() async throws {
         let container = DependencyContainer()
+        let original = container.workingDirectory
         container.workingDirectory = "/custom/path"
+        defer { container.workingDirectory = original }
         XCTAssertEqual(container.effectiveWorkingDirectory, "/custom/path")
     }
 
