@@ -374,7 +374,10 @@ async function main(): Promise<void> {
   logger.info('Server ready. Press Ctrl+C to stop.');
 }
 
-const isMain = process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts');
+const isMain =
+  process.argv[1]?.endsWith('server.js') ||
+  process.argv[1]?.endsWith('server.ts') ||
+  process.argv[1]?.endsWith('index.js');
 if (isMain) {
   main().catch((error) => {
     logger.error('Failed to start server', error);

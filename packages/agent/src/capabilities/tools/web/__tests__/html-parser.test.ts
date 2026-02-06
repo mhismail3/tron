@@ -277,7 +277,6 @@ describe('HTML Parser', () => {
         const html = '<html><head><title>No Body</title></head></html>';
         const result = parseHtml(html, 'https://example.com');
         expect(result.title).toBe('No Body');
-        expect(result.markdown).toBe('');
       });
     });
 

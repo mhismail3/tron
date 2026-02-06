@@ -7,8 +7,10 @@
 
 import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
 import type { HtmlParseResult, HtmlParserConfig } from './types.js';
+
+type LinkedomDocument = ReturnType<typeof parseHTML>['document'];
 
 const DEFAULT_MAX_CONTENT_LENGTH = 500000; // 500KB
 
@@ -47,22 +49,25 @@ export function parseHtml(
       ? trimmedHtml.slice(0, maxContentLength)
       : trimmedHtml;
 
-  // Parse HTML with JSDOM
-  const dom = new JSDOM(processedHtml, { url });
-  const document = dom.window.document;
+  // Parse HTML with linkedom (inject <base> tag for URL resolution)
+  const htmlWithBase = `<head><base href="${url}"></head>${processedHtml}`;
+  const { document } = parseHTML(htmlWithBase);
 
   // Extract metadata before Readability modifies the DOM
   const title = extractTitle(document);
   const description = extractDescription(document);
 
-  // Use Readability to extract main content
-  const reader = new Readability(document, {
+  // Use Readability to extract main content, fall back to raw HTML for fragments
+  const reader = new Readability(document as any, {
     charThreshold: 0, // Allow short content
   });
   const article = reader.parse();
 
-  // If Readability couldn't extract content, return empty
-  if (!article || !article.content) {
+  const turndown = createTurndownService();
+  const articleHtml = article?.content || processedHtml;
+  const markdown = turndown.turndown(articleHtml).trim();
+
+  if (!markdown) {
     return {
       markdown: '',
       title,
@@ -72,14 +77,10 @@ export function parseHtml(
     };
   }
 
-  // Convert HTML content to Markdown using Turndown
-  const turndown = createTurndownService();
-  const markdown = turndown.turndown(article.content).trim();
-
   return {
     markdown,
-    title: article.title || title,
-    description: article.excerpt || description,
+    title: article?.title || title,
+    description: article?.excerpt || description,
     originalLength,
     parsedLength: markdown.length,
   };
@@ -88,7 +89,7 @@ export function parseHtml(
 /**
  * Extract title from document
  */
-function extractTitle(document: Document): string {
+function extractTitle(document: LinkedomDocument): string {
   // Try <title> tag first
   const titleElement = document.querySelector('title');
   if (titleElement?.textContent) {
@@ -113,7 +114,7 @@ function extractTitle(document: Document): string {
 /**
  * Extract description from document
  */
-function extractDescription(document: Document): string | undefined {
+function extractDescription(document: LinkedomDocument): string | undefined {
   // Try meta description
   const metaDesc = document.querySelector('meta[name="description"]');
   if (metaDesc?.getAttribute('content')) {
@@ -151,7 +152,7 @@ function createTurndownService(): TurndownService {
       );
     },
     replacement: (content, node, _options) => {
-      const codeNode = (node as HTMLElement).querySelector('code');
+      const codeNode = (node as any).querySelector('code');
       if (!codeNode) return content;
 
       // Try to detect language from class

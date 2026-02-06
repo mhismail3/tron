@@ -318,7 +318,7 @@ export class GoogleProvider {
       }
 
       // Process SSE stream (delegated to stream-handler.ts)
-      const reader = response.body?.getReader();
+      const reader = response.body?.getReader() as ReadableStreamDefaultReader<Uint8Array> | undefined;
       if (!reader) {
         throw new Error('No response body');
       }

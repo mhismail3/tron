@@ -131,75 +131,42 @@ build_workspace() {
     print_success "Workspace built successfully"
 }
 
-# Build production bundle: esbuild single CJS file + runtime assets
+# Build production artifact: tsc output + isolated node_modules
+#
+# Mirrors exactly what works in beta/dev (bun + tsc multi-file output + normal
+# module resolution). No esbuild — its CJS conversion breaks ws send callbacks
+# under Bun and requires constant workarounds for packages with dynamic requires.
 build_production() {
-    print_status "Building production bundle..."
+    print_status "Building production artifact..."
 
     cd "$PROJECT_DIR"
 
-    # Build TypeScript first
     build_workspace
 
-    # Clean output directory
     rm -rf dist/prod
-    mkdir -p dist/prod/node_modules
+    mkdir -p dist/prod
 
-    # Bundle with esbuild
-    # External: bun:sqlite is provided by Bun runtime, playwright-core has native binaries
-    local BANNER='const _importMetaUrl = require("url").pathToFileURL(__filename).href;'
+    # Copy tsc output (identical to what beta runs from packages/agent/dist/)
+    cp -r packages/agent/dist/* dist/prod/
 
-    ./node_modules/.bin/esbuild packages/agent/dist/interface/server.js \
-        --bundle \
-        --platform=node \
-        --target=node20 \
-        --format=cjs \
-        --outfile=dist/prod/index.js \
-        --external:playwright-core \
-        --external:bun:sqlite \
-        --metafile=dist/prod/meta.json \
-        --banner:js="$BANNER" \
-        --define:import.meta.url=_importMetaUrl \
-        --minify
+    # Generate package.json with production deps from agent's package.json
+    bun -e "
+      const pkg = require('./packages/agent/package.json');
+      const prod = {
+        name: 'tron-server-prod',
+        version: pkg.version,
+        type: 'module',
+        dependencies: pkg.dependencies,
+      };
+      process.stdout.write(JSON.stringify(prod, null, 2) + '\n');
+    " > dist/prod/package.json
 
-    # Copy runtime assets (loaded via readFileSync at runtime, not bundled by esbuild)
-    if [ -d "packages/agent/dist/llm/providers/prompts" ]; then
-        cp -r packages/agent/dist/llm/providers/prompts dist/prod/
-    fi
-    if [ -d "packages/agent/dist/context/system-prompts" ]; then
-        mkdir -p dist/prod/system-prompts
-        cp packages/agent/dist/context/system-prompts/*.md dist/prod/system-prompts/
-    fi
+    # Install production dependencies (bun resolves all transitive deps)
+    print_status "Installing production dependencies..."
+    (cd dist/prod && bun install --production)
 
-    # Copy external native dependencies (playwright only - bun:sqlite is provided by Bun)
-    copy_native_dependency "playwright-core"
-
-    # Create minimal package.json
-    cat > dist/prod/package.json << 'EOF'
-{
-  "name": "tron-server-prod",
-  "version": "1.0.0",
-  "main": "index.js"
-}
-EOF
-
-    local bundle_size=$(ls -lh dist/prod/index.js | awk '{print $5}')
     local total_size=$(du -sh dist/prod | awk '{print $1}')
-    print_success "Production build complete (bundle: $bundle_size, total: $total_size)"
-}
-
-copy_native_dependency() {
-    local pkg_name="$1"
-    local pkg_path=""
-
-    if [ -d "node_modules/$pkg_name" ]; then
-        pkg_path="node_modules/$pkg_name"
-    elif [ -d "node_modules/.bun" ]; then
-        pkg_path=$(find node_modules/.bun -type d -name "$pkg_name" | grep "node_modules/$pkg_name$" | head -1)
-    fi
-
-    if [ -n "$pkg_path" ] && [ -d "$pkg_path" ]; then
-        cp -r "$pkg_path" dist/prod/node_modules/
-    fi
+    print_success "Production build complete ($total_size)"
 }
 
 run_tests() {
@@ -370,7 +337,7 @@ create_launchd_plist() {
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>exec "$bun_path" "$INSTALL_DIR/index.js" >> "$PROD_LOG_FILE" 2>&amp;1</string>
+        <string>exec "$bun_path" "$INSTALL_DIR/interface/server.js" >> "$PROD_LOG_FILE" 2>&amp;1</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -926,7 +893,7 @@ cmd_install() {
     mkdir -p "$HOME/Library/LaunchAgents"
 
     # Build production bundle
-    if [ ! -f "$PROJECT_DIR/dist/prod/index.js" ]; then
+    if [ ! -f "$PROJECT_DIR/dist/prod/interface/server.js" ]; then
         build_production
     fi
 
