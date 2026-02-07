@@ -11,6 +11,7 @@
  * - web/           - Web fetching and searching (web-fetch, web-search)
  * - communication/ - Inter-agent messaging (send-message, receive-messages)
  * - deployment/    - Self-deployment (Adapt)
+ * - sandbox/       - Container management (Sandbox)
  */
 
 // Filesystem tools
@@ -206,6 +207,15 @@ export {
   type AdaptParams,
   type DeploymentRecord,
 } from './deployment/index.js';
+
+// Sandbox tools
+export {
+  SandboxTool,
+  type SandboxToolConfig,
+  type SandboxParams,
+  type SandboxAction,
+  type ContainerRecord,
+} from './sandbox/index.js';
 
 // Utility functions for token estimation and output truncation
 export {

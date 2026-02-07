@@ -36,6 +36,7 @@ import {
   ExaProvider,
   RememberTool,
   AdaptTool,
+  SandboxTool,
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
@@ -280,6 +281,16 @@ export class AgentFactory {
       }));
     }
 
+    // Add Sandbox tool for container management
+    if (!isSubagent) {
+      const tronHome = process.env.TRON_DATA_DIR ?? join(homedir(), '.tron');
+      tools.push(new SandboxTool({
+        sessionId,
+        workingDirectory,
+        tronHome,
+      }));
+    }
+
     // Add NotifyApp tool if push notifications are configured
     if (this.config.onNotify) {
       tools.push(
@@ -396,7 +407,7 @@ export class AgentFactory {
     let effectiveDenials = toolDenials;
     if (isSubagent) {
       const subagentToolsDenial: ToolDenialConfig = {
-        tools: ['SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'Adapt'],
+        tools: ['SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'Adapt', 'Sandbox'],
       };
       // Merge with any existing denials
       if (effectiveDenials) {
