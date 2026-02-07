@@ -8,6 +8,7 @@
 
 import { createLogger } from '@infrastructure/logging/index.js';
 import { MEMORY_LEDGER_PROMPT } from '@context/system-prompts/memory-ledger.js';
+import { SUBAGENT_MODEL } from '@llm/providers/model-ids.js';
 import type { MemoryLedgerPayload } from '@infrastructure/events/types/memory.js';
 import type { SessionEvent, EventType } from '@infrastructure/events/types/index.js';
 
@@ -84,7 +85,7 @@ export class LedgerWriter {
       // 2. Spawn Haiku subagent
       const result = await this.deps.spawnSubsession({
         task: context,
-        model: 'claude-haiku-4-5-20251001',
+        model: SUBAGENT_MODEL,
         systemPrompt: MEMORY_LEDGER_PROMPT,
         toolDenials: { denyAll: true },
         maxTurns: 1,

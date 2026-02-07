@@ -21,18 +21,9 @@ import type { EventType } from '@infrastructure/events/index.js';
 import { normalizeContentBlocks } from '@core/utils/index.js';
 import type { UIRenderHandler, ToolStartArgs, ToolEndDetails } from '../../ui-render-handler.js';
 import type { EventContext } from '../event-context.js';
+import { BLOB_STORAGE_THRESHOLD, MAX_TOOL_RESULT_SIZE } from '../constants.js';
 
 const logger = createLogger('tool-event-handler');
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-/** Threshold for storing tool results in blob storage (2KB) */
-const BLOB_STORAGE_THRESHOLD = 2 * 1024;
-
-/** Maximum size for tool result in context (10KB) */
-const MAX_TOOL_RESULT_SIZE = 10 * 1024;
 
 // =============================================================================
 // Types

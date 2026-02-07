@@ -24,7 +24,7 @@ import { createLogger } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('tool:remember');
 
-const MAX_LIMIT = 500;
+const REMEMBER_MAX_LIMIT = 500;
 
 // =============================================================================
 // Types
@@ -141,7 +141,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
   }
 
   async execute(params: RememberParams): Promise<TronToolResult> {
-    const limit = Math.max(1, Math.min(params.limit ?? 20, MAX_LIMIT));
+    const limit = Math.max(1, Math.min(params.limit ?? 20, REMEMBER_MAX_LIMIT));
     const offset = Math.max(0, params.offset ?? 0);
 
     try {

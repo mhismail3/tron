@@ -191,6 +191,94 @@ describe('CompactionTrigger', () => {
     });
   });
 
+  describe('configurable thresholds', () => {
+    it('should accept custom token threshold', () => {
+      const custom = new CompactionTrigger({ triggerTokenThreshold: 0.90 });
+
+      // Should NOT trigger at 0.80 (below custom threshold)
+      const result1 = custom.shouldCompact({
+        currentTokenRatio: 0.80,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result1.compact).toBe(false);
+
+      // Should trigger at 0.90 (at custom threshold)
+      const result2 = custom.shouldCompact({
+        currentTokenRatio: 0.90,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result2.compact).toBe(true);
+    });
+
+    it('should accept custom alert zone threshold', () => {
+      const custom = new CompactionTrigger({
+        alertZoneThreshold: 0.40,
+        alertTurnFallback: 3,
+        defaultTurnFallback: 10,
+      });
+
+      // At 0.45 ratio (above custom alert zone 0.40), fallback should be 3
+      for (let i = 0; i < 2; i++) {
+        custom.shouldCompact({
+          currentTokenRatio: 0.45,
+          recentEventTypes: [],
+          recentToolCalls: [],
+        });
+      }
+
+      const result = custom.shouldCompact({
+        currentTokenRatio: 0.45,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('turn');
+    });
+
+    it('should accept custom turn fallback values', () => {
+      const custom = new CompactionTrigger({
+        defaultTurnFallback: 3,
+      });
+
+      // Should trigger after 3 turns
+      for (let i = 0; i < 2; i++) {
+        custom.shouldCompact({
+          currentTokenRatio: 0.20,
+          recentEventTypes: [],
+          recentToolCalls: [],
+        });
+      }
+
+      const result = custom.shouldCompact({
+        currentTokenRatio: 0.20,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result.compact).toBe(true);
+    });
+
+    it('should use defaults when no config provided', () => {
+      const defaultTrigger = new CompactionTrigger();
+
+      // Default token threshold is 0.70
+      const result = defaultTrigger.shouldCompact({
+        currentTokenRatio: 0.69,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result.compact).toBe(false);
+
+      const result2 = defaultTrigger.shouldCompact({
+        currentTokenRatio: 0.70,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+      expect(result2.compact).toBe(true);
+    });
+  });
+
   describe('reset', () => {
     it('should reset turn counter after compaction trigger', () => {
       // Trigger via commit

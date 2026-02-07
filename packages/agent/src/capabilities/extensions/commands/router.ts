@@ -15,9 +15,7 @@ import type {
 } from './types.js';
 import { parseCommand, getCommandSuggestions, formatCommand } from './parser.js';
 import { getDefaultBuiltInCommands } from './builtins.js';
-
-// Import version directly to avoid circular dependency
-const VERSION = '0.1.0';
+import { COMMAND_VERSION } from '../constants.js';
 
 const log = createLogger('commands:router');
 
@@ -45,7 +43,7 @@ export class CommandRouter implements ICommandRouter {
 
     // Register default built-in commands
     const defaultCommands = getDefaultBuiltInCommands({
-      version: VERSION,
+      version: COMMAND_VERSION,
       getCommandList: () => this.listCommands(),
       getCommandHelp: (cmd) => this.getHelp(cmd),
     });

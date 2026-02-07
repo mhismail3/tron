@@ -63,6 +63,7 @@ import { LLMSummarizer } from '@context/llm-summarizer.js';
 import type { EventType } from '@infrastructure/events/types/index.js';
 import type { GoogleAuth } from '@infrastructure/auth/google-oauth.js';
 import { getSettings } from '@infrastructure/settings/loader.js';
+import { SUBAGENT_MAX_TOKENS_MULTIPLIER } from '../constants.js';
 
 const logger = createLogger('agent-factory');
 
@@ -222,6 +223,11 @@ export class AgentFactory {
     const auth = await this.config.getAuthForProvider(model);
     const providerType = detectProviderFromModel(model);
 
+    // Read settings from settings.json (server-authoritative)
+    const settings = getSettings();
+    const compactorSettings = settings.context.compactor;
+    const webSettings = settings.tools.web;
+
     // Create BrowserDelegate for BrowserTool
     let browserDelegate: BrowserDelegate | undefined;
     if (this.config.browserService) {
@@ -320,7 +326,8 @@ export class AgentFactory {
       new WebFetchTool({
         workingDirectory,
         onSpawnSubagent: webFetchSummarizer,
-        cache: { ttl: 15 * 60 * 1000, maxEntries: 100 },
+        http: { timeout: webSettings.fetch.timeoutMs },
+        cache: { ttl: webSettings.cache.ttlMs, maxEntries: webSettings.cache.maxEntries },
         urlValidator: { blockedDomains: this.config.blockedWebDomains },
       })
     );
@@ -419,9 +426,6 @@ export class AgentFactory {
       ? (auth as GoogleAuth).endpoint
       : undefined;
 
-    // Read compaction settings from settings.json (server-authoritative)
-    const compactorSettings = getSettings().context.compactor;
-
     logger.info('Creating agent with tools', {
       sessionId,
       workingDirectory,
@@ -447,13 +451,9 @@ export class AgentFactory {
       logger.info('Enabling thinking for model', { model, providerType });
     }
 
-    // Calculate maxTokens for subagents:
-    // Use 90% of model's maxOutput to prevent truncation while leaving buffer
-    // This ensures subagents can produce comprehensive outputs
     let maxTokens: number | undefined;
     if (isSubagent) {
-      // For subagents, use 90% of the model's maximum output capacity
-      maxTokens = Math.floor(capabilities.maxOutput * 0.9);
+      maxTokens = Math.floor(capabilities.maxOutput * SUBAGENT_MAX_TOKENS_MULTIPLIER);
       logger.info('Setting subagent maxTokens based on model capacity', {
         sessionId,
         model,
@@ -498,7 +498,12 @@ export class AgentFactory {
     // Register memory ledger hook for non-subagent sessions
     if (!isSubagent && this.config.memoryConfig) {
       const memCfg = this.config.memoryConfig;
-      const compactionTrigger = new CompactionTrigger();
+      const compactionTrigger = new CompactionTrigger({
+        triggerTokenThreshold: compactorSettings.triggerTokenThreshold,
+        alertZoneThreshold: compactorSettings.alertZoneThreshold,
+        defaultTurnFallback: compactorSettings.defaultTurnFallback,
+        alertTurnFallback: compactorSettings.alertTurnFallback,
+      });
       if (compactorSettings.forceAlways) {
         compactionTrigger.setForceAlways(true);
         logger.info('Compaction force-always enabled', { sessionId });

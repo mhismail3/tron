@@ -6,6 +6,7 @@
  */
 import { createLogger, initializeLogTransport, closeLogTransport, flushLogs } from '@infrastructure/logging/index.js';
 import { resolveTronPath, getTronDataDir } from '@infrastructure/settings/index.js';
+import { DEFAULT_SERVER_MODEL } from '@llm/providers/model-ids.js';
 import type { RpcContext } from './rpc/context-types.js';
 import { TronWebSocketServer, type WebSocketServerConfig } from './gateway/websocket.js';
 import { EventStoreOrchestrator, type EventStoreOrchestratorConfig } from '@runtime/orchestrator/persistence/event-store-orchestrator.js';
@@ -69,7 +70,7 @@ export class TronServer {
     // Initialize EventStore orchestrator
     const orchestratorConfig: EventStoreOrchestratorConfig = {
       eventStoreDbPath,
-      defaultModel: this.config.defaultModel ?? 'claude-sonnet-4-20250514',
+      defaultModel: this.config.defaultModel ?? DEFAULT_SERVER_MODEL,
       defaultProvider: this.config.defaultProvider ?? 'anthropic',
       maxConcurrentSessions: this.config.maxConcurrentSessions,
     };

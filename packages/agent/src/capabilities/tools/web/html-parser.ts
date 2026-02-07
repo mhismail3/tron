@@ -9,10 +9,9 @@ import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
 import { parseHTML } from 'linkedom';
 import type { HtmlParseResult, HtmlParserConfig } from './types.js';
+import { HTML_MAX_CONTENT_LENGTH } from './constants.js';
 
 type LinkedomDocument = ReturnType<typeof parseHTML>['document'];
-
-const DEFAULT_MAX_CONTENT_LENGTH = 500000; // 500KB
 
 /**
  * Parse HTML content and convert to clean Markdown
@@ -27,7 +26,7 @@ export function parseHtml(
   url: string,
   config: HtmlParserConfig = {}
 ): HtmlParseResult {
-  const { maxContentLength = DEFAULT_MAX_CONTENT_LENGTH } = config;
+  const { maxContentLength = HTML_MAX_CONTENT_LENGTH } = config;
 
   // Handle empty input
   const trimmedHtml = html?.trim() ?? '';

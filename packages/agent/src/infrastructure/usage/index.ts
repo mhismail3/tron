@@ -13,6 +13,21 @@
  */
 
 import type { TokenUsage, Cost } from '@core/types/messages.js';
+import {
+  CLAUDE_OPUS_4_6,
+  CLAUDE_OPUS_4_5,
+  CLAUDE_SONNET_4_5,
+  CLAUDE_HAIKU_4_5,
+  CLAUDE_OPUS_4_1,
+  CLAUDE_OPUS_4,
+  CLAUDE_SONNET_4,
+  CLAUDE_3_7_SONNET,
+  CLAUDE_3_HAIKU,
+  GEMINI_3_PRO_PREVIEW,
+  GEMINI_3_FLASH_PREVIEW,
+  GEMINI_2_5_PRO,
+  GEMINI_2_5_FLASH,
+} from '@llm/providers/model-ids.js';
 
 // =============================================================================
 // Pricing Configuration
@@ -31,61 +46,60 @@ interface PricingTier {
 
 const CLAUDE_PRICING: Record<string, PricingTier> = {
   // Claude 4.6 models (Latest)
-  'claude-opus-4-6': {
+  [CLAUDE_OPUS_4_6]: {
     inputPerMillion: 5,
     outputPerMillion: 25,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
   // Claude 4.5 models (Current Generation)
-  // Source: https://platform.claude.com/docs/en/about-claude/models/overview
-  'claude-opus-4-5-20251101': {
+  [CLAUDE_OPUS_4_5]: {
     inputPerMillion: 5,
     outputPerMillion: 25,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  'claude-sonnet-4-5-20250929': {
+  [CLAUDE_SONNET_4_5]: {
     inputPerMillion: 3,
     outputPerMillion: 15,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  'claude-haiku-4-5-20251001': {
+  [CLAUDE_HAIKU_4_5]: {
     inputPerMillion: 1,
     outputPerMillion: 5,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
   // Claude 4.1 models (Legacy - August 2025)
-  'claude-opus-4-1-20250805': {
+  [CLAUDE_OPUS_4_1]: {
     inputPerMillion: 15,
     outputPerMillion: 75,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
   // Claude 4 models (Legacy - May 2025)
-  'claude-opus-4-20250514': {
+  [CLAUDE_OPUS_4]: {
     inputPerMillion: 15,
     outputPerMillion: 75,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
-  'claude-sonnet-4-20250514': {
+  [CLAUDE_SONNET_4]: {
     inputPerMillion: 3,
     outputPerMillion: 15,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
   // Claude 3.7 Sonnet (Legacy - February 2025)
-  'claude-3-7-sonnet-20250219': {
+  [CLAUDE_3_7_SONNET]: {
     inputPerMillion: 3,
     outputPerMillion: 15,
     cacheWriteMultiplier: 1.25,
     cacheReadMultiplier: 0.1,
   },
   // Claude 3 Haiku (Legacy)
-  'claude-3-haiku-20240307': {
+  [CLAUDE_3_HAIKU]: {
     inputPerMillion: 0.25,
     outputPerMillion: 1.25,
     cacheWriteMultiplier: 1.25,
@@ -116,26 +130,26 @@ const OPENAI_PRICING: Record<string, PricingTier> = {
 
 const GOOGLE_PRICING: Record<string, PricingTier> = {
   // Gemini 3 models (preview)
-  'gemini-3-pro-preview': {
+  [GEMINI_3_PRO_PREVIEW]: {
     inputPerMillion: 1.25,
     outputPerMillion: 5,
     cacheWriteMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
-  'gemini-3-flash-preview': {
+  [GEMINI_3_FLASH_PREVIEW]: {
     inputPerMillion: 0.075,
     outputPerMillion: 0.3,
     cacheWriteMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
   // Gemini 2.5 models
-  'gemini-2.5-pro': {
+  [GEMINI_2_5_PRO]: {
     inputPerMillion: 1.25,
     outputPerMillion: 5,
     cacheWriteMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
-  'gemini-2.5-flash': {
+  [GEMINI_2_5_FLASH]: {
     inputPerMillion: 0.075,
     outputPerMillion: 0.3,
     cacheWriteMultiplier: 1,
@@ -196,25 +210,25 @@ export function getPricingTier(model: string): PricingTier {
   const modelLower = model.toLowerCase();
 
   if (modelLower.includes('opus-4-6') || modelLower.includes('opus-4.6')) {
-    return CLAUDE_PRICING['claude-opus-4-6']!;
+    return CLAUDE_PRICING[CLAUDE_OPUS_4_6]!;
   }
   if (modelLower.includes('opus-4-5') || modelLower.includes('opus-4.5')) {
-    return CLAUDE_PRICING['claude-opus-4-5-20251101']!;
+    return CLAUDE_PRICING[CLAUDE_OPUS_4_5]!;
   }
   if (modelLower.includes('opus')) {
-    return CLAUDE_PRICING['claude-opus-4-20250514']!;
+    return CLAUDE_PRICING[CLAUDE_OPUS_4]!;
   }
   if (modelLower.includes('sonnet-4-5') || modelLower.includes('sonnet-4.5')) {
-    return CLAUDE_PRICING['claude-sonnet-4-5-20250929']!;
+    return CLAUDE_PRICING[CLAUDE_SONNET_4_5]!;
   }
   if (modelLower.includes('sonnet')) {
-    return CLAUDE_PRICING['claude-sonnet-4-20250514']!;
+    return CLAUDE_PRICING[CLAUDE_SONNET_4]!;
   }
   if (modelLower.includes('haiku-4-5') || modelLower.includes('haiku-4.5')) {
-    return CLAUDE_PRICING['claude-haiku-4-5-20251001']!;
+    return CLAUDE_PRICING[CLAUDE_HAIKU_4_5]!;
   }
   if (modelLower.includes('haiku')) {
-    return CLAUDE_PRICING['claude-3-haiku-20240307']!;
+    return CLAUDE_PRICING[CLAUDE_3_HAIKU]!;
   }
   if (modelLower.includes('gpt-4o-mini')) {
     return OPENAI_PRICING['gpt-4o-mini']!;
@@ -226,14 +240,14 @@ export function getPricingTier(model: string): PricingTier {
     return OPENAI_PRICING['gpt-4-turbo']!;
   }
   if (modelLower.includes('gemini-2.5-pro')) {
-    return GOOGLE_PRICING['gemini-2.5-pro']!;
+    return GOOGLE_PRICING[GEMINI_2_5_PRO]!;
   }
   if (modelLower.includes('gemini')) {
-    return GOOGLE_PRICING['gemini-2.5-flash']!;
+    return GOOGLE_PRICING[GEMINI_2_5_FLASH]!;
   }
 
   // Default to Sonnet pricing (common middle-tier)
-  return CLAUDE_PRICING['claude-sonnet-4-20250514']!;
+  return CLAUDE_PRICING[CLAUDE_SONNET_4]!;
 }
 
 /**
@@ -374,27 +388,27 @@ export function getUsageDelta(
 
 export const CONTEXT_LIMITS: Record<string, number> = {
   // Claude 4.6 models
-  'claude-opus-4-6': 200_000,
+  [CLAUDE_OPUS_4_6]: 200_000,
   // Claude 4.5 models
-  'claude-opus-4-5-20251101': 200_000,
-  'claude-sonnet-4-5-20250929': 200_000,
-  'claude-haiku-4-5-20251001': 200_000,
+  [CLAUDE_OPUS_4_5]: 200_000,
+  [CLAUDE_SONNET_4_5]: 200_000,
+  [CLAUDE_HAIKU_4_5]: 200_000,
   // Legacy Claude models
-  'claude-opus-4-1-20250805': 200_000,
-  'claude-opus-4-20250514': 200_000,
-  'claude-sonnet-4-20250514': 200_000,
-  'claude-3-7-sonnet-20250219': 200_000,
-  'claude-3-haiku-20240307': 200_000,
+  [CLAUDE_OPUS_4_1]: 200_000,
+  [CLAUDE_OPUS_4]: 200_000,
+  [CLAUDE_SONNET_4]: 200_000,
+  [CLAUDE_3_7_SONNET]: 200_000,
+  [CLAUDE_3_HAIKU]: 200_000,
   // OpenAI
   'gpt-4o': 128_000,
   'gpt-4o-mini': 128_000,
   'gpt-4-turbo': 128_000,
   // Google Gemini 3 (1M context)
-  'gemini-3-pro-preview': 1_048_576,
-  'gemini-3-flash-preview': 1_048_576,
+  [GEMINI_3_PRO_PREVIEW]: 1_048_576,
+  [GEMINI_3_FLASH_PREVIEW]: 1_048_576,
   // Google Gemini 2.5
-  'gemini-2.5-pro': 2_097_152,
-  'gemini-2.5-flash': 1_048_576,
+  [GEMINI_2_5_PRO]: 2_097_152,
+  [GEMINI_2_5_FLASH]: 1_048_576,
 };
 
 /**

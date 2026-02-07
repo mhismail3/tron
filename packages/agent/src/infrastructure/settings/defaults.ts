@@ -6,6 +6,7 @@
  */
 
 import type { TronSettings } from './types.js';
+import { DEFAULT_API_MODEL, DEFAULT_SERVER_MODEL } from '@llm/providers/model-ids.js';
 
 /**
  * Default dangerous command patterns for bash tool
@@ -116,7 +117,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
 
   // Model Configuration
   models: {
-    default: 'claude-opus-4-6',
+    default: DEFAULT_API_MODEL,
   },
 
   // Retry Configuration
@@ -157,6 +158,15 @@ export const DEFAULT_SETTINGS: TronSettings = {
       requireConfirmationForReplace: false,  // Auto-apply by default
       defaultTimeoutMs: 60000,   // 60 second timeout
     },
+    web: {
+      fetch: {
+        timeoutMs: 30000,        // 30 seconds
+      },
+      cache: {
+        ttlMs: 15 * 60 * 1000,  // 15 minutes
+        maxEntries: 100,
+      },
+    },
   },
 
   // Context Configuration
@@ -168,6 +178,10 @@ export const DEFAULT_SETTINGS: TronSettings = {
       preserveRecentCount: 5,
       charsPerToken: 4,
       forceAlways: false,
+      triggerTokenThreshold: 0.70,
+      alertZoneThreshold: 0.50,
+      defaultTurnFallback: 8,
+      alertTurnFallback: 5,
     },
     memory: {
       maxEntries: 1000,
@@ -193,7 +207,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
     maxConcurrentSessions: 10,
     sessionsDir: 'sessions',
     memoryDbPath: 'memory.db',
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: DEFAULT_SERVER_MODEL,
     defaultProvider: 'anthropic',
     transcription: {
       enabled: true,

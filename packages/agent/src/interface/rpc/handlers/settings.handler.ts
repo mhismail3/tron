@@ -68,6 +68,19 @@ export function createSettingsHandlers(): MethodRegistration[] {
       compaction: {
         preserveRecentTurns: settings.context.compactor.preserveRecentCount,
         forceAlways: settings.context.compactor.forceAlways ?? false,
+        triggerTokenThreshold: settings.context.compactor.triggerTokenThreshold ?? 0.70,
+        alertZoneThreshold: settings.context.compactor.alertZoneThreshold ?? 0.50,
+        defaultTurnFallback: settings.context.compactor.defaultTurnFallback ?? 8,
+        alertTurnFallback: settings.context.compactor.alertTurnFallback ?? 5,
+      },
+      tools: {
+        web: {
+          fetch: { timeoutMs: settings.tools.web.fetch.timeoutMs },
+          cache: {
+            ttlMs: settings.tools.web.cache.ttlMs,
+            maxEntries: settings.tools.web.cache.maxEntries,
+          },
+        },
       },
     };
     return result;

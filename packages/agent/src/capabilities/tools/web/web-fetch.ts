@@ -17,14 +17,15 @@ import type {
   WebFetchToolConfig,
   CachedFetchResult,
 } from './types.js';
+import {
+  WEB_FETCH_DEFAULT_TIMEOUT_MS,
+  WEB_FETCH_USER_AGENT,
+  WEB_FETCH_MAX_RESPONSE_SIZE,
+  WEB_FETCH_HAIKU_MODEL,
+  WEB_FETCH_MAX_SUMMARIZER_TURNS,
+} from './constants.js';
 
 const logger = createLogger('tool:web-fetch');
-
-const DEFAULT_TIMEOUT = 30000; // 30 seconds
-const DEFAULT_USER_AGENT = 'TronAgent/1.0 (+https://github.com/tron-agent)';
-const DEFAULT_MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-const MAX_SUMMARIZER_TURNS = 3;
 
 /**
  * WebFetch tool for fetching and analyzing web content
@@ -213,17 +214,17 @@ Instructions:
     // Spawn Haiku subagent
     logger.debug('Spawning Haiku subagent for summarization', {
       url: normalizedUrl,
-      model: HAIKU_MODEL,
+      model: WEB_FETCH_HAIKU_MODEL,
       taskLength: task.length,
-      maxTurns: MAX_SUMMARIZER_TURNS,
+      maxTurns: WEB_FETCH_MAX_SUMMARIZER_TURNS,
     });
 
     const subagentStartTime = Date.now();
     const spawnResult = await this.config.onSpawnSubagent({
       task,
-      model: HAIKU_MODEL,
-      timeout: this.config.http?.timeout ?? DEFAULT_TIMEOUT,
-      maxTurns: MAX_SUMMARIZER_TURNS,
+      model: WEB_FETCH_HAIKU_MODEL,
+      timeout: this.config.http?.timeout ?? WEB_FETCH_DEFAULT_TIMEOUT_MS,
+      maxTurns: WEB_FETCH_MAX_SUMMARIZER_TURNS,
     });
     const subagentDuration = Date.now() - subagentStartTime;
 
@@ -293,9 +294,9 @@ Instructions:
     status?: number;
     contentType?: string;
   }> {
-    const timeout = this.config.http?.timeout ?? DEFAULT_TIMEOUT;
-    const userAgent = this.config.http?.userAgent ?? DEFAULT_USER_AGENT;
-    const maxSize = this.config.http?.maxResponseSize ?? DEFAULT_MAX_RESPONSE_SIZE;
+    const timeout = this.config.http?.timeout ?? WEB_FETCH_DEFAULT_TIMEOUT_MS;
+    const userAgent = this.config.http?.userAgent ?? WEB_FETCH_USER_AGENT;
+    const maxSize = this.config.http?.maxResponseSize ?? WEB_FETCH_MAX_RESPONSE_SIZE;
 
     try {
       logger.trace('HTTP request starting', { url, timeout, userAgent: userAgent.split('/')[0] });

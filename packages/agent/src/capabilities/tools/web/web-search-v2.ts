@@ -24,9 +24,9 @@ import type {
 } from './brave-types.js';
 import { extractDomain, domainMatches } from './domain-utils.js';
 
-const logger = createLogger('tool:web-search-v2');
+import { SEARCH_MAX_QUERY_LENGTH } from './constants.js';
 
-const MAX_QUERY_LENGTH = 400;
+const logger = createLogger('tool:web-search-v2');
 
 // =============================================================================
 // Types
@@ -205,9 +205,9 @@ Tips:
 
     const trimmedQuery = query.trim();
 
-    if (trimmedQuery.length > MAX_QUERY_LENGTH) {
+    if (trimmedQuery.length > SEARCH_MAX_QUERY_LENGTH) {
       return {
-        content: `Error: Query is too long. Maximum length is ${MAX_QUERY_LENGTH} characters, got ${trimmedQuery.length}.`,
+        content: `Error: Query is too long. Maximum length is ${SEARCH_MAX_QUERY_LENGTH} characters, got ${trimmedQuery.length}.`,
         isError: true,
         details: { error: 'Query too long', length: trimmedQuery.length } as any,
       };

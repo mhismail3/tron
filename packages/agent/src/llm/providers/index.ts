@@ -64,6 +64,30 @@ export {
   type ModelCategory,
 } from './models.js';
 
+// Centralized model ID constants
+export {
+  CLAUDE_OPUS_4_6,
+  CLAUDE_OPUS_4_5,
+  CLAUDE_SONNET_4_5,
+  CLAUDE_HAIKU_4_5,
+  CLAUDE_OPUS_4_1,
+  CLAUDE_OPUS_4,
+  CLAUDE_SONNET_4,
+  CLAUDE_3_7_SONNET,
+  CLAUDE_3_HAIKU,
+  GPT_5_3_CODEX,
+  GPT_5_2_CODEX,
+  GEMINI_3_PRO_PREVIEW,
+  GEMINI_3_FLASH_PREVIEW,
+  GEMINI_2_5_PRO,
+  GEMINI_2_5_FLASH,
+  GEMINI_2_5_FLASH_LITE,
+  SUBAGENT_MODEL,
+  DEFAULT_API_MODEL,
+  DEFAULT_SERVER_MODEL,
+  DEFAULT_GOOGLE_MODEL,
+} from './model-ids.js';
+
 // Token module is now in @infrastructure/tokens - re-export for convenience
 export {
   normalizeTokens,

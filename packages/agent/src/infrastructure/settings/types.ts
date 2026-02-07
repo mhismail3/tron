@@ -188,6 +188,32 @@ export interface SearchToolSettings {
 }
 
 /**
+ * Web fetch configuration
+ */
+export interface WebFetchSettings {
+  /** HTTP fetch timeout in milliseconds */
+  timeoutMs: number;
+}
+
+/**
+ * Web cache configuration
+ */
+export interface WebCacheSettings {
+  /** How long cached web pages stay fresh in milliseconds */
+  ttlMs: number;
+  /** Maximum number of cached pages */
+  maxEntries: number;
+}
+
+/**
+ * Web tool configuration
+ */
+export interface WebToolSettings {
+  fetch: WebFetchSettings;
+  cache: WebCacheSettings;
+}
+
+/**
  * All tool settings
  */
 export interface ToolSettings {
@@ -195,6 +221,7 @@ export interface ToolSettings {
   read: ReadToolSettings;
   find: FindToolSettings;
   search: SearchToolSettings;
+  web: WebToolSettings;
 }
 
 // =============================================================================
@@ -217,6 +244,14 @@ export interface CompactorSettings {
   charsPerToken: number;
   /** Force compaction after every turn (testing/debug mode) */
   forceAlways?: boolean;
+  /** Token ratio that forces compaction (0-1) */
+  triggerTokenThreshold?: number;
+  /** Token ratio where compaction becomes more aggressive (0-1) */
+  alertZoneThreshold?: number;
+  /** Turns before auto-compaction in normal zone */
+  defaultTurnFallback?: number;
+  /** Turns before auto-compaction in alert zone */
+  alertTurnFallback?: number;
 }
 
 /**

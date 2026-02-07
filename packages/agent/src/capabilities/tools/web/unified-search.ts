@@ -23,9 +23,9 @@ import type {
   Freshness,
 } from './providers/types.js';
 
-const logger = createLogger('tool:unified-search');
+import { SEARCH_MAX_QUERY_LENGTH } from './constants.js';
 
-const MAX_QUERY_LENGTH = 400;
+const logger = createLogger('tool:unified-search');
 
 // =============================================================================
 // Types
@@ -182,9 +182,9 @@ export class UnifiedSearchTool implements TronTool {
 
     const trimmedQuery = query.trim();
 
-    if (trimmedQuery.length > MAX_QUERY_LENGTH) {
+    if (trimmedQuery.length > SEARCH_MAX_QUERY_LENGTH) {
       return {
-        content: `Error: Query is too long. Maximum length is ${MAX_QUERY_LENGTH} characters.`,
+        content: `Error: Query is too long. Maximum length is ${SEARCH_MAX_QUERY_LENGTH} characters.`,
         isError: true,
         details: { error: 'Query too long' } as any,
       };

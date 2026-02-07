@@ -13,6 +13,7 @@
 import type { Message, Tool } from '@core/types/index.js';
 import { getContextLimit } from '@infrastructure/usage/index.js';
 import { detectProviderFromModel, type ProviderType } from '@llm/providers/index.js';
+import { TOOL_RESULT_MIN_TOKENS, TOOL_RESULT_MAX_CHARS } from './constants.js';
 import type { Summarizer } from './summarizer.js';
 import {
   buildSystemPrompt,
@@ -455,11 +456,11 @@ export class ContextManager {
 
     const availableTokens = Math.max(
       remainingBudget - responseReserve - safetyMargin,
-      2_500  // Minimum 2,500 tokens for tool results
+      TOOL_RESULT_MIN_TOKENS
     );
 
-    // Convert to chars (4 chars ~ 1 token), cap at 100k chars (~25k tokens)
-    return Math.min(availableTokens * 4, 100_000);
+    // Convert to chars (4 chars ~ 1 token), cap at configured max
+    return Math.min(availableTokens * 4, TOOL_RESULT_MAX_CHARS);
   }
 
   // ===========================================================================

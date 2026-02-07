@@ -17,19 +17,14 @@
  * - Default 1500 tokens for URL images (typical 1024x1024)
  */
 import type { Message, Tool } from '@core/types/index.js';
+import {
+  CHARS_PER_TOKEN,
+  MIN_IMAGE_TOKENS,
+  DEFAULT_URL_IMAGE_TOKENS,
+} from './constants.js';
 
-// =============================================================================
-// Constants
-// =============================================================================
-
-/** Characters per token (standard approximation) */
-export const CHARS_PER_TOKEN = 4;
-
-/** Minimum tokens for any image */
-const MIN_IMAGE_TOKENS = 85;
-
-/** Default tokens for URL images (typical 1024x1024) */
-const DEFAULT_URL_IMAGE_TOKENS = 1500;
+// Re-export for consumers that import from this module
+export { CHARS_PER_TOKEN };
 
 /** Rules header that gets prepended by providers */
 const RULES_HEADER = '# Project Rules\n\n';

@@ -12,15 +12,9 @@ import * as os from 'os';
 import type { SkillScanResult, SkillScanError, SkillSource } from './types.js';
 import { parseSkillMd } from './skill-parser.js';
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
+import { SKILL_MD_FILENAME, MAX_SKILL_FILE_SIZE } from '../constants.js';
 
 const logger = createLogger('skills:loader');
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-const SKILL_MD_FILENAME = 'SKILL.md';
-const MAX_SKILL_FILE_SIZE = 100 * 1024; // 100KB limit
 
 // Support both .claude/ (Claude Code convention) and .tron/ (backwards compatibility)
 const GLOBAL_SKILLS_DIRS = ['.tron/skills'];

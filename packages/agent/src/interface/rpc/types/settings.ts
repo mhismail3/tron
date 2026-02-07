@@ -15,6 +15,16 @@ export interface SettingsGetResult {
   compaction: {
     preserveRecentTurns: number;
     forceAlways: boolean;
+    triggerTokenThreshold: number;
+    alertZoneThreshold: number;
+    defaultTurnFallback: number;
+    alertTurnFallback: number;
+  };
+  tools: {
+    web: {
+      fetch: { timeoutMs: number };
+      cache: { ttlMs: number; maxEntries: number };
+    };
   };
 }
 
@@ -22,6 +32,21 @@ export interface SettingsGetResult {
 export interface SettingsUpdateParams {
   settings: {
     server?: { defaultModel?: string; defaultWorkspace?: string };
-    context?: { compactor?: { preserveRecentCount?: number; forceAlways?: boolean } };
+    context?: {
+      compactor?: {
+        preserveRecentCount?: number;
+        forceAlways?: boolean;
+        triggerTokenThreshold?: number;
+        alertZoneThreshold?: number;
+        defaultTurnFallback?: number;
+        alertTurnFallback?: number;
+      };
+    };
+    tools?: {
+      web?: {
+        fetch?: { timeoutMs?: number };
+        cache?: { ttlMs?: number; maxEntries?: number };
+      };
+    };
   };
 }

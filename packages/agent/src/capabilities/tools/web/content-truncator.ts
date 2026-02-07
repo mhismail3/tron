@@ -7,13 +7,11 @@
 
 import type { ContentTruncateResult, ContentTruncatorConfig } from './types.js';
 import { estimateTokens, tokensToChars } from '../utils.js';
+import { TRUNCATOR_MAX_TOKENS, TRUNCATOR_PRESERVE_START_LINES } from './constants.js';
+import { CHARS_PER_TOKEN } from '@context/constants.js';
 
 // Re-export for backwards compatibility
 export { estimateTokens, tokensToChars };
-
-const DEFAULT_MAX_TOKENS = 50000;
-const DEFAULT_PRESERVE_START_LINES = 100;
-const DEFAULT_CHARS_PER_TOKEN = 4;
 
 /**
  * Truncate content to stay within token budget while preserving structure
@@ -27,9 +25,9 @@ export function truncateContent(
   config: ContentTruncatorConfig = {}
 ): ContentTruncateResult {
   const {
-    maxTokens = DEFAULT_MAX_TOKENS,
-    preserveStartLines = DEFAULT_PRESERVE_START_LINES,
-    charsPerToken = DEFAULT_CHARS_PER_TOKEN,
+    maxTokens = TRUNCATOR_MAX_TOKENS,
+    preserveStartLines = TRUNCATOR_PRESERVE_START_LINES,
+    charsPerToken = CHARS_PER_TOKEN,
   } = config;
 
   // Handle empty/whitespace content

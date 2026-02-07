@@ -31,6 +31,58 @@ const mockLoadUserSettings = vi.mocked(loadUserSettings);
 const mockSaveSettings = vi.mocked(saveSettings);
 const mockReloadSettings = vi.mocked(reloadSettings);
 
+function createMockSettings(overrides: Record<string, any> = {}) {
+  return {
+    server: {
+      defaultModel: 'claude-sonnet-4-20250514',
+      defaultWorkspace: '/Users/test/projects',
+      wsPort: 8080,
+      healthPort: 8081,
+      host: '0.0.0.0',
+      heartbeatIntervalMs: 30000,
+      sessionTimeoutMs: 1800000,
+      maxConcurrentSessions: 10,
+      sessionsDir: 'sessions',
+      memoryDbPath: 'memory.db',
+      defaultProvider: 'anthropic',
+      transcription: {
+        enabled: true,
+        manageSidecar: true,
+        baseUrl: 'http://127.0.0.1:8787',
+        timeoutMs: 180000,
+        cleanupMode: 'basic' as const,
+        maxBytes: 25 * 1024 * 1024,
+      },
+      ...overrides.server,
+    },
+    context: {
+      compactor: {
+        maxTokens: 25000,
+        compactionThreshold: 0.85,
+        targetTokens: 10000,
+        preserveRecentCount: 5,
+        charsPerToken: 4,
+        forceAlways: false,
+        triggerTokenThreshold: 0.70,
+        alertZoneThreshold: 0.50,
+        defaultTurnFallback: 8,
+        alertTurnFallback: 5,
+        ...overrides.compactor,
+      },
+      memory: { maxEntries: 1000 },
+      ...overrides.context,
+    },
+    tools: {
+      web: {
+        fetch: { timeoutMs: 30000 },
+        cache: { ttlMs: 15 * 60 * 1000, maxEntries: 100 },
+        ...overrides.web,
+      },
+      ...overrides.tools,
+    },
+  } as any;
+}
+
 describe('Settings Handlers', () => {
   let registry: MethodRegistry;
   let mockContext: RpcContext;
@@ -44,41 +96,7 @@ describe('Settings Handlers', () => {
       agentManager: {} as any,
     };
 
-    // Default settings mock
-    mockGetSettings.mockReturnValue({
-      server: {
-        defaultModel: 'claude-sonnet-4-20250514',
-        defaultWorkspace: '/Users/test/projects',
-        wsPort: 8080,
-        healthPort: 8081,
-        host: '0.0.0.0',
-        heartbeatIntervalMs: 30000,
-        sessionTimeoutMs: 1800000,
-        maxConcurrentSessions: 10,
-        sessionsDir: 'sessions',
-        memoryDbPath: 'memory.db',
-        defaultProvider: 'anthropic',
-        transcription: {
-          enabled: true,
-          manageSidecar: true,
-          baseUrl: 'http://127.0.0.1:8787',
-          timeoutMs: 180000,
-          cleanupMode: 'basic' as const,
-          maxBytes: 25 * 1024 * 1024,
-        },
-      },
-      context: {
-        compactor: {
-          maxTokens: 25000,
-          compactionThreshold: 0.85,
-          targetTokens: 10000,
-          preserveRecentCount: 5,
-          charsPerToken: 4,
-          forceAlways: false,
-        },
-        memory: { maxEntries: 1000 },
-      },
-    } as any);
+    mockGetSettings.mockReturnValue(createMockSettings());
   });
 
   afterEach(() => {
@@ -101,45 +119,35 @@ describe('Settings Handlers', () => {
         compaction: {
           preserveRecentTurns: 5,
           forceAlways: false,
+          triggerTokenThreshold: 0.70,
+          alertZoneThreshold: 0.50,
+          defaultTurnFallback: 8,
+          alertTurnFallback: 5,
+        },
+        tools: {
+          web: {
+            fetch: { timeoutMs: 30000 },
+            cache: { ttlMs: 15 * 60 * 1000, maxEntries: 100 },
+          },
         },
       });
     });
 
     it('should reflect custom values from settings', async () => {
-      mockGetSettings.mockReturnValue({
+      mockGetSettings.mockReturnValue(createMockSettings({
         server: {
           defaultModel: 'claude-opus-4-6',
           defaultWorkspace: undefined,
-          wsPort: 8080,
-          healthPort: 8081,
-          host: '0.0.0.0',
-          heartbeatIntervalMs: 30000,
-          sessionTimeoutMs: 1800000,
-          maxConcurrentSessions: 10,
-          sessionsDir: 'sessions',
-          memoryDbPath: 'memory.db',
-          defaultProvider: 'anthropic',
-          transcription: {
-            enabled: true,
-            manageSidecar: true,
-            baseUrl: 'http://127.0.0.1:8787',
-            timeoutMs: 180000,
-            cleanupMode: 'basic' as const,
-            maxBytes: 25 * 1024 * 1024,
-          },
         },
-        context: {
-          compactor: {
-            maxTokens: 25000,
-            compactionThreshold: 0.85,
-            targetTokens: 10000,
-            preserveRecentCount: 3,
-            charsPerToken: 4,
-            forceAlways: true,
-          },
-          memory: { maxEntries: 1000 },
+        compactor: {
+          preserveRecentCount: 3,
+          forceAlways: true,
+          triggerTokenThreshold: 0.80,
+          alertZoneThreshold: 0.60,
+          defaultTurnFallback: 10,
+          alertTurnFallback: 4,
         },
-      } as any);
+      }));
 
       const request: RpcRequest = {
         id: '2',
@@ -154,50 +162,49 @@ describe('Settings Handlers', () => {
         compaction: {
           preserveRecentTurns: 3,
           forceAlways: true,
+          triggerTokenThreshold: 0.80,
+          alertZoneThreshold: 0.60,
+          defaultTurnFallback: 10,
+          alertTurnFallback: 4,
+        },
+        tools: {
+          web: {
+            fetch: { timeoutMs: 30000 },
+            cache: { ttlMs: 15 * 60 * 1000, maxEntries: 100 },
+          },
         },
       });
     });
 
     it('should default forceAlways to false when undefined', async () => {
-      mockGetSettings.mockReturnValue({
-        server: {
-          defaultModel: 'claude-sonnet-4-20250514',
-          wsPort: 8080,
-          healthPort: 8081,
-          host: '0.0.0.0',
-          heartbeatIntervalMs: 30000,
-          sessionTimeoutMs: 1800000,
-          maxConcurrentSessions: 10,
-          sessionsDir: 'sessions',
-          memoryDbPath: 'memory.db',
-          defaultProvider: 'anthropic',
-          transcription: {
-            enabled: true,
-            manageSidecar: true,
-            baseUrl: 'http://127.0.0.1:8787',
-            timeoutMs: 180000,
-            cleanupMode: 'basic' as const,
-            maxBytes: 25 * 1024 * 1024,
-          },
+      mockGetSettings.mockReturnValue(createMockSettings({
+        compactor: {
+          forceAlways: undefined,
         },
-        context: {
-          compactor: {
-            maxTokens: 25000,
-            compactionThreshold: 0.85,
-            targetTokens: 10000,
-            preserveRecentCount: 5,
-            charsPerToken: 4,
-            // forceAlways intentionally omitted
-          },
-          memory: { maxEntries: 1000 },
-        },
-      } as any);
+      }));
 
       const request: RpcRequest = { id: '3', method: 'settings.get' };
       const response = await registry.dispatch(request, mockContext);
       const result = response.result as any;
 
       expect(result.compaction.forceAlways).toBe(false);
+    });
+
+    it('should return web tool settings', async () => {
+      mockGetSettings.mockReturnValue(createMockSettings({
+        web: {
+          fetch: { timeoutMs: 60000 },
+          cache: { ttlMs: 30 * 60 * 1000, maxEntries: 200 },
+        },
+      }));
+
+      const request: RpcRequest = { id: '4', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.tools.web.fetch.timeoutMs).toBe(60000);
+      expect(result.tools.web.cache.ttlMs).toBe(30 * 60 * 1000);
+      expect(result.tools.web.cache.maxEntries).toBe(200);
     });
   });
 
@@ -288,6 +295,48 @@ describe('Settings Handlers', () => {
 
       expect(response.success).toBe(false);
       expect(response.error?.code).toBe('INVALID_PARAMS');
+    });
+
+    it('should update web tool settings', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        tools: { web: { fetch: { timeoutMs: 30000 } } },
+      });
+
+      const request: RpcRequest = {
+        id: '8',
+        method: 'settings.update',
+        params: {
+          settings: {
+            tools: { web: { fetch: { timeoutMs: 60000 } } },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.tools.web.fetch.timeoutMs).toBe(60000);
+    });
+
+    it('should update compaction trigger settings', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        context: { compactor: { triggerTokenThreshold: 0.70 } },
+      });
+
+      const request: RpcRequest = {
+        id: '9',
+        method: 'settings.update',
+        params: {
+          settings: {
+            context: { compactor: { triggerTokenThreshold: 0.85 } },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.context.compactor.triggerTokenThreshold).toBe(0.85);
     });
   });
 

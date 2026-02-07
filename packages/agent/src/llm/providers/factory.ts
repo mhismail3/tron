@@ -28,6 +28,7 @@ import {
 import type { GoogleOAuthEndpoint } from '@infrastructure/auth/google-oauth.js';
 import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic/index.js';
 import { GEMINI_MODELS } from './google/index.js';
+import { DEFAULT_GOOGLE_MODEL } from './model-ids.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('provider-factory');
@@ -226,7 +227,7 @@ export function getDefaultModel(provider: ProviderType): string {
     case 'openai-codex':
       return DEFAULT_OPENAI_MODEL;
     case 'google':
-      return 'gemini-2.5-flash';
+      return DEFAULT_GOOGLE_MODEL;
     default:
       return DEFAULT_MODEL;
   }

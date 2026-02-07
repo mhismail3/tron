@@ -8,8 +8,7 @@ import type {
   UrlValidationResult,
   UrlValidatorConfig,
 } from './types.js';
-
-const DEFAULT_MAX_LENGTH = 2000;
+import { URL_MAX_LENGTH } from './constants.js';
 
 /**
  * Private IP address patterns
@@ -43,7 +42,7 @@ export function validateUrl(
   config: UrlValidatorConfig = {}
 ): UrlValidationResult {
   const {
-    maxLength = DEFAULT_MAX_LENGTH,
+    maxLength = URL_MAX_LENGTH,
     allowedDomains = [],
     blockedDomains = [],
     allowInternal = false,

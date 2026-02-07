@@ -23,14 +23,25 @@ export interface CompactionTriggerResult {
   reason: string;
 }
 
+export interface CompactionTriggerConfig {
+  /** Token ratio that forces compaction (0-1) */
+  triggerTokenThreshold?: number;
+  /** Token ratio where compaction becomes more aggressive (0-1) */
+  alertZoneThreshold?: number;
+  /** Turns before auto-compaction in normal zone */
+  defaultTurnFallback?: number;
+  /** Turns before auto-compaction in alert zone */
+  alertTurnFallback?: number;
+}
+
 // =============================================================================
-// Constants
+// Constants (defaults)
 // =============================================================================
 
-const TOKEN_THRESHOLD = 0.70;
-const ALERT_ZONE_THRESHOLD = 0.50;
-const DEFAULT_TURN_FALLBACK = 8;
-const ALERT_TURN_FALLBACK = 5;
+const DEFAULT_TOKEN_THRESHOLD = 0.70;
+const DEFAULT_ALERT_ZONE_THRESHOLD = 0.50;
+const DEFAULT_DEFAULT_TURN_FALLBACK = 8;
+const DEFAULT_ALERT_TURN_FALLBACK = 5;
 
 const PROGRESS_TOOL_PATTERNS = [
   /\bgit\s+push\b/,
@@ -46,6 +57,17 @@ const PROGRESS_TOOL_PATTERNS = [
 export class CompactionTrigger {
   private turnsSinceCompaction = 0;
   private forceAlwaysEnabled = false;
+  private tokenThreshold: number;
+  private alertZoneThreshold: number;
+  private defaultTurnFallback: number;
+  private alertTurnFallback: number;
+
+  constructor(config: CompactionTriggerConfig = {}) {
+    this.tokenThreshold = config.triggerTokenThreshold ?? DEFAULT_TOKEN_THRESHOLD;
+    this.alertZoneThreshold = config.alertZoneThreshold ?? DEFAULT_ALERT_ZONE_THRESHOLD;
+    this.defaultTurnFallback = config.defaultTurnFallback ?? DEFAULT_DEFAULT_TURN_FALLBACK;
+    this.alertTurnFallback = config.alertTurnFallback ?? DEFAULT_ALERT_TURN_FALLBACK;
+  }
 
   setForceAlways(enabled: boolean): void {
     this.forceAlwaysEnabled = enabled;
@@ -59,7 +81,7 @@ export class CompactionTrigger {
     }
 
     // 1. Token threshold — safety net
-    if (input.currentTokenRatio >= TOKEN_THRESHOLD) {
+    if (input.currentTokenRatio >= this.tokenThreshold) {
       return { compact: true, reason: `token ratio ${(input.currentTokenRatio * 100).toFixed(0)}% >= threshold` };
     }
 
@@ -77,9 +99,9 @@ export class CompactionTrigger {
     }
 
     // 3. Turn-count fallback (lower in alert zone)
-    const fallback = input.currentTokenRatio >= ALERT_ZONE_THRESHOLD
-      ? ALERT_TURN_FALLBACK
-      : DEFAULT_TURN_FALLBACK;
+    const fallback = input.currentTokenRatio >= this.alertZoneThreshold
+      ? this.alertTurnFallback
+      : this.defaultTurnFallback;
 
     if (this.turnsSinceCompaction >= fallback) {
       return { compact: true, reason: `turn count fallback (${this.turnsSinceCompaction} turns)` };
@@ -97,6 +119,6 @@ export class CompactionTrigger {
 // Factory
 // =============================================================================
 
-export function createCompactionTrigger(): CompactionTrigger {
-  return new CompactionTrigger();
+export function createCompactionTrigger(config?: CompactionTriggerConfig): CompactionTrigger {
+  return new CompactionTrigger(config);
 }

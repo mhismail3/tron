@@ -28,10 +28,11 @@ import {
   BRAVE_ENDPOINT_CAPABILITIES,
 } from './brave-types.js';
 
+import { BRAVE_DEFAULT_TIMEOUT_MS } from './constants.js';
+
 const logger = createLogger('brave-multi-client');
 
 const DEFAULT_BASE_URL = 'https://api.search.brave.com';
-const DEFAULT_TIMEOUT = 15000; // 15 seconds
 
 // =============================================================================
 // Types
@@ -122,7 +123,7 @@ export class BraveMultiClient {
   constructor(config: BraveMultiClientConfig) {
     this.keyRotator = config.keyRotator;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
-    this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
+    this.timeout = config.timeout ?? BRAVE_DEFAULT_TIMEOUT_MS;
   }
 
   /**

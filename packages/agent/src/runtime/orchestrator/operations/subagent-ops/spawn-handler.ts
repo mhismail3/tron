@@ -17,18 +17,9 @@ import type {
 } from '../../types.js';
 import type { SpawnSubagentResult, SpawnTmuxAgentResult } from './types.js';
 import type { RunResult } from '../../../agent/types.js';
+import { DEFAULT_GUARDRAIL_TIMEOUT_MS, TMUX_STARTUP_TIMEOUT_MS } from '../../../constants.js';
 
 const logger = createLogger('subagent-spawn');
-
-// =============================================================================
-// Types
-// =============================================================================
-
-/**
- * Default guardrail timeout for subagent execution (1 hour)
- */
-const DEFAULT_GUARDRAIL_TIMEOUT_MS = 60 * 60 * 1000;
-const TMUX_STARTUP_TIMEOUT_MS = 10_000;
 const TMUX_SESSION_NAME_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
 
 /**

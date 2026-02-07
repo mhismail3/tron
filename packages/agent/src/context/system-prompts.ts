@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ProviderType } from '@llm/providers/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { MAX_SYSTEM_PROMPT_FILE_SIZE } from './constants.js';
 
 // Re-export prompts from the system-prompts directory
 export { TRON_CORE_PROMPT, WORKING_DIRECTORY_SUFFIX } from './system-prompts/index.js';
@@ -30,9 +31,6 @@ const logger = createLogger('context:system-prompts');
 // =============================================================================
 // File-Based System Prompt Loading
 // =============================================================================
-
-/** Maximum file size for SYSTEM.md (100KB = ~25,000 tokens) */
-const MAX_SYSTEM_PROMPT_FILE_SIZE = 100 * 1024;
 
 /**
  * Result of loading a system prompt from file

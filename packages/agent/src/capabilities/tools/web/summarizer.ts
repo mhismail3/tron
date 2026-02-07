@@ -8,11 +8,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createLogger } from '@infrastructure/logging/index.js';
 import type { SubagentSpawnResult, SubagentSpawnCallback } from './types.js';
+import { SUMMARIZER_MAX_TOKENS, SUMMARIZER_HAIKU_MODEL } from './constants.js';
 
 const logger = createLogger('summarizer');
-
-const DEFAULT_MAX_TOKENS = 1024;
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 /**
  * Summarizer configuration
@@ -46,7 +44,7 @@ export function createSummarizer(
     baseURL: config.baseUrl,
   });
 
-  const maxTokens = config.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const maxTokens = config.maxTokens ?? SUMMARIZER_MAX_TOKENS;
 
   return async (params): Promise<SubagentSpawnResult> => {
     const { task, model, timeout: _timeout } = params;
@@ -54,13 +52,13 @@ export function createSummarizer(
 
     logger.debug('Summarizer starting', {
       sessionId,
-      model: model || HAIKU_MODEL,
+      model: model || SUMMARIZER_HAIKU_MODEL,
       taskLength: task.length,
     });
 
     try {
       const response = await anthropic.messages.create({
-        model: model || HAIKU_MODEL,
+        model: model || SUMMARIZER_HAIKU_MODEL,
         max_tokens: maxTokens,
         messages: [
           {

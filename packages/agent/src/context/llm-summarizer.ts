@@ -12,6 +12,14 @@ import type { Message } from '@core/types/index.js';
 import { KeywordSummarizer, type Summarizer, type SummaryResult, type ExtractedData } from './summarizer.js';
 import { COMPACTION_SUMMARIZER_PROMPT } from './system-prompts/compaction-summarizer.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import {
+  SUMMARIZER_MAX_SERIALIZED_CHARS,
+  SUMMARIZER_ASSISTANT_TEXT_LIMIT,
+  SUMMARIZER_THINKING_TEXT_LIMIT,
+  SUMMARIZER_TOOL_RESULT_TEXT_LIMIT,
+  SUMMARIZER_SUBAGENT_TIMEOUT_MS,
+} from './constants.js';
+import { SUBAGENT_MODEL } from '@llm/providers/model-ids.js';
 
 const logger = createLogger('context:llm-summarizer');
 
@@ -36,16 +44,6 @@ export interface LLMSummarizerDeps {
 }
 
 // =============================================================================
-// Constants
-// =============================================================================
-
-const MAX_SERIALIZED_CHARS = 150_000;
-const ASSISTANT_TEXT_LIMIT = 300;
-const THINKING_TEXT_LIMIT = 500;
-const TOOL_RESULT_TEXT_LIMIT = 100;
-const SUBAGENT_TIMEOUT = 30_000;
-
-// =============================================================================
 // LLMSummarizer
 // =============================================================================
 
@@ -64,12 +62,12 @@ export class LLMSummarizer implements Summarizer {
 
       const result = await this.deps.spawnSubsession({
         task: serialized,
-        model: 'claude-haiku-4-5-20251001',
+        model: SUBAGENT_MODEL,
         systemPrompt: COMPACTION_SUMMARIZER_PROMPT,
         toolDenials: { denyAll: true },
         maxTurns: 1,
         blocking: true,
-        timeout: SUBAGENT_TIMEOUT,
+        timeout: SUMMARIZER_SUBAGENT_TIMEOUT_MS,
       });
 
       if (!result.success || !result.output) {
@@ -112,7 +110,7 @@ export class LLMSummarizer implements Summarizer {
 
 /**
  * Serialize messages to a text transcript for the summarizer subagent.
- * Caps output at MAX_SERIALIZED_CHARS — if exceeded, keeps first 25% + last 25%
+ * Caps output at SUMMARIZER_MAX_SERIALIZED_CHARS — if exceeded, keeps first 25% + last 25%
  * with a middle omission marker.
  */
 export function serializeMessages(messages: Message[]): string {
@@ -131,11 +129,11 @@ export function serializeMessages(messages: Message[]): string {
       for (const block of msg.content) {
         if (block.type === 'text') {
           const text = (block as { text: string }).text;
-          lines.push(`[ASSISTANT] ${text.slice(0, ASSISTANT_TEXT_LIMIT)}`);
+          lines.push(`[ASSISTANT] ${text.slice(0, SUMMARIZER_ASSISTANT_TEXT_LIMIT)}`);
         } else if (block.type === 'thinking') {
           const thinking = (block as { thinking?: string }).thinking ?? '';
           if (thinking) {
-            lines.push(`[THINKING] ${thinking.slice(0, THINKING_TEXT_LIMIT)}`);
+            lines.push(`[THINKING] ${thinking.slice(0, SUMMARIZER_THINKING_TEXT_LIMIT)}`);
           }
         } else if (block.type === 'tool_use') {
           const tc = block as { name: string; arguments: Record<string, unknown> };
@@ -151,17 +149,17 @@ export function serializeMessages(messages: Message[]): string {
             .map(b => b.text)
             .join('\n');
       const prefix = msg.isError ? '[TOOL_ERROR]' : '[TOOL_RESULT]';
-      lines.push(`${prefix} ${text.slice(0, TOOL_RESULT_TEXT_LIMIT)}`);
+      lines.push(`${prefix} ${text.slice(0, SUMMARIZER_TOOL_RESULT_TEXT_LIMIT)}`);
     }
   }
 
   const full = lines.join('\n');
 
-  if (full.length <= MAX_SERIALIZED_CHARS) {
+  if (full.length <= SUMMARIZER_MAX_SERIALIZED_CHARS) {
     return full;
   }
 
-  const quarter = Math.floor(MAX_SERIALIZED_CHARS / 4);
+  const quarter = Math.floor(SUMMARIZER_MAX_SERIALIZED_CHARS / 4);
   const head = full.slice(0, quarter);
   const tail = full.slice(-quarter);
   return `${head}\n\n[... ${full.length - quarter * 2} characters omitted ...]\n\n${tail}`;
