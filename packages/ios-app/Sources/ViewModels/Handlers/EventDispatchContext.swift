@@ -17,10 +17,12 @@ import Foundation
     func handleTurnEnd(_ result: TurnEndPlugin.Result)
     func handleAgentTurn(_ result: AgentTurnPlugin.Result)
     func handleComplete()
+    func handleAgentReady()
     func handleAgentError(_ message: String)
 }
 
 @MainActor protocol ContextEventHandler: AnyObject {
+    func handleCompactionStarted(_ result: CompactionStartedPlugin.Result)
     func handleCompaction(_ result: CompactionPlugin.Result)
     func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result)
     func handleContextCleared(_ result: ContextClearedPlugin.Result)

@@ -77,7 +77,9 @@ final class EventRegistry: @unchecked Sendable {
 
         // Lifecycle events
         register(CompletePlugin.self)
+        register(AgentReadyPlugin.self)
         register(ErrorPlugin.self)
+        register(CompactionStartedPlugin.self)
         register(CompactionPlugin.self)
         register(MemoryUpdatedPlugin.self)
         register(ContextClearedPlugin.self)

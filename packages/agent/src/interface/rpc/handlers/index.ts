@@ -41,3 +41,4 @@ export { createVoiceNotesHandlers } from './voiceNotes.handler.js';
 export { createCanvasHandlers } from './canvas.handler.js';
 export { createTodoHandlers } from './todo.handler.js';
 export { getDeviceHandlers } from './device.handler.js';
+export { createSettingsHandlers } from './settings.handler.js';

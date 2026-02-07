@@ -107,15 +107,19 @@ export class AgentCompactionHandler implements ICompactionHandler {
       };
     }
 
-    const tokensBefore = this.contextManager.getCurrentTokens();
+    const totalTokens = this.contextManager.getCurrentTokens();
 
     // Execute PreCompact hook first (before emitting compaction_start)
-    await this.executePreCompactHook(tokensBefore);
+    await this.executePreCompactHook(totalTokens);
+
+    // Report messages-only tokens (consistent with engine results)
+    const snapshot = this.contextManager.getSnapshot();
+    const messageTokensBefore = snapshot.breakdown.messages;
 
     logger.info('Attempting auto-compaction', {
       sessionId: this.sessionId,
       reason,
-      tokensBefore,
+      messageTokensBefore,
       contextLimit: this.contextManager.getContextLimit(),
     });
 
@@ -124,7 +128,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
       sessionId: this.sessionId,
       timestamp: new Date().toISOString(),
       reason,
-      tokensBefore,
+      tokensBefore: messageTokensBefore,
     });
 
     try {
@@ -168,7 +172,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
         sessionId: this.sessionId,
         operation: 'compaction',
         reason,
-        tokensBefore,
+        tokensBefore: messageTokensBefore,
       });
 
       this.eventEmitter.emit({
@@ -176,8 +180,8 @@ export class AgentCompactionHandler implements ICompactionHandler {
         sessionId: this.sessionId,
         timestamp: new Date().toISOString(),
         success: false,
-        tokensBefore,
-        tokensAfter: tokensBefore,
+        tokensBefore: messageTokensBefore,
+        tokensAfter: messageTokensBefore,
         compressionRatio: 1,
         reason,
       });
@@ -193,7 +197,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
       return {
         success: false,
         error: structured.message,
-        tokensBefore,
+        tokensBefore: messageTokensBefore,
       };
     }
   }

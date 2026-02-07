@@ -49,6 +49,23 @@ export class CompactionEventHandler {
   }
 
   /**
+   * Handle compaction_start event.
+   * Broadcasts to clients so iOS can show a "compacting..." spinner
+   * and block the send button until compaction finishes.
+   */
+  handleCompactionStarted(ctx: EventContext, event: TronEvent): void {
+    const startEvent = event as {
+      reason?: string;
+      tokensBefore?: number;
+    };
+
+    ctx.emit('agent.compaction_started', {
+      reason: startEvent.reason || 'auto',
+      tokensBefore: startEvent.tokensBefore,
+    });
+  }
+
+  /**
    * Handle compaction_complete event.
    * Broadcasts to clients and persists boundary event for session resume.
    */

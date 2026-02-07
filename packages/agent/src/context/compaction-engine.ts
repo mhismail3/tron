@@ -83,7 +83,10 @@ export class CompactionEngine {
    * Generate a compaction preview without modifying state.
    */
   async preview(summarizer: Summarizer): Promise<CompactionPreview> {
-    const tokensBefore = this.deps.getCurrentTokens();
+    // Report messages-only tokens (exclude non-compactable system+tools overhead)
+    const totalTokens = this.deps.getCurrentTokens();
+    const systemOverhead = this.deps.estimateSystemPromptTokens() + this.deps.estimateToolsTokens();
+    const tokensBefore = Math.max(0, totalTokens - systemOverhead);
     const messages = this.deps.getMessages();
 
     // Calculate how many messages to preserve
@@ -122,7 +125,10 @@ export class CompactionEngine {
     summarizer: Summarizer;
     editedSummary?: string;
   }): Promise<CompactionResult> {
-    const tokensBefore = this.deps.getCurrentTokens();
+    // Report messages-only tokens (exclude non-compactable system+tools overhead)
+    const totalTokens = this.deps.getCurrentTokens();
+    const systemOverhead = this.deps.estimateSystemPromptTokens() + this.deps.estimateToolsTokens();
+    const tokensBefore = Math.max(0, totalTokens - systemOverhead);
     const messages = this.deps.getMessages();
 
     // Calculate how many messages to preserve
@@ -293,9 +299,8 @@ export class CompactionEngine {
       preservedTokens += this.deps.getMessageTokens(msg);
     }
 
+    // Messages-only estimate (no system+tools overhead — consistent with tokensBefore)
     return (
-      this.deps.estimateSystemPromptTokens() +
-      this.deps.estimateToolsTokens() +
       summaryTokens +
       contextMessageTokens +
       ackMessageTokens +

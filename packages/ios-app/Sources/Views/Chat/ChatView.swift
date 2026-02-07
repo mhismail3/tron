@@ -70,6 +70,8 @@ struct ChatView: View {
                         state: viewModel.inputBarState,
                         config: InputBarConfig(
                             isProcessing: viewModel.isProcessing,
+                            isPostProcessing: viewModel.isPostProcessing,
+                            isCompacting: viewModel.isCompacting,
                             isRecording: viewModel.isRecording,
                             isTranscribing: viewModel.isTranscribing,
                             modelName: displayModelName,

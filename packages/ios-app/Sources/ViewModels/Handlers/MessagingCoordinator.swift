@@ -202,6 +202,7 @@ final class MessagingCoordinator {
         do {
             try await context.abortAgentOnServer()
             context.isProcessing = false
+            context.isPostProcessing = false
             context.setSessionProcessing(false)
             context.updateSessionDashboardInfo(lastUserPrompt: nil, lastAssistantResponse: "Interrupted")
             context.finalizeStreamingMessage()

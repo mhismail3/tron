@@ -215,6 +215,8 @@ export interface CompactorSettings {
   preserveRecentCount: number;
   /** Characters per token estimate */
   charsPerToken: number;
+  /** Force compaction after every turn (testing/debug mode) */
+  forceAlways?: boolean;
 }
 
 /**
@@ -281,6 +283,8 @@ export interface ServerSettings {
   defaultModel: string;
   /** Default provider */
   defaultProvider: string;
+  /** Default workspace directory for quick session creation */
+  defaultWorkspace?: string;
   /** Audio transcription settings */
   transcription: TranscriptionSettings;
 }

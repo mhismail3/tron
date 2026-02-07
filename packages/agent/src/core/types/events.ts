@@ -170,6 +170,14 @@ export interface AgentEndEvent extends BaseTronEvent {
 }
 
 /**
+ * Agent ready event - emitted after background hooks (compaction, memory) complete.
+ * iOS uses this to re-enable the send button after post-processing.
+ */
+export interface AgentReadyEvent extends BaseTronEvent {
+  type: 'agent_ready';
+}
+
+/**
  * Agent interrupted event - emitted when user aborts execution
  */
 export interface AgentInterruptedEvent extends BaseTronEvent {
@@ -612,6 +620,7 @@ export interface TronThinkingEndEvent extends BaseTronEvent {
 export type TronEvent =
   | AgentStartEvent
   | AgentEndEvent
+  | AgentReadyEvent
   | AgentInterruptedEvent
   | TurnStartEvent
   | TurnEndEvent

@@ -180,6 +180,26 @@ struct TranscriptionNoSpeechNotificationView: View {
     }
 }
 
+// MARK: - Compaction In Progress Notification View (spinning cyan pill)
+
+struct CompactionInProgressNotificationView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(.cyan)
+
+            Text("Compacting context...")
+                .font(TronTypography.filePath)
+                .foregroundStyle(.cyan.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .modifier(InteractiveCapsuleGlass(tint: .cyan))
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
 // MARK: - Compaction Notification View (Cyan pill-style in-chat notification)
 
 struct CompactionNotificationView: View {

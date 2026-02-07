@@ -44,6 +44,9 @@ protocol ProcessingTrackable: AnyObject {
     /// Whether the agent is currently processing.
     var isProcessing: Bool { get set }
 
+    /// Whether background hooks (compaction, memory) are running after completion.
+    var isPostProcessing: Bool { get set }
+
     /// Update the session's processing state in the dashboard/database.
     func setSessionProcessing(_ isProcessing: Bool)
 }

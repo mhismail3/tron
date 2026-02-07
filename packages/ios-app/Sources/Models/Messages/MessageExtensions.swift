@@ -62,6 +62,11 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .transcriptionNoSpeech)
     }
 
+    /// In-chat notification for compaction in progress (spinning indicator)
+    static func compactionInProgress(reason: String) -> ChatMessage {
+        ChatMessage(role: .system, content: .compactionInProgress(reason: reason))
+    }
+
     /// In-chat notification for context compaction
     static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String? = nil) -> ChatMessage {
         ChatMessage(role: .system, content: .compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))

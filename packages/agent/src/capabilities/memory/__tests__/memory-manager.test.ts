@@ -141,5 +141,34 @@ describe('MemoryManager', () => {
       expect(deps.shouldCompact).toHaveBeenCalled();
       expect(deps.executeCompaction).toHaveBeenCalled();
     });
+
+    it('should run compaction before ledger (sequential for deterministic DB ordering)', async () => {
+      const order: string[] = [];
+
+      deps.shouldCompact = vi.fn().mockReturnValue({ compact: true, reason: 'commit' });
+      deps.executeCompaction = vi.fn().mockImplementation(async () => {
+        order.push('compaction-start');
+        await new Promise(r => setTimeout(r, 10));
+        order.push('compaction-end');
+        return { success: true };
+      });
+      deps.writeLedgerEntry = vi.fn().mockImplementation(async () => {
+        order.push('ledger-start');
+        await new Promise(r => setTimeout(r, 10));
+        order.push('ledger-end');
+        return { written: true };
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      // Compaction must fully complete before ledger starts
+      expect(order).toEqual([
+        'compaction-start',
+        'compaction-end',
+        'ledger-start',
+        'ledger-end',
+      ]);
+    });
   });
 });

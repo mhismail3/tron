@@ -446,6 +446,21 @@ export class TronAgent {
   }
 
   /**
+   * Number of background hooks still running (compaction, memory ledger, etc.).
+   */
+  getPendingBackgroundHookCount(): number {
+    return this.hookEngine.getPendingBackgroundCount();
+  }
+
+  /**
+   * Wait for all pending background hooks to complete.
+   * Used by agent-controller to drain hooks before starting the next run.
+   */
+  waitForBackgroundHooks(timeoutMs?: number): Promise<void> {
+    return this.hookEngine.waitForBackgroundHooks(timeoutMs);
+  }
+
+  /**
    * Execute a lifecycle hook with proper event emission.
    * Uses HookEngine.executeWithEvents() for centralized hook lifecycle management.
    */
@@ -642,7 +657,6 @@ export class TronAgent {
     if (promptResult.action === 'block') {
       await this.executeLifecycleHook('Stop', { stopReason: 'blocked', finalMessage: promptResult.reason });
       await this.executeLifecycleHook('SessionEnd', { messageCount: 1, toolCallCount: 0 });
-      await this.hookEngine.waitForBackgroundHooks();
 
       this.emit({
         type: 'agent_end',
@@ -674,7 +688,6 @@ export class TronAgent {
             messageCount: this.contextManager.getMessages().length,
             toolCallCount: this.currentTurn,
           });
-          await this.hookEngine.waitForBackgroundHooks();
 
           return {
             success: false,
@@ -696,7 +709,6 @@ export class TronAgent {
           messageCount: this.contextManager.getMessages().length,
           toolCallCount: this.currentTurn,
         });
-        await this.hookEngine.waitForBackgroundHooks();
 
         this.emit({
           type: 'agent_end',
@@ -729,7 +741,6 @@ export class TronAgent {
       messageCount: this.contextManager.getMessages().length,
       toolCallCount: this.currentTurn,
     });
-    await this.hookEngine.waitForBackgroundHooks();
 
     this.emit({
       type: 'agent_end',

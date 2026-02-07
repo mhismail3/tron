@@ -2,27 +2,19 @@ import Foundation
 
 // MARK: - Session Methods
 
-struct CompactionConfig: Encodable {
-    let preserveRecentTurns: Int?
-    let forceAlways: Bool?
-}
-
 struct SessionCreateParams: Encodable {
     let workingDirectory: String
     let model: String?
     let contextFiles: [String]?
-    let compactionConfig: CompactionConfig?
 
     init(
         workingDirectory: String,
         model: String? = nil,
-        contextFiles: [String]? = nil,
-        compactionConfig: CompactionConfig? = nil
+        contextFiles: [String]? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.model = model
         self.contextFiles = contextFiles
-        self.compactionConfig = compactionConfig
     }
 }
 

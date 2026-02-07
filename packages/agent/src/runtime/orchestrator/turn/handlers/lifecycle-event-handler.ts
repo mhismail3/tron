@@ -4,6 +4,7 @@
  * Handles agent lifecycle events:
  * - agent_start: Agent run begins
  * - agent_end: Agent run completes
+ * - agent_ready: Background hooks finished, agent ready for new input
  * - agent_interrupted: Agent was interrupted
  * - api_retry: Provider retry events
  *
@@ -81,6 +82,15 @@ export class LifecycleEventHandler {
     // NOTE: agent.complete is now emitted in runAgent() AFTER all events are persisted
     // This ensures linearized events (message.assistant, tool.call, tool.result)
     // are in the database before iOS syncs on receiving agent.complete
+  }
+
+  /**
+   * Handle agent_ready TronEvent (if emitted by TronAgent).
+   * NOTE: agent.ready is now emitted directly by AgentRunner after agent.complete
+   * to guarantee correct ordering. This handler is retained for backward compat.
+   */
+  handleAgentReady(ctx: EventContext): void {
+    ctx.emit('agent.ready', {});
   }
 
   /**

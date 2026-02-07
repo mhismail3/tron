@@ -271,7 +271,9 @@ describe('TronAgent + ContextManager Integration', () => {
       // Set API tokens to simulate what happens after a turn completes
       cm.setApiContextTokens(session.estimatedTokens);
 
-      const tokensBefore = cm.getCurrentTokens();
+      // tokensBefore reports messages-only (excludes system + tools overhead)
+      const snapshot = cm.getSnapshot();
+      const messageTokensBefore = cm.getCurrentTokens() - snapshot.breakdown.systemPrompt - snapshot.breakdown.tools;
       const result = await cm.executeCompaction({
         summarizer: createMockSummarizer(),
       });
@@ -279,7 +281,7 @@ describe('TronAgent + ContextManager Integration', () => {
       expect(result.success).toBe(true);
       // After compaction, API tokens are reset to 0 until next turn
       expect(cm.getCurrentTokens()).toBe(0);
-      expect(result.tokensBefore).toBe(tokensBefore);
+      expect(result.tokensBefore).toBe(messageTokensBefore);
     });
   });
 

@@ -283,6 +283,17 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.isProcessing)
     }
 
+    func testAbortAgentClearsIsPostProcessing() async {
+        // Given: Currently in post-processing
+        mockContext.isPostProcessing = true
+
+        // When: Aborting agent
+        await coordinator.abortAgent(context: mockContext)
+
+        // Then: isPostProcessing should be cleared
+        XCTAssertFalse(mockContext.isPostProcessing)
+    }
+
     func testAbortAgentFinalizesStreamingMessage() async {
         // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
@@ -390,6 +401,7 @@ final class MockMessagingContext: MessagingContext {
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
     var isProcessing: Bool = false
+    var isPostProcessing: Bool = false
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
     var userDismissedBrowserThisTurn: Bool = false

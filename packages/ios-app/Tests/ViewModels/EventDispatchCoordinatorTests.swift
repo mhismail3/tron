@@ -169,6 +169,21 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.handleCompleteCalled)
     }
 
+    func testDispatch_agentReady_callsHandleAgentReady() {
+        // Given: An agent ready result
+        let result = AgentReadyPlugin.Result()
+
+        // When: Dispatching
+        coordinator.dispatch(
+            type: AgentReadyPlugin.eventType,
+            transform: { result },
+            context: mockContext
+        )
+
+        // Then: Handler should be called
+        XCTAssertTrue(mockContext.handleAgentReadyCalled)
+    }
+
     func testDispatch_error_callsHandleAgentError() {
         // Given: An error result
         let result = ErrorPlugin.Result(code: "ERROR", message: "Something went wrong")
@@ -624,6 +639,11 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleComplete() {
         handleCompleteCalled = true
+    }
+
+    var handleAgentReadyCalled = false
+    func handleAgentReady() {
+        handleAgentReadyCalled = true
     }
 
     func handleAgentError(_ message: String) {

@@ -146,6 +146,20 @@ describe('LifecycleEventHandler', () => {
     });
   });
 
+  describe('handleAgentReady', () => {
+    it('should emit agent.ready event via context', () => {
+      const ctx = createTestContext();
+
+      handler.handleAgentReady(ctx);
+
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
+        type: 'agent.ready',
+        data: {},
+      });
+    });
+  });
+
   describe('handleAgentInterrupted', () => {
     it('should emit agent.complete with interrupted status via context', () => {
       const mockActive = createMockActiveSession({ currentRunId: 'run-123' });

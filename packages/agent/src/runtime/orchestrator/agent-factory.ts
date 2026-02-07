@@ -62,6 +62,7 @@ import { LedgerWriter, CompactionTrigger, MemoryManager } from '@capabilities/me
 import { LLMSummarizer } from '@context/llm-summarizer.js';
 import type { EventType } from '@infrastructure/events/types/index.js';
 import type { GoogleAuth } from '@infrastructure/auth/google-oauth.js';
+import { getSettings } from '@infrastructure/settings/loader.js';
 
 const logger = createLogger('agent-factory');
 
@@ -216,7 +217,6 @@ export class AgentFactory {
     systemPrompt?: string,
     isSubagent?: boolean,
     toolDenials?: ToolDenialConfig,
-    compactionConfig?: { preserveRecentTurns?: number; forceAlways?: boolean }
   ): Promise<TronAgent> {
     // Get auth for the model (handles Codex OAuth vs standard auth)
     const auth = await this.config.getAuthForProvider(model);
@@ -419,6 +419,9 @@ export class AgentFactory {
       ? (auth as GoogleAuth).endpoint
       : undefined;
 
+    // Read compaction settings from settings.json (server-authoritative)
+    const compactorSettings = getSettings().context.compactor;
+
     logger.info('Creating agent with tools', {
       sessionId,
       workingDirectory,
@@ -427,10 +430,10 @@ export class AgentFactory {
       isOAuth: auth.type === 'oauth',
       providerType,
       googleEndpoint,
-      compactionConfig: compactionConfig ? {
-        preserveRecentTurns: compactionConfig.preserveRecentTurns,
-        forceAlways: compactionConfig.forceAlways,
-      } : undefined,
+      compactorSettings: {
+        preserveRecentCount: compactorSettings.preserveRecentCount,
+        forceAlways: compactorSettings.forceAlways,
+      },
     });
 
     // Normalize auth to UnifiedAuth format for provider factory
@@ -470,9 +473,9 @@ export class AgentFactory {
       maxTurns: 50,
       maxTokens,  // Set for subagents, undefined for regular agents (uses default)
       enableThinking,
-      compaction: compactionConfig?.preserveRecentTurns !== undefined
-        ? { preserveRecentTurns: compactionConfig.preserveRecentTurns }
-        : undefined,
+      compaction: {
+        preserveRecentTurns: compactorSettings.preserveRecentCount,
+      },
     };
 
     const agent = new TronAgent(agentConfig, {
@@ -496,7 +499,7 @@ export class AgentFactory {
     if (!isSubagent && this.config.memoryConfig) {
       const memCfg = this.config.memoryConfig;
       const compactionTrigger = new CompactionTrigger();
-      if (compactionConfig?.forceAlways) {
+      if (compactorSettings.forceAlways) {
         compactionTrigger.setForceAlways(true);
         logger.info('Compaction force-always enabled', { sessionId });
       }

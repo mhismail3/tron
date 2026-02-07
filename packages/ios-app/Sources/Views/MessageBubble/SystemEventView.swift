@@ -26,6 +26,9 @@ struct SystemEventView: View {
         case .transcriptionNoSpeech:
             TranscriptionNoSpeechNotificationView()
 
+        case .compactionInProgress:
+            CompactionInProgressNotificationView()
+
         case .compaction(let tokensBefore, let tokensAfter, let reason, let summary):
             CompactionNotificationView(
                 tokensBefore: tokensBefore,

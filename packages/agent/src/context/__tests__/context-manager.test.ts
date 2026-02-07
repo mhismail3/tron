@@ -583,9 +583,11 @@ describe('ContextManager', () => {
       expect(cm.getCurrentTokens()).toBe(originalTokens);
       expect(cm.getMessages().length).toBe(originalCount);
 
-      // Preview should show reduction
-      expect(preview.tokensBefore).toBe(originalTokens);
-      expect(preview.tokensAfter).toBeLessThan(originalTokens);
+      // Preview reports messages-only tokens (excludes system prompt + tools overhead)
+      const snapshot = cm.getSnapshot();
+      const expectedMessageTokens = originalTokens - snapshot.breakdown.systemPrompt - snapshot.breakdown.tools;
+      expect(preview.tokensBefore).toBe(expectedMessageTokens);
+      expect(preview.tokensAfter).toBeLessThan(expectedMessageTokens);
     });
 
     it('returns compression ratio in preview', async () => {
@@ -657,13 +659,14 @@ describe('ContextManager', () => {
       const session = simulator.generateAtUtilization(80, 200_000);
       setupWithSimulatedSession(cm, session);
 
-      const tokensBefore = cm.getCurrentTokens();
+      // tokensBefore/tokensAfter report messages-only (excludes system + tools overhead)
+      const snapshot = cm.getSnapshot();
+      const messageTokensBefore = cm.getCurrentTokens() - snapshot.breakdown.systemPrompt - snapshot.breakdown.tools;
       const result = await cm.executeCompaction({ summarizer: mockSummarizer });
 
       expect(result.success).toBe(true);
-      expect(result.tokensBefore).toBe(tokensBefore);
-      // tokensAfter is estimated since API tokens are reset after setMessages
-      expect(result.tokensAfter).toBeLessThan(tokensBefore);
+      expect(result.tokensBefore).toBe(messageTokensBefore);
+      expect(result.tokensAfter).toBeLessThan(messageTokensBefore);
     });
 
     it('preserves recent turns', async () => {

@@ -45,6 +45,10 @@ enum MessageContent: Equatable {
     static var transcriptionNoSpeech: MessageContent {
         .systemEvent(.transcriptionNoSpeech)
     }
+    /// In-chat notification for compaction in progress
+    static func compactionInProgress(reason: String) -> MessageContent {
+        .systemEvent(.compactionInProgress(reason: reason))
+    }
     /// In-chat notification for context compaction
     static func compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?) -> MessageContent {
         .systemEvent(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))

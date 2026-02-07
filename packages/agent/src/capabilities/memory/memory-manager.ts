@@ -48,13 +48,14 @@ export class MemoryManager {
   }
 
   async onCycleComplete(info: CycleInfo): Promise<void> {
-    // 1. Check compaction trigger (independent of ledger)
     const compactionResult = this.deps.shouldCompact({
       currentTokenRatio: info.currentTokenRatio,
       recentEventTypes: info.recentEventTypes,
       recentToolCalls: info.recentToolCalls,
     });
 
+    // Run compaction first, then ledger — sequential to guarantee deterministic
+    // event ordering in the DB (compact.boundary always before memory.ledger).
     if (compactionResult.compact) {
       try {
         logger.info('Compaction triggered by memory manager', {
@@ -71,7 +72,6 @@ export class MemoryManager {
       }
     }
 
-    // 2. Write ledger entry (independent of compaction)
     try {
       const ledgerResult = await this.deps.writeLedgerEntry({
         firstEventId: info.firstEventId,

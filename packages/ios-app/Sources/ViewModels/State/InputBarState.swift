@@ -51,6 +51,10 @@ final class InputBarState {
 struct InputBarConfig {
     // MARK: - Processing State
     let isProcessing: Bool
+    /// Background hooks running after completion (send blocked, typing allowed)
+    let isPostProcessing: Bool
+    /// Compaction in progress (send blocked, spinning pill shown)
+    let isCompacting: Bool
     let isRecording: Bool
     let isTranscribing: Bool
 
@@ -78,6 +82,8 @@ struct InputBarConfig {
 
     init(
         isProcessing: Bool = false,
+        isPostProcessing: Bool = false,
+        isCompacting: Bool = false,
         isRecording: Bool = false,
         isTranscribing: Bool = false,
         modelName: String = "",
@@ -94,6 +100,8 @@ struct InputBarConfig {
         readOnly: Bool = false
     ) {
         self.isProcessing = isProcessing
+        self.isPostProcessing = isPostProcessing
+        self.isCompacting = isCompacting
         self.isRecording = isRecording
         self.isTranscribing = isTranscribing
         self.modelName = modelName

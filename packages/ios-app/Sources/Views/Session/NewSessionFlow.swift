@@ -33,10 +33,6 @@ struct NewSessionFlow: View {
     // Clone repository sheet
     @State private var showCloneSheet = false
 
-    // Compaction settings (from Settings sheet via @AppStorage)
-    @AppStorage("preserveRecentTurns") private var preserveRecentTurns: Int = 5
-    @AppStorage("forceAlwaysCompact") private var forceAlwaysCompact: Bool = false
-
     // Workspace validation - track paths that no longer exist
     @State private var invalidWorkspacePaths: Set<String> = []
 
@@ -439,18 +435,9 @@ struct NewSessionFlow: View {
 
         Task {
             do {
-                // Build compaction config from Settings (only send non-defaults)
-                let compaction: CompactionConfig? = (preserveRecentTurns != 5 || forceAlwaysCompact)
-                    ? CompactionConfig(
-                        preserveRecentTurns: preserveRecentTurns != 5 ? preserveRecentTurns : nil,
-                        forceAlways: forceAlwaysCompact ? true : nil
-                    )
-                    : nil
-
                 let result = try await rpcClient.session.create(
                     workingDirectory: workingDirectory,
-                    model: selectedModel,
-                    compactionConfig: compaction
+                    model: selectedModel
                 )
 
                 await MainActor.run {

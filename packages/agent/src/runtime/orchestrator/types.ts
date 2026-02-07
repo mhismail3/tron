@@ -239,11 +239,6 @@ export interface CreateSessionOptions {
    * - { rules: [...] }: granular denial with parameter patterns
    */
   toolDenials?: import('../../capabilities/tools/subagent/tool-denial.js').ToolDenialConfig;
-  /** Compaction configuration overrides */
-  compactionConfig?: {
-    preserveRecentTurns?: number;
-    forceAlways?: boolean;
-  };
 }
 
 export interface SessionInfo {

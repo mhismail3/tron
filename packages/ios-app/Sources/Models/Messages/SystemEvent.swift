@@ -15,6 +15,8 @@ enum SystemEvent: Equatable {
     case transcriptionFailed
     /// No speech was detected in recording
     case transcriptionNoSpeech
+    /// Context compaction started (in-progress spinner)
+    case compactionInProgress(reason: String)
     /// Context was compacted to save tokens
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?)
     /// Context was cleared
@@ -47,6 +49,8 @@ enum SystemEvent: Equatable {
             return "Transcription failed"
         case .transcriptionNoSpeech:
             return "No speech detected"
+        case .compactionInProgress:
+            return "Compacting context..."
         case .compaction(let before, let after, _, _):
             let saved = before - after
             return "Context compacted: \(TokenFormatter.format(saved)) tokens saved"

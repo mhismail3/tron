@@ -31,6 +31,7 @@
  * | agent_start/end       | LifecycleEventHandler |
  * | agent_interrupted     | LifecycleEventHandler |
  * | api_retry             | LifecycleEventHandler |
+ * | compaction_start      | CompactionEventHandler |
  * | compaction_complete   | CompactionEventHandler |
  * | hook_triggered        | HookEventHandler       |
  * | hook_completed        | HookEventHandler       |
@@ -239,8 +240,16 @@ export class AgentEventHandler {
         this.lifecycleHandler.handleAgentEnd(ctx);
         break;
 
+      case 'agent_ready':
+        this.lifecycleHandler.handleAgentReady(ctx);
+        break;
+
       case 'agent_interrupted':
         this.lifecycleHandler.handleAgentInterrupted(ctx, event);
+        break;
+
+      case 'compaction_start':
+        this.compactionHandler.handleCompactionStarted(ctx, event);
         break;
 
       case 'compaction_complete':

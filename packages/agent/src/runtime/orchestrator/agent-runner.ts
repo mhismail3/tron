@@ -514,6 +514,10 @@ export class AgentRunner {
     // Clear turn tracking state via SessionContext
     active.sessionContext.onAgentEnd();
 
+    // agent.complete was already emitted by lifecycleHandler.handleAgentInterrupted().
+    // Emit agent.ready so iOS clears isPostProcessing.
+    this.emitAgentReady(options.sessionId, options.runId);
+
     return [runResult];
   }
 
@@ -609,6 +613,11 @@ export class AgentRunner {
     // Emit agent.complete AFTER all linearized events are persisted
     this.emitAgentComplete(options.sessionId, !runResult.error, runResult.error, options.runId);
 
+    // Emit agent.ready AFTER agent.complete so iOS sets isPostProcessing=true
+    // before clearing it. Background hooks continue running async —
+    // agent-controller drains them before the next run.
+    this.emitAgentReady(options.sessionId, options.runId);
+
     return [runResult];
   }
 
@@ -684,6 +693,9 @@ export class AgentRunner {
     // Emit agent.complete for error case
     this.emitAgentComplete(options.sessionId, false, error instanceof Error ? error.message : String(error), options.runId);
 
+    // Emit agent.ready so iOS clears isPostProcessing even on error
+    this.emitAgentReady(options.sessionId, options.runId);
+
     throw error;
   }
 
@@ -729,6 +741,22 @@ export class AgentRunner {
         success,
         error,
       },
+    });
+  }
+
+  /**
+   * Emit agent.ready event.
+   * Must be called AFTER agent.complete so iOS processes completion first
+   * (sets isPostProcessing=true), then agent.ready clears it.
+   * Background hooks continue running async after this returns.
+   */
+  private emitAgentReady(sessionId: string, runId?: string): void {
+    this.config.emit('agent_event', {
+      type: 'agent.ready',
+      sessionId,
+      timestamp: new Date().toISOString(),
+      runId,
+      data: {},
     });
   }
 }

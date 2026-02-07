@@ -242,8 +242,10 @@ describe('Multiple Compaction Cycles', () => {
         summarizer: harness.summarizer,
       });
 
-      // Preview should report tokensBefore from API
-      expect(preview.tokensBefore).toBe(harness.contextManager.getCurrentTokens());
+      // Preview reports messages-only tokensBefore (excludes system + tools overhead)
+      const snapshot = harness.contextManager.getSnapshot();
+      const expectedMessageTokens = harness.contextManager.getCurrentTokens() - snapshot.breakdown.systemPrompt - snapshot.breakdown.tools;
+      expect(preview.tokensBefore).toBe(expectedMessageTokens);
       // Preview tokensAfter is an estimate
       expect(preview.tokensAfter).toBeGreaterThan(0);
       expect(preview.tokensAfter).toBeLessThan(preview.tokensBefore);

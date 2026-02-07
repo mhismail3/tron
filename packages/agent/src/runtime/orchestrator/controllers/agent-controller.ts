@@ -76,6 +76,16 @@ export class AgentController {
       throw new Error('Session is already processing');
     }
 
+    // Drain any pending background hooks from the previous run (compaction, memory ledger).
+    // This prevents a race where a new turn starts while context is still being compacted.
+    if (active.agent.getPendingBackgroundHookCount() > 0) {
+      logger.info('Waiting for pending background hooks before new run', {
+        sessionId: options.sessionId,
+        pending: active.agent.getPendingBackgroundHookCount(),
+      });
+      await active.agent.waitForBackgroundHooks(10_000);
+    }
+
     // Update processing state
     active.lastActivity = new Date();
     active.sessionContext.setProcessing(true);

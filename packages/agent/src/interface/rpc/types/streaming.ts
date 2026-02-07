@@ -24,6 +24,7 @@ export type RpcEventType =
   | 'agent.tool_end'
   | 'agent.error'
   | 'agent.complete'
+  | 'agent.ready'
   // Subagent events (for iOS real-time updates)
   | 'agent.subagent_spawned'
   | 'agent.subagent_status'

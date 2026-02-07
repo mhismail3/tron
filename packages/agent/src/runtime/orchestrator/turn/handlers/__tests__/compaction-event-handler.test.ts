@@ -13,7 +13,7 @@ import {
 } from '../compaction-event-handler.js';
 import { createTestEventContext, type TestEventContext } from '../../event-context.js';
 import type { SessionId } from '../../../../events/types.js';
-import type { CompactionCompleteEvent } from '../../../../types/events.js';
+import type { CompactionStartEvent, CompactionCompleteEvent } from '../../../../types/events.js';
 import type { ActiveSession } from '../../../types.js';
 
 // =============================================================================
@@ -57,6 +57,60 @@ describe('CompactionEventHandler', () => {
   beforeEach(() => {
     deps = createMockDeps();
     handler = createCompactionEventHandler(deps);
+  });
+
+  describe('handleCompactionStarted', () => {
+    it('should emit agent.compaction_started event', () => {
+      const ctx = createTestContext();
+      const event: CompactionStartEvent = {
+        type: 'compaction_start',
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
+        reason: 'threshold_exceeded',
+        tokensBefore: 150000,
+      };
+
+      handler.handleCompactionStarted(ctx, event);
+
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
+        type: 'agent.compaction_started',
+        data: {
+          reason: 'threshold_exceeded',
+          tokensBefore: 150000,
+        },
+      });
+    });
+
+    it('should default reason to auto', () => {
+      const ctx = createTestContext();
+      const event = {
+        type: 'compaction_start' as const,
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
+      };
+
+      handler.handleCompactionStarted(ctx, event as any);
+
+      expect(ctx.emitCalls[0].data).toMatchObject({
+        reason: 'auto',
+      });
+    });
+
+    it('should not persist anything (compaction_start is transient)', () => {
+      const ctx = createTestContext();
+      const event: CompactionStartEvent = {
+        type: 'compaction_start',
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
+        reason: 'manual',
+        tokensBefore: 100000,
+      };
+
+      handler.handleCompactionStarted(ctx, event);
+
+      expect(ctx.persistCalls).toHaveLength(0);
+    });
   });
 
   describe('handleCompactionComplete', () => {

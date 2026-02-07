@@ -76,7 +76,8 @@ describe('CompactionEngine', () => {
       const preview = await engine.preview(mockSummarizer);
 
       expect(preview.summary).toBe('Test summary of the conversation');
-      expect(preview.tokensBefore).toBe(80000);
+      // tokensBefore reports messages-only (total - system - tools = 80000 - 1000 - 500)
+      expect(preview.tokensBefore).toBe(78500);
       expect(mockSummarizer.summarize).toHaveBeenCalled();
     });
 

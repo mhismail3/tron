@@ -20,10 +20,6 @@ export const sessionCreateSchema = z.object({
   resumeIfExists: z.boolean().optional(),
   title: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
-  compactionConfig: z.object({
-    preserveRecentTurns: z.number().int().min(0).max(10).optional(),
-    forceAlways: z.boolean().optional(),
-  }).optional(),
 });
 
 /**

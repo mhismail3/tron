@@ -165,8 +165,9 @@ export const DEFAULT_SETTINGS: TronSettings = {
       maxTokens: 25000,
       compactionThreshold: 0.85,
       targetTokens: 10000,
-      preserveRecentCount: 2,
+      preserveRecentCount: 5,
       charsPerToken: 4,
+      forceAlways: false,
     },
     memory: {
       maxEntries: 1000,

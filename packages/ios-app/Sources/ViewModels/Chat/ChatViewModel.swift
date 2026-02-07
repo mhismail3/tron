@@ -14,6 +14,12 @@ final class ChatViewModel: ChatEventContext {
 
     var messages: [ChatMessage] = []
     var isProcessing = false
+    /// Background hooks (compaction, memory) are running after agent_end.
+    /// While true: text field enabled (can type), send button disabled (can't send).
+    var isPostProcessing = false
+    /// Compaction is in progress (LLM summarizer call running).
+    /// While true: send button disabled, spinning compaction pill shown.
+    var isCompacting = false
     var connectionState: ConnectionState = .disconnected
     var showSettings = false
     var errorMessage: String?
@@ -129,6 +135,8 @@ final class ChatViewModel: ChatEventContext {
     var thinkingMessageId: UUID?
     /// ID of the catching-up notification message (removed on turn_end/complete)
     var catchingUpMessageId: UUID?
+    /// ID of the compaction-in-progress notification (replaced when compaction completes)
+    var compactionInProgressMessageId: UUID?
 
     // MARK: - Sub-Managers
 
@@ -239,6 +247,18 @@ final class ChatViewModel: ChatEventContext {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.connectionState = self.rpcClient.connectionState
+
+                // Clear stale processing state on disconnect — server may have
+                // crashed during post-processing, so agent_ready will never arrive.
+                if case .disconnected = self.connectionState {
+                    if self.isProcessing {
+                        self.isProcessing = false
+                    }
+                    if self.isPostProcessing {
+                        self.isPostProcessing = false
+                    }
+                }
+
                 // Re-register for the next change
                 self.observeConnectionStateChanges()
             }

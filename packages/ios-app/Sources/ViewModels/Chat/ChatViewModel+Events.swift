@@ -114,6 +114,15 @@ extension ChatViewModel {
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
+        // Clear stale flags (safety: handles events not arriving from previous cycle)
+        if isPostProcessing {
+            isPostProcessing = false
+        }
+        if isCompacting {
+            isCompacting = false
+            compactionInProgressMessageId = nil
+        }
+
         // Process through handler (resets handler streaming state)
         let result = eventHandler.handleTurnStart(pluginResult)
 
@@ -144,12 +153,40 @@ extension ChatViewModel {
 
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
+
+        // Enter post-processing state: text field enabled, send button disabled.
+        // Cleared by agent_ready event when background hooks finish.
+        isPostProcessing = true
+    }
+
+    func handleAgentReady() {
+        isPostProcessing = false
+        logInfo("Agent ready - post-processing complete")
+    }
+
+    func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {
+        logger.info("Compaction started (reason: \(pluginResult.reason))", category: .events)
+
+        // Block the send button while compaction runs
+        isCompacting = true
+
+        // Finalize any current streaming before adding notification
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
+
+        // Add spinning "Compacting..." pill to chat
+        let inProgressMessage = ChatMessage.compactionInProgress(reason: pluginResult.reason)
+        messages.append(inProgressMessage)
+        compactionInProgressMessageId = inProgressMessage.id
     }
 
     func handleCompaction(_ pluginResult: CompactionPlugin.Result) {
         // Process event through handler
         let result = eventHandler.handleCompaction(pluginResult)
         logger.info("Context compacted: \(result.tokensBefore) -> \(result.tokensAfter) tokens (saved \(result.tokensSaved), reason: \(result.reason))", category: .events)
+
+        // Clear compaction blocking state
+        isCompacting = false
 
         // Finalize any current streaming before adding notification
         flushPendingTextUpdates()
@@ -159,14 +196,27 @@ extension ChatViewModel {
         contextState.lastTurnInputTokens = result.tokensAfter
         logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after compaction", category: .events)
 
-        // Add compaction notification pill to chat
-        let compactionMessage = ChatMessage.compaction(
-            tokensBefore: result.tokensBefore,
-            tokensAfter: result.tokensAfter,
-            reason: result.reason,
-            summary: result.summary
-        )
-        messages.append(compactionMessage)
+        // Replace the in-progress pill with the final compaction pill
+        if let inProgressId = compactionInProgressMessageId,
+           let index = MessageFinder.indexById(inProgressId, in: messages) {
+            let compactionMessage = ChatMessage.compaction(
+                tokensBefore: result.tokensBefore,
+                tokensAfter: result.tokensAfter,
+                reason: result.reason,
+                summary: result.summary
+            )
+            messages[index] = compactionMessage
+            compactionInProgressMessageId = nil
+        } else {
+            // No in-progress pill found (e.g. reconstruction) — just append
+            let compactionMessage = ChatMessage.compaction(
+                tokensBefore: result.tokensBefore,
+                tokensAfter: result.tokensAfter,
+                reason: result.reason,
+                summary: result.summary
+            )
+            messages.append(compactionMessage)
+        }
 
         // Refresh context from server to ensure context limit is also current
         Task {
@@ -249,6 +299,9 @@ extension ChatViewModel {
         streamingManager.reset()
 
         isProcessing = false
+        isPostProcessing = false
+        isCompacting = false
+        compactionInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

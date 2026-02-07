@@ -31,12 +31,11 @@ struct SettingsView: View {
     @State private var showArchiveAllConfirmation = false
     @State private var isArchivingAll = false
 
-    // Quick Session settings
-    @AppStorage("quickSessionWorkspace") private var quickSessionWorkspace = "/Users/moose/Workspace"
-
-    // Compaction settings
-    @AppStorage("preserveRecentTurns") private var preserveRecentTurns: Int = 5
-    @AppStorage("forceAlwaysCompact") private var forceAlwaysCompact: Bool = false
+    // Server-authoritative settings (loaded via RPC)
+    @State private var quickSessionWorkspace = "/Users/moose/Workspace"
+    @State private var preserveRecentTurns: Int = 5
+    @State private var forceAlwaysCompact: Bool = false
+    @State private var settingsLoaded = false
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showModelPicker = false
     @State private var availableModels: [ModelInfo] = []
@@ -229,10 +228,20 @@ struct SettingsView: View {
                             .fixedSize()
                             .controlSize(.small)
                     }
+                    .onChange(of: preserveRecentTurns) { _, newValue in
+                        updateServerSetting {
+                            ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
+                        }
+                    }
 
                     Toggle(isOn: $forceAlwaysCompact) {
                         Label("Compact Every Cycle", systemImage: "arrow.triangle.2.circlepath")
                             .font(TronTypography.subheadline)
+                    }
+                    .onChange(of: forceAlwaysCompact) { _, newValue in
+                        updateServerSetting {
+                            ServerSettingsUpdate(context: .init(compactor: .init(forceAlways: newValue)))
+                        }
                     }
                 } header: {
                     Text("Compaction")
@@ -291,7 +300,16 @@ struct SettingsView: View {
             .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
                 WorkspaceSelector(
                     rpcClient: rpcClient,
-                    selectedPath: $quickSessionWorkspace
+                    selectedPath: Binding(
+                        get: { quickSessionWorkspace },
+                        set: { newValue in
+                            quickSessionWorkspace = newValue
+                            dependencies?.quickSessionWorkspace = newValue
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
+                            }
+                        }
+                    )
                 )
             }
             .sheet(isPresented: $showModelPicker) {
@@ -301,11 +319,15 @@ struct SettingsView: View {
                         currentModelId: defaultModelValue,
                         onSelect: { model in
                             defaultModelBinding.wrappedValue = model.id
+                            updateServerSetting {
+                                ServerSettingsUpdate(server: .init(defaultModel: model.id))
+                            }
                         }
                     )
                 }
             }
             .task {
+                await loadSettings()
                 await loadModels()
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -368,6 +390,14 @@ struct SettingsView: View {
         confirmArchive = true
         preserveRecentTurns = 5
         forceAlwaysCompact = false
+        quickSessionWorkspace = "/Users/moose/Workspace"
+        // Reset server-side settings
+        updateServerSetting {
+            ServerSettingsUpdate(
+                server: .init(defaultWorkspace: "/Users/moose/Workspace"),
+                context: .init(compactor: .init(preserveRecentCount: 5, forceAlways: false))
+            )
+        }
         // Trigger server reconnection with Beta port
         dependencies?.updateServerSettings(host: "localhost", port: "8082", useTLS: false)
     }
@@ -377,6 +407,28 @@ struct SettingsView: View {
         Task {
             await eventStoreManager.archiveAllSessions()
             isArchivingAll = false
+        }
+    }
+
+    private func loadSettings() async {
+        guard !settingsLoaded else { return }
+        do {
+            let settings = try await rpcClient.settings.get()
+            preserveRecentTurns = settings.compaction.preserveRecentTurns
+            forceAlwaysCompact = settings.compaction.forceAlways
+            if let workspace = settings.defaultWorkspace {
+                quickSessionWorkspace = workspace
+            }
+            settingsLoaded = true
+        } catch {
+            // Use local defaults on failure — server may be unreachable
+        }
+    }
+
+    private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
+        let update = build()
+        Task {
+            try? await rpcClient.settings.update(update)
         }
     }
 

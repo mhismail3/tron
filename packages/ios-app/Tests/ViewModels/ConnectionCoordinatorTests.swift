@@ -393,6 +393,7 @@ final class MockConnectionContext: ConnectionContext {
     // MARK: - State
     var sessionId: String = "test-session"
     var isProcessing: Bool = false
+    var isPostProcessing: Bool = false
     var shouldDismiss: Bool = false
     var isConnected: Bool = false
 

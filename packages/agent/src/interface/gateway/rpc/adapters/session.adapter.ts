@@ -79,7 +79,6 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
       const session = await orchestrator.sessions.createSession({
         workingDirectory: params.workingDirectory,
         model: params.model,
-        compactionConfig: params.compactionConfig,
       });
       return {
         sessionId: session.sessionId,

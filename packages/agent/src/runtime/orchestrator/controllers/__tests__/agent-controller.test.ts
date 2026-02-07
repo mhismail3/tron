@@ -24,6 +24,8 @@ describe('AgentController', () => {
     wasInterrupted: false,
     agent: {
       abort: vi.fn(),
+      getPendingBackgroundHookCount: vi.fn().mockReturnValue(0),
+      waitForBackgroundHooks: vi.fn().mockResolvedValue(undefined),
     },
     sessionContext: {
       isProcessing: vi.fn(),
@@ -149,6 +151,35 @@ describe('AgentController', () => {
 
       // Processing should be cleared even on error
       expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenLastCalledWith(false);
+    });
+
+    it('waits for pending background hooks before starting new run', async () => {
+      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
+      (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(2);
+      mockAgentRunner.run.mockResolvedValue([]);
+
+      await controller.run({
+        sessionId: 'sess-123',
+        prompt: 'Hello',
+      });
+
+      expect((mockActiveSession.agent as any).waitForBackgroundHooks).toHaveBeenCalledWith(10_000);
+      expect(mockAgentRunner.run).toHaveBeenCalled();
+    });
+
+    it('skips background hook wait when none are pending', async () => {
+      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
+      (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(0);
+      mockAgentRunner.run.mockResolvedValue([]);
+
+      await controller.run({
+        sessionId: 'sess-123',
+        prompt: 'Hello',
+      });
+
+      expect((mockActiveSession.agent as any).waitForBackgroundHooks).not.toHaveBeenCalled();
     });
 
     it('updates lastActivity timestamp', async () => {

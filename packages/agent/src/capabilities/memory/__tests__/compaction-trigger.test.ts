@@ -149,6 +149,48 @@ describe('CompactionTrigger', () => {
     });
   });
 
+  describe('forceAlways', () => {
+    it('should trigger immediately when forceAlways is enabled', () => {
+      trigger.setForceAlways(true);
+
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.10,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('force-always');
+    });
+
+    it('should restore normal behavior when forceAlways is disabled', () => {
+      trigger.setForceAlways(true);
+      trigger.setForceAlways(false);
+
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.10,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(false);
+    });
+
+    it('should take precedence over token threshold check', () => {
+      trigger.setForceAlways(true);
+
+      // Even at 0% usage, forceAlways triggers
+      const result = trigger.shouldCompact({
+        currentTokenRatio: 0.0,
+        recentEventTypes: [],
+        recentToolCalls: [],
+      });
+
+      expect(result.compact).toBe(true);
+      expect(result.reason).toContain('force-always');
+    });
+  });
+
   describe('reset', () => {
     it('should reset turn counter after compaction trigger', () => {
       // Trigger via commit

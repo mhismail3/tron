@@ -57,6 +57,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var media: MediaClient = MediaClient(transport: self)
 
+    /// Settings operations client (server-authoritative settings)
+    @ObservationIgnored
+    lazy var settings: SettingsClient = SettingsClient(transport: self)
+
     /// Miscellaneous operations client (system, skills, canvas, worktree, todo, device, memory, message)
     @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)

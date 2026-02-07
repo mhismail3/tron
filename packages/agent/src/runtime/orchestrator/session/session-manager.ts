@@ -73,7 +73,6 @@ export interface SessionManagerConfig {
     model: string,
     systemPrompt?: string,
     isSubagent?: boolean,
-    compactionConfig?: { preserveRecentTurns?: number; forceAlways?: boolean }
   ) => Promise<TronAgent>;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
@@ -142,7 +141,6 @@ export class SessionManager {
       model,
       options.systemPrompt,
       isSubagent,
-      options.compactionConfig
     );
 
     // Load rules files for the session
@@ -257,6 +255,11 @@ export class SessionManager {
     // Check if already active
     const existing = this.config.getActiveSession(sessionId);
     if (existing) {
+      // Drain any pending background hooks (compaction, memory ledger) so
+      // events they persist are visible when iOS fetches history.
+      if (existing.agent.getPendingBackgroundHookCount() > 0) {
+        await existing.agent.waitForBackgroundHooks(10_000);
+      }
       existing.lastActivity = new Date();
       const session = await this.eventStore.getSession(sessionId as SessionId);
       return this.sessionRowToInfo(session!, true, existing.workingDir);

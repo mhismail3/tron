@@ -33,6 +33,7 @@ describe('AgentCompactionHandler', () => {
         contextLimit: 100000,
         usagePercent: 50,
         thresholdLevel: 'normal',
+        breakdown: { systemPrompt: 1000, tools: 1500, rules: 500, messages: 47000 },
       }),
       executeCompaction: vi.fn().mockResolvedValue({
         success: true,
@@ -133,7 +134,7 @@ describe('AgentCompactionHandler', () => {
         expect.objectContaining({
           type: 'compaction_start',
           reason: 'pre_turn_guardrail',
-          tokensBefore: 50000,
+          tokensBefore: 47000,
         })
       );
     });

@@ -28,6 +28,7 @@ function createMockContextManager(): Partial<ContextManager> {
       currentTokens: 50000,
       contextLimit: 100000,
       thresholdLevel: 'none',
+      breakdown: { systemPrompt: 1000, tools: 1500, rules: 500, messages: 47000 },
     }),
     executeCompaction: vi.fn().mockResolvedValue({
       success: true,

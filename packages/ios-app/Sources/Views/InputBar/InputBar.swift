@@ -46,11 +46,11 @@ struct InputBar: View {
     // MARK: - Computed Properties
 
     private var canSend: Bool {
-        state.hasContent
+        state.hasContent && !config.isPostProcessing && !config.isCompacting
     }
 
     private var shouldShowActionButton: Bool {
-        config.isProcessing || canSend
+        config.isProcessing || canSend || config.isPostProcessing
     }
 
     private var shouldShowStatusPills: Bool {

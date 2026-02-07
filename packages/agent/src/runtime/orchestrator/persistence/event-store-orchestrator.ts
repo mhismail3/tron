@@ -285,8 +285,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       deleteActiveSession: (sessionId: string) => this.activeSessions.delete(sessionId),
       getActiveSessionCount: () => this.activeSessions.size,
       getAllActiveSessions: () => this.activeSessions.entries(),
-      createAgentForSession: (sessionId, workingDirectory, model, systemPrompt, isSubagent, compactionConfig) =>
-        this.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent, compactionConfig),
+      createAgentForSession: (sessionId, workingDirectory, model, systemPrompt, isSubagent) =>
+        this.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent),
       emit: (event, data) => this.emit(event, data),
       estimateTokens: (text) => this.estimateTokens(text),
       hasBrowserSession: (sessionId) => this.browserService?.hasSession(sessionId) ?? false,
@@ -584,9 +584,8 @@ export class EventStoreOrchestrator extends EventEmitter {
     model: string,
     systemPrompt?: string,
     isSubagent?: boolean,
-    compactionConfig?: { preserveRecentTurns?: number; forceAlways?: boolean }
   ): Promise<TronAgent> {
-    return this.agentFactory.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent, undefined, compactionConfig);
+    return this.agentFactory.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent);
   }
 
   // ===========================================================================
