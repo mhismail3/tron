@@ -248,16 +248,21 @@ Actions:
 - Analyze data: container with Python + pandas/numpy, run the analysis
 - Process documents: container with pandoc, LibreOffice, or any CLI tool
 
-**Running services.** Start databases, web servers, API backends — anything that listens on a port. Interact with them via exec (curl, psql, redis-cli, etc.) or via WebFetch from the host through mapped ports.
+**Running services.** Start databases, web servers, API backends — anything that listens on a port. Interact with them via exec (curl, psql, redis-cli, etc.) from inside the container.
 - `create` with `ports: ["5432:5432"]`, then exec to start PostgreSQL and run queries
 - `create` with `ports: ["6379:6379"]` for Redis, then exec redis-cli commands
-- Any service that speaks HTTP can also be hit via WebFetch from the host side
 
-**Interactive UIs for the user's phone.** Create with port mappings, build a web app inside the container, start a dev server, then call OpenURL with `http://{tailscale-hostname}:{port}` to open it on iOS. The full pattern:
-1. `create` with `ports: ["3000:3000"]`
-2. `exec`: install Node.js, scaffold a React/Vite app in `/workspace`
-3. `exec`: start the dev server (use `timeout` for long-running processes)
-4. OpenURL to push it to the user's phone
+**User-facing web apps and UIs.** When you build something the user should see and interact with — a dashboard, a form, a visualization, a prototype — serve it from a container and open it on their phone. The container's mapped port is reachable at the same IP address the iOS app uses to connect to this server. **Always use OpenURL** to push the URL to the user's in-app browser — don't just tell them the URL.
+
+The pattern:
+1. `create` with `ports: ["3000:3000"]` (or whatever port the app uses)
+2. `exec`: install dependencies, scaffold the app, write code — all in `/workspace`
+3. `exec`: start the server in the background (`nohup node server.js > /tmp/server.log 2>&1 &`)
+4. `exec`: verify it's running (`curl -s http://localhost:3000`)
+5. OpenURL with `http://{server-ip}:3000` — use the same IP/hostname the iOS app connects to
+6. **Keep the container running.** Don't stop or remove it — the user is actively using it. Only clean up when they ask.
+
+This works for anything with a web interface: React/Vite apps, Jupyter notebooks, admin dashboards, API documentation UIs, data visualizations, interactive tools.
 
 **Tool augmentation.** When you need capabilities the host doesn't have — different language runtimes, system libraries, CLI tools — a container gives you a full Linux userspace. Install whatever you need.
 
