@@ -4,7 +4,7 @@
 
 1. **Code, tests, and docs ship together.** Every change must include updated tests and updated documentation in the same commit. Outdated docs and missing tests are bugs.
 2. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
-3. **Use `@tron-db` skill** to investigate issues. Query `~/.tron/db/` directly — don't guess.
+3. **Use `@tron-db` skill** to investigate issues. Query `~/.tron/database/` directly — don't guess.
 4. **Follow established patterns.** Read `packages/agent/docs/patterns.md` before implementing new features.
 5. **NEVER use `bun test`** — it invokes Bun's built-in runner, not vitest. ALWAYS use `bun run test`.
 

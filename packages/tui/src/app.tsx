@@ -573,7 +573,7 @@ export function App({ config, auth }: AppProps): React.ReactElement {
     const initializeSession = async () => {
       // Create EventStore for session management
       const globalTronDir = path.join(os.homedir(), '.tron');
-      const eventStoreDbPath = path.join(globalTronDir, 'db', 'prod.db');
+      const eventStoreDbPath = path.join(globalTronDir, 'database', 'prod.db');
 
       // Initialize EventStore
       const eventStore = new EventStore(eventStoreDbPath);

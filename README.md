@@ -467,10 +467,10 @@ cd packages/ios-app && xcodegen generate && open TronMobile.xcodeproj
 
 ```bash
 # Query events
-sqlite3 ~/.tron/db/prod.db "SELECT type, substr(payload, 1, 100) FROM events ORDER BY rowid DESC LIMIT 10"
+sqlite3 ~/.tron/database/prod.db "SELECT type, substr(payload, 1, 100) FROM events ORDER BY rowid DESC LIMIT 10"
 
 # Query sessions
-sqlite3 ~/.tron/db/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
+sqlite3 ~/.tron/database/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
 ```
 
 ---
@@ -509,8 +509,8 @@ Run beta and production simultaneously:
 
 | Environment | WebSocket | Health | Database |
 |-------------|-----------|--------|----------|
-| Production | 8080 | 8081 | `~/.tron/db/prod.db` |
-| Beta | 8082 | 8083 | `~/.tron/db/beta.db` |
+| Production | 8080 | 8081 | `~/.tron/database/prod.db` |
+| Beta | 8082 | 8083 | `~/.tron/database/beta.db` |
 
 ```bash
 tron dev         # Run beta server (Ctrl+C to stop)
@@ -636,7 +636,7 @@ Response: { status: "ok", version: "1.0.0" }
 
 ```
 ~/.tron/
-├── db/                 # SQLite databases (prod.db, beta.db)
+├── database/           # SQLite databases (prod.db, beta.db)
 ├── logs/               # Server logs
 ├── settings.json       # Global settings
 ├── SYSTEM.md           # Global system prompt

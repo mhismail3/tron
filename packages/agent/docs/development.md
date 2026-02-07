@@ -215,7 +215,7 @@ describe('MyFeature', () => {
 
 | Location | Purpose |
 |----------|---------|
-| `~/.tron/db/` | SQLite databases |
+| `~/.tron/database/` | SQLite databases |
 | `~/.tron/skills/` | Global skills |
 | `~/.tron/settings.json` | User settings |
 | `~/.tron/auth.json` | API keys and OAuth tokens |
@@ -232,17 +232,17 @@ TRON_LOG_LEVEL=debug bun run dev
 
 ```bash
 # Query events
-sqlite3 ~/.tron/db/prod.db "SELECT type, json_extract(payload, '$.name') FROM events WHERE type LIKE 'tool.%' LIMIT 10"
+sqlite3 ~/.tron/database/prod.db "SELECT type, json_extract(payload, '$.name') FROM events WHERE type LIKE 'tool.%' LIMIT 10"
 
 # Query sessions
-sqlite3 ~/.tron/db/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
+sqlite3 ~/.tron/database/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
 ```
 
 ### Event Inspection
 
 ```bash
 # View recent events for a session
-sqlite3 ~/.tron/db/prod.db "SELECT sequence, type, substr(payload, 1, 100) FROM events WHERE session_id='sess_xxx' ORDER BY sequence"
+sqlite3 ~/.tron/database/prod.db "SELECT sequence, type, substr(payload, 1, 100) FROM events WHERE session_id='sess_xxx' ORDER BY sequence"
 ```
 
 ## Troubleshooting

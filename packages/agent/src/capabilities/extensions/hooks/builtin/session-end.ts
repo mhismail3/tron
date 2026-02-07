@@ -2,7 +2,7 @@
  * @fileoverview SessionEnd Built-in Hook
  *
  * Executes when a session ends.
- * Session history is preserved via the event-sourced system (~/.tron/db/).
+ * Session history is preserved via the event-sourced system (~/.tron/database/).
  */
 
 import type {

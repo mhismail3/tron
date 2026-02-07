@@ -19,7 +19,7 @@ Commands:
     stats       Database statistics
 
 Environment:
-    TRON_DB - Path to database (default: ~/.tron/db/prod.db or beta.db)
+    TRON_DB - Path to database (default: ~/.tron/database/prod.db or beta.db)
 """
 
 import os
@@ -36,13 +36,13 @@ def get_db_path():
     if os.environ.get("TRON_DB"):
         return os.environ["TRON_DB"]
 
-    tron_dir = Path.home() / ".tron" / "db"
+    tron_dir = Path.home() / ".tron" / "database"
     for db_name in ["prod.db", "beta.db"]:
         db_path = tron_dir / db_name
         if db_path.exists():
             return str(db_path)
 
-    print("Error: No Tron database found at ~/.tron/db/prod.db or beta.db", file=sys.stderr)
+    print("Error: No Tron database found at ~/.tron/database/prod.db or beta.db", file=sys.stderr)
     print("Set TRON_DB environment variable to specify database path", file=sys.stderr)
     sys.exit(1)
 

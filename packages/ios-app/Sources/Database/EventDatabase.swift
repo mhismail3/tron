@@ -40,7 +40,7 @@ final class EventDatabase: DatabaseTransport {
             fatalError("EventDatabase: Unable to access Documents directory - app cannot function")
         }
         let tronDir = documentsURL.appendingPathComponent(".tron", isDirectory: true)
-        let dbDir = tronDir.appendingPathComponent("db", isDirectory: true)
+        let dbDir = tronDir.appendingPathComponent("database", isDirectory: true)
 
         // Create directories if needed
         try? fileManager.createDirectory(at: dbDir, withIntermediateDirectories: true)

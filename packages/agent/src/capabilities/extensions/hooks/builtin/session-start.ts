@@ -2,7 +2,7 @@
  * @fileoverview SessionStart Built-in Hook
  *
  * Executes when a new session begins.
- * Session history is available via the event-sourced system (~/.tron/db/).
+ * Session history is available via the event-sourced system (~/.tron/database/).
  */
 
 import type {

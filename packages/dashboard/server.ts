@@ -24,7 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const DB_NAME = process.env.DB_NAME || 'beta.db';
 const TRON_HOME = process.env.TRON_HOME || path.join(process.env.HOME || '~', '.tron');
-const DB_PATH = path.join(TRON_HOME, 'db', DB_NAME);
+const DB_PATH = path.join(TRON_HOME, 'database', DB_NAME);
 
 // =============================================================================
 // Server State

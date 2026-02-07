@@ -101,8 +101,14 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/{db,mods,notes,plans,skills,artifacts/canvases}
+    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,artifacts/canvases}
     mkdir -p "$TRON_HOME"/mods/apns
+
+    # Migrate legacy db/ → database/
+    if [ -d "$TRON_HOME/db" ] && [ ! -L "$TRON_HOME/db" ]; then
+        mv "$TRON_HOME/db"/* "$TRON_HOME/database/" 2>/dev/null
+        rmdir "$TRON_HOME/db" 2>/dev/null
+    fi
 }
 
 get_bun_path() {
@@ -454,8 +460,8 @@ query_logs() {
     fi
 
     # Database mode
-    local db_path="$TRON_HOME/db/prod.db"
-    [ "$tier" = "beta" ] && db_path="$TRON_HOME/db/beta.db"
+    local db_path="$TRON_HOME/database/prod.db"
+    [ "$tier" = "beta" ] && db_path="$TRON_HOME/database/beta.db"
 
     if [ ! -f "$db_path" ]; then
         print_error "Database not found: $db_path"
@@ -646,7 +652,7 @@ cmd_dev() {
     export TRON_WS_PORT=$BETA_WS_PORT
     export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
     export TRON_BUILD_TIER=beta
-    export TRON_EVENT_STORE_DB="$TRON_HOME/db/beta.db"
+    export TRON_EVENT_STORE_DB="$TRON_HOME/database/beta.db"
     export TRON_REPO_ROOT="$PROJECT_DIR"
     export LOG_LEVEL="${LOG_LEVEL:-trace}"
     export NODE_ENV=development
@@ -1245,8 +1251,8 @@ cmd_restart() {
 
 cmd_errors() {
     local tier="${1:-prod}"
-    local db_path="$TRON_HOME/db/prod.db"
-    [ "$tier" = "beta" ] && db_path="$TRON_HOME/db/beta.db"
+    local db_path="$TRON_HOME/database/prod.db"
+    [ "$tier" = "beta" ] && db_path="$TRON_HOME/database/beta.db"
 
     if [ -f "$db_path" ]; then
         echo -e "${RED}Recent errors from database:${NC}"

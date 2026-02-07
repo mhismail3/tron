@@ -135,8 +135,8 @@ describe('GuardrailEngine', () => {
       expect(evaluation.triggeredRules.some(r => r.ruleId === 'core.tron-app-protection')).toBe(true);
     });
 
-    it('should block writes to ~/.tron/db directory', async () => {
-      const dbPath = path.join(os.homedir(), '.tron', 'db', 'prod.db');
+    it('should block writes to ~/.tron/database directory', async () => {
+      const dbPath = path.join(os.homedir(), '.tron', 'database', 'prod.db');
       const context: EvaluationContext = {
         toolName: 'Write',
         toolArguments: { file_path: dbPath, content: 'test' },

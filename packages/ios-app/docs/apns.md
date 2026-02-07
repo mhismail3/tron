@@ -152,7 +152,7 @@ Push notifications don't work on Simulator. Use a physical device.
 
 ```bash
 # On server, trigger notification
-sqlite3 ~/.tron/db/prod.db "SELECT token FROM device_tokens LIMIT 1"
+sqlite3 ~/.tron/database/prod.db "SELECT token FROM device_tokens LIMIT 1"
 
 # Use curl to test APNS directly (requires JWT generation)
 ```

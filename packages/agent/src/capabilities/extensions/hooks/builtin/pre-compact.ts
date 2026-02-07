@@ -2,7 +2,7 @@
  * @fileoverview PreCompact Built-in Hook
  *
  * Executes before context compaction.
- * Session history is preserved via the event-sourced system (~/.tron/db/).
+ * Session history is preserved via the event-sourced system (~/.tron/database/).
  */
 
 import type {

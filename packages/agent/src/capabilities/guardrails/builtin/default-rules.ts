@@ -111,14 +111,14 @@ export const CORE_TRON_APP_PROTECTION: PathRule = {
 };
 
 /**
- * Core rule: Protect ~/.tron/db directory (database files)
+ * Core rule: Protect ~/.tron/database directory (database files)
  *
- * The agent cannot write, edit, or delete any files in ~/.tron/db/.
+ * The agent cannot write, edit, or delete any files in ~/.tron/database/.
  */
 export const CORE_TRON_DB_PROTECTION: PathRule = {
   id: 'core.tron-db-protection',
   name: 'Tron DB Protection',
-  description: 'Protects the ~/.tron/db directory from agent modifications',
+  description: 'Protects the ~/.tron/database directory from agent modifications',
   type: 'path',
   severity: 'block',
   scope: 'global',
@@ -129,8 +129,8 @@ export const CORE_TRON_DB_PROTECTION: PathRule = {
   tags: ['security', 'config-protection'],
   pathArguments: ['file_path', 'path', 'command'],
   protectedPaths: [
-    path.join(os.homedir(), '.tron', 'db'),
-    path.join(os.homedir(), '.tron', 'db', '**'),
+    path.join(os.homedir(), '.tron', 'database'),
+    path.join(os.homedir(), '.tron', 'database', '**'),
   ],
 };
 

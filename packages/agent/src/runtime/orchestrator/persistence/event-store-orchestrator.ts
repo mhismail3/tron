@@ -229,7 +229,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       this.eventStore = config.eventStore;
     } else {
       const eventStoreDbPath = config.eventStoreDbPath ??
-        path.join(os.homedir(), '.tron', 'db', 'prod.db');
+        path.join(os.homedir(), '.tron', 'database', 'prod.db');
       this.eventStore = new EventStore(eventStoreDbPath);
     }
 

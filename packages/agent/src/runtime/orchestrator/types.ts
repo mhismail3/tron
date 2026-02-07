@@ -21,7 +21,7 @@ import type { SessionContext } from './session/session-context.js';
 // =============================================================================
 
 export interface EventStoreOrchestratorConfig {
-  /** Path to event store database (defaults to ~/.tron/db/prod.db) */
+  /** Path to event store database (defaults to ~/.tron/database/prod.db) */
   eventStoreDbPath?: string;
   /** Default model */
   defaultModel: string;
