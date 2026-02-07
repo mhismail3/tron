@@ -80,18 +80,16 @@ struct ContextUsageGaugeView: View {
                         .foregroundStyle(usageColor)
                 }
 
-                // Progress bar
+                // Progress bar - use overlay + clipShape to prevent thin-line artifact at low fill
                 GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Background
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.white.opacity(0.1))
-
-                        // Fill
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(usageColor.opacity(0.8))
-                            .frame(width: geometry.size.width * min(usagePercent, 1.0))
-                    }
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(0.1))
+                        .overlay(alignment: .leading) {
+                            Rectangle()
+                                .fill(usageColor.opacity(0.8))
+                                .frame(width: geometry.size.width * min(usagePercent, 1.0))
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .frame(height: 10)
 
