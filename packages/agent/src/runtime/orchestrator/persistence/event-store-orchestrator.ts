@@ -339,6 +339,11 @@ export class EventStoreOrchestrator extends EventEmitter {
       } : undefined,
       memoryConfig: {
         appendEvent: async (sessionId, type, payload) => {
+          const active = this.activeSessions.get(sessionId);
+          if (active?.sessionContext) {
+            const event = await active.sessionContext.appendEvent(type, payload);
+            if (event) return { id: event.id };
+          }
           const event = await this.eventStore.append({
             sessionId: sessionId as SessionId,
             type,

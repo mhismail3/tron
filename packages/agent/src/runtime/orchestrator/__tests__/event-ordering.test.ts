@@ -925,3 +925,121 @@ describe('Event Ordering - Edge Cases', () => {
     });
   });
 });
+
+// =============================================================================
+// Memory Ledger Linearization Tests
+// =============================================================================
+
+describe('Event Ordering - Memory Ledger Linearization', () => {
+  let eventStore: EventStore;
+  let testDir: string;
+  let sessionId: SessionId;
+  let initialHeadEventId: string;
+
+  beforeEach(async () => {
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tron-memory-ledger-test-'));
+    const dbPath = path.join(testDir, 'events.db');
+    eventStore = new EventStore(dbPath);
+    await eventStore.initialize();
+
+    const result = await eventStore.createSession({
+      workspacePath: '/test/project',
+      workingDirectory: '/test/project',
+      model: 'claude-sonnet-4-20250514',
+    });
+    sessionId = result.session.id;
+    initialHeadEventId = result.rootEvent.id;
+  });
+
+  afterEach(async () => {
+    await eventStore.close();
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('memory.ledger appended via SessionContext stays in ancestor chain', async () => {
+    const { createSessionContext } = await import('../session/session-context.js');
+    const ctx = createSessionContext({
+      sessionId,
+      eventStore,
+      initialHeadEventId: initialHeadEventId as any,
+      model: 'claude-sonnet-4-20250514',
+      workingDirectory: '/test/project',
+    });
+
+    // Append a conversation turn
+    await ctx.appendEvent('message.user', { content: 'Hello' });
+    await ctx.appendEvent('message.assistant', {
+      content: [{ type: 'text', text: 'Hi there!' }],
+      turn: 1,
+      stopReason: 'end_turn',
+    });
+
+    // Append memory.ledger through the linearized path (the fix)
+    await ctx.appendEvent('memory.ledger', {
+      entries: [{ key: 'test', value: 'data' }],
+    });
+
+    // Append session.end after memory.ledger
+    await ctx.appendEvent('session.end', { reason: 'user_closed' });
+
+    await ctx.flushEvents();
+
+    // Walk ancestors from head — all events should be reachable
+    const headId = ctx.getPendingHeadEventId();
+    const ancestors = await eventStore.getAncestors(headId);
+
+    const types = ancestors.map(e => e.type);
+    expect(types).toContain('memory.ledger');
+    expect(types).toContain('session.end');
+
+    // Verify linear chain — no branching
+    for (let i = 1; i < ancestors.length; i++) {
+      expect(ancestors[i].parentId).toBe(ancestors[i - 1].id);
+    }
+  });
+
+  it('concurrent memory.ledger and session.end via SessionContext do not branch', async () => {
+    const { createSessionContext } = await import('../session/session-context.js');
+    const ctx = createSessionContext({
+      sessionId,
+      eventStore,
+      initialHeadEventId: initialHeadEventId as any,
+      model: 'claude-sonnet-4-20250514',
+      workingDirectory: '/test/project',
+    });
+
+    await ctx.appendEvent('message.user', { content: 'Work done' });
+
+    // Fire both concurrently (fire-and-forget) — this is the race scenario
+    ctx.appendEventFireAndForget('memory.ledger', {
+      entries: [{ key: 'insight', value: 'learned something' }],
+    });
+    ctx.appendEventFireAndForget('session.end', { reason: 'user_closed' });
+
+    await ctx.flushEvents();
+
+    const headId = ctx.getPendingHeadEventId();
+    const ancestors = await eventStore.getAncestors(headId);
+
+    const types = ancestors.map(e => e.type);
+    expect(types).toContain('memory.ledger');
+    expect(types).toContain('session.end');
+
+    // Verify linear chain — no branching
+    for (let i = 1; i < ancestors.length; i++) {
+      expect(ancestors[i].parentId).toBe(ancestors[i - 1].id);
+    }
+
+    // Verify no siblings: each parent_id should appear exactly once
+    const parentCounts = new Map<string, number>();
+    for (const event of ancestors) {
+      if (event.parentId) {
+        const count = parentCounts.get(event.parentId) ?? 0;
+        parentCounts.set(event.parentId, count + 1);
+      }
+    }
+    for (const [parentId, count] of parentCounts) {
+      expect(count).toBe(1);
+    }
+  });
+});
