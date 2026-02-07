@@ -117,9 +117,9 @@ describe('TronAgent + ContextManager Integration', () => {
       const agent = new TronAgent(createTestConfig());
       const cm = agent.getContextManager();
 
-      // Before first turn, API tokens are 0
+      // Before first turn, falls back to component estimates (system prompt overhead)
       const beforeTokens = cm.getCurrentTokens();
-      expect(beforeTokens).toBe(0);
+      expect(beforeTokens).toBeGreaterThanOrEqual(0);
 
       agent.addMessage({ role: 'user', content: 'Hello world' });
       // Simulate API reporting tokens after a turn
@@ -279,8 +279,8 @@ describe('TronAgent + ContextManager Integration', () => {
       });
 
       expect(result.success).toBe(true);
-      // After compaction, API tokens are reset to 0 until next turn
-      expect(cm.getCurrentTokens()).toBe(0);
+      // After compaction, API tokens reset — falls back to component estimates (> 0)
+      expect(cm.getCurrentTokens()).toBeGreaterThan(0);
       expect(result.tokensBefore).toBe(messageTokensBefore);
     });
   });

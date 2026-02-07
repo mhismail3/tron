@@ -192,9 +192,11 @@ extension ChatViewModel {
         flushPendingTextUpdates()
         finalizeStreamingMessage()
 
-        // Update context tracking - the new context size is tokensAfter
-        contextState.lastTurnInputTokens = result.tokensAfter
-        logger.debug("Updated lastTurnInputTokens to \(result.tokensAfter) after compaction", category: .events)
+        // Update context tracking — prefer estimatedContextTokens (total context including
+        // system prompt, tools, rules) over tokensAfter (messages-only) for accurate pill display
+        let postCompactionTokens = result.estimatedContextTokens ?? result.tokensAfter
+        contextState.lastTurnInputTokens = postCompactionTokens
+        logger.debug("Updated lastTurnInputTokens to \(postCompactionTokens) after compaction", category: .events)
 
         // Replace the in-progress pill with the final compaction pill
         if let inProgressId = compactionInProgressMessageId,

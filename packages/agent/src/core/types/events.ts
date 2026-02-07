@@ -455,6 +455,8 @@ export interface CompactionCompleteEvent extends BaseTronEvent {
   reason?: 'pre_turn_guardrail' | 'threshold_exceeded' | 'manual';
   /** Summary of compacted context (for display in UI) */
   summary?: string;
+  /** Estimated total context tokens after compaction (system + tools + rules + compacted messages) */
+  estimatedContextTokens?: number;
 }
 
 /**

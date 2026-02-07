@@ -78,8 +78,9 @@ export class ContextManager {
    * API-reported context token count from model response.
    * This is the ground truth from the actual tokenizer, set after each turn.
    * When available, this is preferred over our char/4 estimates.
+   * null = no API data available (use component estimates as fallback).
    */
-  private lastApiContextTokens: number = 0;
+  private lastApiContextTokens: number | null = null;
 
   constructor(config: ContextManagerConfig) {
     this.model = config.model;
@@ -159,8 +160,8 @@ export class ContextManager {
    */
   setMessages(messages: Message[]): void {
     this.messageStore.set(messages);
-    // Reset API tokens since message set changed - estimate until next turn
-    this.lastApiContextTokens = 0;
+    // Reset API tokens since message set changed — fall back to estimates until next turn
+    this.lastApiContextTokens = null;
   }
 
   /**
@@ -176,8 +177,8 @@ export class ContextManager {
    */
   clearMessages(): void {
     this.messageStore.clear();
-    // Reset API tokens so estimate is used until next turn completes
-    this.lastApiContextTokens = 0;
+    // Reset API tokens — fall back to estimates until next turn completes
+    this.lastApiContextTokens = null;
   }
 
   /**
@@ -270,11 +271,18 @@ export class ContextManager {
 
   /**
    * Get current total token count.
-   * Returns API-reported tokens (ground truth from model's tokenizer).
-   * Returns 0 before first turn completes - this is intentional for UI consistency.
+   * Returns API-reported tokens when available (ground truth from model's tokenizer).
+   * Falls back to sum of component estimates when API data is unavailable
+   * (before first turn, after compaction resets messages, after clearMessages).
    */
   getCurrentTokens(): number {
-    return this.lastApiContextTokens;
+    if (this.lastApiContextTokens !== null) {
+      return this.lastApiContextTokens;
+    }
+    return this.estimateSystemPromptTokens()
+      + this.estimateToolsTokens()
+      + this.estimateRulesTokens()
+      + this.getMessagesTokens();
   }
 
   /**
@@ -304,7 +312,7 @@ export class ContextManager {
    * Get the API-reported context token count (0 if not yet available).
    */
   getApiContextTokens(): number {
-    return this.lastApiContextTokens;
+    return this.lastApiContextTokens ?? 0;
   }
 
   // ===========================================================================

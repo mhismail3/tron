@@ -110,6 +110,7 @@ struct CompactBoundaryPayload {
     let compactedTokens: Int
     let reason: String
     let summary: String?
+    let estimatedContextTokens: Int?
 
     init?(from payload: [String: AnyCodable]) {
         // Range fields are optional (not present in auto-compaction events)
@@ -134,6 +135,9 @@ struct CompactBoundaryPayload {
 
         // Summary is optional (may not be present in auto-compaction events)
         self.summary = payload.string("summary")
+
+        // Estimated total context tokens after compaction (system + tools + rules + messages)
+        self.estimatedContextTokens = payload.int("estimatedContextTokens")
     }
 }
 

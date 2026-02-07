@@ -111,14 +111,17 @@ export class TrackerReconstructor {
   }
 
   /**
-   * Extract API token count from the last turn_end event.
+   * Extract the best available token count from event history.
    *
-   * This ensures Context Manager sheet matches progress bar on session resume.
+   * Scans backwards for either `stream.turn_end` or `compact.boundary`,
+   * whichever is more recent. After compaction, the last turn_end's count
+   * is stale — the compact.boundary's estimatedContextTokens reflects
+   * the actual post-compaction context size.
    */
   private extractApiTokenCount(events: SessionEvent[]): number | undefined {
-    // Find last turn_end event by iterating backwards
     for (let i = events.length - 1; i >= 0; i--) {
       const event = events[i];
+
       if (event?.type === 'stream.turn_end') {
         const payload = event.payload as {
           tokenRecord?: { computed?: { contextWindowTokens?: number } };
@@ -126,6 +129,15 @@ export class TrackerReconstructor {
         if (payload?.tokenRecord?.computed?.contextWindowTokens !== undefined) {
           return payload.tokenRecord.computed.contextWindowTokens;
         }
+      }
+
+      if (event?.type === 'compact.boundary') {
+        const payload = event.payload as {
+          estimatedContextTokens?: number;
+          compactedTokens?: number;
+        };
+        // Prefer estimatedContextTokens (total context); fall back to compactedTokens (backward compat)
+        return payload?.estimatedContextTokens ?? payload?.compactedTokens;
       }
     }
     return undefined;

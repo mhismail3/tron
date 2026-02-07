@@ -140,6 +140,7 @@ describe('CompactionEventHandler', () => {
           compressionRatio: 0.5,
           reason: 'manual',
           summary: 'Compacted context',
+          estimatedContextTokens: undefined,
         },
       });
     });
@@ -235,6 +236,35 @@ describe('CompactionEventHandler', () => {
 
       // Should persist (success !== false)
       expect(ctx.persistCalls).toHaveLength(1);
+    });
+
+    it('should pass estimatedContextTokens through to emit and persist', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-est' });
+      const ctx = createTestContext({ active: mockActive });
+      const event: CompactionCompleteEvent = {
+        type: 'compaction_complete',
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
+        tokensBefore: 100000,
+        tokensAfter: 50000,
+        compressionRatio: 0.5,
+        reason: 'threshold_exceeded',
+        success: true,
+        summary: 'Compacted',
+        estimatedContextTokens: 65000,
+      };
+
+      handler.handleCompactionComplete(ctx, event);
+
+      // WebSocket event should include estimatedContextTokens
+      expect(ctx.emitCalls[0].data).toMatchObject({
+        estimatedContextTokens: 65000,
+      });
+
+      // Persisted compact.boundary should include estimatedContextTokens
+      expect(ctx.persistCalls[0].payload).toMatchObject({
+        estimatedContextTokens: 65000,
+      });
     });
 
     it('should handle undefined active session (no runId)', () => {

@@ -136,6 +136,10 @@ export class AgentCompactionHandler implements ICompactionHandler {
         summarizer: this.summarizer,
       });
 
+      // After executeCompaction (which calls setMessages, resetting API tokens to null),
+      // getCurrentTokens() returns estimate from components (system + tools + rules + compacted messages).
+      const estimatedContextTokens = this.contextManager.getCurrentTokens();
+
       this.eventEmitter.emit({
         type: 'compaction_complete',
         sessionId: this.sessionId,
@@ -146,6 +150,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
         compressionRatio: result.compressionRatio,
         reason,
         summary: result.summary,
+        estimatedContextTokens,
       });
 
       if (result.success) {

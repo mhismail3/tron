@@ -329,17 +329,51 @@ describe('TrackerReconstructor', () => {
       expect(result.todoTracker.count).toBe(1);
     });
 
-    it('should preserve API token count through compaction', () => {
+    it('should preserve API token count through compaction when turn_end follows', () => {
       const events = [
         createEvent('stream.turn_end', { tokenRecord: createMockTokenRecord(5000) }),
-        createEvent('compact.boundary', { reason: 'context_limit' }),
+        createEvent('compact.boundary', { reason: 'context_limit', estimatedContextTokens: 3000 }),
         createEvent('stream.turn_end', { tokenRecord: createMockTokenRecord(2000) }),
       ] as SessionEvent[];
 
       const result = reconstructor.reconstruct(events);
 
-      // Should use the last turn_end after compaction
+      // Should use the last turn_end after compaction (more recent than compact.boundary)
       expect(result.apiTokenCount).toBe(2000);
+    });
+
+    it('should use estimatedContextTokens from compact.boundary when no turn_end follows', () => {
+      const events = [
+        createEvent('stream.turn_end', { tokenRecord: createMockTokenRecord(5000) }),
+        createEvent('compact.boundary', {
+          reason: 'context_limit',
+          originalTokens: 150000,
+          compactedTokens: 50000,
+          estimatedContextTokens: 65000,
+        }),
+      ] as SessionEvent[];
+
+      const result = reconstructor.reconstruct(events);
+
+      // compact.boundary is more recent — use estimatedContextTokens
+      expect(result.apiTokenCount).toBe(65000);
+    });
+
+    it('should fall back to compactedTokens for backward-compatible compact.boundary events', () => {
+      const events = [
+        createEvent('stream.turn_end', { tokenRecord: createMockTokenRecord(5000) }),
+        createEvent('compact.boundary', {
+          reason: 'context_limit',
+          originalTokens: 150000,
+          compactedTokens: 50000,
+          // no estimatedContextTokens field (old event format)
+        }),
+      ] as SessionEvent[];
+
+      const result = reconstructor.reconstruct(events);
+
+      // Falls back to compactedTokens when estimatedContextTokens is absent
+      expect(result.apiTokenCount).toBe(50000);
     });
   });
 

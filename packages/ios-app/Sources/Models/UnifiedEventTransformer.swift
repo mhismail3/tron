@@ -421,6 +421,9 @@ extension UnifiedEventTransformer {
                         compactedTokens: parsed.compactedTokens,
                         timestamp: parseTimestamp(event.timestamp)
                     ))
+                    // Update context tokens so pill reflects post-compaction state on resume.
+                    // If a later message.assistant arrives with a tokenRecord, it overwrites with API ground truth.
+                    state.lastTurnInputTokens = parsed.estimatedContextTokens ?? parsed.compactedTokens
                 }
 
             case .compactSummary:

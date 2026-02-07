@@ -77,6 +77,7 @@ export class CompactionEventHandler {
       reason?: string;
       success?: boolean;
       summary?: string;
+      estimatedContextTokens?: number;
     };
 
     const reason = compactionEvent.reason || 'auto';
@@ -88,6 +89,7 @@ export class CompactionEventHandler {
       compressionRatio: compactionEvent.compressionRatio,
       reason,
       summary: compactionEvent.summary,
+      estimatedContextTokens: compactionEvent.estimatedContextTokens,
     });
 
     // Persist compact.boundary event so it shows up on session resume
@@ -99,6 +101,7 @@ export class CompactionEventHandler {
         compressionRatio: compactionEvent.compressionRatio,
         reason,
         summary: compactionEvent.summary,
+        estimatedContextTokens: compactionEvent.estimatedContextTokens,
       });
 
       logger.debug('Persisted compact.boundary event', {

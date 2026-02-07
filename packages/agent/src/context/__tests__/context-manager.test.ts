@@ -97,10 +97,10 @@ describe('ContextManager', () => {
       expect(cm.getMessages()).toHaveLength(1);
     });
 
-    it('tracks API-reported tokens after turn', () => {
+    it('returns estimate before API data, then API value after', () => {
       cm.addMessage({ role: 'user', content: 'Hello world' });
-      // Before API reports, tokens are 0
-      expect(cm.getCurrentTokens()).toBe(0);
+      // Before API reports, falls back to component estimates (> 0)
+      expect(cm.getCurrentTokens()).toBeGreaterThan(0);
       // After turn completes, API reports actual tokens
       cm.setApiContextTokens(1500);
       expect(cm.getCurrentTokens()).toBe(1500);
@@ -112,7 +112,7 @@ describe('ContextManager', () => {
       expect(cm.getMessages()).toHaveLength(2);
     });
 
-    it('setMessages replaces all messages and resets API tokens', () => {
+    it('setMessages replaces all messages and falls back to estimates', () => {
       cm.addMessage({ role: 'user', content: 'First' });
       cm.addMessage({ role: 'user', content: 'Second' });
       cm.setApiContextTokens(5000);
@@ -121,8 +121,10 @@ describe('ContextManager', () => {
 
       cm.setMessages([{ role: 'user', content: 'Only one' }]);
       expect(cm.getMessages()).toHaveLength(1);
-      // API tokens reset after setMessages
-      expect(cm.getCurrentTokens()).toBe(0);
+      // API tokens reset after setMessages — falls back to estimate from new messages
+      const tokens = cm.getCurrentTokens();
+      expect(tokens).toBeGreaterThan(0);
+      expect(tokens).not.toBe(5000);
     });
 
     it('handles complex assistant messages', () => {
@@ -139,7 +141,9 @@ describe('ContextManager', () => {
         ],
       });
       expect(cm.getMessages()).toHaveLength(1);
-      // Tokens come from API after turn
+      // Before API data, falls back to estimates (> 0)
+      expect(cm.getCurrentTokens()).toBeGreaterThan(0);
+      // After API reports, uses ground truth
       cm.setApiContextTokens(2000);
       expect(cm.getCurrentTokens()).toBe(2000);
     });
@@ -208,7 +212,7 @@ describe('ContextManager', () => {
       expect(snapshot.breakdown.messages).toBeGreaterThan(0);
     });
 
-    it('returns zero currentTokens but shows breakdown estimates before first turn', () => {
+    it('returns estimated currentTokens from components before first turn', () => {
       const cm = createContextManager({
         model: 'claude-sonnet-4-20250514',
         systemPrompt: 'You are a helpful assistant.',
@@ -224,12 +228,14 @@ describe('ContextManager', () => {
 
       const snapshot = cm.getSnapshot();
 
-      // Before API data, currentTokens is 0 (matches progress bar)
-      expect(snapshot.currentTokens).toBe(0);
-      // But breakdown shows estimates for informational purposes
+      // Before API data, currentTokens is sum of component estimates (not 0)
+      expect(snapshot.currentTokens).toBeGreaterThan(0);
       expect(snapshot.breakdown.systemPrompt).toBeGreaterThan(0);
       expect(snapshot.breakdown.tools).toBeGreaterThan(0);
       expect(snapshot.breakdown.messages).toBeGreaterThan(0);
+      // currentTokens should be at least the sum of breakdowns
+      const breakdownSum = snapshot.breakdown.systemPrompt + snapshot.breakdown.tools + snapshot.breakdown.messages;
+      expect(snapshot.currentTokens).toBeGreaterThanOrEqual(breakdownSum);
     });
 
     it('returns normal threshold for low usage', () => {
@@ -758,7 +764,7 @@ describe('ContextManager', () => {
       expect(result.extractedData).toBeDefined();
     });
 
-    it('resets API tokens after compaction (requires next turn to update)', async () => {
+    it('falls back to estimates after compaction, then uses API on next turn', async () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
       const session = simulator.generateAtUtilization(80, 200_000);
       setupWithSimulatedSession(cm, session);
@@ -766,11 +772,13 @@ describe('ContextManager', () => {
       const tokensBefore = cm.getCurrentTokens();
       await cm.executeCompaction({ summarizer: mockSummarizer });
 
-      // After compaction, API tokens are reset (setMessages resets them)
-      // So getCurrentTokens() returns 0 until next turn reports actual usage
-      expect(cm.getCurrentTokens()).toBe(0);
+      // After compaction, API tokens are reset — falls back to component estimates
+      // reflecting the compacted (smaller) message set
+      const estimateAfter = cm.getCurrentTokens();
+      expect(estimateAfter).toBeGreaterThan(0);
+      expect(estimateAfter).toBeLessThan(tokensBefore);
 
-      // Simulate next turn reporting reduced tokens
+      // Simulate next turn reporting reduced tokens (API ground truth)
       cm.setApiContextTokens(50000);
       expect(cm.getCurrentTokens()).toBe(50000);
       expect(cm.getCurrentTokens()).toBeLessThan(tokensBefore);
@@ -785,8 +793,8 @@ describe('ContextManager', () => {
     it('handles empty messages gracefully', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
 
-      // Before any API data, tokens are 0
-      expect(cm.getCurrentTokens()).toBe(0);
+      // Before any API data, falls back to estimates (system prompt + tools, no messages)
+      expect(cm.getCurrentTokens()).toBeGreaterThanOrEqual(0);
       expect(cm.getMessages()).toHaveLength(0);
       expect(cm.shouldCompact()).toBe(false);
     });
@@ -819,8 +827,8 @@ describe('ContextManager', () => {
       cm.addMessage({ role: 'user', content: '' });
 
       expect(cm.getMessages()).toHaveLength(1);
-      // Tokens come from API, not estimates
-      expect(cm.getCurrentTokens()).toBe(0);
+      // Before API data, returns estimate (system prompt overhead at minimum)
+      expect(cm.getCurrentTokens()).toBeGreaterThanOrEqual(0);
     });
 
     it('handles concurrent calls to getCurrentTokens', () => {
