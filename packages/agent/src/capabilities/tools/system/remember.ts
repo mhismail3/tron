@@ -39,6 +39,7 @@ export interface RememberParams {
   action: string;
   session_id?: string;
   blob_id?: string;
+  query?: string;
   type?: string;
   turn?: number;
   level?: string;
@@ -56,7 +57,7 @@ export class RememberTool implements TronTool<RememberParams> {
   readonly description = `Your memory and self-analysis tool. Query your internal database to recall past work, review session history, and retrieve stored content.
 
 Available actions:
-- memory: Recall past work from structured memory ledger entries — what you did, what you learned, files changed, decisions made. Use this to build on previous sessions.
+- memory: Search past work from structured memory ledger entries. ALWAYS provide a query to search by keyword (matches title, actions, lessons, files, decisions). Only omit query when you need a broad overview of recent work.
 - sessions: List recent sessions (title, tokens, cost)
 - session: Get details for a specific session
 - events: Get raw events (filter by session_id, type, turn)
@@ -67,7 +68,7 @@ Available actions:
 - schema: List database tables and columns
 - read_blob: Read stored content from blob storage
 
-Use memory to recall what was done in previous sessions — patterns, lessons, and decisions carry forward.
+Search strategy: Start narrow (query + small limit), then broaden if needed. Avoid retrieving all entries.
 Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
   readonly parameters = {
@@ -85,6 +86,10 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
       blob_id: {
         type: 'string' as const,
         description: 'Blob ID to read (for read_blob action)',
+      },
+      query: {
+        type: 'string' as const,
+        description: 'Search keyword for memory action — filters ledger entries by title, actions, lessons, files, and decisions. Always provide this to avoid retrieving all entries.',
       },
       type: {
         type: 'string' as const,
@@ -142,7 +147,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
     try {
       switch (params.action) {
         case 'memory':
-          return this.getMemoryLedger(params.session_id, limit, offset);
+          return this.getMemoryLedger(params.session_id, params.query, limit, offset);
 
         case 'schema':
           return this.getSchema();
@@ -201,9 +206,16 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
   private getMemoryLedger(
     sessionId: string | undefined,
+    searchQuery: string | undefined,
     limit: number,
     offset: number
   ): TronToolResult {
+    // When a search query is provided and events_fts exists, use FTS5 for ranked results
+    if (searchQuery && this.hasFtsTable()) {
+      return this.searchMemoryFts(sessionId, searchQuery, limit, offset);
+    }
+
+    // Fallback: direct table scan (no query or no FTS table)
     let query = `
       SELECT id, session_id, timestamp, payload
       FROM events
@@ -226,11 +238,85 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
       payload: string;
     }>;
 
-    if (rows.length === 0) {
-      return { content: 'No memory ledger entries found', isError: false };
+    return this.formatMemoryRows(rows);
+  }
+
+  /**
+   * Search memory ledger entries using FTS5 full-text search with BM25 ranking
+   */
+  private searchMemoryFts(
+    sessionId: string | undefined,
+    searchQuery: string,
+    limit: number,
+    offset: number
+  ): TronToolResult {
+    // Build FTS5 query — quote search terms to handle special characters (hyphens, dots, etc.)
+    // Use column filter to search in content only (not id/session_id/type/tool_name)
+    const quoted = searchQuery.replace(/"/g, '""');
+    const ftsQuery = `content:"${quoted}"`;
+
+    let sql = `
+      SELECT
+        e.id, e.session_id, e.timestamp, e.payload,
+        bm25(events_fts) as score
+      FROM events_fts
+      JOIN events e ON events_fts.id = e.id
+      WHERE events_fts MATCH ?
+        AND events_fts.type = 'memory.ledger'
+    `;
+    const params: SQLQueryBindings[] = [ftsQuery];
+
+    if (sessionId) {
+      sql += ` AND (events_fts.session_id = ? OR events_fts.session_id LIKE ?)`;
+      params.push(sessionId, `${sessionId}%`);
     }
 
-    const lines = ['Memory Ledger:', ''];
+    sql += ` ORDER BY score LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = this.db.prepare(sql).all(...params) as Array<{
+      id: string;
+      session_id: string;
+      timestamp: string;
+      payload: string;
+      score: number;
+    }>;
+
+    return this.formatMemoryRows(rows, searchQuery);
+  }
+
+  /**
+   * Check if events_fts table exists (may not in test databases)
+   */
+  private hasFtsTable(): boolean {
+    try {
+      const row = this.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='events_fts'"
+      ).get() as { name: string } | undefined;
+      return !!row;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Format memory ledger rows into readable output
+   */
+  private formatMemoryRows(
+    rows: Array<{ id: string; session_id: string; timestamp: string; payload: string; score?: number }>,
+    searchQuery?: string
+  ): TronToolResult {
+    if (rows.length === 0) {
+      const msg = searchQuery
+        ? `No memory ledger entries found matching "${searchQuery}"`
+        : 'No memory ledger entries found';
+      return { content: msg, isError: false };
+    }
+
+    const lines = searchQuery
+      ? [`Memory Ledger (search: "${searchQuery}", ${rows.length} results):`, '']
+      : ['Memory Ledger:', ''];
+
     for (const row of rows) {
       try {
         const payload = JSON.parse(row.payload);

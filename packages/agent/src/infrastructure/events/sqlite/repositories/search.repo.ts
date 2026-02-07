@@ -257,7 +257,51 @@ export class SearchRepository extends BaseRepository {
     // Index each event
     let indexed = 0;
     for (const row of events) {
-      const content = this.extractContentFromPayload(row.payload);
+      const content = this.extractContentFromPayload(row.payload, row.type);
+      const toolName = this.extractToolNameFromPayload(row.payload);
+
+      this.run(
+        `INSERT INTO events_fts (id, session_id, type, content, tool_name)
+         VALUES (?, ?, ?, ?, ?)`,
+        row.id,
+        row.session_id,
+        row.type,
+        content,
+        toolName
+      );
+      indexed++;
+    }
+
+    return indexed;
+  }
+
+  /**
+   * Re-index all events of a given type across all sessions.
+   * Deletes existing FTS entries for those events and re-indexes them.
+   * Used by incremental migrations after changing extraction logic.
+   */
+  reindexByType(eventType: string): number {
+    // Delete existing FTS entries for this type
+    this.run('DELETE FROM events_fts WHERE type = ?', eventType);
+
+    // Get all events of this type
+    const events = this.all<{
+      id: string;
+      session_id: string;
+      type: string;
+      payload: string;
+    }>(
+      `SELECT id, session_id, type, payload
+       FROM events
+       WHERE type = ?
+       ORDER BY sequence ASC`,
+      eventType
+    );
+
+    // Re-index each event
+    let indexed = 0;
+    for (const row of events) {
+      const content = this.extractContentFromPayload(row.payload, row.type);
       const toolName = this.extractToolNameFromPayload(row.payload);
 
       this.run(
@@ -286,7 +330,66 @@ export class SearchRepository extends BaseRepository {
     if (!('payload' in event)) return '';
 
     const payload = event.payload as Record<string, unknown>;
+
+    // memory.ledger events store searchable data in structured fields, not 'content'
+    if (event.type === 'memory.ledger') {
+      return this.extractMemoryLedgerContent(payload);
+    }
+
     return this.extractContentFromValue(payload.content);
+  }
+
+  /**
+   * Extract searchable content from a memory.ledger payload
+   * Concatenates title, input, actions, lessons, decisions, and file paths
+   */
+  private extractMemoryLedgerContent(payload: Record<string, unknown>): string {
+    const parts: string[] = [];
+
+    if (typeof payload.title === 'string') parts.push(payload.title);
+    if (typeof payload.input === 'string') parts.push(payload.input);
+    if (typeof payload.entryType === 'string') parts.push(payload.entryType);
+    if (typeof payload.status === 'string') parts.push(payload.status);
+
+    if (Array.isArray(payload.actions)) {
+      for (const a of payload.actions) {
+        if (typeof a === 'string') parts.push(a);
+      }
+    }
+
+    if (Array.isArray(payload.lessons)) {
+      for (const l of payload.lessons) {
+        if (typeof l === 'string') parts.push(l);
+      }
+    }
+
+    if (Array.isArray(payload.decisions)) {
+      for (const d of payload.decisions) {
+        if (d && typeof d === 'object') {
+          const dec = d as Record<string, unknown>;
+          if (typeof dec.choice === 'string') parts.push(dec.choice);
+          if (typeof dec.reason === 'string') parts.push(dec.reason);
+        }
+      }
+    }
+
+    if (Array.isArray(payload.files)) {
+      for (const f of payload.files) {
+        if (f && typeof f === 'object') {
+          const file = f as Record<string, unknown>;
+          if (typeof file.path === 'string') parts.push(file.path);
+          if (typeof file.why === 'string') parts.push(file.why);
+        }
+      }
+    }
+
+    if (Array.isArray(payload.tags)) {
+      for (const t of payload.tags) {
+        if (typeof t === 'string') parts.push(t);
+      }
+    }
+
+    return parts.join(' ');
   }
 
   /**
@@ -323,10 +426,14 @@ export class SearchRepository extends BaseRepository {
 
   /**
    * Extract content from stored JSON payload string
+   * Requires event type to select the right extraction strategy
    */
-  private extractContentFromPayload(payloadStr: string): string {
+  private extractContentFromPayload(payloadStr: string, eventType?: string): string {
     try {
       const payload = JSON.parse(payloadStr);
+      if (eventType === 'memory.ledger') {
+        return this.extractMemoryLedgerContent(payload);
+      }
       return this.extractContentFromValue(payload.content);
     } catch {
       return '';

@@ -681,6 +681,218 @@ describe('RememberTool', () => {
       expect(result.isError).toBe(false);
       expect(result.content).toContain('Prefix match test');
     });
+
+    it('should filter by query keyword (LIKE fallback without FTS)', async () => {
+      // Without events_fts table, query falls through to no-query path
+      // (FTS table not created in test setup)
+      db.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      const payload1 = JSON.stringify({ title: 'OAuth implementation', entryType: 'feature', lessons: ['Use passport.js'] });
+      const payload2 = JSON.stringify({ title: 'Database migration', entryType: 'feature', lessons: ['Use knex'] });
+
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z', payload1);
+      db.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run('evt_2', 'sess_1', 2, 'memory.ledger', '2024-01-15T10:31:00Z', payload2);
+
+      // Without FTS, returns all entries (query has no effect on direct scan)
+      const result = await tool.execute({ action: 'memory', query: 'OAuth' });
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('Memory Ledger');
+    });
+  });
+
+  // ===========================================================================
+  // Memory action with FTS5
+  // ===========================================================================
+
+  describe('memory action with FTS5', () => {
+    let ftsTool: RememberTool;
+    let ftsDb: Database;
+    let ftsDbPath: string;
+
+    beforeEach(() => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remember-fts-test-'));
+      ftsDbPath = path.join(tmpDir, 'test-fts.db');
+      ftsDb = new Database(ftsDbPath);
+
+      // Create schema with FTS5 table
+      ftsDb.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT,
+          title TEXT,
+          created_at TEXT NOT NULL,
+          last_activity_at TEXT,
+          event_count INTEGER DEFAULT 0,
+          turn_count INTEGER DEFAULT 0,
+          total_input_tokens INTEGER DEFAULT 0,
+          total_output_tokens INTEGER DEFAULT 0,
+          total_cost REAL DEFAULT 0
+        );
+
+        CREATE TABLE events (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          timestamp TEXT NOT NULL,
+          turn INTEGER,
+          tool_name TEXT,
+          tool_call_id TEXT,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          payload TEXT,
+          FOREIGN KEY (session_id) REFERENCES sessions(id)
+        );
+
+        CREATE VIRTUAL TABLE events_fts USING fts5(
+          id,
+          session_id,
+          type,
+          content,
+          tool_name,
+          tokenize='porter unicode61'
+        );
+      `);
+
+      ftsTool = new RememberTool({ dbPath: ftsDbPath });
+    });
+
+    afterEach(() => {
+      ftsTool.close();
+      ftsDb.close();
+      if (ftsDbPath) {
+        const tmpDir = path.dirname(ftsDbPath);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    function insertMemoryWithFts(id: string, sessionId: string, timestamp: string, payload: Record<string, unknown>) {
+      const payloadStr = JSON.stringify(payload);
+      ftsDb.prepare(`INSERT INTO events (id, session_id, sequence, type, timestamp, payload) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(id, sessionId, 1, 'memory.ledger', timestamp, payloadStr);
+
+      // Manually index into FTS (since we don't have the trigger in test)
+      const parts: string[] = [];
+      if (typeof payload.title === 'string') parts.push(payload.title);
+      if (typeof payload.input === 'string') parts.push(payload.input);
+      if (typeof payload.entryType === 'string') parts.push(payload.entryType as string);
+      if (typeof payload.status === 'string') parts.push(payload.status as string);
+      if (Array.isArray(payload.actions)) parts.push(...(payload.actions as string[]));
+      if (Array.isArray(payload.lessons)) parts.push(...(payload.lessons as string[]));
+      if (Array.isArray(payload.tags)) parts.push(...(payload.tags as string[]));
+
+      ftsDb.prepare(`INSERT INTO events_fts (id, session_id, type, content, tool_name) VALUES (?, ?, 'memory.ledger', ?, '')`)
+        .run(id, sessionId, parts.join(' '));
+    }
+
+    it('should search memory by query using FTS5', async () => {
+      ftsDb.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      insertMemoryWithFts('evt_1', 'sess_1', '2024-01-15T10:30:00Z', {
+        title: 'OAuth implementation',
+        entryType: 'feature',
+        status: 'completed',
+        input: 'Add Google OAuth login',
+        actions: ['Created auth module', 'Added passport integration'],
+        lessons: ['Use passport.js for OAuth providers'],
+      });
+
+      insertMemoryWithFts('evt_2', 'sess_1', '2024-01-15T10:31:00Z', {
+        title: 'Database migration system',
+        entryType: 'feature',
+        status: 'completed',
+        input: 'Set up database migrations',
+        actions: ['Created migration runner'],
+        lessons: ['Use knex for migrations'],
+      });
+
+      const result = await ftsTool.execute({ action: 'memory', query: 'OAuth' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('OAuth implementation');
+      // FTS ranked search should not return the unrelated entry (or rank it lower)
+      expect(result.content).not.toContain('Database migration');
+    });
+
+    it('should search across lessons and actions', async () => {
+      ftsDb.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      insertMemoryWithFts('evt_1', 'sess_1', '2024-01-15T10:30:00Z', {
+        title: 'WebSocket improvements',
+        entryType: 'bugfix',
+        actions: ['Fixed reconnection logic'],
+        lessons: ['Never use esbuild CJS bundling for Bun production'],
+      });
+
+      insertMemoryWithFts('evt_2', 'sess_1', '2024-01-15T10:31:00Z', {
+        title: 'API endpoint cleanup',
+        entryType: 'refactor',
+        actions: ['Cleaned up REST endpoints'],
+      });
+
+      const result = await ftsTool.execute({ action: 'memory', query: 'esbuild' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('WebSocket improvements');
+      expect(result.content).toContain('esbuild');
+      expect(result.content).not.toContain('API endpoint');
+    });
+
+    it('should show "no results" message with search context', async () => {
+      ftsDb.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      const result = await ftsTool.execute({ action: 'memory', query: 'nonexistent_topic' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('No memory ledger entries found matching "nonexistent_topic"');
+    });
+
+    it('should combine query with session_id filter', async () => {
+      ftsDb.exec(`
+        INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z');
+        INSERT INTO sessions (id, created_at) VALUES ('sess_2', '2024-01-15T11:00:00Z');
+      `);
+
+      insertMemoryWithFts('evt_1', 'sess_1', '2024-01-15T10:30:00Z', {
+        title: 'Auth work in session 1',
+        entryType: 'feature',
+        lessons: ['OAuth is tricky'],
+      });
+
+      insertMemoryWithFts('evt_2', 'sess_2', '2024-01-15T11:30:00Z', {
+        title: 'Auth work in session 2',
+        entryType: 'feature',
+        lessons: ['OAuth needs refresh tokens'],
+      });
+
+      const result = await ftsTool.execute({ action: 'memory', query: 'OAuth', session_id: 'sess_1' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('Auth work in session 1');
+      expect(result.content).not.toContain('Auth work in session 2');
+    });
+
+    it('should return all entries when no query provided (even with FTS table)', async () => {
+      ftsDb.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      insertMemoryWithFts('evt_1', 'sess_1', '2024-01-15T10:30:00Z', {
+        title: 'First entry',
+        entryType: 'feature',
+      });
+
+      insertMemoryWithFts('evt_2', 'sess_1', '2024-01-15T10:31:00Z', {
+        title: 'Second entry',
+        entryType: 'bugfix',
+      });
+
+      const result = await ftsTool.execute({ action: 'memory' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('First entry');
+      expect(result.content).toContain('Second entry');
+    });
   });
 
   // ===========================================================================

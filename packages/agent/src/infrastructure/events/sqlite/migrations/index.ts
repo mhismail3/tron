@@ -73,6 +73,118 @@ export function runIncrementalMigrations(db: Database): void {
   if (!hasIndex) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id, ended_at)');
   }
+
+  // Migration: Update FTS trigger to extract memory.ledger fields
+  // The original trigger only extracts $.content, which is empty for memory.ledger events.
+  // Replace it with one that concatenates structured fields for memory.ledger.
+  runFtsTriggerMigration(db);
+}
+
+/**
+ * Update the events_fts_insert trigger to handle memory.ledger events.
+ *
+ * memory.ledger events store searchable data in title, input, actions, lessons,
+ * decisions, and files fields — not in content. The old trigger produced empty
+ * FTS content for these events.
+ */
+function runFtsTriggerMigration(db: Database): void {
+  // Check if trigger needs updating by looking for the memory.ledger-aware version
+  const triggers = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='events_fts_insert'"
+  ).get() as { sql: string } | undefined;
+
+  if (!triggers?.sql || triggers.sql.includes('memory.ledger')) {
+    // Already updated or trigger doesn't exist
+    return;
+  }
+
+  // Drop and recreate with memory.ledger support
+  db.exec(`
+    DROP TRIGGER IF EXISTS events_fts_insert;
+
+    CREATE TRIGGER events_fts_insert
+    AFTER INSERT ON events
+    BEGIN
+      INSERT INTO events_fts (id, session_id, type, content, tool_name)
+      VALUES (
+        NEW.id,
+        NEW.session_id,
+        NEW.type,
+        CASE
+          WHEN NEW.type = 'memory.ledger' AND json_valid(NEW.payload) THEN
+            COALESCE(json_extract(NEW.payload, '$.title'), '') || ' ' ||
+            COALESCE(json_extract(NEW.payload, '$.input'), '') || ' ' ||
+            COALESCE(json_extract(NEW.payload, '$.entryType'), '') || ' ' ||
+            COALESCE(json_extract(NEW.payload, '$.status'), '')
+          WHEN json_valid(NEW.payload) THEN
+            COALESCE(json_extract(NEW.payload, '$.content'), '')
+          ELSE ''
+        END,
+        COALESCE(
+          NEW.tool_name,
+          CASE WHEN json_valid(NEW.payload)
+            THEN COALESCE(
+              json_extract(NEW.payload, '$.toolName'),
+              json_extract(NEW.payload, '$.name')
+            )
+            ELSE NULL
+          END,
+          ''
+        )
+      );
+    END;
+  `);
+
+  // Re-index existing memory.ledger events
+  // Delete old (empty) FTS entries and re-insert with proper content
+  const memoryEvents = db.prepare(`
+    SELECT id, session_id, type, payload
+    FROM events
+    WHERE type = 'memory.ledger'
+  `).all() as Array<{ id: string; session_id: string; type: string; payload: string }>;
+
+  if (memoryEvents.length > 0) {
+    db.exec('DELETE FROM events_fts WHERE type = \'memory.ledger\'');
+
+    const insert = db.prepare(`
+      INSERT INTO events_fts (id, session_id, type, content, tool_name)
+      VALUES (?, ?, ?, ?, '')
+    `);
+
+    for (const evt of memoryEvents) {
+      let content = '';
+      try {
+        const p = JSON.parse(evt.payload);
+        const parts: string[] = [];
+        if (typeof p.title === 'string') parts.push(p.title);
+        if (typeof p.input === 'string') parts.push(p.input);
+        if (typeof p.entryType === 'string') parts.push(p.entryType);
+        if (typeof p.status === 'string') parts.push(p.status);
+        if (Array.isArray(p.actions)) parts.push(...p.actions.filter((a: unknown) => typeof a === 'string'));
+        if (Array.isArray(p.lessons)) parts.push(...p.lessons.filter((l: unknown) => typeof l === 'string'));
+        if (Array.isArray(p.decisions)) {
+          for (const d of p.decisions) {
+            if (d && typeof d === 'object') {
+              if (typeof d.choice === 'string') parts.push(d.choice);
+              if (typeof d.reason === 'string') parts.push(d.reason);
+            }
+          }
+        }
+        if (Array.isArray(p.files)) {
+          for (const f of p.files) {
+            if (f && typeof f === 'object') {
+              if (typeof f.path === 'string') parts.push(f.path);
+              if (typeof f.why === 'string') parts.push(f.why);
+            }
+          }
+        }
+        if (Array.isArray(p.tags)) parts.push(...p.tags.filter((t: unknown) => typeof t === 'string'));
+        content = parts.join(' ');
+      } catch { /* skip malformed */ }
+
+      insert.run(evt.id, evt.session_id, evt.type, content);
+    }
+  }
 }
 
 /**
