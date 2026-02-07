@@ -42,7 +42,7 @@ enum SystemEvent: Equatable {
         case .modelChange(let from, let to):
             return "Switched from \(from) to \(to)"
         case .reasoningLevelChange(let from, let to):
-            return "Reasoning: \(from) → \(to)"
+            return "Reasoning: \(SystemEvent.reasoningLabel(from)) → \(SystemEvent.reasoningLabel(to))"
         case .interrupted:
             return "Session interrupted"
         case .transcriptionFailed:
@@ -74,6 +74,17 @@ enum SystemEvent: Equatable {
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
         case .memoryUpdated(let title, _):
             return "Memory updated: \(title)"
+        }
+    }
+
+    private static func reasoningLabel(_ level: String) -> String {
+        switch level.lowercased() {
+        case "low": return "Low"
+        case "medium": return "Medium"
+        case "high": return "High"
+        case "xhigh": return "Extra High"
+        case "max": return "Max"
+        default: return level.capitalized
         }
     }
 }
