@@ -23,9 +23,8 @@ struct ContextAuditView: View {
     @State private var showClearPopover = false
     @State private var showCompactPopover = false
 
-    // Optimistic deletion state - items being deleted animate out immediately
+    // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
-    @State private var pendingMessageDeletions: Set<String> = []
 
     // Cached token usage to avoid recomputation on every body evaluation
     @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) = (0, 0, 0, 0)
@@ -45,24 +44,20 @@ struct ContextAuditView: View {
         return snapshot.addedSkills.filter { !pendingSkillDeletions.contains($0.name) }
     }
 
-    /// Messages filtered to exclude those being deleted (for optimistic UI)
-    private var displayedMessages: [DetailedMessageInfo] {
-        guard let snapshot = detailedSnapshot else { return [] }
-        return snapshot.messages.filter { message in
-            guard let eventId = message.eventId else { return true }
-            return !pendingMessageDeletions.contains(eventId)
-        }
+    /// All messages from snapshot
+    private var allMessages: [DetailedMessageInfo] {
+        detailedSnapshot?.messages ?? []
     }
 
     /// Paginated messages - show latest messages first (reverse chronological)
     private var paginatedMessages: [DetailedMessageInfo] {
-        let reversed = displayedMessages.reversed()
+        let reversed = allMessages.reversed()
         return Array(reversed.prefix(messagesLoadedCount))
     }
 
     /// Whether there are more messages to load
     private var hasMoreMessages: Bool {
-        messagesLoadedCount < displayedMessages.count
+        messagesLoadedCount < allMessages.count
     }
 
     var body: some View {
@@ -278,14 +273,11 @@ struct ContextAuditView: View {
                                 // Messages (collapsible container with count badge and token total)
                                 MessagesContainer(
                                     messages: paginatedMessages,
-                                    totalMessages: displayedMessages.count,
+                                    totalMessages: allMessages.count,
                                     totalTokens: snapshot.breakdown.messages,
                                     hasMoreMessages: hasMoreMessages,
                                     onLoadMore: {
-                                        messagesLoadedCount += 10  // Load 10 at a time
-                                    },
-                                    onDelete: readOnly ? nil : { eventId in
-                                        Task { await deleteMessage(eventId: eventId) }
+                                        messagesLoadedCount += 10
                                     }
                                 )
                             }
@@ -353,7 +345,6 @@ struct ContextAuditView: View {
 
             // Clear any pending deletions since we now have fresh data
             pendingSkillDeletions.removeAll()
-            pendingMessageDeletions.removeAll()
 
             // Reset message pagination when reloading
             messagesLoadedCount = 10
@@ -391,25 +382,6 @@ struct ContextAuditView: View {
             logger.error("🔧 Compaction failed: \(error)", category: .general)
             errorMessage = "Failed to compact context: \(error.localizedDescription)"
             isCompacting = false
-        }
-    }
-
-    private func deleteMessage(eventId: String) async {
-        // Optimistic update: immediately hide the message with animation
-        _ = withAnimation(.tronStandard) {
-            pendingMessageDeletions.insert(eventId)
-        }
-
-        do {
-            _ = try await rpcClient.misc.deleteMessage(sessionId, targetEventId: eventId)
-            // Background reload to sync state (doesn't show loading)
-            await reloadContextInBackground()
-        } catch {
-            // Rollback: show the message again if deletion failed
-            _ = withAnimation(.tronStandard) {
-                pendingMessageDeletions.remove(eventId)
-            }
-            errorMessage = "Failed to delete message: \(error.localizedDescription)"
         }
     }
 

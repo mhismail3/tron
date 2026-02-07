@@ -6,7 +6,6 @@ import SwiftUI
 struct DetailedMessageRow: View {
     let message: DetailedMessageInfo
     let isLast: Bool
-    var onDelete: (() -> Void)?
 
     @State private var isExpanded = false
     @State private var contentExpanded = false
@@ -150,18 +149,6 @@ struct DetailedMessageRow: View {
                 .fill(iconColor.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contextMenu {
-            // Only show delete option if eventId is available (deletable)
-            if onDelete != nil {
-                Button(role: .destructive) {
-                    onDelete?()
-                } label: {
-                    Label("Delete from Context", systemImage: "trash")
-                }
-                .tint(.red)
-            }
-        }
-        // Removed duplicate .animation() - withAnimation in button action handles this
     }
 }
 
@@ -174,7 +161,6 @@ struct MessagesContainer: View {
     let totalTokens: Int
     let hasMoreMessages: Bool
     var onLoadMore: (() -> Void)?
-    var onDelete: ((String) -> Void)?
 
     @State private var isExpanded = false
 
@@ -233,8 +219,7 @@ struct MessagesContainer: View {
                             ForEach(messages) { message in
                                 DetailedMessageRow(
                                     message: message,
-                                    isLast: message.index == messages.last?.index,
-                                    onDelete: message.eventId != nil ? { onDelete?(message.eventId!) } : nil
+                                    isLast: message.index == messages.last?.index
                                 )
                             }
 
