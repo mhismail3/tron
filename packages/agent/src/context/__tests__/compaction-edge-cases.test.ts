@@ -180,32 +180,32 @@ describe('Compaction Edge Cases', () => {
   describe('model switching', () => {
     it('switching model updates context limit', () => {
       const contextManager = createContextManager({
-        model: 'claude-sonnet-4-20250514',
+        model: 'gpt-5.3-codex',
         workingDirectory: '/test',
       });
 
-      // Initial limit for Claude
-      expect(contextManager.getContextLimit()).toBe(200_000);
+      // Initial limit for Codex
+      expect(contextManager.getContextLimit()).toBe(400_000);
 
-      // Switch to GPT-4o (128k limit)
-      contextManager.switchModel('gpt-4o');
-      expect(contextManager.getContextLimit()).toBe(128_000);
-
-      // Switch back
+      // Switch to Claude (200k limit)
       contextManager.switchModel('claude-sonnet-4-20250514');
       expect(contextManager.getContextLimit()).toBe(200_000);
+
+      // Switch back
+      contextManager.switchModel('gpt-5.3-codex');
+      expect(contextManager.getContextLimit()).toBe(400_000);
     });
 
     it('model switch to smaller limit triggers compaction callback', () => {
       const contextManager = createContextManager({
-        model: 'claude-sonnet-4-20250514',
+        model: 'gpt-5.3-codex',
         workingDirectory: '/test',
       });
 
-      // Fill to 70% of 200k = 140k tokens
-      const messages = PreciseTokenGenerator.generateForTokens(140_000);
+      // Fill to 60% of 400k = 240k tokens
+      const messages = PreciseTokenGenerator.generateForTokens(240_000);
       contextManager.setMessages(messages);
-      contextManager.setApiContextTokens(140_000); // 70% of 200k
+      contextManager.setApiContextTokens(240_000); // 60% of 400k
 
       // Register callback
       let callbackCalled = false;
@@ -213,30 +213,30 @@ describe('Compaction Edge Cases', () => {
         callbackCalled = true;
       });
 
-      // Switch to smaller model - 140k is now over 100% of 128k limit!
-      contextManager.switchModel('gpt-4o');
+      // Switch to smaller model - 240k is now 120% of 200k limit!
+      contextManager.switchModel('claude-sonnet-4-20250514');
 
       expect(callbackCalled).toBe(true);
     });
 
     it('model switch to larger limit does not trigger callback', () => {
       const contextManager = createContextManager({
-        model: 'gpt-4o', // 128k limit
+        model: 'claude-sonnet-4-20250514', // 200k limit
         workingDirectory: '/test',
       });
 
-      // Fill to 50% of 128k = 64k tokens
-      const messages = PreciseTokenGenerator.generateForTokens(64_000);
+      // Fill to 50% of 200k = 100k tokens
+      const messages = PreciseTokenGenerator.generateForTokens(100_000);
       contextManager.setMessages(messages);
-      contextManager.setApiContextTokens(64_000); // 50% of 128k
+      contextManager.setApiContextTokens(100_000); // 50% of 200k
 
       let callbackCalled = false;
       contextManager.onCompactionNeeded(() => {
         callbackCalled = true;
       });
 
-      // Switch to larger model (200k) - 64k is now only 32%
-      contextManager.switchModel('claude-sonnet-4-20250514');
+      // Switch to larger model (400k) - 100k is now only 25%
+      contextManager.switchModel('gpt-5.3-codex');
 
       expect(callbackCalled).toBe(false);
     });

@@ -28,8 +28,8 @@ describe('Cross-Provider Model Switching', () => {
     { role: 'user', content: 'Looks good, please apply the changes' },
   ];
 
-  describe('Anthropic → OpenAI', () => {
-    it('preserves messages when switching from Claude to GPT', () => {
+  describe('Anthropic → OpenAI Codex', () => {
+    it('preserves messages when switching from Claude to Codex', () => {
       const cm = createContextManager({
         model: 'claude-sonnet-4-20250514',
         workingDirectory: '/test/project',
@@ -43,12 +43,12 @@ describe('Cross-Provider Model Switching', () => {
       expect(cm.getMessages()).toHaveLength(5);
       expect(cm.getProviderType()).toBe('anthropic');
 
-      // Switch to OpenAI
-      cm.switchModel('gpt-4o');
+      // Switch to OpenAI Codex
+      cm.switchModel('gpt-5.3-codex');
 
       // Messages should persist
       expect(cm.getMessages()).toHaveLength(5);
-      expect(cm.getProviderType()).toBe('openai');
+      expect(cm.getProviderType()).toBe('openai-codex');
 
       // Verify message content preserved
       const messages = cm.getMessages();
@@ -65,17 +65,17 @@ describe('Cross-Provider Model Switching', () => {
       const claudeLimit = cm.getContextLimit();
       expect(claudeLimit).toBe(200000);
 
-      cm.switchModel('gpt-4o'); // 128k context
+      cm.switchModel('gpt-5.3-codex'); // 400k context
 
-      const gptLimit = cm.getContextLimit();
-      expect(gptLimit).toBe(128000);
+      const codexLimit = cm.getContextLimit();
+      expect(codexLimit).toBe(400000);
     });
   });
 
-  describe('OpenAI → OpenAI Codex', () => {
-    it('preserves messages when switching to Codex', () => {
+  describe('Codex → Codex (model upgrade)', () => {
+    it('preserves messages when switching between Codex models', () => {
       const cm = createContextManager({
-        model: 'gpt-4o',
+        model: 'gpt-5.2-codex',
         workingDirectory: '/test/project',
       });
 
@@ -83,17 +83,16 @@ describe('Cross-Provider Model Switching', () => {
         cm.addMessage(msg);
       }
 
-      expect(cm.getProviderType()).toBe('openai');
-      expect(cm.getSystemPrompt()).toContain('You are Tron');
+      expect(cm.getProviderType()).toBe('openai-codex');
 
-      // Switch to Codex
-      cm.switchModel('gpt-5.2-codex');
+      // Switch to newer Codex
+      cm.switchModel('gpt-5.3-codex');
 
       // Messages preserved
       expect(cm.getMessages()).toHaveLength(5);
       expect(cm.getProviderType()).toBe('openai-codex');
 
-      // System prompt changes for Codex (empty, uses tool clarification)
+      // System prompt stays empty for Codex (uses tool clarification)
       expect(cm.getSystemPrompt()).toBe('');
       expect(cm.getToolClarificationMessage()).toContain('You are Tron');
     });
@@ -125,7 +124,7 @@ describe('Cross-Provider Model Switching', () => {
     });
   });
 
-  describe('Full Circuit: Anthropic → OpenAI → Codex → Anthropic', () => {
+  describe('Full Circuit: Anthropic → Codex → Gemini → Anthropic', () => {
     it('preserves all context through multiple provider switches', () => {
       const cm = createContextManager({
         model: 'claude-sonnet-4-20250514',
@@ -140,18 +139,18 @@ describe('Cross-Provider Model Switching', () => {
       const originalMessages = cm.getMessages();
       expect(originalMessages).toHaveLength(5);
 
-      // Switch 1: Anthropic → OpenAI
-      cm.switchModel('gpt-4o');
-      expect(cm.getProviderType()).toBe('openai');
+      // Switch 1: Anthropic → Codex
+      cm.switchModel('gpt-5.3-codex');
+      expect(cm.getProviderType()).toBe('openai-codex');
       expect(cm.getMessages()).toHaveLength(5);
 
       // Add a message mid-session
       cm.addMessage({ role: 'user', content: 'Continue with next step' });
       expect(cm.getMessages()).toHaveLength(6);
 
-      // Switch 2: OpenAI → Codex
-      cm.switchModel('gpt-5.2-codex');
-      expect(cm.getProviderType()).toBe('openai-codex');
+      // Switch 2: Codex → Gemini
+      cm.switchModel('gemini-2.5-pro');
+      expect(cm.getProviderType()).toBe('google');
       expect(cm.getMessages()).toHaveLength(6);
 
       // Add another message
@@ -161,7 +160,7 @@ describe('Cross-Provider Model Switching', () => {
       });
       expect(cm.getMessages()).toHaveLength(7);
 
-      // Switch 3: Codex → Anthropic
+      // Switch 3: Gemini → Anthropic
       cm.switchModel('claude-sonnet-4-20250514');
       expect(cm.getProviderType()).toBe('anthropic');
       expect(cm.getMessages()).toHaveLength(7);
@@ -177,7 +176,7 @@ describe('Cross-Provider Model Switching', () => {
   describe('Token Tracking Across Switches', () => {
     it('recalculates tokens with new model context limit', () => {
       const cm = createContextManager({
-        model: 'claude-sonnet-4-20250514', // 200k
+        model: 'gpt-5.3-codex', // 400k
         workingDirectory: '/test/project',
       });
 
@@ -194,7 +193,7 @@ describe('Cross-Provider Model Switching', () => {
       expect(snapshot1.currentTokens).toBe(tokens);
 
       // Switch to smaller context model
-      cm.switchModel('gpt-4o'); // 128k
+      cm.switchModel('claude-sonnet-4-20250514'); // 200k
 
       // API tokens persist across model switch
       cm.setApiContextTokens(tokens);
@@ -210,28 +209,28 @@ describe('Cross-Provider Model Switching', () => {
 
     it('triggers compaction callback when switching to smaller context', () => {
       const cm = createContextManager({
-        model: 'claude-sonnet-4-20250514', // 200k
+        model: 'gpt-5.3-codex', // 400k
         workingDirectory: '/test/project',
       });
 
-      // Fill to 75% of Claude's limit (150k tokens)
-      const largeContent = 'x'.repeat(150000 * 4);
+      // Fill to 60% of Codex limit (240k tokens)
+      const largeContent = 'x'.repeat(240000 * 4);
       cm.addMessage({ role: 'user', content: largeContent });
 
-      // Simulate API reporting 150k tokens after turn
-      cm.setApiContextTokens(150000);
+      // Simulate API reporting 240k tokens after turn
+      cm.setApiContextTokens(240000);
 
       let callbackCalled = false;
       cm.onCompactionNeeded(() => {
         callbackCalled = true;
       });
 
-      // With Claude: 75% usage - within alert threshold
-      expect(cm.getSnapshot().thresholdLevel).toBe('alert');
+      // With Codex: 60% usage - within warning threshold
+      expect(cm.getSnapshot().thresholdLevel).toBe('warning');
 
-      // Switch to a model with smaller context (128k)
-      // 150k tokens in 128k context = 117% - exceeded!
-      cm.switchModel('gpt-4o');
+      // Switch to Claude (200k context)
+      // 240k tokens in 200k context = 120% - exceeded!
+      cm.switchModel('claude-sonnet-4-20250514');
 
       // Callback should have been triggered
       expect(callbackCalled).toBe(true);
@@ -249,12 +248,12 @@ describe('Cross-Provider Model Switching', () => {
       expect(cm.getWorkingDirectory()).toBe('/my/special/path');
       expect(cm.getSystemPrompt()).toContain('/my/special/path');
 
-      cm.switchModel('gpt-4o');
+      cm.switchModel('gpt-5.2-codex');
 
       expect(cm.getWorkingDirectory()).toBe('/my/special/path');
-      expect(cm.getSystemPrompt()).toContain('/my/special/path');
+      expect(cm.getToolClarificationMessage()).toContain('/my/special/path');
 
-      cm.switchModel('gpt-5.2-codex');
+      cm.switchModel('gpt-5.3-codex');
 
       expect(cm.getWorkingDirectory()).toBe('/my/special/path');
       expect(cm.getToolClarificationMessage()).toContain('/my/special/path');

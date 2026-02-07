@@ -28,6 +28,7 @@ import {
   GEMINI_2_5_PRO,
   GEMINI_2_5_FLASH,
 } from '@llm/providers/model-ids.js';
+import { detectProviderFromModel, getModelInfo } from '@llm/providers/factory.js';
 
 // =============================================================================
 // Pricing Configuration
@@ -107,27 +108,6 @@ const CLAUDE_PRICING: Record<string, PricingTier> = {
   },
 };
 
-const OPENAI_PRICING: Record<string, PricingTier> = {
-  'gpt-4o': {
-    inputPerMillion: 2.5,
-    outputPerMillion: 10,
-    cacheWriteMultiplier: 1,
-    cacheReadMultiplier: 0.5, // OpenAI's cached rate
-  },
-  'gpt-4o-mini': {
-    inputPerMillion: 0.15,
-    outputPerMillion: 0.6,
-    cacheWriteMultiplier: 1,
-    cacheReadMultiplier: 0.5,
-  },
-  'gpt-4-turbo': {
-    inputPerMillion: 10,
-    outputPerMillion: 30,
-    cacheWriteMultiplier: 1,
-    cacheReadMultiplier: 1,
-  },
-};
-
 const GOOGLE_PRICING: Record<string, PricingTier> = {
   // Gemini 3 models (preview)
   [GEMINI_3_PRO_PREVIEW]: {
@@ -188,6 +168,22 @@ export interface SessionUsage {
 }
 
 /**
+ * Build a PricingTier from an OpenAI model registry entry.
+ */
+function openAIPricingFromInfo(info: Record<string, unknown>): PricingTier | null {
+  const input = info.inputCostPerMillion;
+  const output = info.outputCostPerMillion;
+  const cacheRead = info.cacheReadCostPerMillion;
+  if (typeof input !== 'number' || typeof output !== 'number') return null;
+  return {
+    inputPerMillion: input,
+    outputPerMillion: output,
+    cacheWriteMultiplier: 1,
+    cacheReadMultiplier: typeof cacheRead === 'number' && input > 0 ? cacheRead / input : 0.1,
+  };
+}
+
+/**
  * Get pricing tier for a model
  */
 export function getPricingTier(model: string): PricingTier {
@@ -196,14 +192,19 @@ export function getPricingTier(model: string): PricingTier {
     return CLAUDE_PRICING[model]!;
   }
 
-  // Check OpenAI models
-  if (model in OPENAI_PRICING) {
-    return OPENAI_PRICING[model]!;
-  }
-
   // Check Google models
   if (model in GOOGLE_PRICING) {
     return GOOGLE_PRICING[model]!;
+  }
+
+  // Check OpenAI models via registry
+  const provider = detectProviderFromModel(model);
+  if (provider === 'openai' || provider === 'openai-codex') {
+    const info = getModelInfo(provider, model) as Record<string, unknown> | null;
+    if (info) {
+      const tier = openAIPricingFromInfo(info);
+      if (tier) return tier;
+    }
   }
 
   // Pattern matching for model families
@@ -229,15 +230,6 @@ export function getPricingTier(model: string): PricingTier {
   }
   if (modelLower.includes('haiku')) {
     return CLAUDE_PRICING[CLAUDE_3_HAIKU]!;
-  }
-  if (modelLower.includes('gpt-4o-mini')) {
-    return OPENAI_PRICING['gpt-4o-mini']!;
-  }
-  if (modelLower.includes('gpt-4o')) {
-    return OPENAI_PRICING['gpt-4o']!;
-  }
-  if (modelLower.includes('gpt-4')) {
-    return OPENAI_PRICING['gpt-4-turbo']!;
   }
   if (modelLower.includes('gemini-2.5-pro')) {
     return GOOGLE_PRICING[GEMINI_2_5_PRO]!;
@@ -386,43 +378,17 @@ export function getUsageDelta(
 // Context Limit Utilities
 // =============================================================================
 
-export const CONTEXT_LIMITS: Record<string, number> = {
-  // Claude 4.6 models
-  [CLAUDE_OPUS_4_6]: 200_000,
-  // Claude 4.5 models
-  [CLAUDE_OPUS_4_5]: 200_000,
-  [CLAUDE_SONNET_4_5]: 200_000,
-  [CLAUDE_HAIKU_4_5]: 200_000,
-  // Legacy Claude models
-  [CLAUDE_OPUS_4_1]: 200_000,
-  [CLAUDE_OPUS_4]: 200_000,
-  [CLAUDE_SONNET_4]: 200_000,
-  [CLAUDE_3_7_SONNET]: 200_000,
-  [CLAUDE_3_HAIKU]: 200_000,
-  // OpenAI
-  'gpt-4o': 128_000,
-  'gpt-4o-mini': 128_000,
-  'gpt-4-turbo': 128_000,
-  // Google Gemini 3 (1M context)
-  [GEMINI_3_PRO_PREVIEW]: 1_048_576,
-  [GEMINI_3_FLASH_PREVIEW]: 1_048_576,
-  // Google Gemini 2.5
-  [GEMINI_2_5_PRO]: 2_097_152,
-  [GEMINI_2_5_FLASH]: 1_048_576,
-};
-
 /**
- * Get context limit for a model
+ * Get context limit for a model.
+ * Derives from the canonical model registries — no hardcoded map.
  */
 export function getContextLimit(model: string): number {
-  if (model in CONTEXT_LIMITS) {
-    return CONTEXT_LIMITS[model]!;
+  const provider = detectProviderFromModel(model);
+  const info = getModelInfo(provider, model) as Record<string, unknown> | null;
+  if (info && typeof info.contextWindow === 'number') {
+    return info.contextWindow;
   }
-
-  const modelLower = model.toLowerCase();
-  if (modelLower.includes('gemini')) return 1_000_000;
-  if (modelLower.includes('gpt')) return 128_000;
-  return 200_000; // Default Claude limit
+  return 200_000;
 }
 
 /**

@@ -372,7 +372,7 @@ struct NewSessionFlow: View {
             await MainActor.run {
                 // On error, set a sensible default that matches server
                 // These are the actual server model IDs from core/providers/models.ts
-                selectedModel = defaultModel.isEmpty ? "claude-opus-4-5-20251101" : defaultModel
+                selectedModel = defaultModel.isEmpty ? (availableModels.first?.id ?? "") : defaultModel
                 isLoadingModels = false
             }
         }

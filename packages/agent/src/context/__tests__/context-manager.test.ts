@@ -42,9 +42,9 @@ describe('ContextManager', () => {
       expect(cm.getContextLimit()).toBe(200_000);
     });
 
-    it('initializes with GPT-4o context limit', () => {
-      const cm = createContextManager({ model: 'gpt-4o' });
-      expect(cm.getContextLimit()).toBe(128_000);
+    it('initializes with GPT Codex context limit', () => {
+      const cm = createContextManager({ model: 'gpt-5.3-codex' });
+      expect(cm.getContextLimit()).toBe(400_000);
     });
 
     it('initializes with Gemini context limit', () => {
@@ -369,69 +369,69 @@ describe('ContextManager', () => {
       const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       expect(cm.getContextLimit()).toBe(200_000);
 
-      cm.switchModel('gpt-4o');
+      cm.switchModel('gpt-5.3-codex');
 
-      expect(cm.getContextLimit()).toBe(128_000);
-      expect(cm.getModel()).toBe('gpt-4o');
+      expect(cm.getContextLimit()).toBe(400_000);
+      expect(cm.getModel()).toBe('gpt-5.3-codex');
     });
 
     it('revalidates threshold after switch to smaller model', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
-      // 75% of 200k = 150k tokens
-      const session = simulator.generateAtUtilization(75, 200_000);
+      // 60% of 400k = 240k tokens
+      const session = simulator.generateAtUtilization(60, 400_000);
 
       // Use empty systemPrompt to avoid loading from project .tron/SYSTEM.md
-      const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
+      const cm = createContextManager({ model: 'gpt-5.3-codex', systemPrompt: '' });
       setupWithSimulatedSession(cm, session);
 
-      // At 75% of 200k, should be "alert"
-      expect(cm.getSnapshot().thresholdLevel).toBe('alert');
+      // At 60% of 400k, should be "warning" (50-70%)
+      expect(cm.getSnapshot().thresholdLevel).toBe('warning');
 
-      // Switch to GPT-4o (128k limit)
-      // 150k tokens = 117% of 128k = exceeded
-      cm.switchModel('gpt-4o');
+      // Switch to Claude (200k limit)
+      // 240k tokens = 120% of 200k = exceeded
+      cm.switchModel('claude-sonnet-4-20250514');
 
       expect(cm.getSnapshot().thresholdLevel).toBe('exceeded');
     });
 
     it('improves threshold after switch to larger model', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
-      // 88% of 128k = ~113k tokens (use 88% to stay safely in critical zone)
-      const session = simulator.generateAtUtilization(88, 128_000);
+      // 88% of 200k = ~176k tokens (use 88% to stay safely in critical zone)
+      const session = simulator.generateAtUtilization(88, 200_000);
 
       // Use empty systemPrompt to avoid loading from project .tron/SYSTEM.md
-      const cm = createContextManager({ model: 'gpt-4o', systemPrompt: '' });
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
       setupWithSimulatedSession(cm, session);
 
-      // At 88% of 128k, should be "critical" (85-95%)
+      // At 88% of 200k, should be "critical" (85-95%)
       expect(cm.getSnapshot().thresholdLevel).toBe('critical');
 
-      // Switch to Gemini (1M limit)
-      // 115k tokens = 11.5% of 1M = normal
-      cm.switchModel('gemini-2.5-pro');
+      // Switch to Codex (400k limit)
+      // 176k tokens = 44% of 400k = normal
+      cm.switchModel('gpt-5.3-codex');
 
       expect(cm.getSnapshot().thresholdLevel).toBe('normal');
     });
 
     it('triggers callback when compaction needed after switch', () => {
       const simulator = createContextSimulator({ targetTokens: 1000 });
-      const session = simulator.generateAtUtilization(75, 200_000);
+      const session = simulator.generateAtUtilization(60, 400_000);
 
       // Use empty systemPrompt to avoid loading from project .tron/SYSTEM.md
-      const cm = createContextManager({ model: 'claude-sonnet-4-20250514', systemPrompt: '' });
+      const cm = createContextManager({ model: 'gpt-5.3-codex', systemPrompt: '' });
       setupWithSimulatedSession(cm, session);
 
       const callback = vi.fn();
       cm.onCompactionNeeded(callback);
 
       // Switch to smaller model - should trigger callback
-      cm.switchModel('gpt-4o');
+      cm.switchModel('claude-sonnet-4-20250514');
 
       expect(callback).toHaveBeenCalled();
     });
 
     it('does not trigger callback if context is fine after switch', () => {
-      const cm = createContextManager({ model: 'gpt-4o' });
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
       cm.addMessage({ role: 'user', content: 'Hello' });
       cm.setApiContextTokens(5000); // Low usage
 
@@ -439,7 +439,7 @@ describe('ContextManager', () => {
       cm.onCompactionNeeded(callback);
 
       // Switch to larger model - should NOT trigger
-      cm.switchModel('gemini-2.5-pro');
+      cm.switchModel('gpt-5.3-codex');
 
       expect(callback).not.toHaveBeenCalled();
     });

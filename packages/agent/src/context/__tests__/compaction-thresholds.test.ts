@@ -347,30 +347,29 @@ describe('Compaction Threshold Boundaries', () => {
   });
 
   describe('different context limits', () => {
-    it('respects smaller context limit (128k for GPT-4o)', () => {
-      // Use GPT-4o model which has 128k context limit
+    it('respects larger context limit (400k for Codex)', () => {
       const harness = CompactionTestHarness.atUtilization(85, {
-        model: 'gpt-4o',
-        contextLimit: 128_000,
+        model: 'gpt-5.3-codex',
+        contextLimit: 400_000,
       });
       harness.inject();
 
       const snapshot = harness.contextManager.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('critical');
-      expect(snapshot.contextLimit).toBe(128_000);
+      expect(snapshot.contextLimit).toBe(400_000);
     });
 
     it('respects larger context limit (1M for Gemini)', () => {
-      // Use Gemini model which has 1M context limit
-      const harness = CompactionTestHarness.atUtilization(70, {
-        model: 'gemini-1.5-pro',
-        contextLimit: 1_000_000,
+      // Use registered Gemini model which has ~1M context limit
+      const harness = CompactionTestHarness.atUtilization(72, {
+        model: 'gemini-2.5-flash',
+        contextLimit: 1_048_576,
       });
       harness.inject();
 
       const snapshot = harness.contextManager.getSnapshot();
       expect(snapshot.thresholdLevel).toBe('alert');
-      expect(snapshot.contextLimit).toBe(1_000_000);
+      expect(snapshot.contextLimit).toBe(1_048_576);
     });
   });
 });

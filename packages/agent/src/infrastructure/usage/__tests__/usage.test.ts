@@ -24,10 +24,10 @@ describe('getPricingTier', () => {
     expect(tier.outputPerMillion).toBe(25);
   });
 
-  it('returns exact model pricing for OpenAI models', () => {
-    const tier = getPricingTier('gpt-4o');
-    expect(tier.inputPerMillion).toBe(2.5);
-    expect(tier.outputPerMillion).toBe(10);
+  it('returns exact model pricing for OpenAI Codex models', () => {
+    const tier = getPricingTier('gpt-5.3-codex');
+    expect(tier.inputPerMillion).toBe(1.75);
+    expect(tier.outputPerMillion).toBe(14);
   });
 
   it('returns exact model pricing for Google models', () => {
@@ -51,9 +51,10 @@ describe('getPricingTier', () => {
     expect(tier.inputPerMillion).toBe(0.25); // haiku-3 pricing
   });
 
-  it('matches gpt-4o-mini specifically before gpt-4o', () => {
-    const tier = getPricingTier('gpt-4o-mini-2024-07-18');
-    expect(tier.inputPerMillion).toBe(0.15); // mini pricing, not gpt-4o
+  it('returns correct pricing for different Codex tiers', () => {
+    const mini = getPricingTier('gpt-5.1-codex-mini');
+    expect(mini.inputPerMillion).toBe(0.25);
+    expect(mini.outputPerMillion).toBe(2);
   });
 
   it('defaults to sonnet pricing for unknown models', () => {
@@ -233,21 +234,26 @@ describe('getContextLimit', () => {
     expect(getContextLimit('claude-opus-4-6')).toBe(200_000);
   });
 
-  it('returns exact limit for known models', () => {
+  it('returns correct limit for known Claude models', () => {
     expect(getContextLimit('claude-opus-4-5-20251101')).toBe(200_000);
-    expect(getContextLimit('gpt-4o')).toBe(128_000);
+    expect(getContextLimit('claude-sonnet-4-20250514')).toBe(200_000);
+    expect(getContextLimit('claude-haiku-4-5-20251001')).toBe(200_000);
+  });
+
+  it('returns correct limit for Gemini models', () => {
     expect(getContextLimit('gemini-2.5-pro')).toBe(2_097_152);
+    expect(getContextLimit('gemini-2.5-flash')).toBe(1_048_576);
+    expect(getContextLimit('gemini-3-pro-preview')).toBe(1_048_576);
   });
 
-  it('returns default for Gemini family', () => {
-    expect(getContextLimit('gemini-unknown')).toBe(1_000_000);
+  it('returns 400K for GPT Codex models', () => {
+    expect(getContextLimit('gpt-5.3-codex')).toBe(400_000);
+    expect(getContextLimit('gpt-5.2-codex')).toBe(400_000);
+    expect(getContextLimit('gpt-5.1-codex-max')).toBe(400_000);
+    expect(getContextLimit('gpt-5.1-codex-mini')).toBe(400_000);
   });
 
-  it('returns default for GPT family', () => {
-    expect(getContextLimit('gpt-something')).toBe(128_000);
-  });
-
-  it('returns Claude default for unknown models', () => {
+  it('returns fallback for unknown models', () => {
     expect(getContextLimit('unknown-model')).toBe(200_000);
   });
 });

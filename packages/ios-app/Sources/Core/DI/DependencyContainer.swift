@@ -37,7 +37,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @AppStorage("workingDirectory") var workingDirectory = ""
 
     @ObservationIgnored
-    @AppStorage("defaultModel") var defaultModel = "claude-haiku-4-5-20251001"
+    @AppStorage("defaultModel") var defaultModel = ""
 
     @ObservationIgnored
     @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = "/Users/moose/Workspace"

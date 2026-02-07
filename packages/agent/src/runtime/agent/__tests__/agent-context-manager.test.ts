@@ -166,9 +166,9 @@ describe('TronAgent + ContextManager Integration', () => {
       expect(cm.getContextLimit()).toBe(200_000);
 
       // Directly test ContextManager's switchModel
-      cm.switchModel('gpt-4o');
+      cm.switchModel('gpt-5.3-codex');
 
-      expect(cm.getContextLimit()).toBe(128_000);
+      expect(cm.getContextLimit()).toBe(400_000);
     });
 
     it('ContextManager triggers compaction callback when needed after switch', () => {
@@ -176,18 +176,20 @@ describe('TronAgent + ContextManager Integration', () => {
       const agent = new TronAgent(createTestConfig());
       const cm = agent.getContextManager();
 
-      // Generate high context session (75% of 200k = 150k tokens)
+      // Switch to Codex first (400k context)
+      cm.switchModel('gpt-5.3-codex');
+
+      // Generate 60% of 400k = 240k tokens (fine for 400k, exceeds 200k)
       const simulator = createContextSimulator({ targetTokens: 1000 });
-      const session = simulator.generateAtUtilization(75, 200_000);
+      const session = simulator.generateAtUtilization(60, 400_000);
       cm.setMessages(session.messages);
-      // Set API tokens to simulate what happens after a turn completes
       cm.setApiContextTokens(session.estimatedTokens);
 
       const callback = vi.fn();
       cm.onCompactionNeeded(callback);
 
-      // Switch to smaller model via ContextManager - should trigger callback
-      cm.switchModel('gpt-4o');
+      // Switch to Claude (200k) — 240k tokens = 120% → exceeded → triggers callback
+      cm.switchModel('claude-sonnet-4-20250514');
 
       expect(callback).toHaveBeenCalled();
     });

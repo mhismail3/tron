@@ -38,7 +38,7 @@ final class TokenStateManager {
 
     // MARK: - Initialization
 
-    init(maxContextSize: Int = 200_000) {
+    init(maxContextSize: Int = 0) {
         self.accumulated = AccumulatedTokens()
         self.contextWindow = ContextWindowState(maxSize: maxContextSize)
     }
@@ -170,7 +170,7 @@ struct ContextWindowState {
     var percentUsed: Int = 0
     var tokensRemaining: Int
 
-    init(maxSize: Int = 200_000) {
+    init(maxSize: Int = 0) {
         self.maxSize = maxSize
         self.tokensRemaining = maxSize
     }

@@ -25,7 +25,7 @@ final class RPCClient: RPCTransport {
 
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var currentSessionId: String?
-    private(set) var currentModel: String = "claude-opus-4-5-20251101"
+    private(set) var currentModel: String = ""
 
     // MARK: - Domain Clients
 
