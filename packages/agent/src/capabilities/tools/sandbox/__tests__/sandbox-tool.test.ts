@@ -109,8 +109,8 @@ describe('SandboxTool', () => {
       expect(args).toContain('--name');
       // Should have workspace volume mount
       expect(args.some((a: string) => a.includes('/Users/test/project') && a.includes(':/workspace'))).toBe(true);
-      // Default image
-      expect(args[args.length - 1]).toBe('ubuntu:latest');
+      // Default image + sleep infinity keep-alive
+      expect(args.slice(-3)).toEqual(['ubuntu:latest', 'sleep', 'infinity']);
 
       // Verify registered
       expect(mockRegistry.add).toHaveBeenCalledWith(
@@ -132,9 +132,24 @@ describe('SandboxTool', () => {
       } as SandboxParams, new AbortController().signal);
 
       const args = mockRunner.run.mock.calls[0][0] as string[];
-      expect(args[args.length - 1]).toBe('node:20');
+      expect(args.slice(-3)).toEqual(['node:20', 'sleep', 'infinity']);
       expect(mockRegistry.add).toHaveBeenCalledWith(
         expect.objectContaining({ image: 'node:20' }),
+      );
+    });
+
+    it('uses agent-provided name when specified', async () => {
+      mockRunner.run.mockResolvedValue({ stdout: 'id\n', stderr: '', exitCode: 0 });
+
+      await tool.execute('tc-1', {
+        action: 'create',
+        name: 'my-app',
+      } as SandboxParams, new AbortController().signal);
+
+      const args = mockRunner.run.mock.calls[0][0] as string[];
+      expect(args[args.indexOf('--name') + 1]).toBe('my-app');
+      expect(mockRegistry.add).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'my-app' }),
       );
     });
 

@@ -58,7 +58,7 @@ Interactive UIs: To build something the user can interact with on their phone:
       },
       name: {
         type: 'string' as const,
-        description: 'Container name (required for exec, stop, start, remove, logs)',
+        description: 'Container name. Optional for create (auto-generated if omitted). Required for exec, stop, start, remove, logs.',
       },
       image: {
         type: 'string' as const,
@@ -170,7 +170,7 @@ Interactive UIs: To build something the user can interact with on their phone:
   }
 
   private async handleCreate(params: SandboxParams): Promise<TronToolResult> {
-    const name = `tron-${randomBytes(4).toString('hex')}`;
+    const name = params.name ?? `tron-${randomBytes(4).toString('hex')}`;
     const image = params.image ?? DEFAULT_IMAGE;
     const ports = params.ports ?? [];
 
@@ -206,8 +206,10 @@ Interactive UIs: To build something the user can interact with on their phone:
       }
     }
 
-    // Image must be last
-    args.push(image);
+    // Image + keep-alive command
+    // Detached containers need a long-running process or they exit immediately.
+    // `sleep infinity` keeps the container alive for exec calls.
+    args.push(image, 'sleep', 'infinity');
 
     const result = await this.runner.run(args);
 
