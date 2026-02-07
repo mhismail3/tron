@@ -35,6 +35,11 @@ struct SettingsView: View {
     @State private var quickSessionWorkspace = "/Users/moose/Workspace"
     @State private var preserveRecentTurns: Int = 5
     @State private var forceAlwaysCompact: Bool = false
+    @State private var triggerTokenThreshold: Double = 0.70
+    @State private var defaultTurnFallback: Int = 8
+    @State private var webFetchTimeoutMs: Int = 30000
+    @State private var webCacheTtlMs: Int = 900000
+    @State private var webCacheMaxEntries: Int = 100
     @State private var settingsLoaded = false
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showModelPicker = false
@@ -81,36 +86,27 @@ struct SettingsView: View {
         return defaultModelValue.shortModelName
     }
 
+    // MARK: - Fetch Timeout Options
+
+    private static let fetchTimeoutOptions: [(label: String, value: Int)] = [
+        ("15s", 15000),
+        ("30s", 30000),
+        ("60s", 60000),
+        ("2min", 120000),
+    ]
+
+    // MARK: - Cache Duration Options
+
+    private static let cacheTtlOptions: [(label: String, value: Int)] = [
+        ("5min", 300000),
+        ("15min", 900000),
+        ("30min", 1800000),
+        ("1hr", 3600000),
+    ]
+
     var body: some View {
         NavigationStack {
             List {
-                // Environment Toggle (native iOS 26 segmented picker)
-                Section {
-                    Picker("Environment", selection: Binding(
-                        get: { selectedEnvironment },
-                        set: { newValue in
-                            let newPort: String
-                            switch newValue {
-                            case "beta": newPort = "8082"
-                            case "prod": newPort = "8080"
-                            default: return
-                            }
-                            serverPort = ""  // Clear custom port
-                            dependencies?.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
-                        }
-                    )) {
-                        Text("Beta")
-                            .tag("beta")
-                        Text("Prod")
-                            .tag("prod")
-                    }
-                    .pickerStyle(.segmented)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                } header: {
-                    Text("Environment")
-                        .font(TronTypography.caption)
-                }
-
                 // Server Section
                 Section {
                     TextField("Host", text: $serverHost)
@@ -122,51 +118,40 @@ struct SettingsView: View {
                             dependencies?.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
                         }
 
-                    TextField("Custom Port (optional)", text: $serverPort)
-                        .font(TronTypography.subheadline)
-                        .keyboardType(.numberPad)
-                        .onChange(of: serverPort) { _, newValue in
-                            // Only trigger update if port actually changed to something meaningful
-                            if !newValue.isEmpty {
-                                dependencies?.updateServerSettings(host: serverHost, port: newValue, useTLS: false)
+                    HStack {
+                        TextField("Custom Port", text: $serverPort)
+                            .font(TronTypography.subheadline)
+                            .keyboardType(.numberPad)
+                            .onChange(of: serverPort) { _, newValue in
+                                if !newValue.isEmpty {
+                                    dependencies?.updateServerSettings(host: serverHost, port: newValue, useTLS: false)
+                                }
                             }
+
+                        Picker("", selection: Binding(
+                            get: { selectedEnvironment },
+                            set: { newValue in
+                                let newPort: String
+                                switch newValue {
+                                case "beta": newPort = "8082"
+                                case "prod": newPort = "8080"
+                                default: return
+                                }
+                                serverPort = ""
+                                dependencies?.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                            }
+                        )) {
+                            Text("Beta").tag("beta")
+                            Text("Prod").tag("prod")
                         }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 120)
+                    }
                 } header: {
                     Text("Server")
                         .font(TronTypography.caption)
                 } footer: {
-                    Text("Default ports: Prod (8080), Beta (8082). Only set custom port if using a non-standard port.")
-                        .font(TronTypography.caption2)
-                }
-                .listSectionSpacing(16)
-
-                // Data Section
-                Section {
-                    Toggle(isOn: $confirmArchive) {
-                        Label("Confirm before archiving", systemImage: "questionmark.circle")
-                            .font(TronTypography.subheadline)
-                    }
-
-                    Button(role: .destructive) {
-                        showArchiveAllConfirmation = true
-                    } label: {
-                        HStack {
-                            Label("Archive All Sessions", systemImage: "archivebox")
-                                .font(TronTypography.subheadline)
-                                .foregroundStyle(.red)
-                            Spacer()
-                            if isArchivingAll {
-                                ProgressView()
-                                    .tint(.red)
-                            }
-                        }
-                    }
-                    .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
-                } header: {
-                    Text("Data")
-                        .font(TronTypography.caption)
-                } footer: {
-                    Text("Removes all sessions from your device. Session data on the server will remain.")
+                    Text("Default ports: Beta (8082), Prod (8080).")
                         .font(TronTypography.caption2)
                 }
                 .listSectionSpacing(16)
@@ -213,49 +198,46 @@ struct SettingsView: View {
                 }
 
                 // Compaction Section
-                Section {
-                    HStack {
-                        Label("Preserve Turns", systemImage: "arrow.counterclockwise.circle")
-                            .font(TronTypography.subheadline)
-                        Spacer()
-                        Text("\(preserveRecentTurns)")
-                            .font(TronTypography.subheadline)
-                            .foregroundStyle(.tronEmerald)
-                            .monospacedDigit()
-                            .frame(minWidth: 20)
-                        Stepper("", value: $preserveRecentTurns, in: 0...10)
-                            .labelsHidden()
-                            .fixedSize()
-                            .controlSize(.small)
-                    }
-                    .onChange(of: preserveRecentTurns) { _, newValue in
-                        updateServerSetting {
-                            ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
-                        }
-                    }
+                compactionSection
 
-                    Toggle(isOn: $forceAlwaysCompact) {
-                        Label("Compact Every Cycle", systemImage: "arrow.triangle.2.circlepath")
-                            .font(TronTypography.subheadline)
-                    }
-                    .onChange(of: forceAlwaysCompact) { _, newValue in
-                        updateServerSetting {
-                            ServerSettingsUpdate(context: .init(compactor: .init(forceAlways: newValue)))
-                        }
-                    }
-                } header: {
-                    Text("Compaction")
-                        .font(TronTypography.caption)
-                } footer: {
-                    Text("Preserve Turns: number of recent turns kept after compaction (default 5). Compact Every Cycle: trigger compaction after every response (for testing).")
-                        .font(TronTypography.caption2)
-                }
-                .listSectionSpacing(16)
+                // Web Section
+                webSection
 
                 // Font Style Section
                 if #available(iOS 26.0, *) {
                     FontStyleSection()
                 }
+
+                // Data Section
+                Section {
+                    Toggle(isOn: $confirmArchive) {
+                        Label("Confirm before archiving", systemImage: "questionmark.circle")
+                            .font(TronTypography.subheadline)
+                    }
+
+                    Button(role: .destructive) {
+                        showArchiveAllConfirmation = true
+                    } label: {
+                        HStack {
+                            Label("Archive All Sessions", systemImage: "archivebox")
+                                .font(TronTypography.subheadline)
+                                .foregroundStyle(.red)
+                            Spacer()
+                            if isArchivingAll {
+                                ProgressView()
+                                    .tint(.red)
+                            }
+                        }
+                    }
+                    .disabled(eventStoreManager.sessions.isEmpty || isArchivingAll)
+                } header: {
+                    Text("Data")
+                        .font(TronTypography.caption)
+                } footer: {
+                    Text("Removes all sessions from your device. Session data on the server will remain.")
+                        .font(TronTypography.caption2)
+                }
+                .listSectionSpacing(16)
 
                 // Advanced Section
                 Section {
@@ -376,6 +358,191 @@ struct SettingsView: View {
         .preferredColorScheme(.dark)
     }
 
+    // MARK: - Compaction Section
+
+    @ViewBuilder
+    private var compactionSection: some View {
+        // Compaction Threshold slider (50%–95%, step 5%)
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("Compaction Threshold", systemImage: "gauge.with.dots.needle.67percent")
+                        .font(TronTypography.subheadline)
+                    Spacer()
+                    Text("\(Int(triggerTokenThreshold * 100))%")
+                        .font(TronTypography.subheadline)
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                }
+                Slider(
+                    value: $triggerTokenThreshold,
+                    in: 0.50...0.95,
+                    step: 0.05
+                )
+                .tint(.tronEmerald)
+            }
+            .onChange(of: triggerTokenThreshold) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(compactor: .init(
+                        triggerTokenThreshold: newValue
+                    )))
+                }
+            }
+        } header: {
+            Text("Compaction")
+                .font(TronTypography.caption)
+        } footer: {
+            Text("Context usage % that triggers compaction. Lower values compact sooner, preserving more headroom.")
+                .font(TronTypography.caption2)
+        }
+
+        // Max Turns stepper (3–20)
+        Section {
+            HStack {
+                Label("Max Turns", systemImage: "repeat")
+                    .font(TronTypography.subheadline)
+                Spacer()
+                Text("\(defaultTurnFallback)")
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
+                    .monospacedDigit()
+                    .frame(minWidth: 20)
+                Stepper("", value: $defaultTurnFallback, in: 3...20)
+                    .labelsHidden()
+                    .fixedSize()
+                    .controlSize(.small)
+            }
+            .onChange(of: defaultTurnFallback) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(compactor: .init(
+                        defaultTurnFallback: newValue
+                    )))
+                }
+            }
+        } footer: {
+            Text("Maximum turns between compactions, even if the threshold hasn't been reached.")
+                .font(TronTypography.caption2)
+        }
+
+        // Keep Recent Turns stepper (0–10)
+        Section {
+            HStack {
+                Label("Keep Recent Turns", systemImage: "arrow.counterclockwise.circle")
+                    .font(TronTypography.subheadline)
+                Spacer()
+                Text("\(preserveRecentTurns)")
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
+                    .monospacedDigit()
+                    .frame(minWidth: 20)
+                Stepper("", value: $preserveRecentTurns, in: 0...10)
+                    .labelsHidden()
+                    .fixedSize()
+                    .controlSize(.small)
+            }
+            .onChange(of: preserveRecentTurns) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
+                }
+            }
+        } footer: {
+            Text("Number of recent turns kept verbatim after compaction. The rest is summarized.")
+                .font(TronTypography.caption2)
+        }
+
+        // Compact Every Cycle toggle (debug — stays last)
+        Section {
+            Toggle(isOn: $forceAlwaysCompact) {
+                Label("Compact Every Cycle", systemImage: "arrow.triangle.2.circlepath")
+                    .font(TronTypography.subheadline)
+            }
+            .onChange(of: forceAlwaysCompact) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(compactor: .init(forceAlways: newValue)))
+                }
+            }
+        } footer: {
+            Text("Force compaction after every response. Useful for testing compaction behavior.")
+                .font(TronTypography.caption2)
+        }
+        .listSectionSpacing(16)
+    }
+
+    // MARK: - Web Section
+
+    @ViewBuilder
+    private var webSection: some View {
+        // Fetch Timeout picker
+        Section {
+            Picker(selection: $webFetchTimeoutMs) {
+                ForEach(Self.fetchTimeoutOptions, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            } label: {
+                Label("Fetch Timeout", systemImage: "clock")
+                    .font(TronTypography.subheadline)
+            }
+            .onChange(of: webFetchTimeoutMs) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(tools: .init(web: .init(fetch: .init(timeoutMs: newValue))))
+                }
+            }
+        } header: {
+            Text("Web")
+                .font(TronTypography.caption)
+        } footer: {
+            Text("How long to wait for a page to respond before giving up.")
+                .font(TronTypography.caption2)
+        }
+
+        // Cache Duration picker
+        Section {
+            Picker(selection: $webCacheTtlMs) {
+                ForEach(Self.cacheTtlOptions, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            } label: {
+                Label("Cache Duration", systemImage: "timer")
+                    .font(TronTypography.subheadline)
+            }
+            .onChange(of: webCacheTtlMs) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(tools: .init(web: .init(cache: .init(ttlMs: newValue))))
+                }
+            }
+        } footer: {
+            Text("How long fetched pages are cached before being re-fetched.")
+                .font(TronTypography.caption2)
+        }
+
+        // Max Cached Pages stepper (25–500, step 25)
+        Section {
+            HStack {
+                Label("Max Cached Pages", systemImage: "doc.on.doc")
+                    .font(TronTypography.subheadline)
+                Spacer()
+                Text("\(webCacheMaxEntries)")
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
+                    .monospacedDigit()
+                    .frame(minWidth: 30)
+                Stepper("", value: $webCacheMaxEntries, in: 25...500, step: 25)
+                    .labelsHidden()
+                    .fixedSize()
+                    .controlSize(.small)
+            }
+            .onChange(of: webCacheMaxEntries) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(tools: .init(web: .init(cache: .init(maxEntries: newValue))))
+                }
+            }
+        } footer: {
+            Text("Maximum number of pages kept in cache. Oldest entries are evicted first.")
+                .font(TronTypography.caption2)
+        }
+        .listSectionSpacing(16)
+    }
+
     // MARK: - Computed Properties
 
     var serverURL: URL? {
@@ -390,12 +557,26 @@ struct SettingsView: View {
         confirmArchive = true
         preserveRecentTurns = 5
         forceAlwaysCompact = false
+        triggerTokenThreshold = 0.70
+        defaultTurnFallback = 8
+        webFetchTimeoutMs = 30000
+        webCacheTtlMs = 900000
+        webCacheMaxEntries = 100
         quickSessionWorkspace = "/Users/moose/Workspace"
         // Reset server-side settings
         updateServerSetting {
             ServerSettingsUpdate(
                 server: .init(defaultWorkspace: "/Users/moose/Workspace"),
-                context: .init(compactor: .init(preserveRecentCount: 5, forceAlways: false))
+                context: .init(compactor: .init(
+                    preserveRecentCount: 5,
+                    forceAlways: false,
+                    triggerTokenThreshold: 0.70,
+                    defaultTurnFallback: 8
+                )),
+                tools: .init(web: .init(
+                    fetch: .init(timeoutMs: 30000),
+                    cache: .init(ttlMs: 900000, maxEntries: 100)
+                ))
             )
         }
         // Trigger server reconnection with Beta port
@@ -416,6 +597,11 @@ struct SettingsView: View {
             let settings = try await rpcClient.settings.get()
             preserveRecentTurns = settings.compaction.preserveRecentTurns
             forceAlwaysCompact = settings.compaction.forceAlways
+            triggerTokenThreshold = settings.compaction.triggerTokenThreshold
+            defaultTurnFallback = settings.compaction.defaultTurnFallback
+            webFetchTimeoutMs = settings.tools.web.fetch.timeoutMs
+            webCacheTtlMs = settings.tools.web.cache.ttlMs
+            webCacheMaxEntries = settings.tools.web.cache.maxEntries
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
