@@ -38,6 +38,8 @@ export type SanitizationFixType =
   | 'removed_empty_message'
   | 'removed_thinking_only_message'
   | 'removed_invalid_block'
+  | 'removed_duplicate_tool_use'
+  | 'merged_consecutive_messages'
   | 'injected_placeholder_user';
 
 export interface SanitizationFix {
@@ -223,9 +225,10 @@ export function sanitizeMessages(messages: Message[]): SanitizationResult {
     return { messages: [], fixes: [], isValid: true };
   }
 
-  // PHASE 1: Filter invalid messages and build valid message list
+  // PHASE 1: Filter invalid messages, deduplicate tool_use IDs, and build valid message list
   const validMessages: Message[] = [];
   const toolUseLocations = new Map<string, number>(); // toolUseId → index in validMessages where assistant is
+  const seenToolUseIds = new Set<string>(); // For deduplication across messages
 
   for (const msg of messages) {
     if (!isValidMessage(msg)) {
@@ -252,6 +255,41 @@ export function sanitizeMessages(messages: Message[]): SanitizationResult {
     }
 
     const cloned = cloneMessage(msg);
+
+    // Deduplicate tool_use blocks within assistant messages
+    if (cloned.role === 'assistant') {
+      const assistantMsg = cloned as AssistantMessage;
+      const originalLength = assistantMsg.content.length;
+      assistantMsg.content = assistantMsg.content.filter(block => {
+        if (block && typeof block === 'object' && (block as any).type === 'tool_use') {
+          const id = (block as any).id;
+          if (typeof id === 'string' && seenToolUseIds.has(id)) {
+            fixes.push({
+              type: 'removed_duplicate_tool_use',
+              details: { toolUseId: id },
+            });
+            logger.warn('Removed duplicate tool_use block', { toolUseId: id });
+            return false;
+          }
+          if (typeof id === 'string') {
+            seenToolUseIds.add(id);
+          }
+        }
+        return true;
+      }) as AssistantMessage['content'];
+
+      // If message became empty after dedup, skip it
+      if (!isValidAssistantMessage(assistantMsg)) {
+        if (originalLength > 0) {
+          fixes.push({
+            type: 'removed_empty_message',
+            details: { role: 'assistant', reason: 'empty_after_dedup' },
+          });
+        }
+        continue;
+      }
+    }
+
     const index = validMessages.length;
     validMessages.push(cloned);
 
@@ -328,8 +366,42 @@ export function sanitizeMessages(messages: Message[]): SanitizationResult {
     logger.warn('Injected placeholder user message at start');
   }
 
+  // PHASE 5: Merge consecutive same-role messages (except toolResult)
+  // This catches any source of consecutive same-role messages, including
+  // those created by removing thinking-only messages or dedup operations.
+  const mergedMessages: Message[] = [];
+  for (const msg of validMessages) {
+    const prev = mergedMessages[mergedMessages.length - 1];
+    if (prev && prev.role === msg.role && msg.role !== 'toolResult') {
+      if (msg.role === 'assistant') {
+        // Merge assistant: concatenate content arrays
+        const prevAssistant = prev as AssistantMessage;
+        const curAssistant = msg as AssistantMessage;
+        prevAssistant.content = [...prevAssistant.content, ...curAssistant.content];
+      } else if (msg.role === 'user') {
+        // Merge user: normalize both to array format then concatenate
+        const prevUser = prev as UserMessage;
+        const curUser = msg as UserMessage;
+        const prevContent = typeof prevUser.content === 'string'
+          ? [{ type: 'text' as const, text: prevUser.content }]
+          : Array.isArray(prevUser.content) ? prevUser.content : [];
+        const curContent = typeof curUser.content === 'string'
+          ? [{ type: 'text' as const, text: curUser.content }]
+          : Array.isArray(curUser.content) ? curUser.content : [];
+        prevUser.content = [...prevContent, ...curContent] as UserMessage['content'];
+      }
+      fixes.push({
+        type: 'merged_consecutive_messages',
+        details: { role: msg.role },
+      });
+      logger.warn('Merged consecutive same-role messages', { role: msg.role });
+    } else {
+      mergedMessages.push(msg);
+    }
+  }
+
   return {
-    messages: validMessages,
+    messages: mergedMessages,
     fixes,
     isValid: fixes.length === 0,
   };

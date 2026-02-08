@@ -413,12 +413,13 @@ describe('sanitizeMessages thinking blocks', () => {
 
       const result = sanitizeMessages(messages);
 
-      // Should have 5 messages (thinking-only removed)
-      expect(result.messages).toHaveLength(5);
+      // Thinking-only removed, then consecutive user messages merged → 4 messages
+      expect(result.messages).toHaveLength(4);
       expect(result.messages.map(m => m.role)).toEqual([
-        'user', 'assistant', 'user', 'user', 'assistant',
+        'user', 'assistant', 'user', 'assistant',
       ]);
       expect(result.fixes.some(f => f.type === 'removed_thinking_only_message')).toBe(true);
+      expect(result.fixes.some(f => f.type === 'merged_consecutive_messages')).toBe(true);
     });
 
     it('should NOT remove assistant messages with thinking that has a signature', () => {
@@ -506,15 +507,14 @@ describe('sanitizeMessages thinking blocks', () => {
 
       const result = sanitizeMessages(messages);
 
-      // The thinking-only message should be removed
-      expect(result.messages).toHaveLength(5);
+      // Thinking-only removed + consecutive user messages merged → 4 messages
+      expect(result.messages).toHaveLength(4);
       expect(result.fixes.some(f => f.type === 'removed_thinking_only_message')).toBe(true);
+      expect(result.fixes.some(f => f.type === 'merged_consecutive_messages')).toBe(true);
 
       // Verify the structure is valid for API
       const roles = result.messages.map(m => m.role);
-      // User messages will be merged since they're consecutive after removal
-      expect(roles[0]).toBe('user');
-      expect(roles[1]).toBe('assistant');
+      expect(roles).toEqual(['user', 'assistant', 'user', 'assistant']);
     });
   });
 });
@@ -694,5 +694,197 @@ describe('integration with message reconstruction', () => {
 
     // Should inject 2 synthetic tool results
     expect(result.messages.filter(m => m.role === 'toolResult')).toHaveLength(2);
+  });
+});
+
+// =============================================================================
+// 6. Tool Use ID Deduplication
+// =============================================================================
+
+describe('sanitizeMessages tool_use ID deduplication', () => {
+  it('should remove duplicate tool_use IDs across assistant messages', () => {
+    // This is the exact bug: interrupted multi-turn sessions can produce
+    // the same tool_use ID in two different assistant messages
+    const messages: Message[] = [
+      createUserMessage('Start'),
+      createAssistantMessage([
+        createText('Turn 1'),
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+      ]),
+      createToolResult('tc_1', 'contents of a'),
+      // Duplicate: interrupted content also includes tc_1
+      createAssistantMessage([
+        createText('Interrupted turn'),
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+        createToolUse('tc_2', 'Bash', { command: 'echo hi' }),
+      ]),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // Count tool_use blocks with id 'tc_1' across all assistant messages
+    let tc1Count = 0;
+    for (const msg of result.messages) {
+      if (msg.role === 'assistant') {
+        for (const block of (msg as AssistantMessage).content) {
+          if (block && typeof block === 'object' && (block as any).type === 'tool_use' && (block as any).id === 'tc_1') {
+            tc1Count++;
+          }
+        }
+      }
+    }
+    expect(tc1Count).toBe(1); // First occurrence kept, duplicate removed
+  });
+
+  it('should remove assistant message entirely if empty after dedup', () => {
+    const messages: Message[] = [
+      createUserMessage('Start'),
+      createAssistantMessage([
+        createText('First'),
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+      ]),
+      createToolResult('tc_1', 'result'),
+      // This message only has the duplicate tool_use
+      createAssistantMessage([
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+      ]),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // The second assistant message should be removed entirely since it only had the dup
+    const assistantMessages = result.messages.filter(m => m.role === 'assistant');
+    expect(assistantMessages).toHaveLength(1);
+  });
+
+  it('should preserve different tool_use IDs with same tool name', () => {
+    const messages: Message[] = [
+      createUserMessage('Start'),
+      createAssistantMessage([
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+        createToolUse('tc_2', 'Read', { file_path: 'b.ts' }),
+      ]),
+      createToolResult('tc_1', 'a contents'),
+      createToolResult('tc_2', 'b contents'),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // Both should be preserved (different IDs)
+    const toolUseBlocks: any[] = [];
+    for (const msg of result.messages) {
+      if (msg.role === 'assistant') {
+        for (const block of (msg as AssistantMessage).content) {
+          if (block && typeof block === 'object' && (block as any).type === 'tool_use') {
+            toolUseBlocks.push(block);
+          }
+        }
+      }
+    }
+    expect(toolUseBlocks).toHaveLength(2);
+  });
+});
+
+// =============================================================================
+// 7. Consecutive Same-Role Message Merging
+// =============================================================================
+
+describe('sanitizeMessages consecutive same-role message merging', () => {
+  it('should merge two consecutive assistant messages', () => {
+    const messages: Message[] = [
+      createUserMessage('Start'),
+      createAssistantMessage([createText('Part 1')]),
+      createAssistantMessage([createText('Part 2')]),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // Should be merged into one assistant message
+    const assistantMessages = result.messages.filter(m => m.role === 'assistant');
+    expect(assistantMessages).toHaveLength(1);
+
+    // Content should be concatenated
+    const content = (assistantMessages[0] as AssistantMessage).content;
+    expect(content).toHaveLength(2);
+    expect((content[0] as any).text).toBe('Part 1');
+    expect((content[1] as any).text).toBe('Part 2');
+  });
+
+  it('should merge two consecutive user messages', () => {
+    const messages: Message[] = [
+      createUserMessage('Hello'),
+      createUserMessage('World'),
+      createAssistantMessage([createText('Hi')]),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // Should be merged into one user message
+    const userMessages = result.messages.filter(m => m.role === 'user');
+    expect(userMessages).toHaveLength(1);
+  });
+
+  it('should NOT merge consecutive toolResult messages', () => {
+    const messages: Message[] = [
+      createUserMessage('Start'),
+      createAssistantMessage([
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+        createToolUse('tc_2', 'Read', { file_path: 'b.ts' }),
+      ]),
+      createToolResult('tc_1', 'a contents'),
+      createToolResult('tc_2', 'b contents'),
+      createAssistantMessage([createText('Done')]),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // toolResult messages should NOT be merged
+    const toolResults = result.messages.filter(m => m.role === 'toolResult');
+    expect(toolResults).toHaveLength(2);
+  });
+
+  it('should handle complex mixed scenario with dedup and merging', () => {
+    // Simulates the exact interrupted multi-turn bug:
+    // Turn 1 persisted normally, Turn 2 interrupted → duplicated tool_use + consecutive assistants
+    const messages: Message[] = [
+      createUserMessage('Do stuff'),
+      // Turn 1: normal
+      createAssistantMessage([
+        createText('Turn 1'),
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+      ]),
+      createToolResult('tc_1', 'a contents'),
+      // Turn 2: normal (before interrupt)
+      createAssistantMessage([
+        createText('Turn 2'),
+        createToolUse('tc_2', 'Bash', { command: 'echo hi' }),
+      ]),
+      createToolResult('tc_2', 'hi'),
+      // Interrupted content (duplicates tc_1 and tc_2 from accumulation bug)
+      createAssistantMessage([
+        createText('Turn 1'),
+        createToolUse('tc_1', 'Read', { file_path: 'a.ts' }),
+        createText('Turn 2'),
+        createToolUse('tc_2', 'Bash', { command: 'echo hi' }),
+        createText('Turn 3 partial'),
+        createToolUse('tc_3', 'Write', { file_path: 'c.ts', content: 'x' }),
+      ]),
+    ];
+
+    const result = sanitizeMessages(messages);
+
+    // Verify no duplicate tool_use IDs
+    const allToolUseIds: string[] = [];
+    for (const msg of result.messages) {
+      if (msg.role === 'assistant') {
+        for (const block of (msg as AssistantMessage).content) {
+          if (block && typeof block === 'object' && (block as any).type === 'tool_use') {
+            allToolUseIds.push((block as any).id);
+          }
+        }
+      }
+    }
+    const uniqueIds = new Set(allToolUseIds);
+    expect(allToolUseIds.length).toBe(uniqueIds.size);
   });
 });

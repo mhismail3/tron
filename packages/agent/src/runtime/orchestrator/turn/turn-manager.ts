@@ -316,6 +316,14 @@ export class TurnManager {
     return this.tracker.buildInterruptedContent();
   }
 
+  /**
+   * Build content blocks for an interrupted session using only the current turn.
+   * Prevents duplicate events by only including unpersisted content.
+   */
+  buildCurrentTurnInterruptedContent(): InterruptedContent {
+    return this.tracker.buildCurrentTurnInterruptedContent();
+  }
+
   // ===========================================================================
   // Pre-Tool Content Flush (for Linear Event Ordering)
   // ===========================================================================

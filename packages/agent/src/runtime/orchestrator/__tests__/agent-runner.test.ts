@@ -50,6 +50,7 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
     getAccumulatedContent: vi.fn().mockReturnValue({ text: '', toolCalls: [] }),
     hasAccumulatedContent: vi.fn().mockReturnValue(false),
     buildInterruptedContent: vi.fn().mockReturnValue({ assistantContent: [], toolResultContent: [] }),
+    buildCurrentTurnInterruptedContent: vi.fn().mockReturnValue({ assistantContent: [], toolResultContent: [] }),
     onAgentEnd: vi.fn(),
   };
 
@@ -528,7 +529,7 @@ describe('AgentRunner', () => {
     });
 
     it('persists partial assistant content', async () => {
-      (active.sessionContext.buildInterruptedContent as Mock).mockReturnValue({
+      (active.sessionContext.buildCurrentTurnInterruptedContent as Mock).mockReturnValue({
         assistantContent: [{ type: 'text', text: 'Partial...' }],
         toolResultContent: [],
       });
@@ -546,7 +547,7 @@ describe('AgentRunner', () => {
     });
 
     it('persists tool results from interrupted session', async () => {
-      (active.sessionContext.buildInterruptedContent as Mock).mockReturnValue({
+      (active.sessionContext.buildCurrentTurnInterruptedContent as Mock).mockReturnValue({
         assistantContent: [{ type: 'tool_use', id: 'tc_1', name: 'Read', input: {} }],
         toolResultContent: [{ type: 'tool_result', tool_use_id: 'tc_1', content: 'file content', is_error: false }],
       });
@@ -566,7 +567,7 @@ describe('AgentRunner', () => {
     });
 
     it('does not persist when no accumulated content', async () => {
-      (active.sessionContext.buildInterruptedContent as Mock).mockReturnValue({
+      (active.sessionContext.buildCurrentTurnInterruptedContent as Mock).mockReturnValue({
         assistantContent: [],
         toolResultContent: [],
       });

@@ -35,6 +35,7 @@ import {
 import {
   buildPreToolContentBlocks,
   buildInterruptedContentBlocks,
+  buildToolResultBlock,
   type ContentSequenceItem,
   type ToolCallData,
   type ToolUseMeta,
@@ -744,6 +745,57 @@ export class TurnContentTracker {
       assistantBlocks: result.assistantContent.length,
       toolResultBlocks: result.toolResultContent.length,
       usedSequence: this.accumulatedSequence.length > 0,
+    });
+
+    return result;
+  }
+
+  /**
+   * Build content blocks for persisting an interrupted session using ONLY the current turn.
+   *
+   * Unlike buildInterruptedContent() which uses accumulated state across ALL turns,
+   * this method only persists content from the current turn that hasn't already been
+   * persisted by the normal event handlers. This prevents duplicate events when
+   * a session is interrupted after multiple agentic turns.
+   *
+   * Logic:
+   * - If preToolContentFlushed: message.assistant was already persisted → assistantContent is empty
+   * - If !preToolContentFlushed: build assistantContent from per-turn state
+   * - toolResultContent: only include tools with status !== 'completed' && status !== 'error'
+   *   (completed/error tools already have tool.result events from the normal handler)
+   */
+  buildCurrentTurnInterruptedContent(): InterruptedContent {
+    if (this.preToolContentFlushed) {
+      // message.assistant already persisted — only persist tool results for incomplete tools
+      const incompleteResults: InterruptedContent['toolResultContent'] = [];
+      for (const [, tc] of this.thisTurnToolCalls) {
+        if (tc.status !== 'completed' && tc.status !== 'error') {
+          incompleteResults.push(buildToolResultBlock(tc, true));
+        }
+      }
+      return { assistantContent: [], toolResultContent: incompleteResults };
+    }
+
+    // Pre-tool content NOT flushed — need to persist both message.assistant and tool results
+    const toolCallsArray = Array.from(this.thisTurnToolCalls.values());
+    const result = buildInterruptedContentBlocks(
+      this.thisTurnThinking,
+      this.thisTurnThinkingSignature,
+      this.thisTurnSequence,
+      toolCallsArray
+    );
+
+    // Filter out tool results for completed/error tools (they already have tool.result events)
+    result.toolResultContent = result.toolResultContent.filter(tr => {
+      const tc = this.thisTurnToolCalls.get(tr.tool_use_id);
+      return tc && tc.status !== 'completed' && tc.status !== 'error';
+    });
+
+    logger.debug('Built current-turn interrupted content', {
+      assistantBlocks: result.assistantContent.length,
+      toolResultBlocks: result.toolResultContent.length,
+      turn: this.currentTurn,
+      preToolFlushed: this.preToolContentFlushed,
     });
 
     return result;

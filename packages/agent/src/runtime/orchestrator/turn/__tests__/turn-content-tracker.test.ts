@@ -471,4 +471,198 @@ describe('TurnContentTracker', () => {
       });
     });
   });
+
+  describe('buildCurrentTurnInterruptedContent', () => {
+    it('should only return current turn content, not previous turns', () => {
+      tracker.onAgentStart();
+
+      // Turn 1: complete
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('Turn 1 text');
+      tracker.registerToolIntents([
+        { id: 'tc_t1', name: 'Read', arguments: { file_path: 'a.ts' } },
+      ]);
+      tracker.startToolCall('tc_t1', 'Read', { file_path: 'a.ts' }, '2024-01-01T00:00:00Z');
+      tracker.endToolCall('tc_t1', 'contents of a', false, '2024-01-01T00:00:01Z');
+      tracker.onTurnEnd();
+
+      // Turn 2: complete
+      tracker.onTurnStart(2);
+      tracker.addTextDelta('Turn 2 text');
+      tracker.registerToolIntents([
+        { id: 'tc_t2', name: 'Read', arguments: { file_path: 'b.ts' } },
+      ]);
+      tracker.startToolCall('tc_t2', 'Read', { file_path: 'b.ts' }, '2024-01-01T00:00:02Z');
+      tracker.endToolCall('tc_t2', 'contents of b', false, '2024-01-01T00:00:03Z');
+      tracker.onTurnEnd();
+
+      // Turn 3: interrupted mid-tool
+      tracker.onTurnStart(3);
+      tracker.addTextDelta('Turn 3 text');
+      tracker.registerToolIntents([
+        { id: 'tc_t3', name: 'Bash', arguments: { command: 'sleep 100' } },
+      ]);
+      tracker.startToolCall('tc_t3', 'Bash', { command: 'sleep 100' }, '2024-01-01T00:00:04Z');
+      // Tool NOT ended — interrupted
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      // Should only contain turn 3 content
+      expect(result.assistantContent.length).toBeGreaterThan(0);
+      const textBlock = result.assistantContent.find(b => b.type === 'text');
+      expect(textBlock?.text).toBe('Turn 3 text');
+
+      // Should not contain turn 1 or turn 2 tool_use blocks
+      const toolUseBlocks = result.assistantContent.filter(b => b.type === 'tool_use');
+      expect(toolUseBlocks).toHaveLength(1);
+      expect(toolUseBlocks[0]!.id).toBe('tc_t3');
+
+      // Should only have tool results for incomplete tools
+      expect(result.toolResultContent).toHaveLength(1);
+      expect(result.toolResultContent[0]!.tool_use_id).toBe('tc_t3');
+    });
+
+    it('should return empty assistantContent when preToolContent already flushed', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('Some text');
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Read', arguments: { file_path: 'a.ts' } },
+      ]);
+      tracker.startToolCall('tc_1', 'Read', { file_path: 'a.ts' }, '2024-01-01T00:00:00Z');
+
+      // Flush pre-tool content (simulates message.assistant already persisted)
+      tracker.flushPreToolContent();
+      expect(tracker.hasPreToolContentFlushed()).toBe(true);
+
+      // Now interrupt
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      // assistantContent should be empty since message.assistant was already persisted
+      expect(result.assistantContent).toHaveLength(0);
+
+      // But incomplete tool results should still be present
+      expect(result.toolResultContent).toHaveLength(1);
+      expect(result.toolResultContent[0]!.tool_use_id).toBe('tc_1');
+    });
+
+    it('should exclude completed tools from toolResultContent', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('Working on it');
+      tracker.registerToolIntents([
+        { id: 'tc_done', name: 'Read', arguments: { file_path: 'a.ts' } },
+        { id: 'tc_running', name: 'Bash', arguments: { command: 'sleep 100' } },
+        { id: 'tc_pending', name: 'Write', arguments: { file_path: 'c.ts', content: 'x' } },
+      ]);
+      tracker.startToolCall('tc_done', 'Read', { file_path: 'a.ts' }, '2024-01-01T00:00:00Z');
+      tracker.endToolCall('tc_done', 'contents', false, '2024-01-01T00:00:01Z');
+      tracker.startToolCall('tc_running', 'Bash', { command: 'sleep 100' }, '2024-01-01T00:00:02Z');
+      // tc_running not ended, tc_pending never started
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      // All 3 tool_use blocks in assistantContent (since preToolContent not flushed)
+      const toolUseBlocks = result.assistantContent.filter(b => b.type === 'tool_use');
+      expect(toolUseBlocks).toHaveLength(3);
+
+      // Only incomplete tools in toolResultContent
+      const toolResultIds = result.toolResultContent.map(tr => tr.tool_use_id);
+      expect(toolResultIds).not.toContain('tc_done');
+      expect(toolResultIds).toContain('tc_running');
+      expect(toolResultIds).toContain('tc_pending');
+    });
+
+    it('should return full content for first turn with no tools', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('Just some text, no tools');
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      expect(result.assistantContent).toHaveLength(1);
+      expect(result.assistantContent[0]!.type).toBe('text');
+      expect(result.assistantContent[0]!.text).toBe('Just some text, no tools');
+      expect(result.toolResultContent).toHaveLength(0);
+    });
+
+    it('should return empty content between turns (empty current turn)', () => {
+      tracker.onAgentStart();
+
+      // Complete turn 1
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('Done');
+      tracker.onTurnEnd();
+
+      // Turn 2 not started yet (or just started with no content)
+      tracker.onTurnStart(2);
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      expect(result.assistantContent).toHaveLength(0);
+      expect(result.toolResultContent).toHaveLength(0);
+    });
+
+    it('should return empty when all tools in current turn completed', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('All done');
+      tracker.registerToolIntents([
+        { id: 'tc_1', name: 'Read', arguments: { file_path: 'a.ts' } },
+      ]);
+      tracker.startToolCall('tc_1', 'Read', { file_path: 'a.ts' }, '2024-01-01T00:00:00Z');
+      tracker.endToolCall('tc_1', 'contents', false, '2024-01-01T00:00:01Z');
+
+      // Simulate pre-tool content flushed (message.assistant already persisted)
+      tracker.flushPreToolContent();
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      // message.assistant already persisted, all tools completed → nothing to persist
+      expect(result.assistantContent).toHaveLength(0);
+      expect(result.toolResultContent).toHaveLength(0);
+    });
+
+    it('should include thinking content in current turn', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addThinkingDelta('Deep thoughts about the problem');
+      tracker.setThinkingSignature('sig_abc');
+      tracker.addTextDelta('Let me work on this');
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      expect(result.assistantContent.length).toBeGreaterThanOrEqual(2);
+      expect(result.assistantContent[0]!.type).toBe('thinking');
+      expect(result.assistantContent[0]!.thinking).toBe('Deep thoughts about the problem');
+      expect(result.assistantContent[0]!.signature).toBe('sig_abc');
+    });
+
+    it('should handle error-status tools same as completed (exclude from results)', () => {
+      tracker.onAgentStart();
+      tracker.onTurnStart(1);
+      tracker.addTextDelta('Trying');
+      tracker.registerToolIntents([
+        { id: 'tc_err', name: 'Bash', arguments: { command: 'fail' } },
+        { id: 'tc_run', name: 'Read', arguments: { file_path: 'x.ts' } },
+      ]);
+      tracker.startToolCall('tc_err', 'Bash', { command: 'fail' }, '2024-01-01T00:00:00Z');
+      tracker.endToolCall('tc_err', 'command failed', true, '2024-01-01T00:00:01Z');
+      tracker.startToolCall('tc_run', 'Read', { file_path: 'x.ts' }, '2024-01-01T00:00:02Z');
+      // tc_run still running
+
+      // Flush pre-tool content
+      tracker.flushPreToolContent();
+
+      const result = tracker.buildCurrentTurnInterruptedContent();
+
+      // assistantContent empty (already flushed)
+      expect(result.assistantContent).toHaveLength(0);
+
+      // Only running tool in results (error tool already has tool.result event)
+      const resultIds = result.toolResultContent.map(tr => tr.tool_use_id);
+      expect(resultIds).not.toContain('tc_err');
+      expect(resultIds).toContain('tc_run');
+    });
+  });
 });

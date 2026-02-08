@@ -529,8 +529,8 @@ export class AgentRunner {
     active: ActiveSession,
     runResult: RunResult
   ): Promise<void> {
-    // Build content blocks from accumulated state (preserves exact interleaving order)
-    const { assistantContent, toolResultContent } = active.sessionContext.buildInterruptedContent();
+    // Build content blocks from current turn only (prevents cross-turn duplication)
+    const { assistantContent, toolResultContent } = active.sessionContext.buildCurrentTurnInterruptedContent();
 
     // Only persist if there's actual content
     if (assistantContent.length === 0 && toolResultContent.length === 0) {

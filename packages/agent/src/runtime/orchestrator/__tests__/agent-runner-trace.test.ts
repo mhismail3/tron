@@ -48,6 +48,7 @@ function createMockActiveSession(): ActiveSession {
     getAccumulatedContent: vi.fn().mockReturnValue({ text: '', toolCalls: [] }),
     hasAccumulatedContent: vi.fn().mockReturnValue(false),
     buildInterruptedContent: vi.fn().mockReturnValue({ assistantContent: [], toolResultContent: [] }),
+    buildCurrentTurnInterruptedContent: vi.fn().mockReturnValue({ assistantContent: [], toolResultContent: [] }),
     onAgentEnd: vi.fn(),
   };
 

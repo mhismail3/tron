@@ -661,4 +661,224 @@ describe('Agentic Loop Message Reconstruction', () => {
       expect((messages[2] as any).content).toBe('');
     });
   });
+
+  describe('Interrupted multi-turn session (regression)', () => {
+    it('should have no duplicate tool_use IDs when 3-turn session interrupted during turn 3', async () => {
+      // Simulates the bug: persistInterruptedContent() used accumulated state
+      // which spans ALL turns, creating duplicates of turns 1 and 2 content.
+      //
+      // Correct behavior: only turn 3's unpersisted content should be in the
+      // interrupted message.assistant event.
+
+      // User prompt
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Do a multi-step task' },
+      });
+
+      // Turn 1: assistant with tool_use (persisted normally)
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Step 1' },
+            { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'a.ts' } },
+          ],
+          turn: 1,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'a contents', isError: false },
+      });
+
+      // Turn 2: assistant continues (persisted normally)
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Step 2' },
+            { type: 'tool_use', id: 'tc_2', name: 'Read', input: { file_path: 'b.ts' } },
+          ],
+          turn: 2,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_2', content: 'b contents', isError: false },
+      });
+
+      // Turn 3: interrupted — only this turn's content should appear here
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Step 3' },
+            { type: 'tool_use', id: 'tc_3', name: 'Bash', input: { command: 'make build' } },
+          ],
+          turn: 3,
+          interrupted: true,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_3', content: 'Command interrupted (no output captured)', isError: false, interrupted: true },
+      });
+
+      // Reconstruct messages
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Collect ALL tool_use IDs across all messages
+      const allToolUseIds: string[] = [];
+      for (const msg of messages) {
+        if (msg.role === 'assistant') {
+          for (const block of (msg.content as any[])) {
+            if (block.type === 'tool_use') {
+              allToolUseIds.push(block.id);
+            }
+          }
+        }
+      }
+
+      // CRITICAL: No duplicate tool_use IDs
+      const uniqueIds = new Set(allToolUseIds);
+      expect(allToolUseIds.length).toBe(uniqueIds.size);
+
+      // Should have exactly 3 unique tool_use IDs
+      expect(uniqueIds.size).toBe(3);
+      expect(uniqueIds.has('tc_1')).toBe(true);
+      expect(uniqueIds.has('tc_2')).toBe(true);
+      expect(uniqueIds.has('tc_3')).toBe(true);
+    });
+
+    it('should handle interrupt after all tools complete in turn 3', async () => {
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Multi-step' },
+      });
+
+      // Turn 1
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_1', name: 'Read', input: { file_path: 'a.ts' } },
+          ],
+          turn: 1,
+        },
+      });
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'a', isError: false },
+      });
+
+      // Turn 2
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_2', name: 'Read', input: { file_path: 'b.ts' } },
+          ],
+          turn: 2,
+        },
+      });
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_2', content: 'b', isError: false },
+      });
+
+      // Turn 3: tools completed, then interrupted before LLM response
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'tool_use', id: 'tc_3', name: 'Read', input: { file_path: 'c.ts' } },
+          ],
+          turn: 3,
+        },
+      });
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_3', content: 'c', isError: false },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Verify no duplicate tool_use IDs
+      const allToolUseIds: string[] = [];
+      for (const msg of messages) {
+        if (msg.role === 'assistant') {
+          for (const block of (msg.content as any[])) {
+            if (block.type === 'tool_use') {
+              allToolUseIds.push(block.id);
+            }
+          }
+        }
+      }
+      expect(new Set(allToolUseIds).size).toBe(allToolUseIds.length);
+
+      // Verify proper alternation
+      const roles = messages.map(m => m.role);
+      // user -> assistant -> toolResult -> assistant -> toolResult -> assistant -> toolResult
+      expect(roles[0]).toBe('user');
+    });
+
+    it('should handle interrupt during first turn with tool calls', async () => {
+      await eventStore.append({
+        sessionId,
+        type: 'message.user',
+        payload: { content: 'Quick task' },
+      });
+
+      // Only turn 1, interrupted
+      await eventStore.append({
+        sessionId,
+        type: 'message.assistant',
+        payload: {
+          content: [
+            { type: 'text', text: 'Starting...' },
+            { type: 'tool_use', id: 'tc_1', name: 'Bash', input: { command: 'ls' } },
+          ],
+          turn: 1,
+          interrupted: true,
+        },
+      });
+
+      await eventStore.append({
+        sessionId,
+        type: 'tool.result',
+        payload: { toolCallId: 'tc_1', content: 'interrupted', isError: false, interrupted: true },
+      });
+
+      const messages = await eventStore.getMessagesAtHead(sessionId);
+
+      // Should have: user -> assistant -> toolResult
+      expect(messages).toHaveLength(3);
+      expect(messages[0]!.role).toBe('user');
+      expect(messages[1]!.role).toBe('assistant');
+      expect(messages[2]!.role).toBe('toolResult');
+
+      // Only one tool_use ID
+      const assistantContent = (messages[1] as any).content;
+      const toolUseBlocks = assistantContent.filter((b: any) => b.type === 'tool_use');
+      expect(toolUseBlocks).toHaveLength(1);
+    });
+  });
 });

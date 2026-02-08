@@ -414,6 +414,13 @@ export class SessionContext {
     return this.turnManager.buildInterruptedContent();
   }
 
+  /**
+   * Build interrupted content using only the current turn (prevents duplicates).
+   */
+  buildCurrentTurnInterruptedContent(): InterruptedContent {
+    return this.turnManager.buildCurrentTurnInterruptedContent();
+  }
+
   // ===========================================================================
   // Pre-Tool Content Flush (for Linear Event Ordering)
   // ===========================================================================
