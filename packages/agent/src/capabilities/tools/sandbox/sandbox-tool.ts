@@ -48,7 +48,7 @@ Network binding: Services inside containers MUST bind to 0.0.0.0 (not localhost/
 Interactive UIs: To build something the user can interact with on their phone:
 1. Create a container with port mappings (e.g. ports: ["3000:3000"])
 2. Install dependencies and start a dev server bound to 0.0.0.0 inside the container
-3. Get machine IP: /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4
+3. Get the machine's Tailscale IP from server.tailscaleIp in ~/.tron/settings.json
 4. Use OpenURL to open the app at http://{tailscale-ip}:{port}`;
 
   readonly parameters = {

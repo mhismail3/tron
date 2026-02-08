@@ -337,6 +337,8 @@ export interface ServerSettings {
   healthPort: number;
   /** Server host binding */
   host: string;
+  /** Tailscale IPv4 address for this machine (used for container port access from iOS) */
+  tailscaleIp?: string;
   /** WebSocket heartbeat interval in milliseconds */
   heartbeatIntervalMs: number;
   /** Session inactivity timeout in milliseconds */
