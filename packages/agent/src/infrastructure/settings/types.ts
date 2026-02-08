@@ -304,6 +304,18 @@ export interface ContextSettings {
 }
 
 // =============================================================================
+// Logging Settings
+// =============================================================================
+
+/**
+ * Logging configuration
+ */
+export interface LoggingSettings {
+  /** Minimum log level to persist to SQLite (default: 'info') */
+  dbLogLevel: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+}
+
+// =============================================================================
 // Hook Settings
 // =============================================================================
 
@@ -641,6 +653,8 @@ export interface TronSettings {
   tools: ToolSettings;
   /** Context configuration */
   context: ContextSettings;
+  /** Logging configuration */
+  logging: LoggingSettings;
   /** Hook configuration */
   hooks: HookSettings;
   /** Server configuration */

@@ -204,6 +204,11 @@ export const DEFAULT_SETTINGS: TronSettings = {
     },
   },
 
+  // Logging Configuration
+  logging: {
+    dbLogLevel: 'info',  // Exclude trace (10) and debug (20) from SQLite by default
+  },
+
   // Hook Configuration
   hooks: {
     defaultTimeoutMs: 5000,

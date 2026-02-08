@@ -4,7 +4,7 @@
  * Main entry point for the Tron WebSocket server.
  * Uses event-sourced session management via EventStoreOrchestrator.
  */
-import { createLogger, initializeLogTransport, closeLogTransport, flushLogs } from '@infrastructure/logging/index.js';
+import { createLogger, initializeLogTransport, closeLogTransport, flushLogs, LOG_LEVEL_NUM } from '@infrastructure/logging/index.js';
 import { resolveTronPath, getTronDataDir } from '@infrastructure/settings/index.js';
 import { DEFAULT_SERVER_MODEL } from '@llm/providers/model-ids.js';
 import type { RpcContext } from './rpc/context-types.js';
@@ -79,14 +79,15 @@ export class TronServer {
     await this.orchestrator.initialize();
 
     // Initialize SQLite log transport for database-backed logging
-    // Persist ALL log levels (trace=10 and above) for comprehensive debugging
     const db = this.orchestrator.getEventStore().getDatabase();
+    const dbLogLevel = getSettings().logging.dbLogLevel;
+    const minLevel = LOG_LEVEL_NUM[dbLogLevel];
     initializeLogTransport(db, {
-      minLevel: 10, // trace and above - persist EVERYTHING
-      batchSize: 200, // Larger batches for trace/debug volume
-      flushIntervalMs: 2000, // Longer interval for non-critical logs
+      minLevel,
+      batchSize: 200,
+      flushIntervalMs: 2000,
     });
-    logger.info('SQLite log transport initialized (all levels)');
+    logger.info(`SQLite log transport initialized (minLevel: ${dbLogLevel}/${minLevel})`);
 
     // Create RpcContext from modular adapter factory
     const rpcContext: RpcContext = createRpcContext({

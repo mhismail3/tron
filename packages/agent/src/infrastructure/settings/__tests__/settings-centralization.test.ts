@@ -45,6 +45,12 @@ describe('settings centralization', () => {
     });
   });
 
+  describe('logging defaults', () => {
+    it('should have dbLogLevel default to info', () => {
+      expect(DEFAULT_SETTINGS.logging.dbLogLevel).toBe('info');
+    });
+  });
+
   describe('settings structure', () => {
     it('should have tools.web section', () => {
       expect(DEFAULT_SETTINGS.tools.web).toBeDefined();
