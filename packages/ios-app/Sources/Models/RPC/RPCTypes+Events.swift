@@ -84,23 +84,23 @@ struct MemoryGetLedgerParams: Encodable {
     }
 }
 
-struct LedgerFileEntry: Decodable {
+struct LedgerFileEntry: Codable {
     let path: String
     let op: String
     let why: String
 }
 
-struct LedgerDecision: Decodable {
+struct LedgerDecision: Codable {
     let choice: String
     let reason: String
 }
 
-struct LedgerTokenCost: Decodable {
+struct LedgerTokenCost: Codable {
     let input: Int?
     let output: Int?
 }
 
-struct LedgerEntryDTO: Decodable, Identifiable {
+struct LedgerEntryDTO: Codable, Identifiable {
     let id: String
     let sessionId: String
     let timestamp: String

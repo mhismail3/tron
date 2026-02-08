@@ -41,6 +41,9 @@ struct MemoryDashboardDetailSheet: View {
                         tagsSection
                             .padding(.horizontal)
                     }
+
+                    rawEntrySection
+                        .padding(.horizontal)
                 }
                 .padding(.vertical)
             }
@@ -131,6 +134,7 @@ struct MemoryDashboardDetailSheet: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
@@ -165,6 +169,7 @@ struct MemoryDashboardDetailSheet: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
@@ -194,6 +199,7 @@ struct MemoryDashboardDetailSheet: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
@@ -223,6 +229,7 @@ struct MemoryDashboardDetailSheet: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
@@ -261,6 +268,7 @@ struct MemoryDashboardDetailSheet: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.clear)
@@ -286,7 +294,42 @@ struct MemoryDashboardDetailSheet: View {
         }
     }
 
+    // MARK: - Raw Entry
+
+    private var rawEntrySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Ledger Entry")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(prettyPrintEntry(entry))
+                    .font(TronTypography.mono(size: 11))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.purple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
     // MARK: - Helpers
+
+    private func prettyPrintEntry(_ entry: LedgerEntryDTO) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(entry),
+              let json = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return json
+    }
 
     private func formatTokens(_ count: Int) -> String {
         if count >= 1000 {
