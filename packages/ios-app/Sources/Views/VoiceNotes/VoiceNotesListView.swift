@@ -12,6 +12,8 @@ struct VoiceNotesListView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedNote: VoiceNoteMetadata?
+    @State private var noteToDelete: VoiceNoteMetadata?
+    @State private var showDeleteConfirmation = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -31,6 +33,20 @@ struct VoiceNotesListView: View {
             FloatingVoiceNotesButton(action: onVoiceNote)
                 .padding(.trailing, 20)
                 .padding(.bottom, 24)
+        }
+        .background {
+            Color.clear
+                .alert("Delete Voice Note", isPresented: $showDeleteConfirmation) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Delete", role: .destructive) {
+                        if let note = noteToDelete {
+                            Task { await deleteNote(note) }
+                        }
+                    }
+                } message: {
+                    Text("This will permanently delete the note from your machine.")
+                }
+                .tint(.gray)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -99,18 +115,9 @@ struct VoiceNotesListView: View {
                         selectedNote = note
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Menu {
-                            Section("This will permanently delete the note from your machine.") {
-                                Button(role: .destructive) {
-                                    Task { await deleteNote(note) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            Button(role: .cancel) {
-                            } label: {
-                                Label("Cancel", systemImage: "xmark")
-                            }
+                        Button {
+                            noteToDelete = note
+                            showDeleteConfirmation = true
                         } label: {
                             Image(systemName: "trash")
                         }

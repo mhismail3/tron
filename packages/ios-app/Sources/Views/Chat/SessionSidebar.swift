@@ -23,6 +23,8 @@ enum NavigationMode: String, CaseIterable {
 struct SessionSidebar: View {
     @Environment(\.dependencies) var dependencies
     @Binding var selectedSessionId: String?
+    @State private var sessionToArchive: String?
+    @State private var showArchiveConfirmation = false
 
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
@@ -72,18 +74,9 @@ struct SessionSidebar: View {
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Menu {
-                                    Section("This will archive the session from your device. Server data will remain.") {
-                                        Button {
-                                            onDeleteSession(session.id)
-                                        } label: {
-                                            Label("Archive", systemImage: "archivebox")
-                                        }
-                                    }
-                                    Button(role: .cancel) {
-                                    } label: {
-                                        Label("Cancel", systemImage: "xmark")
-                                    }
+                                Button {
+                                    sessionToArchive = session.id
+                                    showArchiveConfirmation = true
                                 } label: {
                                     Image(systemName: "archivebox")
                                 }
@@ -105,6 +98,20 @@ struct SessionSidebar: View {
             }
             .padding(.trailing, 20)
             .padding(.bottom, 24)
+        }
+        .background {
+            Color.clear
+                .alert("Archive Session", isPresented: $showArchiveConfirmation) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Archive", role: .destructive) {
+                        if let id = sessionToArchive {
+                            onDeleteSession(id)
+                        }
+                    }
+                } message: {
+                    Text("This will archive the session from your device. Server data will remain.")
+                }
+                .tint(.gray)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
