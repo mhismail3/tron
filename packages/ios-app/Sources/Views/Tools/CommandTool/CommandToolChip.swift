@@ -49,18 +49,20 @@ struct CommandToolChip: View {
 
     @ViewBuilder
     private var statusIcon: some View {
+        let iconSize = TronTypography.sizeBodySM
         switch data.status {
         case .running:
             ProgressView()
-                .scaleEffect(0.7)
+                .scaleEffect(0.6)
+                .frame(width: iconSize, height: iconSize)
                 .tint(data.iconColor)
         case .success:
             Image(systemName: data.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(data.iconColor)
         case .error:
             Image(systemName: "xmark.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }
@@ -124,18 +126,20 @@ struct CommandToolChipFallback: View {
 
     @ViewBuilder
     private var statusIcon: some View {
+        let iconSize = TronTypography.sizeBodySM
         switch data.status {
         case .running:
             ProgressView()
-                .scaleEffect(0.7)
+                .scaleEffect(0.6)
+                .frame(width: iconSize, height: iconSize)
                 .tint(data.iconColor)
         case .success:
             Image(systemName: data.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(data.iconColor)
         case .error:
             Image(systemName: "xmark.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }
