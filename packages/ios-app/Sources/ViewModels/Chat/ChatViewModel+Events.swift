@@ -70,6 +70,10 @@ extension ChatViewModel {
         logger.verbose("Thinking delta: +\(delta.count) chars, total: \(result.thinkingText.count)", category: .events)
     }
 
+    func handleToolGenerating(_ pluginResult: ToolGeneratingPlugin.Result) {
+        toolEventCoordinator.handleToolGenerating(pluginResult, context: self)
+    }
+
     func handleToolStart(_ pluginResult: ToolStartPlugin.Result) {
         // Process through handler (classifies tool type, parses params)
         let result = eventHandler.handleToolStart(pluginResult, context: self)

@@ -208,7 +208,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             tokensAfter: 30000,
             compressionRatio: 0.6,
             reason: "Context limit approaching",
-            summary: "Summarized conversation history"
+            summary: "Summarized conversation history",
+            estimatedContextTokens: nil
         )
 
         // When: Dispatching
@@ -564,6 +565,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleThinkingDeltaCalledWith: String?
 
     // MARK: - Tools
+    var handleToolGeneratingCalledWith: ToolGeneratingPlugin.Result?
     var handleToolStartCalledWith: ToolStartPlugin.Result?
     var handleToolEndCalledWith: ToolEndPlugin.Result?
 
@@ -617,6 +619,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleThinkingDeltaCalledWith = delta
     }
 
+    func handleToolGenerating(_ result: ToolGeneratingPlugin.Result) {
+        handleToolGeneratingCalledWith = result
+    }
+
     func handleToolStart(_ result: ToolStartPlugin.Result) {
         handleToolStartCalledWith = result
     }
@@ -648,6 +654,11 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleAgentError(_ message: String) {
         handleAgentErrorCalledWith = message
+    }
+
+    var handleCompactionStartedCalledWith: CompactionStartedPlugin.Result?
+    func handleCompactionStarted(_ result: CompactionStartedPlugin.Result) {
+        handleCompactionStartedCalledWith = result
     }
 
     func handleCompaction(_ result: CompactionPlugin.Result) {

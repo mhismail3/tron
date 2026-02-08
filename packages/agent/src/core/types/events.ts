@@ -349,6 +349,22 @@ export interface ToolCallArgumentDeltaEvent extends BaseTronEvent {
 }
 
 /**
+ * Tool call generating event - emitted at toolcall_start time,
+ * BEFORE arguments are streamed. Allows the UI to show a spinning
+ * tool chip immediately instead of waiting for tool execution.
+ *
+ * This is ephemeral (not persisted) — it bridges the gap between
+ * the LLM starting to generate a tool call and tool_execution_start.
+ */
+export interface ToolCallGeneratingEvent extends BaseTronEvent {
+  type: 'toolcall_generating';
+  /** Tool call ID */
+  toolCallId: string;
+  /** Tool name */
+  toolName: string;
+}
+
+/**
  * Hook events
  */
 export interface HookTriggeredEvent extends BaseTronEvent {
@@ -634,6 +650,7 @@ export type TronEvent =
   | ToolExecutionUpdateEvent
   | ToolExecutionEndEvent
   | ToolCallArgumentDeltaEvent
+  | ToolCallGeneratingEvent
   | HookTriggeredEvent
   | HookCompletedEvent
   | HookBackgroundStartedEvent

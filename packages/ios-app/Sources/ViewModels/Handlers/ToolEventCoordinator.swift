@@ -18,6 +18,59 @@ final class ToolEventCoordinator {
 
     init() {}
 
+    // MARK: - Tool Generating Handling
+
+    /// Handle a tool generating event — emitted when the LLM starts a tool call block,
+    /// BEFORE arguments are fully streamed. Creates a spinning chip immediately.
+    func handleToolGenerating(
+        _ pluginResult: ToolGeneratingPlugin.Result,
+        context: ToolEventContext
+    ) {
+        // Skip tools with custom UI flows or side-effects that require full ToolStartResult
+        let toolNameLower = pluginResult.toolName.lowercased()
+        if toolNameLower == "askuserquestion" || toolNameLower == "renderappui" || toolNameLower == "openurl" { return }
+
+        // Finalize any active thinking message before tool chip appears
+        context.finalizeThinkingMessageIfNeeded()
+
+        // Skip if chip already exists (catch-up/reconstruction)
+        if MessageFinder.hasToolMessage(toolCallId: pluginResult.toolCallId, in: context.messages) { return }
+
+        context.flushPendingTextUpdates()
+        context.finalizeStreamingMessage()
+
+        // Create chip with .running status, empty arguments
+        let tool = ToolUseData(
+            toolName: pluginResult.toolName,
+            toolCallId: pluginResult.toolCallId,
+            arguments: "",
+            status: .running
+        )
+        let message = ChatMessage(role: .assistant, content: .toolUse(tool))
+
+        context.messages.append(message)
+        context.currentToolMessages[message.id] = message
+        context.makeToolVisible(pluginResult.toolCallId)
+        context.appendToMessageWindow(message)
+
+        // Track tool call for persistence
+        let record = ToolCallRecord(
+            toolCallId: pluginResult.toolCallId,
+            toolName: pluginResult.toolName,
+            arguments: ""
+        )
+        context.currentTurnToolCalls.append(record)
+
+        // Enqueue for UIUpdateQueue ordering
+        let toolStartData = UIUpdateQueue.ToolStartData(
+            toolCallId: pluginResult.toolCallId,
+            toolName: pluginResult.toolName,
+            arguments: "",
+            timestamp: Date()
+        )
+        context.enqueueToolStart(toolStartData)
+    }
+
     // MARK: - Tool Start Handling
 
     /// Handle a tool start event.
@@ -36,13 +89,21 @@ final class ToolEventCoordinator {
         // Finalize any active thinking message before tools begin
         context.finalizeThinkingMessageIfNeeded()
 
-        // CRITICAL: Check if this tool already exists from catch-up processing.
+        // CRITICAL: Check if this tool already exists from catch-up or tool_generating.
         // When resuming an in-progress session, catch-up creates tool messages for running/completed tools.
+        // tool_generating also pre-creates chips before tool_start arrives.
         // The server then continues streaming those same tools, which would cause duplicates.
         if MessageFinder.hasToolMessage(toolCallId: pluginResult.toolCallId, in: context.messages) {
-            context.logInfo("Skipping duplicate tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) - already exists from catch-up")
+            context.logInfo("Skipping duplicate tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) - already exists")
             // Still make the tool visible (in case it wasn't) and track it
             context.makeToolVisible(pluginResult.toolCallId)
+            // Still handle browser tool detection for pre-existing chips
+            if result.isBrowserTool {
+                let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
+                if shouldStartStreaming {
+                    context.startBrowserStreamIfNeeded()
+                }
+            }
             return
         }
 

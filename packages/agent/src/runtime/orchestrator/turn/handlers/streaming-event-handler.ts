@@ -95,6 +95,18 @@ export class StreamingEventHandler {
   }
 
   /**
+   * Handle toolcall_generating event.
+   * Emits ephemeral WebSocket event so the UI can show a spinning chip immediately.
+   */
+  handleToolCallGenerating(ctx: EventContext, event: TronEvent): void {
+    const generating = event as { toolCallId: string; toolName: string };
+    ctx.emit('agent.tool_generating', {
+      toolCallId: generating.toolCallId,
+      toolName: generating.toolName,
+    });
+  }
+
+  /**
    * Handle thinking_start event.
    * Emits WebSocket event for real-time UI streaming.
    */

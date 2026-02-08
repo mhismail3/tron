@@ -118,7 +118,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             tokensAfter: tokensAfter,
             compressionRatio: ratio,
             reason: reason,
-            summary: summary
+            summary: summary,
+            estimatedContextTokens: nil
         )
     }
 

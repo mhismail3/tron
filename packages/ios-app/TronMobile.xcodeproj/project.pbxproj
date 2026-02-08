@@ -35,6 +35,7 @@
 		0C9EDF94CE66476F1AF38DE8 /* TokenRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B79EAE3563FE55AD275FAF /* TokenRecord.swift */; };
 		0EB1252C2D1DD49C7A70EC89 /* TurnStartPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0994B7AB83BA6F86D83443E /* TurnStartPlugin.swift */; };
 		0F322C0000641A49E7A95012 /* AskUserQuestionViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF575202DD166B3DF642F62 /* AskUserQuestionViewer.swift */; };
+		0FCB41B96A3A96F7C99ABFBC /* ToolGeneratingPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09BB41E595069B9C3C91095D /* ToolGeneratingPluginTests.swift */; };
 		103540225CF7453441997AD4 /* ChatEventContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BF7B2CD7A1B5122CCE1331 /* ChatEventContext.swift */; };
 		1192E3F84F3AAE4245D0581E /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B83EBDF1E49D2E340DC9E3 /* ChatViewModel+Events.swift */; };
 		11AFA5645D976D4D73E39CB1 /* ContextStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D0FBFA601E6C8A35615110 /* ContextStateTests.swift */; };
@@ -371,6 +372,7 @@
 		E0A2B0E64F6A65FAA0233C21 /* ProcessingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40D8D5C3141F21A364DD7F25 /* ProcessingIndicator.swift */; };
 		E17481515F00BD92FE8C5F71 /* ContextAnalyticsOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DD7F81A981AD89C2A30BAC /* ContextAnalyticsOverview.swift */; };
 		E18644B52CDA2FFC5D4DC45B /* SheetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 417A957F1B03E3F563D2A0F3 /* SheetCoordinator.swift */; };
+		E18EF9EE27B4F57CA4C1656E /* ToolGeneratingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B75C105FF237A8DBB8961B /* ToolGeneratingPlugin.swift */; };
 		E2225FD792EF550888014183 /* ContextClearedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F02C32D8D43B7DC9E958BAC /* ContextClearedPlugin.swift */; };
 		E3353F8B1501D3D364CB70F8 /* StreamingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A33D515C7609324FFC2A6A60 /* StreamingManager.swift */; };
 		E35218873C7549883A5519A2 /* AnswerParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE7816ABBC956CE9E60ABA97 /* AnswerParser.swift */; };
@@ -456,6 +458,7 @@
 		081C39F4A377A4E0808FCA02 /* SkillDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillDetailSheet.swift; sourceTree = "<group>"; };
 		088BDE03F59D94AD1C60E382 /* TronFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronFontLoader.swift; sourceTree = "<group>"; };
 		092C8B51A3BD92C3D3D861F2 /* MessagingCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagingCoordinatorTests.swift; sourceTree = "<group>"; };
+		09BB41E595069B9C3C91095D /* ToolGeneratingPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolGeneratingPluginTests.swift; sourceTree = "<group>"; };
 		0A56E390C1255F3228D0F480 /* PaginationContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginationContext.swift; sourceTree = "<group>"; };
 		0B459558B2DDAE5B155700AB /* ToolEventCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolEventCoordinator.swift; sourceTree = "<group>"; };
 		0BA5810A34C92084B89C6EA4 /* TronColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColors.swift; sourceTree = "<group>"; };
@@ -662,6 +665,7 @@
 		82FBD1C62F81A20D5003A4E5 /* StreamingContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingContentView.swift; sourceTree = "<group>"; };
 		83245F189C1B47C52A4A8516 /* FloatingBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingBrowserView.swift; sourceTree = "<group>"; };
 		8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		83B75C105FF237A8DBB8961B /* ToolGeneratingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolGeneratingPlugin.swift; sourceTree = "<group>"; };
 		85764F1A4E487CD20657EAF6 /* BrowserCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserCoordinatorTests.swift; sourceTree = "<group>"; };
 		86636B2253DF1CA2F0502BB7 /* StatusPillBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPillBar.swift; sourceTree = "<group>"; };
 		873F797C00DD12CB198174E5 /* RenderAppUIChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderAppUIChip.swift; sourceTree = "<group>"; };
@@ -967,6 +971,7 @@
 				E326D1E8420FAB689077986B /* EventPluginTests.swift */,
 				04E4152F68F0335046FD3016 /* TextDeltaPluginTests.swift */,
 				8E7B1DF04A2FBDD66BDBA33E /* ToolEndPluginTests.swift */,
+				09BB41E595069B9C3C91095D /* ToolGeneratingPluginTests.swift */,
 				DAD87CBC58F65286C1220FEE /* TurnEndPluginTests.swift */,
 			);
 			path = Plugins;
@@ -1107,6 +1112,7 @@
 			isa = PBXGroup;
 			children = (
 				99A74BC20146AF6AD09D808C /* ToolEndPlugin.swift */,
+				83B75C105FF237A8DBB8961B /* ToolGeneratingPlugin.swift */,
 				7C77AFC2422FCDB7A086FB2A /* ToolStartPlugin.swift */,
 			);
 			path = Tool;
@@ -2536,6 +2542,7 @@
 				7EE42C93DD3772DA20EFD61E /* ToolEndPlugin.swift in Sources */,
 				CE58B70611975E8E46695749 /* ToolEventContext.swift in Sources */,
 				8D04A163F49EA655DFAEEC5B /* ToolEventCoordinator.swift in Sources */,
+				E18EF9EE27B4F57CA4C1656E /* ToolGeneratingPlugin.swift in Sources */,
 				1D7F9424F20DDFA46E34FE80 /* ToolHandlers.swift in Sources */,
 				45547C33D9EC4977CC374547 /* ToolPayloads.swift in Sources */,
 				7873152FDCFC6E9258BF9F1F /* ToolResultParser.swift in Sources */,
@@ -2658,6 +2665,7 @@
 				DB319F1DCE74545D699AFB56 /* ToolArgumentParserTests.swift in Sources */,
 				D80A41AD9F10A4CA2678E474 /* ToolEndPluginTests.swift in Sources */,
 				6B5AA7C596E4C1B5902B4D00 /* ToolEventCoordinatorTests.swift in Sources */,
+				0FCB41B96A3A96F7C99ABFBC /* ToolGeneratingPluginTests.swift in Sources */,
 				1CB6632A703C236EB9CE68F6 /* ToolRegistryTests.swift in Sources */,
 				FFE8EE699BA7BFD96512E197 /* TranscriptionCoordinatorTests.swift in Sources */,
 				DB71481015BA128E4D2069E5 /* TurnEndPluginTests.swift in Sources */,

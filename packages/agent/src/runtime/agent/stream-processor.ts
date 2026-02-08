@@ -99,6 +99,16 @@ export class AgentStreamProcessor implements IStreamProcessor {
         case 'toolcall_start':
           // Track tool name for subsequent delta events
           this.activeToolCalls.set(event.toolCallId, event.name);
+
+          // Emit toolcall_generating so the UI can show a spinning chip immediately
+          this.eventEmitter.emit({
+            type: 'toolcall_generating',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            toolCallId: event.toolCallId,
+            toolName: event.name,
+          });
+
           logger.debug('Tool call started', {
             toolCallId: event.toolCallId,
             toolName: event.name,

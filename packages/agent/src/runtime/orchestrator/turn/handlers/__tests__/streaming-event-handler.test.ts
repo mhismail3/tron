@@ -188,6 +188,52 @@ describe('StreamingEventHandler', () => {
     });
   });
 
+  describe('handleToolCallGenerating', () => {
+    it('should emit agent.tool_generating event via context', () => {
+      const ctx = createTestContext({ runId: 'run-123' });
+      const event = {
+        type: 'toolcall_generating' as const,
+        toolCallId: 'call-1',
+        toolName: 'Write',
+      };
+
+      handler.handleToolCallGenerating(ctx, event);
+
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
+        type: 'agent.tool_generating',
+        data: { toolCallId: 'call-1', toolName: 'Write' },
+      });
+    });
+
+    it('should not persist any event (ephemeral)', () => {
+      const ctx = createTestContext({ runId: 'run-456' });
+      const event = {
+        type: 'toolcall_generating' as const,
+        toolCallId: 'call-2',
+        toolName: 'Bash',
+      };
+
+      handler.handleToolCallGenerating(ctx, event);
+
+      expect(ctx.persistCalls).toHaveLength(0);
+    });
+
+    it('should handle undefined runId', () => {
+      const ctx = createTestContext(); // No runId
+      const event = {
+        type: 'toolcall_generating' as const,
+        toolCallId: 'call-3',
+        toolName: 'Read',
+      };
+
+      handler.handleToolCallGenerating(ctx, event);
+
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0].type).toBe('agent.tool_generating');
+    });
+  });
+
   describe('handleThinkingStart', () => {
     it('should emit agent.thinking_start event via context', () => {
       const ctx = createTestContext({ runId: 'run-123' });

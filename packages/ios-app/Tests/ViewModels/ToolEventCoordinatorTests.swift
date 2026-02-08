@@ -19,6 +19,245 @@ final class ToolEventCoordinatorTests: XCTestCase {
         mockContext = nil
     }
 
+    // MARK: - Tool Generating Tests
+
+    func testToolGeneratingCreatesRunningChip() async throws {
+        // Given: A tool generating event
+        let result = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_123")
+
+        // When: Handling tool generating
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        // Then: A tool message should be created with .running status
+        XCTAssertEqual(mockContext.messages.count, 1)
+        XCTAssertEqual(mockContext.messages[0].role, .assistant)
+        if case .toolUse(let tool) = mockContext.messages[0].content {
+            XCTAssertEqual(tool.toolName, "Write")
+            XCTAssertEqual(tool.toolCallId, "gen_123")
+            XCTAssertEqual(tool.status, .running)
+            XCTAssertEqual(tool.arguments, "")
+        } else {
+            XCTFail("Expected toolUse content")
+        }
+    }
+
+    func testToolGeneratingFinalizesThinkingMessage() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_think")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertTrue(mockContext.finalizeThinkingMessageIfNeededCalled)
+    }
+
+    func testToolGeneratingFlushesStreamingText() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_flush")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertTrue(mockContext.flushPendingTextUpdatesCalled)
+        XCTAssertTrue(mockContext.finalizeStreamingMessageCalled)
+    }
+
+    func testToolGeneratingMakesToolVisible() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_vis")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertTrue(mockContext.visibleToolCallIds.contains("gen_vis"))
+    }
+
+    func testToolGeneratingEnqueuesToolStart() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_enq")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.enqueuedToolStarts.count, 1)
+        XCTAssertEqual(mockContext.enqueuedToolStarts[0].toolCallId, "gen_enq")
+        XCTAssertEqual(mockContext.enqueuedToolStarts[0].toolName, "Write")
+    }
+
+    func testToolGeneratingTracksToolCall() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "Bash", toolCallId: "gen_track")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.currentTurnToolCalls.count, 1)
+        XCTAssertEqual(mockContext.currentTurnToolCalls[0].toolCallId, "gen_track")
+        XCTAssertEqual(mockContext.currentTurnToolCalls[0].toolName, "Bash")
+    }
+
+    func testToolGeneratingSkipsDuplicateChip() async throws {
+        // Given: A tool message already exists
+        let existing = ChatMessage(
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "Write",
+                toolCallId: "dup_123",
+                arguments: "{}",
+                status: .running
+            ))
+        )
+        mockContext.messages.append(existing)
+
+        // When: tool_generating arrives for same toolCallId
+        let result = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "dup_123")
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        // Then: No duplicate message created
+        XCTAssertEqual(mockContext.messages.count, 1)
+    }
+
+    func testToolGeneratingSkipsAskUserQuestion() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "AskUserQuestion", toolCallId: "gen_ask")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 0)
+    }
+
+    func testToolGeneratingSkipsRenderAppUI() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "RenderAppUI", toolCallId: "gen_render")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 0)
+    }
+
+    func testToolGeneratingSkipsOpenURL() async throws {
+        let result = ToolGeneratingPlugin.Result(toolName: "OpenURL", toolCallId: "gen_openurl")
+
+        coordinator.handleToolGenerating(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 0)
+    }
+
+    func testToolStartSkipsDuplicateFromGenerating() async throws {
+        // Given: tool_generating already created a chip
+        let genResult = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_first")
+        coordinator.handleToolGenerating(genResult, context: mockContext)
+        XCTAssertEqual(mockContext.messages.count, 1)
+
+        // When: tool_start arrives for same toolCallId
+        let event = ToolStartPlugin.Result(
+            toolName: "Write",
+            toolCallId: "gen_first",
+            arguments: nil,
+            formattedArguments: "{\"file_path\": \"/test.txt\"}"
+        )
+        let startResult = ToolStartResult(
+            tool: ToolUseData(
+                toolName: "Write",
+                toolCallId: "gen_first",
+                arguments: "{\"file_path\": \"/test.txt\"}",
+                status: .running
+            ),
+            isAskUserQuestion: false,
+            isBrowserTool: false,
+            isOpenURL: false,
+            askUserQuestionParams: nil,
+            openURL: nil
+        )
+        coordinator.handleToolStart(event, result: startResult, context: mockContext)
+
+        // Then: No duplicate message (still just 1)
+        XCTAssertEqual(mockContext.messages.count, 1)
+        // Then: Tool is still visible
+        XCTAssertTrue(mockContext.visibleToolCallIds.contains("gen_first"))
+    }
+
+    func testToolEndUpdatesGeneratingChip() async throws {
+        // Given: tool_generating created a chip
+        let genResult = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_end")
+        coordinator.handleToolGenerating(genResult, context: mockContext)
+        XCTAssertEqual(mockContext.currentTurnToolCalls.count, 1)
+
+        // When: tool_end arrives
+        let endEvent = ToolEndPlugin.Result(
+            toolCallId: "gen_end",
+            success: true,
+            displayResult: "File written",
+            durationMs: 150,
+            details: nil
+        )
+        let endResult = ToolEndResult(
+            toolCallId: "gen_end",
+            status: .success,
+            result: "File written",
+            durationMs: 150,
+            isAskUserQuestion: false
+        )
+        coordinator.handleToolEnd(endEvent, result: endResult, context: mockContext)
+
+        // Then: Tool call record is updated
+        XCTAssertEqual(mockContext.currentTurnToolCalls[0].result, "File written")
+        // Then: Tool end is enqueued
+        XCTAssertEqual(mockContext.enqueuedToolEnds.count, 1)
+    }
+
+    func testMultipleToolGeneratingEvents() async throws {
+        // When: Two tool_generating events arrive
+        coordinator.handleToolGenerating(
+            ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "tc1"),
+            context: mockContext
+        )
+        coordinator.handleToolGenerating(
+            ToolGeneratingPlugin.Result(toolName: "Bash", toolCallId: "tc2"),
+            context: mockContext
+        )
+
+        // Then: Two messages created
+        XCTAssertEqual(mockContext.messages.count, 2)
+        // Then: Both have .running status
+        if case .toolUse(let tool1) = mockContext.messages[0].content {
+            XCTAssertEqual(tool1.status, .running)
+            XCTAssertEqual(tool1.toolName, "Write")
+        } else { XCTFail("Expected toolUse content") }
+        if case .toolUse(let tool2) = mockContext.messages[1].content {
+            XCTAssertEqual(tool2.status, .running)
+            XCTAssertEqual(tool2.toolName, "Bash")
+        } else { XCTFail("Expected toolUse content") }
+        // Then: Two enqueued tool starts
+        XCTAssertEqual(mockContext.enqueuedToolStarts.count, 2)
+        XCTAssertEqual(mockContext.enqueuedToolStarts[0].toolCallId, "tc1")
+        XCTAssertEqual(mockContext.enqueuedToolStarts[1].toolCallId, "tc2")
+    }
+
+    func testBrowserToolStartStillTriggersOnDuplicate() async throws {
+        // Given: tool_generating already created a chip for a browser tool
+        let genResult = ToolGeneratingPlugin.Result(toolName: "BrowseTheWeb", toolCallId: "browser_dup")
+        coordinator.handleToolGenerating(genResult, context: mockContext)
+        XCTAssertEqual(mockContext.messages.count, 1)
+
+        // When: tool_start arrives with isBrowserTool: true
+        let event = ToolStartPlugin.Result(
+            toolName: "BrowseTheWeb",
+            toolCallId: "browser_dup",
+            arguments: nil,
+            formattedArguments: "{}"
+        )
+        let startResult = ToolStartResult(
+            tool: ToolUseData(
+                toolName: "BrowseTheWeb",
+                toolCallId: "browser_dup",
+                arguments: "{}",
+                status: .running
+            ),
+            isAskUserQuestion: false,
+            isBrowserTool: true,
+            isOpenURL: false,
+            askUserQuestionParams: nil,
+            openURL: nil
+        )
+        coordinator.handleToolStart(event, result: startResult, context: mockContext)
+
+        // Then: No duplicate message
+        XCTAssertEqual(mockContext.messages.count, 1)
+        // Then: Browser status is still set
+        XCTAssertNotNil(mockContext.browserStatus)
+        // Then: Browser streaming is started
+        XCTAssertTrue(mockContext.startBrowserStreamIfNeededCalled)
+    }
+
     // MARK: - Tool Start Tests
 
     func testToolStartCreatesToolMessage() async throws {

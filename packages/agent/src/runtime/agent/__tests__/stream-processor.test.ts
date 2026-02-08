@@ -229,6 +229,100 @@ describe('AgentStreamProcessor', () => {
     });
   });
 
+  describe('toolcall_generating', () => {
+    it('should emit toolcall_generating event on toolcall_start', async () => {
+      const listener = vi.fn();
+      eventEmitter.addListener(listener);
+
+      const toolCall: ToolCall = {
+        type: 'tool_use',
+        id: 'call_1',
+        name: 'Write',
+        arguments: { file_path: '/test.txt', content: 'hello' },
+      };
+
+      const stream = createMockStream([
+        { type: 'toolcall_start', toolCallId: 'call_1', name: 'Write' },
+        { type: 'toolcall_end', toolCall },
+        { type: 'done', message: createMockMessage('', [toolCall]), stopReason: 'tool_use' },
+      ]);
+
+      await processor.process(stream);
+
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'toolcall_generating',
+          sessionId: 'sess_test',
+          toolCallId: 'call_1',
+          toolName: 'Write',
+        })
+      );
+    });
+
+    it('should emit toolcall_generating before toolcall_delta', async () => {
+      const callOrder: string[] = [];
+      eventEmitter.addListener((event: { type: string }) => {
+        if (event.type === 'toolcall_generating' || event.type === 'toolcall_delta') {
+          callOrder.push(event.type);
+        }
+      });
+
+      const toolCall: ToolCall = {
+        type: 'tool_use',
+        id: 'call_1',
+        name: 'Write',
+        arguments: { file_path: '/test.txt' },
+      };
+
+      const stream = createMockStream([
+        { type: 'toolcall_start', toolCallId: 'call_1', name: 'Write' },
+        { type: 'toolcall_delta', toolCallId: 'call_1', argumentsDelta: '{"file' },
+        { type: 'toolcall_end', toolCall },
+        { type: 'done', message: createMockMessage('', [toolCall]), stopReason: 'tool_use' },
+      ]);
+
+      await processor.process(stream);
+
+      expect(callOrder).toEqual(['toolcall_generating', 'toolcall_delta']);
+    });
+
+    it('should emit toolcall_generating for multiple tools', async () => {
+      const generatingEvents: Array<{ toolName: string; toolCallId: string }> = [];
+      eventEmitter.addListener((event: { type: string; toolName?: string; toolCallId?: string }) => {
+        if (event.type === 'toolcall_generating') {
+          generatingEvents.push({ toolName: event.toolName!, toolCallId: event.toolCallId! });
+        }
+      });
+
+      const toolCall1: ToolCall = {
+        type: 'tool_use',
+        id: 'call_1',
+        name: 'Write',
+        arguments: {},
+      };
+      const toolCall2: ToolCall = {
+        type: 'tool_use',
+        id: 'call_2',
+        name: 'Bash',
+        arguments: {},
+      };
+
+      const stream = createMockStream([
+        { type: 'toolcall_start', toolCallId: 'call_1', name: 'Write' },
+        { type: 'toolcall_end', toolCall: toolCall1 },
+        { type: 'toolcall_start', toolCallId: 'call_2', name: 'Bash' },
+        { type: 'toolcall_end', toolCall: toolCall2 },
+        { type: 'done', message: createMockMessage('', [toolCall1, toolCall2]), stopReason: 'tool_use' },
+      ]);
+
+      await processor.process(stream);
+
+      expect(generatingEvents).toHaveLength(2);
+      expect(generatingEvents[0]).toEqual({ toolName: 'Write', toolCallId: 'call_1' });
+      expect(generatingEvents[1]).toEqual({ toolName: 'Bash', toolCallId: 'call_2' });
+    });
+  });
+
   describe('thinking support', () => {
     it('should accumulate thinking deltas', async () => {
       const stream = createMockStream([

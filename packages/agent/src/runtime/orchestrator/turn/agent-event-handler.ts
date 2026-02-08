@@ -24,6 +24,7 @@
  * | turn_start/end        | TurnEventHandler    |
  * | response_complete     | TurnEventHandler    |
  * | message_update        | StreamingEventHandler |
+ * | toolcall_generating   | StreamingEventHandler |
  * | toolcall_delta        | StreamingEventHandler |
  * | thinking_*            | StreamingEventHandler |
  * | tool_use_batch        | ToolEventHandler    |
@@ -254,6 +255,10 @@ export class AgentEventHandler {
 
       case 'compaction_complete':
         this.compactionHandler.handleCompactionComplete(ctx, event);
+        break;
+
+      case 'toolcall_generating':
+        this.streamingHandler.handleToolCallGenerating(ctx, event);
         break;
 
       case 'toolcall_delta':

@@ -337,7 +337,8 @@ final class ChatEventHandlerTests: XCTestCase {
             tokensAfter: 25000,
             compressionRatio: 0.5,
             reason: "auto",
-            summary: "Summarized context"
+            summary: "Summarized context",
+            estimatedContextTokens: nil
         )
 
         // When: handling compaction
