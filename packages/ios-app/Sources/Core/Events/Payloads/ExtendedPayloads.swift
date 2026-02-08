@@ -280,7 +280,7 @@ struct LoadedMemoryEntry: Codable, Identifiable {
 struct LoadedMemory: Codable {
     let count: Int
     let tokens: Int
-    let entries: [LoadedMemoryEntry]
+    let entries: [LoadedMemoryEntry]?
 }
 
 // MARK: - Worktree Payloads

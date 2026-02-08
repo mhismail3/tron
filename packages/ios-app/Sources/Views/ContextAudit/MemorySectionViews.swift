@@ -7,9 +7,12 @@ struct MemorySection: View {
     let memory: LoadedMemory
     @State private var isExpanded = false
 
+    private var entries: [LoadedMemoryEntry] { memory.entries ?? [] }
+    private var hasEntries: Bool { !entries.isEmpty }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Header row (tappable)
+            // Header row (tappable when entries exist)
             HStack(spacing: 8) {
                 Image(systemName: "brain.head.profile")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -34,15 +37,18 @@ struct MemorySection: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.white.opacity(0.6))
 
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+                if hasEntries {
+                    Image(systemName: "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+                }
             }
             .padding(12)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onTapGesture {
+                guard hasEntries else { return }
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     isExpanded.toggle()
                 }
@@ -51,7 +57,7 @@ struct MemorySection: View {
             // Expandable content
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(memory.entries) { entry in
+                    ForEach(entries) { entry in
                         MemoryEntryRow(entry: entry)
                     }
                 }
