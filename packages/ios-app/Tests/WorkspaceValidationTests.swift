@@ -24,30 +24,24 @@ final class WorkspaceValidationTests: XCTestCase {
     /// Test that validateWorkspacePath returns true for existing paths
     @MainActor
     func testValidateWorkspacePathExistingPath() async throws {
-        // Given: A mock RPC client that returns success for listDirectory
         let mockRPC = MockRPCClient()
-        // No error set = success
 
-        // When: Validating an existing path
         let result = await mockRPC.validateWorkspacePath("/existing/path")
 
-        // Then: Should return true
-        XCTAssertTrue(result)
+        XCTAssertEqual(result, true)
         XCTAssertEqual(mockRPC.listDirectoryCallCount, 1)
     }
 
-    /// Test that validateWorkspacePath returns false for non-existent paths
+    /// Test that validateWorkspacePath returns false for confirmed-deleted paths (RPCError)
     @MainActor
     func testValidateWorkspacePathNonExistentPath() async throws {
-        // Given: A mock RPC client that throws for listDirectory
         let mockRPC = MockRPCClient()
-        mockRPC.listDirectoryError = MockRPCError.filesystemError("ENOENT: no such file or directory")
+        // RPCError = server processed request and returned error (e.g. ENOENT)
+        mockRPC.listDirectoryError = RPCError(code: "ENOENT", message: "no such file or directory", details: nil)
 
-        // When: Validating a non-existent path
         let result = await mockRPC.validateWorkspacePath("/deleted/path")
 
-        // Then: Should return false
-        XCTAssertFalse(result)
+        XCTAssertEqual(result, false)
     }
 
     /// Test that validateWorkspacePath returns false for empty path
@@ -55,64 +49,13 @@ final class WorkspaceValidationTests: XCTestCase {
     func testValidateWorkspacePathEmptyPath() async throws {
         let mockRPC = MockRPCClient()
 
-        // When: Validating an empty path
         let result = await mockRPC.validateWorkspacePath("")
 
-        // Then: Should return false without making RPC call
-        XCTAssertFalse(result)
+        XCTAssertEqual(result, false)
         XCTAssertEqual(mockRPC.listDirectoryCallCount, 0)
     }
 
-    /// Test that network errors are handled gracefully (treated as invalid)
-    @MainActor
-    func testValidateWorkspacePathNetworkError() async throws {
-        let mockRPC = MockRPCClient()
-        mockRPC.listDirectoryError = MockRPCError.connectionNotEstablished
-
-        let result = await mockRPC.validateWorkspacePath("/some/path")
-
-        // Network errors should be treated as unable to validate
-        XCTAssertFalse(result)
-    }
-
-    // MARK: - Connection State + Workspace Deleted Tests
-
-    /// Test that workspace deleted pill should only be shown when connected
-    @MainActor
-    func testWorkspaceDeletedRequiresConnection() async throws {
-        // The workspace deleted pill should only show when:
-        // 1. workspaceDeleted == true AND
-        // 2. connection state is .connected
-        let workspaceDeleted = true
-
-        // When disconnected - should NOT show pill
-        let disconnectedState = ConnectionState.disconnected
-        XCTAssertFalse(workspaceDeleted && disconnectedState.isConnected)
-
-        // When reconnecting - should NOT show pill
-        let reconnectingState = ConnectionState.reconnecting(attempt: 1, nextRetrySeconds: 5)
-        XCTAssertFalse(workspaceDeleted && reconnectingState.isConnected)
-
-        // When connected - SHOULD show pill
-        let connectedState = ConnectionState.connected
-        XCTAssertTrue(workspaceDeleted && connectedState.isConnected)
-
-        // When failed - should NOT show pill
-        let failedState = ConnectionState.failed(reason: "error")
-        XCTAssertFalse(workspaceDeleted && failedState.isConnected)
-    }
-
-    /// Test that workspace deleted state should NOT be set when connection is not established
-    @MainActor
-    func testWorkspaceDeletedNotSetWhenDisconnected() async throws {
-        let mockRPC = MockRPCClient()
-        mockRPC.connectionState = .disconnected
-
-        // When disconnected, callers should check connection state before calling validateWorkspacePath
-        XCTAssertFalse(mockRPC.connectionState.isConnected)
-    }
-
-    /// Test that workspace validation is only meaningful when connected
+    /// Test that connection errors return nil (indeterminate), not false
     @MainActor
     func testValidateWorkspacePathConnectionError() async throws {
         let mockRPC = MockRPCClient()
@@ -120,21 +63,69 @@ final class WorkspaceValidationTests: XCTestCase {
 
         let result = await mockRPC.validateWorkspacePath("/some/path")
 
-        // Connection errors return false — but callers must distinguish this from
-        // actual "workspace deleted" by checking connection state first
-        XCTAssertFalse(result)
+        // Connection errors are indeterminate — must NOT be treated as "deleted"
+        XCTAssertNil(result)
     }
 
-    /// Test that reconnection clears stale workspace deleted state
+    // MARK: - Connection Error vs Filesystem Error Tests
+
+    /// Test that connection errors produce nil (indeterminate), NOT false (deleted)
     @MainActor
-    func testReconnectionClearsWorkspaceDeletedState() async throws {
-        // Simulate: workspace was marked as "deleted" while disconnected
-        var workspaceDeletedForSession: [String: Bool] = ["s1": true]
+    func testConnectionErrorDoesNotProduceFalsePositive() async throws {
+        let mockRPC = MockRPCClient()
+        mockRPC.listDirectoryError = MockRPCError.connectionNotEstablished
 
-        // On reconnection, stale entries should be cleared
-        workspaceDeletedForSession = [:]
+        let result = await mockRPC.validateWorkspacePath("/some/path")
 
-        XCTAssertNil(workspaceDeletedForSession["s1"])
+        // Connection errors must return nil so callers don't store false "deleted" state
+        XCTAssertNil(result)
+    }
+
+    /// Test that RPCError (server-confirmed) produces definitive false
+    @MainActor
+    func testRPCErrorProducesDefinitiveFalse() async throws {
+        let mockRPC = MockRPCClient()
+        mockRPC.listDirectoryError = RPCError(code: "ENOENT", message: "no such file or directory", details: nil)
+
+        let result = await mockRPC.validateWorkspacePath("/deleted/path")
+
+        // RPCError = server processed request → confirmed deleted
+        XCTAssertEqual(result, false)
+    }
+
+    /// Test that nil results don't pollute the workspace deleted cache
+    @MainActor
+    func testNilResultDoesNotUpdateCache() async throws {
+        // Simulate: caller uses if-let to only store definitive results
+        var cache: [String: Bool] = [:]
+        let indeterminateResult: Bool? = nil
+
+        if let pathExists = indeterminateResult {
+            cache["s1"] = !pathExists
+        }
+
+        // Cache should remain empty — indeterminate results are discarded
+        XCTAssertNil(cache["s1"])
+    }
+
+    /// Test that definitive results update the cache correctly
+    @MainActor
+    func testDefinitiveResultUpdatesCache() async throws {
+        var cache: [String: Bool] = [:]
+
+        // Path confirmed to exist
+        let existsResult: Bool? = true
+        if let pathExists = existsResult {
+            cache["s1"] = !pathExists
+        }
+        XCTAssertEqual(cache["s1"], false) // not deleted
+
+        // Path confirmed deleted
+        let deletedResult: Bool? = false
+        if let pathExists = deletedResult {
+            cache["s2"] = !pathExists
+        }
+        XCTAssertEqual(cache["s2"], true) // deleted
     }
 
     // MARK: - Session Filtering Tests

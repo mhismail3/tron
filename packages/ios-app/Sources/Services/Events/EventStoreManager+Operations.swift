@@ -158,15 +158,21 @@ extension EventStoreManager {
     // MARK: - Workspace Validation
 
     /// Check if a workspace path exists on the filesystem.
-    /// Returns false for empty paths or if the path doesn't exist.
-    func validateWorkspacePath(_ path: String) async -> Bool {
+    /// Returns `true` if path exists, `false` if confirmed deleted (server returned error),
+    /// or `nil` if the result is indeterminate (connection/transport error).
+    func validateWorkspacePath(_ path: String) async -> Bool? {
         guard !path.isEmpty else { return false }
         do {
             _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
             return true
-        } catch {
-            logger.debug("Workspace path validation failed for '\(path)': \(error.localizedDescription)", category: .session)
+        } catch is RPCError {
+            // Server processed the request and returned an error (e.g. ENOENT)
+            logger.debug("Workspace path confirmed deleted: '\(path)'", category: .session)
             return false
+        } catch {
+            // Connection/transport error — can't determine workspace state
+            logger.debug("Workspace path validation indeterminate for '\(path)': \(error.localizedDescription)", category: .session)
+            return nil
         }
     }
 

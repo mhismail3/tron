@@ -419,12 +419,13 @@ struct NewSessionFlow: View {
             guard !path.isEmpty else { continue }
             do {
                 _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
-                // Path exists, no action needed
-            } catch {
-                // Path doesn't exist, mark as invalid
+            } catch is RPCError {
+                // Server confirmed path doesn't exist (e.g. ENOENT)
                 await MainActor.run {
                     invalidWorkspacePaths.insert(path)
                 }
+            } catch {
+                // Connection/transport error — can't determine, don't mark as invalid
             }
         }
     }

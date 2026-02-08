@@ -20,14 +20,18 @@ class MockRPCClient {
         )
     }
 
-    /// Validate if a workspace path exists
-    func validateWorkspacePath(_ path: String) async -> Bool {
+    /// Validate if a workspace path exists.
+    /// Returns `true` if path exists, `false` if confirmed deleted (RPCError),
+    /// or `nil` if indeterminate (connection/transport error).
+    func validateWorkspacePath(_ path: String) async -> Bool? {
         guard !path.isEmpty else { return false }
         do {
             _ = try await listDirectory(path: path, showHidden: false)
             return true
-        } catch {
+        } catch is RPCError {
             return false
+        } catch {
+            return nil
         }
     }
 }

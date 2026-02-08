@@ -8,7 +8,7 @@ struct ConnectionStatusPill: View {
     let onRetry: () async -> Void
 
     /// Tracks if we've ever seen a non-connected state in this session
-    @State private var hasSeenDisconnect = false
+    @State private var hasSeenDisconnect: Bool
 
     /// The state we're actually displaying (debounced)
     /// When nil, pill is hidden. When set, pill is shown.
@@ -19,9 +19,14 @@ struct ConnectionStatusPill: View {
 
     private let debounceDelay: TimeInterval = 0.3
 
-    /// Whether the pill should be visible
-    private var isVisible: Bool {
-        hasSeenDisconnect && displayedState != nil
+    init(connectionState: ConnectionState, onRetry: @escaping () async -> Void) {
+        self.connectionState = connectionState
+        self.onRetry = onRetry
+        // Seed state from initial connectionState so the pill works even inside
+        // LazyVStack where onAppear may be deferred until scroll-into-view.
+        let notConnected = !connectionState.isConnected
+        _hasSeenDisconnect = State(initialValue: notConnected)
+        _displayedState = State(initialValue: notConnected ? connectionState : nil)
     }
 
     var body: some View {
@@ -34,15 +39,6 @@ struct ConnectionStatusPill: View {
         }
         .onChange(of: connectionState) { _, newState in
             handleStateChange(newState)
-        }
-        .onAppear {
-            if !connectionState.isConnected {
-                hasSeenDisconnect = true
-                // Animate the initial appearance
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                    displayedState = connectionState
-                }
-            }
         }
     }
 

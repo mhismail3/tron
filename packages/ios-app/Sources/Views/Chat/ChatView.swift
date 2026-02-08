@@ -270,7 +270,7 @@ struct ChatView: View {
             // AFTER the cascade starts, to prevent a flash where all messages are visible
             await handleInitialMessageVisibility()
         }
-        .onChange(of: viewModel.connectionState) { oldState, newState in
+        .onChange(of: rpcClient.connectionState) { oldState, newState in
             // React when connection transitions to connected
             if newState.isConnected && !oldState.isConnected {
                 Task {
@@ -287,7 +287,7 @@ struct ChatView: View {
                     guard !Task.isCancelled else { return }
                     await MainActor.run {
                         // Double-check still connected before enabling
-                        if viewModel.connectionState.canInteract {
+                        if rpcClient.connectionState.canInteract {
                             isInteractionEnabled = true
                         }
                     }
@@ -415,16 +415,14 @@ struct ChatView: View {
                         }
 
                         // Show workspace deleted notification when workspace folder no longer exists
-                        // Only show when connected — when disconnected, the RPC validation may have failed
-                        // and produced a false positive. The connection status pill handles the disconnected case.
-                        if workspaceDeleted && viewModel.connectionState.isConnected {
+                        if workspaceDeleted {
                             WorkspaceDeletedNotificationView()
                                 .id("workspaceDeleted")
                         }
 
                         // Connection status pill - appears when not connected
                         ConnectionStatusPill(
-                            connectionState: viewModel.connectionState,
+                            connectionState: rpcClient.connectionState,
                             onRetry: { await rpcClient.manualRetry() }
                         )
                         .frame(maxWidth: .infinity)

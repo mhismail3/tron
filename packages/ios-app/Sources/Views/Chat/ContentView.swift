@@ -66,10 +66,6 @@ struct ContentView: View {
                 if newState.isConnected && !oldState.isConnected {
                     eventStoreManager.startDashboardPolling()
 
-                    // Clear stale workspace deleted state — prior disconnected validation
-                    // may have produced false positives via failed RPC calls
-                    workspaceDeletedForSession = [:]
-
                     // Re-validate current session's workspace now that we're connected
                     if let sessionId = selectedSessionId,
                        let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) {
@@ -77,12 +73,10 @@ struct ContentView: View {
                         let workingDir = session.workingDirectory
                         Task {
                             isValidatingWorkspace = true
-                            let pathExists = await manager.validateWorkspacePath(workingDir)
+                            if let pathExists = await manager.validateWorkspacePath(workingDir) {
+                                workspaceDeletedForSession[sessionId] = !pathExists
+                            }
                             isValidatingWorkspace = false
-                            // Only store result if still connected — if connection dropped
-                            // during the async RPC call, the result is unreliable
-                            guard rpcClient.connectionState.isConnected else { return }
-                            workspaceDeletedForSession[sessionId] = !pathExists
                         }
                     }
                 }
@@ -331,16 +325,11 @@ struct ContentView: View {
         let manager = eventStoreManager
         let workingDir = session.workingDirectory
         Task {
-            // Only validate workspace path when connected to server.
-            // When disconnected, the RPC call will fail and produce a false "deleted" result.
-            guard rpcClient.connectionState.isConnected else { return }
             isValidatingWorkspace = true
-            let pathExists = await manager.validateWorkspacePath(workingDir)
+            if let pathExists = await manager.validateWorkspacePath(workingDir) {
+                workspaceDeletedForSession[id] = !pathExists
+            }
             isValidatingWorkspace = false
-            // Only store result if still connected — if connection dropped
-            // during the async RPC call, the result is unreliable
-            guard rpcClient.connectionState.isConnected else { return }
-            workspaceDeletedForSession[id] = !pathExists
         }
     }
 
