@@ -93,6 +93,29 @@ final class MiscClient {
         return result.handoffs
     }
 
+    /// Get paginated ledger entries for a workspace
+    func getLedgerEntries(
+        workingDirectory: String,
+        limit: Int? = nil,
+        offset: Int? = nil,
+        tags: [String]? = nil
+    ) async throws -> MemoryGetLedgerResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        let params = MemoryGetLedgerParams(
+            workingDirectory: workingDirectory,
+            limit: limit,
+            offset: offset,
+            tags: tags
+        )
+
+        return try await ws.send(
+            method: "memory.getLedger",
+            params: params
+        )
+    }
+
     // MARK: - Worktree Methods
 
     /// Get worktree status for a session

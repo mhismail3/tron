@@ -267,5 +267,67 @@ export function createEventStoreAdapter(deps: AdapterDependencies): EventStoreMa
       const event = await orchestrator.events.deleteMessage(sessionId, targetEventId, reason);
       return { id: event.id, payload: event.payload };
     },
+
+    async getLedgerEntries(workingDirectory, options) {
+      const limit = options?.limit ?? 50;
+      const offset = options?.offset ?? 0;
+      const tags = options?.tags;
+
+      const workspace = await eventStore.getWorkspaceByPath(workingDirectory);
+      if (!workspace) {
+        return { entries: [], hasMore: false, totalCount: 0 };
+      }
+
+      const totalCount = await eventStore.countEventsByWorkspaceAndTypes(
+        workspace.id,
+        ['memory.ledger' as EventType]
+      );
+
+      const events = await eventStore.getEventsByWorkspaceAndTypes(
+        workspace.id,
+        ['memory.ledger' as EventType],
+        { limit: tags ? undefined : limit, offset: tags ? undefined : offset }
+      );
+
+      let entries = events.map(event => {
+        const payload = (event as { payload?: Record<string, unknown> }).payload ?? {};
+        return {
+          id: event.id,
+          sessionId: event.sessionId,
+          timestamp: event.timestamp,
+          title: payload.title as string | undefined,
+          entryType: payload.type as string | undefined,
+          input: payload.input as string | undefined,
+          actions: (payload.actions as string[] | undefined) ?? [],
+          decisions: (payload.decisions as Array<{ choice: string; reason: string }> | undefined) ?? [],
+          lessons: (payload.lessons as string[] | undefined) ?? [],
+          insights: (payload.insights as string[] | undefined) ?? [],
+          tags: (payload.tags as string[] | undefined) ?? [],
+          files: (payload.files as Array<{ path: string; op: string; why: string }> | undefined) ?? [],
+          model: payload.model as string | undefined,
+          tokenCost: payload.tokenCost as Record<string, unknown> | undefined,
+        };
+      });
+
+      // Apply tag filtering if tags provided
+      if (tags && tags.length > 0) {
+        entries = entries.filter(entry =>
+          entry.tags.some(tag => tags.includes(tag))
+        );
+        const filteredTotal = entries.length;
+        const paginatedEntries = entries.slice(offset, offset + limit);
+        return {
+          entries: paginatedEntries,
+          hasMore: offset + limit < filteredTotal,
+          totalCount: filteredTotal,
+        };
+      }
+
+      return {
+        entries,
+        hasMore: offset + limit < totalCount,
+        totalCount,
+      };
+    },
   };
 }

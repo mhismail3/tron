@@ -333,10 +333,17 @@ export class SQLiteEventStore {
   async getEventsByWorkspaceAndTypes(
     workspaceId: WorkspaceId,
     types: EventType[],
-    options?: { limit?: number }
+    options?: { limit?: number; offset?: number }
   ): Promise<SessionEvent[]> {
     const events = this.eventRepo.getByWorkspaceAndTypes(workspaceId, types, options);
     return events.map(({ depth, ...event }) => event as SessionEvent);
+  }
+
+  async countEventsByWorkspaceAndTypes(
+    workspaceId: WorkspaceId,
+    types: EventType[]
+  ): Promise<number> {
+    return this.eventRepo.countByWorkspaceAndTypes(workspaceId, types);
   }
 
   async getNextSequence(sessionId: SessionId): Promise<number> {

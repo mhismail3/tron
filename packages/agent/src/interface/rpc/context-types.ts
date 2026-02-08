@@ -191,6 +191,9 @@ export interface EventStoreManager {
 
   // Message operations
   deleteMessage(sessionId: string, targetEventId: string, reason?: 'user_request' | 'content_policy' | 'context_management'): Promise<{ id: string; payload: unknown }>;
+
+  // Memory operations
+  getLedgerEntries(workingDirectory: string, options?: { limit?: number; offset?: number; tags?: string[] }): Promise<{ entries: unknown[]; hasMore: boolean; totalCount: number }>;
 }
 
 /**

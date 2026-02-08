@@ -41,7 +41,7 @@ struct VoiceNotesListView: View {
                         Button {
                             onNavigationModeChange?(mode)
                         } label: {
-                            Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                            Label(mode.rawValue, systemImage: mode.icon)
                         }
                     }
                 } label: {

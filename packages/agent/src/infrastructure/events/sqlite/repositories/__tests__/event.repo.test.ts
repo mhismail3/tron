@@ -477,6 +477,66 @@ describe('EventRepository', () => {
     });
   });
 
+  describe('getByWorkspaceAndTypes with offset', () => {
+    it('should return events with offset and limit', async () => {
+      for (let i = 0; i < 5; i++) {
+        await repo.insert(createEvent({
+          id: EventId(`evt_${i}`),
+          type: 'memory.ledger' as any,
+          sequence: i,
+          timestamp: new Date(2025, 0, 1 + i).toISOString(),
+        }));
+      }
+
+      // Results are DESC by timestamp, so offset=2 skips the 2 newest
+      const events = repo.getByWorkspaceAndTypes(testWorkspaceId, ['memory.ledger' as any], { limit: 2, offset: 2 });
+      expect(events).toHaveLength(2);
+    });
+
+    it('should return empty array when offset exceeds total', async () => {
+      await repo.insert(createEvent({
+        id: EventId('evt_1'),
+        type: 'memory.ledger' as any,
+        sequence: 0,
+      }));
+
+      const events = repo.getByWorkspaceAndTypes(testWorkspaceId, ['memory.ledger' as any], { limit: 10, offset: 100 });
+      expect(events).toEqual([]);
+    });
+
+    it('should behave same as no offset when offset is 0', async () => {
+      for (let i = 0; i < 3; i++) {
+        await repo.insert(createEvent({
+          id: EventId(`evt_${i}`),
+          type: 'memory.ledger' as any,
+          sequence: i,
+        }));
+      }
+
+      const withOffset = repo.getByWorkspaceAndTypes(testWorkspaceId, ['memory.ledger' as any], { offset: 0 });
+      const withoutOffset = repo.getByWorkspaceAndTypes(testWorkspaceId, ['memory.ledger' as any]);
+      expect(withOffset).toHaveLength(withoutOffset.length);
+    });
+  });
+
+  describe('countByWorkspaceAndTypes', () => {
+    it('should return 0 for empty types', () => {
+      expect(repo.countByWorkspaceAndTypes(testWorkspaceId, [])).toBe(0);
+    });
+
+    it('should count matching events', async () => {
+      await repo.insert(createEvent({ id: EventId('evt_1'), type: 'memory.ledger' as any, sequence: 0 }));
+      await repo.insert(createEvent({ id: EventId('evt_2'), type: 'memory.ledger' as any, sequence: 1 }));
+      await repo.insert(createEvent({ id: EventId('evt_3'), type: 'message.user', sequence: 2 }));
+
+      expect(repo.countByWorkspaceAndTypes(testWorkspaceId, ['memory.ledger' as any])).toBe(2);
+    });
+
+    it('should return 0 when no events match', () => {
+      expect(repo.countByWorkspaceAndTypes(testWorkspaceId, ['memory.ledger' as any])).toBe(0);
+    });
+  });
+
   describe('exists', () => {
     it('should return false for non-existent event', () => {
       expect(repo.exists(EventId('evt_nonexistent'))).toBe(false);

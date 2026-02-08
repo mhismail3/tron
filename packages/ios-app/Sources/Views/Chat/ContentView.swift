@@ -89,11 +89,13 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        // On iPhone with no sessions, show WelcomePage or VoiceNotesListView
+        // On iPhone with no sessions, show WelcomePage or VoiceNotesListView or MemoryDashboard
         if horizontalSizeClass == .compact && eventStoreManager.sessions.isEmpty && navigationMode == .agents {
             compactWelcomePage
         } else if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
             compactVoiceNotesList
+        } else if horizontalSizeClass == .compact && navigationMode == .memory {
+            compactMemoryDashboard
         } else {
             splitViewContent
         }
@@ -118,6 +120,20 @@ struct ContentView: View {
             VoiceNotesListView(
                 rpcClient: rpcClient,
                 onVoiceNote: { showVoiceNotesRecording = true },
+                onSettings: { showSettings = true },
+                onNavigationModeChange: { mode in
+                    navigationMode = mode
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var compactMemoryDashboard: some View {
+        NavigationStack {
+            MemoryDashboardView(
+                rpcClient: rpcClient,
+                workingDirectory: quickSessionWorkspace,
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
@@ -172,6 +188,15 @@ struct ContentView: View {
                     },
                     // iPad (regular) has toolbar in detail view, iPhone (compact) needs it here
                     showToolbar: horizontalSizeClass == .compact
+                )
+            } else if navigationMode == .memory {
+                MemoryDashboardView(
+                    rpcClient: rpcClient,
+                    workingDirectory: quickSessionWorkspace,
+                    onSettings: { showSettings = true },
+                    onNavigationModeChange: { mode in
+                        navigationMode = mode
+                    }
                 )
             } else {
                 VoiceNotesListView(
@@ -348,7 +373,7 @@ struct ContentView: View {
                             Button {
                                 navigationMode = mode
                             } label: {
-                                Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                                Label(mode.rawValue, systemImage: mode.icon)
                             }
                         }
                     } label: {
@@ -506,7 +531,7 @@ struct WelcomePage: View {
                                 Button {
                                     onNavigationModeChange?(mode)
                                 } label: {
-                                    Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                                    Label(mode.rawValue, systemImage: mode.icon)
                                 }
                             }
                         } label: {

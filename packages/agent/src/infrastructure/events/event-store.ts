@@ -556,9 +556,16 @@ export class EventStore {
   async getEventsByWorkspaceAndTypes(
     workspaceId: WorkspaceId,
     types: EventType[],
-    options?: { limit?: number }
+    options?: { limit?: number; offset?: number }
   ): Promise<SessionEvent[]> {
     return this.backend.getEventsByWorkspaceAndTypes(workspaceId, types, options);
+  }
+
+  async countEventsByWorkspaceAndTypes(
+    workspaceId: WorkspaceId,
+    types: EventType[]
+  ): Promise<number> {
+    return this.backend.countEventsByWorkspaceAndTypes(workspaceId, types);
   }
 
   // ===========================================================================

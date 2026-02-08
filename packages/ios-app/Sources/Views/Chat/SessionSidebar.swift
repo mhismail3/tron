@@ -6,6 +6,15 @@ import SwiftUI
 enum NavigationMode: String, CaseIterable {
     case agents = "Agents"
     case voiceNotes = "Voice Notes"
+    case memory = "Memory"
+
+    var icon: String {
+        switch self {
+        case .agents: "cpu"
+        case .voiceNotes: "waveform"
+        case .memory: "brain.fill"
+        }
+    }
 }
 
 @available(iOS 26.0, *)
@@ -107,7 +116,7 @@ struct SessionSidebar: View {
                             Button {
                                 onNavigationModeChange?(mode)
                             } label: {
-                                Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                                Label(mode.rawValue, systemImage: mode.icon)
                             }
                         }
                     } label: {

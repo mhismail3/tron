@@ -34,7 +34,7 @@ extension ChatView {
                         Button {
                             NotificationCenter.default.post(name: .navigationModeAction, object: mode)
                         } label: {
-                            Label(mode.rawValue, systemImage: mode == .agents ? "cpu" : "waveform")
+                            Label(mode.rawValue, systemImage: mode.icon)
                         }
                     }
                 } label: {

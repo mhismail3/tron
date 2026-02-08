@@ -67,3 +67,58 @@ struct TreeGetAncestorsParams: Encodable {
 struct TreeGetAncestorsResult: Decodable {
     let events: [RawEvent]
 }
+
+// MARK: - Memory Ledger Methods
+
+struct MemoryGetLedgerParams: Encodable {
+    let workingDirectory: String
+    let limit: Int?
+    let offset: Int?
+    let tags: [String]?
+
+    init(workingDirectory: String, limit: Int? = nil, offset: Int? = nil, tags: [String]? = nil) {
+        self.workingDirectory = workingDirectory
+        self.limit = limit
+        self.offset = offset
+        self.tags = tags
+    }
+}
+
+struct LedgerFileEntry: Decodable {
+    let path: String
+    let op: String
+    let why: String
+}
+
+struct LedgerDecision: Decodable {
+    let choice: String
+    let reason: String
+}
+
+struct LedgerTokenCost: Decodable {
+    let input: Int?
+    let output: Int?
+}
+
+struct LedgerEntryDTO: Decodable, Identifiable {
+    let id: String
+    let sessionId: String
+    let timestamp: String
+    let title: String?
+    let entryType: String?
+    let input: String?
+    let actions: [String]
+    let decisions: [LedgerDecision]
+    let lessons: [String]
+    let insights: [String]
+    let tags: [String]
+    let files: [LedgerFileEntry]
+    let model: String?
+    let tokenCost: LedgerTokenCost?
+}
+
+struct MemoryGetLedgerResult: Decodable {
+    let entries: [LedgerEntryDTO]
+    let hasMore: Bool
+    let totalCount: Int
+}

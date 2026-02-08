@@ -354,7 +354,7 @@ export class EventRepository extends BaseRepository {
   getByWorkspaceAndTypes(
     workspaceId: WorkspaceId,
     types: EventType[],
-    options?: { limit?: number }
+    options?: { limit?: number; offset?: number }
   ): EventWithDepth[] {
     if (types.length === 0) return [];
 
@@ -367,8 +367,31 @@ export class EventRepository extends BaseRepository {
       params.push(options.limit);
     }
 
+    if (options?.offset) {
+      sql += ' OFFSET ?';
+      params.push(options.offset);
+    }
+
     const rows = this.all<EventDbRow>(sql, ...params);
     return rows.map(row => this.rowToEvent(row));
+  }
+
+  /**
+   * Count events by workspace ID and type(s)
+   */
+  countByWorkspaceAndTypes(
+    workspaceId: WorkspaceId,
+    types: EventType[]
+  ): number {
+    if (types.length === 0) return 0;
+
+    const placeholders = this.inPlaceholders(types);
+    const row = this.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM events WHERE workspace_id = ? AND type IN (${placeholders})`,
+      workspaceId,
+      ...types
+    );
+    return row?.count ?? 0;
   }
 
   /**
