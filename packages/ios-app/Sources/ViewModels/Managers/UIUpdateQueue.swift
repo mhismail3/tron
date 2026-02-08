@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - UI Update Queue
-// Ensures tool calls appear in order and batches UI updates for 60fps
+// Batches UI updates for 60fps
 
 @MainActor
 final class UIUpdateQueue {
@@ -72,13 +72,6 @@ final class UIUpdateQueue {
 
     // MARK: - State
 
-    /// Order in which tool calls started (for ordering tool ends)
-    private var toolCallOrder: [String] = []
-    /// Set of completed tool call IDs
-    private var completedTools: Set<String> = []
-    /// Pending tool end updates waiting for earlier tools to complete
-    private var pendingToolResults: [String: ToolEndData] = [:]
-
     /// Queue of pending updates
     private var pendingUpdates: [UpdateType] = []
     /// Batch processing task
@@ -87,74 +80,22 @@ final class UIUpdateQueue {
     /// Callback for processing batched updates
     var onProcessUpdates: (([UpdateType]) -> Void)?
 
-    // MARK: - Tool Ordering
+    // MARK: - Tool Enqueueing
 
-    /// Register a tool call start (establishes ordering)
+    /// Register a tool call start
     func enqueueToolStart(_ data: ToolStartData) {
-        toolCallOrder.append(data.toolCallId)
         enqueue(.toolStart(data))
     }
 
-    /// Register a tool call end (may be queued if earlier tools incomplete)
+    /// Register a tool call end
     func enqueueToolEnd(_ data: ToolEndData) {
-        // Check if all earlier tools have completed
-        guard let toolIndex = toolCallOrder.firstIndex(of: data.toolCallId) else {
-            // Unknown tool - process immediately
-            enqueue(.toolEnd(data))
-            return
-        }
-
-        // Check if all earlier tools are complete
-        let earlierTools = toolCallOrder.prefix(toolIndex)
-        let allEarlierComplete = earlierTools.allSatisfy { completedTools.contains($0) }
-
-        if allEarlierComplete {
-            // Process this tool end and mark as complete
-            completedTools.insert(data.toolCallId)
-            enqueue(.toolEnd(data))
-
-            // Check if any pending tool ends can now be processed
-            processPendingToolEnds()
-        } else {
-            // Queue for later - earlier tools still running
-            pendingToolResults[data.toolCallId] = data
-        }
-    }
-
-    /// Process any pending tool ends that are now ready
-    private func processPendingToolEnds() {
-        var processed = true
-        while processed {
-            processed = false
-
-            for toolCallId in toolCallOrder {
-                guard let pending = pendingToolResults[toolCallId] else { continue }
-
-                // Check if all earlier tools are complete
-                guard let toolIndex = toolCallOrder.firstIndex(of: toolCallId) else { continue }
-                let earlierTools = toolCallOrder.prefix(toolIndex)
-                let allEarlierComplete = earlierTools.allSatisfy { completedTools.contains($0) }
-
-                if allEarlierComplete {
-                    completedTools.insert(toolCallId)
-                    pendingToolResults.removeValue(forKey: toolCallId)
-                    enqueue(.toolEnd(pending))
-                    processed = true
-                }
-            }
-        }
+        enqueue(.toolEnd(data))
     }
 
     // MARK: - General Enqueueing
 
     /// Enqueue a turn boundary update
     func enqueueTurnBoundary(_ data: TurnBoundaryData) {
-        if data.isStart {
-            // Reset tool tracking at turn start
-            toolCallOrder.removeAll()
-            completedTools.removeAll()
-            pendingToolResults.removeAll()
-        }
         enqueue(.turnBoundary(data))
     }
 
@@ -225,19 +166,12 @@ final class UIUpdateQueue {
         batchTask?.cancel()
         batchTask = nil
         pendingUpdates.removeAll()
-        toolCallOrder.removeAll()
-        completedTools.removeAll()
-        pendingToolResults.removeAll()
     }
 
     // MARK: - Debugging
 
     var pendingCount: Int {
         pendingUpdates.count
-    }
-
-    var pendingToolEndCount: Int {
-        pendingToolResults.count
     }
 }
 

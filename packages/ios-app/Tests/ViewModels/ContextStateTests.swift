@@ -7,7 +7,7 @@ final class ContextStateTests: XCTestCase {
     func testInitialState() {
         let state = ContextTrackingState()
         XCTAssertNil(state.totalTokenUsage)
-        XCTAssertEqual(state.currentContextWindow, 200_000)
+        XCTAssertEqual(state.currentContextWindow, 0)
         XCTAssertEqual(state.newInputTokens, 0)
         XCTAssertEqual(state.contextWindowTokens, 0)
         XCTAssertEqual(state.outputTokens, 0)

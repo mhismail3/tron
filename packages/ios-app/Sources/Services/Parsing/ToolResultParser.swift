@@ -110,9 +110,17 @@ struct ToolResultParser {
 
     // MARK: - TodoWrite Parsing
 
-    /// Parse TodoWrite tool result to create TodoWriteChipData for chip display
+    /// Parse TodoWrite tool to create TodoWriteChipData for chip display
     static func parseTodoWrite(from tool: ToolUseData) -> TodoWriteChipData? {
-        guard let result = tool.result else { return nil }
+        guard let result = tool.result else {
+            return TodoWriteChipData(
+                toolCallId: tool.toolCallId,
+                newCount: 0,
+                doneCount: 0,
+                totalCount: 0,
+                status: .updating
+            )
+        }
 
         var completed = 0
         var inProgress = 0
@@ -131,7 +139,8 @@ struct ToolResultParser {
             toolCallId: tool.toolCallId,
             newCount: newCount,
             doneCount: completed,
-            totalCount: totalCount
+            totalCount: totalCount,
+            status: .updated
         )
     }
 

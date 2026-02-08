@@ -3,58 +3,82 @@ import SwiftUI
 // MARK: - TodoWrite Chip (iOS 26)
 
 /// Compact chip for TodoWrite tool calls
-/// Shows "Tasks Updated" with optional counts "(X new, Y done)"
-/// Tappable to open TodoDetailSheet
+/// Shows spinner + "Updating Tasks..." while running,
+/// then "Tasks Updated" with optional counts "(X new, Y done)" when complete
+/// Tappable (when updated) to open TodoDetailSheet
 @available(iOS 26.0, *)
 struct TodoWriteChip: View {
     let data: TodoWriteChipData
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                // Checklist icon
-                Image(systemName: "checklist")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronSlate)
-
-                // Status text
-                Text(statusText)
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronSlate)
-                    .lineLimit(1)
-
-                // Chevron for tappable action
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronSlate.opacity(0.6))
+        Group {
+            if data.status == .updated {
+                Button(action: onTap) {
+                    chipContent
+                }
+                .buttonStyle(.plain)
+            } else {
+                chipContent
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
         .glassEffect(
             .regular.tint(Color.tronSlate.opacity(0.35)).interactive(),
             in: .capsule
         )
     }
 
+    private var chipContent: some View {
+        HStack(spacing: 6) {
+            statusIcon
+
+            Text(statusText)
+                .font(TronTypography.filePath)
+                .foregroundStyle(.tronSlate)
+                .lineLimit(1)
+
+            if data.status == .updated {
+                Image(systemName: "chevron.right")
+                    .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                    .foregroundStyle(.tronSlate.opacity(0.6))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .contentShape(Capsule())
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch data.status {
+        case .updating:
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(.tronSlate)
+        case .updated:
+            Image(systemName: "checklist")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronSlate)
+        }
+    }
+
     private var statusText: String {
-        var parts: [String] = []
-
-        if data.newCount > 0 {
-            parts.append("\(data.newCount) new")
+        switch data.status {
+        case .updating:
+            return "Updating Tasks..."
+        case .updated:
+            var parts: [String] = []
+            if data.newCount > 0 {
+                parts.append("\(data.newCount) new")
+            }
+            if data.doneCount > 0 {
+                parts.append("\(data.doneCount) done")
+            }
+            if parts.isEmpty {
+                return "Tasks Updated"
+            }
+            return "Tasks Updated (\(parts.joined(separator: ", ")))"
         }
-        if data.doneCount > 0 {
-            parts.append("\(data.doneCount) done")
-        }
-
-        if parts.isEmpty {
-            return "Tasks Updated"
-        }
-
-        return "Tasks Updated (\(parts.joined(separator: ", ")))"
     }
 }
 
@@ -66,54 +90,77 @@ struct TodoWriteChipFallback: View {
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                // Checklist icon
-                Image(systemName: "checklist")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+        Group {
+            if data.status == .updated {
+                Button(action: onTap) {
+                    chipContent
+                }
+                .buttonStyle(.plain)
+            } else {
+                chipContent
+            }
+        }
+    }
 
-                // Status text
-                Text(statusText)
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronSlate)
-                    .lineLimit(1)
+    private var chipContent: some View {
+        HStack(spacing: 6) {
+            statusIcon
 
-                // Chevron
+            Text(statusText)
+                .font(TronTypography.filePath)
+                .foregroundStyle(.tronSlate)
+                .lineLimit(1)
+
+            if data.status == .updated {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(.tronSlate.opacity(0.6))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(Color.tronSlate.opacity(0.15))
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.tronSlate.opacity(0.4), lineWidth: 0.5)
-            )
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.tronSlate.opacity(0.15))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.tronSlate.opacity(0.4), lineWidth: 0.5)
+        )
+        .contentShape(Capsule())
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch data.status {
+        case .updating:
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(.tronSlate)
+        case .updated:
+            Image(systemName: "checklist")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronSlate)
+        }
     }
 
     private var statusText: String {
-        var parts: [String] = []
-
-        if data.newCount > 0 {
-            parts.append("\(data.newCount) new")
+        switch data.status {
+        case .updating:
+            return "Updating Tasks..."
+        case .updated:
+            var parts: [String] = []
+            if data.newCount > 0 {
+                parts.append("\(data.newCount) new")
+            }
+            if data.doneCount > 0 {
+                parts.append("\(data.doneCount) done")
+            }
+            if parts.isEmpty {
+                return "Tasks Updated"
+            }
+            return "Tasks Updated (\(parts.joined(separator: ", ")))"
         }
-        if data.doneCount > 0 {
-            parts.append("\(data.doneCount) done")
-        }
-
-        if parts.isEmpty {
-            return "Tasks Updated"
-        }
-
-        return "Tasks Updated (\(parts.joined(separator: ", ")))"
     }
 }
 
@@ -123,7 +170,19 @@ struct TodoWriteChipFallback: View {
 @available(iOS 26.0, *)
 #Preview("TodoWrite Chip States") {
     VStack(spacing: 16) {
-        // No counts
+        // Updating (running)
+        TodoWriteChip(
+            data: TodoWriteChipData(
+                toolCallId: "call_0",
+                newCount: 0,
+                doneCount: 0,
+                totalCount: 0,
+                status: .updating
+            ),
+            onTap: { }
+        )
+
+        // Updated - no counts
         TodoWriteChip(
             data: TodoWriteChipData(
                 toolCallId: "call_1",
@@ -145,21 +204,10 @@ struct TodoWriteChipFallback: View {
             onTap: { }
         )
 
-        // Done only
-        TodoWriteChip(
-            data: TodoWriteChipData(
-                toolCallId: "call_3",
-                newCount: 0,
-                doneCount: 2,
-                totalCount: 4
-            ),
-            onTap: { }
-        )
-
         // Both new and done
         TodoWriteChip(
             data: TodoWriteChipData(
-                toolCallId: "call_4",
+                toolCallId: "call_3",
                 newCount: 3,
                 doneCount: 2,
                 totalCount: 5
