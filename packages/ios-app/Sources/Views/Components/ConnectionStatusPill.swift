@@ -1,29 +1,29 @@
 import SwiftUI
 
 /// A connection status pill that appears at the bottom of the chat when connection issues occur.
-/// Uses native iOS 26 liquid glass animations - no custom animation hacks.
+/// Matches the visual style of CommandToolChip — glass capsule, tinted text, blur transitions.
 @available(iOS 26.0, *)
 struct ConnectionStatusPill: View {
     let connectionState: ConnectionState
+    let isReady: Bool
     let onRetry: () async -> Void
 
     /// Tracks if we've ever seen a non-connected state in this session
     @State private var hasSeenDisconnect: Bool
 
-    /// The state we're actually displaying (debounced)
+    /// The state we're actually displaying (debounced on connected transition).
     /// When nil, pill is hidden. When set, pill is shown.
     @State private var displayedState: ConnectionState?
 
-    /// Debounce task for state changes
+    /// Debounce task for connected→hide transition
     @State private var debounceTask: Task<Void, Never>?
 
-    private let debounceDelay: TimeInterval = 0.3
-
-    init(connectionState: ConnectionState, onRetry: @escaping () async -> Void) {
+    init(connectionState: ConnectionState, isReady: Bool = true, onRetry: @escaping () async -> Void) {
         self.connectionState = connectionState
+        self.isReady = isReady
         self.onRetry = onRetry
-        // Seed state from initial connectionState so the pill works even inside
-        // LazyVStack where onAppear may be deferred until scroll-into-view.
+        // Seed state from initial connectionState so the pill works inside LazyVStack
+        // where onAppear may be deferred until scroll-into-view.
         let notConnected = !connectionState.isConnected
         _hasSeenDisconnect = State(initialValue: notConnected)
         _displayedState = State(initialValue: notConnected ? connectionState : nil)
@@ -31,95 +31,103 @@ struct ConnectionStatusPill: View {
 
     var body: some View {
         Group {
-            if let state = displayedState, hasSeenDisconnect {
+            if let state = displayedState, hasSeenDisconnect, isReady {
                 pillContent(for: state)
-                    // Native iOS transition - scale up/down with fade
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+                    .transition(.blurReplace)
             }
         }
+        .animation(.smooth(duration: 0.3), value: displayedState)
+        .animation(.smooth(duration: 0.3), value: isReady)
         .onChange(of: connectionState) { _, newState in
             handleStateChange(newState)
         }
     }
 
+    // MARK: - Pill Content
+
     @ViewBuilder
     private func pillContent(for state: ConnectionState) -> some View {
+        let color = statusColor(for: state)
         Button {
             Task { await onRetry() }
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 statusIcon(for: state)
 
                 Text(statusText(for: state))
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(color)
+                    .transition(.blurReplace)
 
-                // Countdown for reconnecting
                 if case .reconnecting(_, let seconds) = state, seconds > 0 {
                     Text("(\(seconds)s)")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(color.opacity(0.5))
+                        .transition(.blurReplace)
                 }
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            // Smooth transitions for internal content changes
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .contentTransition(.interpolate)
+            .animation(.smooth(duration: 0.3), value: statusText(for: state))
         }
         .buttonStyle(.plain)
         .disabled(state.isConnected)
         .glassEffect(
-            .regular.tint(tintColor(for: state)).interactive(),
+            .regular.tint(color.opacity(0.25)).interactive(),
             in: .capsule
         )
     }
 
+    // MARK: - Status Icon
+
     @ViewBuilder
     private func statusIcon(for state: ConnectionState) -> some View {
+        let iconSize = TronTypography.sizeBodySM
+        let color = statusColor(for: state)
         switch state {
-        case .disconnected:
-            Image(systemName: "wifi.slash")
-                .font(.system(size: 13, weight: .semibold))
-        case .connecting:
+        case .connecting, .reconnecting:
             ProgressView()
-                .scaleEffect(0.65)
-                .tint(.white)
-        case .reconnecting:
-            ProgressView()
-                .scaleEffect(0.65)
-                .tint(.white)
+                .scaleEffect(0.6)
+                .frame(width: iconSize, height: iconSize)
+                .tint(color)
         case .connected:
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
+                .foregroundStyle(color)
+        case .disconnected:
+            Image(systemName: "wifi.slash")
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
+                .foregroundStyle(color)
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
+                .foregroundStyle(color)
         }
     }
+
+    // MARK: - Status Text & Color
 
     private func statusText(for state: ConnectionState) -> String {
         switch state {
         case .disconnected: return "Not Connected"
-        case .connecting: return "Connecting..."
-        case .reconnecting(let attempt, let seconds):
-            if seconds > 0 {
-                return "Reconnecting (Attempt \(attempt))"
-            } else {
-                return "Attempting Connection..."
-            }
+        case .connecting: return "Connecting"
+        case .reconnecting(let attempt, _):
+            return "Reconnecting (Attempt \(attempt))"
         case .connected: return "Connected"
-        case .failed: return "Not Connected - Tap to Retry"
+        case .failed: return "Connection Failed"
         }
     }
 
-    private func tintColor(for state: ConnectionState) -> Color {
+    private func statusColor(for state: ConnectionState) -> Color {
         switch state {
-        case .connected: return .tronEmerald.opacity(0.6)
-        case .failed: return .tronError.opacity(0.5)
-        case .reconnecting, .connecting: return .tronWarning.opacity(0.5)
-        case .disconnected: return .tronError.opacity(0.4)
+        case .connected: return .tronEmerald
+        case .connecting, .reconnecting: return .tronWarning
+        case .disconnected, .failed: return .tronError
         }
     }
+
+    // MARK: - State Machine
 
     private func handleStateChange(_ newState: ConnectionState) {
         debounceTask?.cancel()
@@ -131,43 +139,24 @@ struct ConnectionStatusPill: View {
         guard hasSeenDisconnect else { return }
 
         if newState.isConnected {
-            // Transitioning to connected - debounce to prevent flicker
-            debounceTask = Task {
-                try? await Task.sleep(for: .seconds(debounceDelay))
-                guard !Task.isCancelled else { return }
+            // Show "Connected" briefly, then dismiss
+            if let current = displayedState, !current.isConnected {
+                displayedState = newState
 
-                await MainActor.run {
-                    // Only show "Connected" if we were showing a non-connected state
-                    if let current = displayedState, !current.isConnected {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            displayedState = newState
-                        }
-
-                        // Schedule disappearance after showing "Connected" briefly
-                        debounceTask = Task {
-                            try? await Task.sleep(for: .seconds(2.0))
-                            guard !Task.isCancelled else { return }
-                            await MainActor.run {
-                                if connectionState.isConnected {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                                        displayedState = nil
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Was already nil or already connected - just clear
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                debounceTask = Task {
+                    try? await Task.sleep(for: .seconds(2.0))
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        if connectionState.isConnected {
                             displayedState = nil
                         }
                     }
                 }
+            } else {
+                displayedState = nil
             }
         } else {
-            // Non-connected states - update immediately with animation
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                displayedState = newState
-            }
+            displayedState = newState
         }
     }
 }
@@ -176,7 +165,7 @@ struct ConnectionStatusPill: View {
 
 @available(iOS 26.0, *)
 #Preview("Connection States") {
-    VStack(spacing: 20) {
+    VStack(spacing: 16) {
         ConnectionStatusPill(connectionState: .disconnected) { }
         ConnectionStatusPill(connectionState: .connecting) { }
         ConnectionStatusPill(connectionState: .reconnecting(attempt: 1, nextRetrySeconds: 5)) { }
@@ -185,5 +174,5 @@ struct ConnectionStatusPill: View {
         ConnectionStatusPill(connectionState: .failed(reason: "Connection lost")) { }
     }
     .padding()
-    .background(Color.black)
+    .background(Color.tronBackground)
 }

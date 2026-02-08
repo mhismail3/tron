@@ -423,10 +423,9 @@ struct ChatView: View {
                         // Connection status pill - appears when not connected
                         ConnectionStatusPill(
                             connectionState: rpcClient.connectionState,
+                            isReady: initialLoadComplete,
                             onRetry: { await rpcClient.manualRetry() }
                         )
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 8)
                         .id("connectionStatusPill")
 
                         // Bottom anchor for scrolling
