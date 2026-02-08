@@ -11,9 +11,13 @@ struct ConnectionStatusPill: View {
     /// Tracks if we've ever seen a non-connected state in this session
     @State private var hasSeenDisconnect: Bool
 
-    /// The state we're actually displaying (debounced on connected transition).
-    /// When nil, pill is hidden. When set, pill is shown.
-    @State private var displayedState: ConnectionState?
+    /// Whether the pill is visible. Separate from displayedState to decouple
+    /// show/hide animation from content updates (prevents glitchy re-renders).
+    @State private var isVisible: Bool
+
+    /// The state we're actually displaying. Updated immediately on every
+    /// connectionState change — content transitions handle smooth text updates.
+    @State private var displayedState: ConnectionState
 
     /// Debounce task for connected→hide transition
     @State private var debounceTask: Task<Void, Never>?
@@ -22,22 +26,21 @@ struct ConnectionStatusPill: View {
         self.connectionState = connectionState
         self.isReady = isReady
         self.onRetry = onRetry
-        // Seed state from initial connectionState so the pill works inside LazyVStack
-        // where onAppear may be deferred until scroll-into-view.
         let notConnected = !connectionState.isConnected
         _hasSeenDisconnect = State(initialValue: notConnected)
-        _displayedState = State(initialValue: notConnected ? connectionState : nil)
+        _isVisible = State(initialValue: notConnected)
+        _displayedState = State(initialValue: connectionState)
     }
 
     var body: some View {
         Group {
-            if let state = displayedState, hasSeenDisconnect, isReady {
-                pillContent(for: state)
+            if isVisible, hasSeenDisconnect, isReady {
+                pillContent
                     .transition(.blurReplace)
             }
         }
-        .animation(.smooth(duration: 0.3), value: displayedState)
-        .animation(.smooth(duration: 0.3), value: isReady)
+        .animation(.smooth(duration: 0.35), value: isVisible)
+        .animation(.smooth(duration: 0.35), value: isReady)
         .onChange(of: connectionState) { _, newState in
             handleStateChange(newState)
         }
@@ -45,62 +48,56 @@ struct ConnectionStatusPill: View {
 
     // MARK: - Pill Content
 
-    @ViewBuilder
-    private func pillContent(for state: ConnectionState) -> some View {
-        let color = statusColor(for: state)
-        Button {
+    private var pillContent: some View {
+        let color = statusColor
+        return Button {
             Task { await onRetry() }
         } label: {
             HStack(spacing: 6) {
-                statusIcon(for: state)
+                statusIcon
+                    .frame(width: TronTypography.sizeBodySM, height: TronTypography.sizeBodySM)
 
-                Text(statusText(for: state))
+                Text(statusText)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                     .foregroundStyle(color)
-                    .transition(.blurReplace)
 
-                if case .reconnecting(_, let seconds) = state, seconds > 0 {
+                if let seconds = countdownSeconds, seconds > 0 {
                     Text("(\(seconds)s)")
                         .font(TronTypography.codeSM)
                         .foregroundStyle(color.opacity(0.5))
-                        .transition(.blurReplace)
+                        .contentTransition(.numericText())
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .contentTransition(.interpolate)
-            .animation(.smooth(duration: 0.3), value: statusText(for: state))
         }
         .buttonStyle(.plain)
-        .disabled(state.isConnected)
+        .disabled(displayedState.isConnected)
         .glassEffect(
             .regular.tint(color.opacity(0.25)).interactive(),
             in: .capsule
         )
+        .animation(.smooth(duration: 0.25), value: statusText)
+        .animation(.smooth(duration: 0.25), value: countdownSeconds)
     }
 
     // MARK: - Status Icon
 
     @ViewBuilder
-    private func statusIcon(for state: ConnectionState) -> some View {
+    private var statusIcon: some View {
         let iconSize = TronTypography.sizeBodySM
-        let color = statusColor(for: state)
-        switch state {
+        let color = statusColor
+        switch displayedState {
         case .connecting, .reconnecting:
             ProgressView()
                 .scaleEffect(0.6)
-                .frame(width: iconSize, height: iconSize)
                 .tint(color)
         case .connected:
             Image(systemName: "checkmark.circle.fill")
                 .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(color)
-        case .disconnected:
+        case .disconnected, .failed:
             Image(systemName: "wifi.slash")
-                .font(TronTypography.sans(size: iconSize, weight: .medium))
-                .foregroundStyle(color)
-        case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
                 .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(color)
         }
@@ -108,19 +105,28 @@ struct ConnectionStatusPill: View {
 
     // MARK: - Status Text & Color
 
-    private func statusText(for state: ConnectionState) -> String {
-        switch state {
-        case .disconnected: return "Not Connected"
-        case .connecting: return "Connecting"
+    private var statusText: String {
+        switch displayedState {
+        case .disconnected, .failed:
+            return "Not Connected (Tap to retry)"
+        case .connecting:
+            return "Connecting"
         case .reconnecting(let attempt, _):
             return "Reconnecting (Attempt \(attempt))"
-        case .connected: return "Connected"
-        case .failed: return "Connection Failed"
+        case .connected:
+            return "Connected"
         }
     }
 
-    private func statusColor(for state: ConnectionState) -> Color {
-        switch state {
+    private var countdownSeconds: Int? {
+        if case .reconnecting(_, let seconds) = displayedState {
+            return seconds
+        }
+        return nil
+    }
+
+    private var statusColor: Color {
+        switch displayedState {
         case .connected: return .tronEmerald
         case .connecting, .reconnecting: return .tronWarning
         case .disconnected, .failed: return .tronError
@@ -138,25 +144,26 @@ struct ConnectionStatusPill: View {
 
         guard hasSeenDisconnect else { return }
 
-        if newState.isConnected {
-            // Show "Connected" briefly, then dismiss
-            if let current = displayedState, !current.isConnected {
-                displayedState = newState
+        // Always update displayed state for content changes (text, countdown, color)
+        displayedState = newState
 
-                debounceTask = Task {
-                    try? await Task.sleep(for: .seconds(2.0))
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        if connectionState.isConnected {
-                            displayedState = nil
-                        }
+        if newState.isConnected {
+            // Show pill briefly, then hide
+            if !isVisible {
+                // Was already hidden — just stay hidden
+                return
+            }
+            debounceTask = Task {
+                try? await Task.sleep(for: .seconds(2.0))
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    if connectionState.isConnected {
+                        isVisible = false
                     }
                 }
-            } else {
-                displayedState = nil
             }
         } else {
-            displayedState = newState
+            isVisible = true
         }
     }
 }

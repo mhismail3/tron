@@ -25,7 +25,7 @@ struct ChatView: View {
     // has been moved to viewModel.modelPickerState - see ChatView+Helpers.swift for accessors
 
     // MARK: - Connection Interaction State (private - body only)
-    @State private var isInteractionEnabled = true
+    @State private var isInteractionEnabled: Bool
     @State private var interactionDebounceTask: Task<Void, Never>?
 
     // MARK: - Scroll State (internal for extension access)
@@ -52,6 +52,7 @@ struct ChatView: View {
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
         _viewModel = State(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
+        _isInteractionEnabled = State(initialValue: rpcClient.connectionState.canInteract)
     }
 
     // MARK: - Body

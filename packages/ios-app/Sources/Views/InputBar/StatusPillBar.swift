@@ -109,7 +109,7 @@ struct StatusPillsColumn: View {
 
     /// Whether model pill should be visible
     private var showModelPill: Bool {
-        !modelName.isEmpty
+        !modelName.isEmpty || readOnly
     }
 
     // MARK: - Body
@@ -147,7 +147,7 @@ struct StatusPillsColumn: View {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
                     .font(TronTypography.pill)
-                Text(modelName.shortModelName)
+                Text(modelName.isEmpty ? "—" : modelName.shortModelName)
                     .font(TronTypography.pillValue)
                 if !readOnly {
                     Image(systemName: "chevron.up.chevron.down")
@@ -222,19 +222,21 @@ struct StatusPillsColumn: View {
                     .overlay(alignment: .leading) {
                         // Fill rectangle that gets clipped by parent Capsule shape
                         Rectangle()
-                            .fill(contextPercentageColor)
-                            .frame(width: 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
+                            .fill(readOnly ? Color.tronEmerald.opacity(0.3) : contextPercentageColor)
+                            .frame(width: readOnly ? 0 : 40 * min(CGFloat(contextPercentage) / 100.0, 1.0))
                     }
                     .clipShape(Capsule())
 
                 // Tokens remaining + Chevrons (spacing: 4 to match model pill)
                 HStack(spacing: 4) {
-                    Text("\(formattedTokensRemaining) left")
-                        .foregroundStyle(contextPercentageColor)
+                    Text(readOnly ? "—" : "\(formattedTokensRemaining) left")
+                        .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : contextPercentageColor)
 
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(TronTypography.labelSM)
-                        .foregroundStyle(contextPercentageColor)
+                    if !readOnly {
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(TronTypography.labelSM)
+                            .foregroundStyle(contextPercentageColor)
+                    }
                 }
             }
             .font(TronTypography.pillValue)
@@ -244,6 +246,8 @@ struct StatusPillsColumn: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: .capsule)
+        .opacity(readOnly ? 0.5 : 1.0)
+        .disabled(readOnly)
     }
 }
 
