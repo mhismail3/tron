@@ -17,7 +17,7 @@ struct VoiceNotesListView: View {
         ZStack(alignment: .bottomTrailing) {
             if isLoading && notes.isEmpty {
                 ProgressView()
-                    .tint(.tronEmerald)
+                    .tint(.tronTeal)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = errorMessage {
                 errorView(error)
@@ -46,22 +46,24 @@ struct VoiceNotesListView: View {
                     }
                 } label: {
                     Image("TronLogo")
+                        .renderingMode(.template)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 28)
+                        .foregroundStyle(.tronTeal)
                 }
             }
             ToolbarItem(placement: .principal) {
                 Text("VOICE NOTES")
                     .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTeal)
                     .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTeal)
                 }
             }
         }
@@ -69,9 +71,6 @@ struct VoiceNotesListView: View {
             VoiceNoteDetailSheet(note: note)
         }
         .task {
-            await loadNotes()
-        }
-        .refreshable {
             await loadNotes()
         }
     }
@@ -156,7 +155,7 @@ struct VoiceNotesListView: View {
             Button("Retry") {
                 Task { await loadNotes() }
             }
-            .foregroundStyle(.tronEmerald)
+            .foregroundStyle(.tronTeal)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -191,11 +190,11 @@ struct VoiceNoteRow: View {
             HStack {
                 Image(systemName: "waveform")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTeal)
 
                 Text(note.formattedDate)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
+                    .foregroundStyle(.tronTeal)
 
                 Spacer()
 
@@ -214,7 +213,7 @@ struct VoiceNoteRow: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
         .glassEffect(
-            .regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(),
+            .regular.tint(Color.tronTeal.opacity(0.12)).interactive(),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))

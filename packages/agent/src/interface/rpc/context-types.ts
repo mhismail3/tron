@@ -70,6 +70,8 @@ export interface RpcContext {
   todoManager?: TodoRpcManager;
   /** Device token manager for push notifications (optional) */
   deviceManager?: DeviceTokenRpcManager;
+  /** Sandbox manager for container operations (optional) */
+  sandboxManager?: SandboxRpcManager;
 }
 
 // =============================================================================
@@ -322,6 +324,25 @@ export interface DeviceTokenRpcManager {
 
   /** Mark a token as invalid (e.g., after APNS 410 response) */
   markTokenInvalid(deviceToken: string): Promise<void>;
+}
+
+/**
+ * Sandbox manager interface for RPC operations
+ */
+export interface SandboxRpcManager {
+  listContainers(): Promise<{
+    containers: Array<{
+      name: string;
+      image: string;
+      status: string;
+      ports: string[];
+      purpose?: string;
+      createdAt: string;
+      createdBySession: string;
+      workingDirectory: string;
+    }>;
+    tailscaleIp?: string;
+  }>;
 }
 
 // =============================================================================

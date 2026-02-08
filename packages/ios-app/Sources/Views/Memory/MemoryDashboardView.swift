@@ -66,9 +66,11 @@ struct MemoryDashboardView: View {
                     }
                 } label: {
                     Image("TronLogo")
+                        .renderingMode(.template)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 28)
+                        .foregroundStyle(.purple)
                 }
             }
             ToolbarItem(placement: .principal) {
@@ -108,13 +110,22 @@ struct MemoryDashboardView: View {
     private var entryList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
+                // Count header
+                HStack {
+                    Text("\(entries.count) of \(totalCount)")
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(.white.opacity(0.4))
+                    Spacer()
+                }
+                .padding(.leading, 4)
+
                 ForEach(filteredEntries) { entry in
                     LedgerEntryRow(entry: entry)
                         .onTapGesture {
                             selectedEntry = entry
                         }
                         .onAppear {
-                            if entry.id == entries.last?.id && hasMore {
+                            if entry.id == filteredEntries.last?.id && hasMore {
                                 Task { await loadMore() }
                             }
                         }
@@ -124,6 +135,20 @@ struct MemoryDashboardView: View {
                     ProgressView()
                         .tint(.purple)
                         .padding()
+                } else if hasMore {
+                    Button {
+                        Task { await loadMore() }
+                    } label: {
+                        Text("Load More")
+                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                            .foregroundStyle(.purple)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .glassEffect(
+                        .regular.tint(Color.purple.opacity(0.15)),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
                 }
             }
             .padding(.horizontal, 12)

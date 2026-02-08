@@ -415,7 +415,9 @@ struct ChatView: View {
                         }
 
                         // Show workspace deleted notification when workspace folder no longer exists
-                        if workspaceDeleted {
+                        // Only show when connected — when disconnected, the RPC validation may have failed
+                        // and produced a false positive. The connection status pill handles the disconnected case.
+                        if workspaceDeleted && viewModel.connectionState.isConnected {
                             WorkspaceDeletedNotificationView()
                                 .id("workspaceDeleted")
                         }

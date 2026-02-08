@@ -30,6 +30,7 @@ export {
   type RpcBackloggedTask,
   type DeviceTokenRpcManager,
   type RpcDeviceToken,
+  type SandboxRpcManager,
 } from './handler.js';
 
 // Registry (new approach)

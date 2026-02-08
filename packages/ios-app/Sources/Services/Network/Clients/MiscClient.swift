@@ -362,6 +362,19 @@ final class MiscClient {
         }
     }
 
+    // MARK: - Sandbox Methods
+
+    /// List all tracked containers with live status
+    func listContainers() async throws -> SandboxListResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        return try await ws.send(
+            method: "sandbox.listContainers",
+            params: EmptyParams()
+        )
+    }
+
     // MARK: - Logs Methods
 
     /// Export logs to server filesystem at $HOME/.tron/artifacts/ios-logs/

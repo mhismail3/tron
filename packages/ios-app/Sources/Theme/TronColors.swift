@@ -43,6 +43,7 @@ extension Color {
     static let tronBlue = Color(hex: "#3B82F6")
     static let tronCyan = Color(hex: "#06B6D4")
     static let tronIndigo = Color(hex: "#818CF8")     // Indigo-400 for sandbox
+    static let tronTeal = Color(hex: "#2DD4BF")        // Teal-400 for voice notes
     static let tronPink = Color(hex: "#EC4899")      // Pink-500 for spells
     static let tronPinkLight = Color(hex: "#F472B6") // Pink-400 for spell highlights
 
@@ -295,6 +296,7 @@ extension ShapeStyle where Self == Color {
     static var tronBlue: Color { .tronBlue }
     static var tronCyan: Color { .tronCyan }
     static var tronIndigo: Color { .tronIndigo }
+    static var tronTeal: Color { .tronTeal }
     static var tronPink: Color { .tronPink }
     static var tronPinkLight: Color { .tronPinkLight }
 

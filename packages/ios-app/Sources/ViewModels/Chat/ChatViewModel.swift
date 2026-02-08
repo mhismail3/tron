@@ -220,6 +220,7 @@ final class ChatViewModel: ChatEventContext {
         self.rpcClient = rpcClient
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
+        self.connectionState = rpcClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
         setupBindings()
         setupEventHandlers()

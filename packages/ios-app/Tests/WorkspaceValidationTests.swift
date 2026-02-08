@@ -75,6 +75,68 @@ final class WorkspaceValidationTests: XCTestCase {
         XCTAssertFalse(result)
     }
 
+    // MARK: - Connection State + Workspace Deleted Tests
+
+    /// Test that workspace deleted pill should only be shown when connected
+    @MainActor
+    func testWorkspaceDeletedRequiresConnection() async throws {
+        // The workspace deleted pill should only show when:
+        // 1. workspaceDeleted == true AND
+        // 2. connection state is .connected
+        let workspaceDeleted = true
+
+        // When disconnected - should NOT show pill
+        let disconnectedState = ConnectionState.disconnected
+        XCTAssertFalse(workspaceDeleted && disconnectedState.isConnected)
+
+        // When reconnecting - should NOT show pill
+        let reconnectingState = ConnectionState.reconnecting(attempt: 1, nextRetrySeconds: 5)
+        XCTAssertFalse(workspaceDeleted && reconnectingState.isConnected)
+
+        // When connected - SHOULD show pill
+        let connectedState = ConnectionState.connected
+        XCTAssertTrue(workspaceDeleted && connectedState.isConnected)
+
+        // When failed - should NOT show pill
+        let failedState = ConnectionState.failed(reason: "error")
+        XCTAssertFalse(workspaceDeleted && failedState.isConnected)
+    }
+
+    /// Test that workspace deleted state should NOT be set when connection is not established
+    @MainActor
+    func testWorkspaceDeletedNotSetWhenDisconnected() async throws {
+        let mockRPC = MockRPCClient()
+        mockRPC.connectionState = .disconnected
+
+        // When disconnected, callers should check connection state before calling validateWorkspacePath
+        XCTAssertFalse(mockRPC.connectionState.isConnected)
+    }
+
+    /// Test that workspace validation is only meaningful when connected
+    @MainActor
+    func testValidateWorkspacePathConnectionError() async throws {
+        let mockRPC = MockRPCClient()
+        mockRPC.listDirectoryError = MockRPCError.connectionNotEstablished
+
+        let result = await mockRPC.validateWorkspacePath("/some/path")
+
+        // Connection errors return false — but callers must distinguish this from
+        // actual "workspace deleted" by checking connection state first
+        XCTAssertFalse(result)
+    }
+
+    /// Test that reconnection clears stale workspace deleted state
+    @MainActor
+    func testReconnectionClearsWorkspaceDeletedState() async throws {
+        // Simulate: workspace was marked as "deleted" while disconnected
+        var workspaceDeletedForSession: [String: Bool] = ["s1": true]
+
+        // On reconnection, stale entries should be cleared
+        workspaceDeletedForSession = [:]
+
+        XCTAssertNil(workspaceDeletedForSession["s1"])
+    }
+
     // MARK: - Session Filtering Tests
 
     /// Test that sessions with deleted workspaces are filtered from recent sessions

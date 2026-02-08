@@ -14,10 +14,10 @@ struct VoiceNoteDetailSheet: View {
                     // Metadata header
                     HStack {
                         Image(systemName: "waveform")
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronTeal)
                         Text(note.formattedDate)
                             .font(TronTypography.headline)
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronTeal)
 
                         Spacer()
 
@@ -46,19 +46,19 @@ struct VoiceNoteDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronTeal)
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Voice Note")
                         .font(TronTypography.button)
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.tronTeal)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: note.transcript) {
                         Image(systemName: "square.and.arrow.up")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronTeal)
                     }
                     .disabled(note.transcript.isEmpty)
                 }

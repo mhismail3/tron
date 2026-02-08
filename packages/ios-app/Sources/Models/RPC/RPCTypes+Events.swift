@@ -122,3 +122,22 @@ struct MemoryGetLedgerResult: Decodable {
     let hasMore: Bool
     let totalCount: Int
 }
+
+// MARK: - Sandbox Types
+
+struct ContainerDTO: Decodable, Identifiable {
+    var id: String { name }
+    let name: String
+    let image: String
+    let status: String
+    let ports: [String]
+    let purpose: String?
+    let createdAt: String
+    let createdBySession: String
+    let workingDirectory: String
+}
+
+struct SandboxListResult: Decodable {
+    let containers: [ContainerDTO]
+    let tailscaleIp: String?
+}

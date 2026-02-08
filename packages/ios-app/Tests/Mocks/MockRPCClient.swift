@@ -4,6 +4,7 @@ import Foundation
 /// Mock RPC Client for testing workspace validation
 @MainActor
 class MockRPCClient {
+    var connectionState: ConnectionState = .connected
     var listDirectoryCallCount = 0
     var listDirectoryError: Error?
 

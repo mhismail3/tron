@@ -54,6 +54,7 @@ import { createDeviceAdapter } from './adapters/device.adapter.js';
 // Standalone adapters (no orchestrator dependency)
 import { createTranscriptionAdapter } from './adapters/transcription.adapter.js';
 import { createCanvasAdapter } from './adapters/canvas.adapter.js';
+import { createSandboxAdapter } from './adapters/sandbox.adapter.js';
 
 // =============================================================================
 // Context Factory
@@ -124,6 +125,9 @@ export function createRpcContext(
 
     // Canvas manager is standalone (no orchestrator dependency)
     context.canvasManager = createCanvasAdapter();
+
+    // Sandbox manager is standalone (reads registry + CLI directly)
+    context.sandboxManager = createSandboxAdapter();
   }
 
   return context;

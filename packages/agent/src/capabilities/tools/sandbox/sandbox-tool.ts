@@ -32,10 +32,10 @@ export class SandboxTool implements TronTool<SandboxParams> {
   readonly category = 'shell' as const;
   readonly executionContract = 'contextual' as const;
 
-  readonly description = `Create and manage sandboxed Linux containers. Containers persist across sessions and are tracked in a registry.
+  readonly description = `Create and manage sandboxed Linux containers. Containers are single-use — one container per project/task. Never reuse a container for a different purpose. Always provide a descriptive purpose when creating.
 
 Actions:
-- create: Create + start a new container (default: ubuntu:latest). Mounts workspace at /workspace.
+- create: Create + start a new container (default: ubuntu:latest). Mounts workspace at /workspace. Always set purpose to describe what this container is for.
 - exec: Execute a command inside a running container. Requires name + command. Supports full shell syntax (pipes, &&, redirects). Use detach: true for long-running processes (servers, daemons).
 - stop: Stop a running container.
 - start: Resume a stopped container.
@@ -43,10 +43,12 @@ Actions:
 - list: List all tracked containers with their current status.
 - logs: Get container logs.
 
+IMPORTANT: Containers are single-use. Each container serves one purpose. If you need to build something new, create a new container — never repurpose an existing one. Use list to check existing containers before creating duplicates.
+
 Network binding: Services inside containers MUST bind to 0.0.0.0 (not localhost/127.0.0.1) to be reachable from external hosts via port mappings. Examples: python3 -m http.server 3000 --bind 0.0.0.0, node app.listen(3000, '0.0.0.0'), flask app.run(host='0.0.0.0').
 
 Interactive UIs: To build something the user can interact with on their phone:
-1. Create a container with port mappings (e.g. ports: ["3000:3000"])
+1. Create a container with port mappings (e.g. ports: ["3000:3000"]) and a descriptive purpose
 2. Install dependencies and start a dev server bound to 0.0.0.0 inside the container
 3. Get the machine's Tailscale IP from server.tailscaleIp in ~/.tron/settings.json
 4. Use OpenURL to open the app at http://{tailscale-ip}:{port}`;
@@ -109,6 +111,10 @@ Interactive UIs: To build something the user can interact with on their phone:
       tail: {
         type: 'number' as const,
         description: 'Number of log lines for logs action',
+      },
+      purpose: {
+        type: 'string' as const,
+        description: 'What this container is for (required for create). E.g. "Snake game web app", "PDF processing", "PostgreSQL database".',
       },
     },
     required: ['action'] as string[],
@@ -232,6 +238,7 @@ Interactive UIs: To build something the user can interact with on their phone:
       createdBySession: this.config.sessionId,
       workingDirectory: this.config.workingDirectory,
       ports,
+      purpose: params.purpose,
     };
     this.registry.add(record);
 

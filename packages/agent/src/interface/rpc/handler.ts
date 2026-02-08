@@ -31,6 +31,7 @@ export type {
   CanvasRpcManager,
   DeviceTokenRpcManager,
   RpcDeviceToken,
+  SandboxRpcManager,
 } from './context-types.js';
 
 import type { RpcContext, RpcMiddleware } from './context-types.js';
@@ -66,6 +67,7 @@ import { getDeviceHandlers } from './handlers/device.handler.js';
 import { createLogsHandlers } from './handlers/logs.handler.js';
 import { createSettingsHandlers } from './handlers/settings.handler.js';
 import { createMemoryHandlers } from './handlers/memory.handler.js';
+import { createSandboxHandlers } from './handlers/sandbox.handler.js';
 
 export class RpcHandler extends EventEmitter {
   private context: RpcContext;
@@ -102,6 +104,7 @@ export class RpcHandler extends EventEmitter {
     this.registry.registerAll(createLogsHandlers());
     this.registry.registerAll(createSettingsHandlers());
     this.registry.registerAll(createMemoryHandlers());
+    this.registry.registerAll(createSandboxHandlers());
 
     logger.debug('RPC handler initialized', {
       registeredMethods: this.registry.list(),

@@ -56,6 +56,7 @@ export interface SandboxParams {
   timeout?: number;
   detach?: boolean;
   tail?: number;
+  purpose?: string;
 }
 
 // =============================================================================

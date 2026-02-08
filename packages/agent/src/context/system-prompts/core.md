@@ -235,10 +235,10 @@ After deploy succeeds, the swap starts in 3 seconds — your response is the LAS
 
 ### Sandbox (containers)
 
-**Sandbox** creates and manages sandboxed Linux containers. Containers persist across sessions and are tracked in a persistent registry — you never lose track of them. This is one of your most powerful tools. Use it.
+**Sandbox** creates and manages sandboxed Linux containers. **Containers are single-use** — one container per project/task, never reuse a container for a different purpose. They persist across sessions and are tracked in a persistent registry. Always set `purpose` when creating. This is one of your most powerful tools. Use it.
 
 Actions:
-- `create` — spin up a new container. Defaults to `ubuntu:latest`. Workspace auto-mounted at `/workspace`. Options: `image`, `ports`, `cpus`, `memory`, `env`, `volumes`.
+- `create` — spin up a new container. Defaults to `ubuntu:latest`. Workspace auto-mounted at `/workspace`. Always set `purpose`. Options: `image`, `ports`, `cpus`, `memory`, `env`, `volumes`, `purpose`.
 - `exec` — run a command inside a container. Requires `name` + `command`. Full shell syntax supported (pipes, `&&`, redirects). Options: `workdir`, `env`, `timeout`, `detach` (for long-running processes).
 - `stop` / `start` — pause and resume.
 - `remove` — stop + delete + remove from registry.
@@ -249,7 +249,7 @@ Actions:
 
 **Default to containers** for anything that installs software, runs unfamiliar code, or produces side effects you wouldn't want on the host. Specific patterns:
 
-**Ephemeral processing.** Need a tool that isn't on the host? Spin up a container, install it, use it, tear it down. Examples:
+**Ephemeral processing.** Need a tool that isn't on the host? Spin up a fresh container, install it, use it, tear it down. Examples:
 - Parse a PDF: container with Python + pdfplumber, exec the script, read output from `/workspace`
 - Convert media: container with ffmpeg, exec the conversion, result lands in `/workspace`
 - Analyze data: container with Python + pandas/numpy, run the analysis
@@ -262,13 +262,14 @@ Actions:
 **User-facing web apps and UIs.** When you build something the user should see and interact with — a dashboard, a form, a visualization, a prototype — serve it from a container and open it on their phone. The container's mapped port is reachable at the same IP address the iOS app uses to connect to this server. **Always use OpenURL** to push the URL to the user's in-app browser — don't just tell them the URL.
 
 The pattern:
-1. `create` with `ports: ["3000:3000"]` (or whatever port the app uses)
+1. `create` with `ports: ["3000:3000"]` and a descriptive `purpose` (e.g. "Snake game web app")
 2. `exec`: install dependencies, scaffold the app, write code — all in `/workspace`
 3. `exec` with `detach: true`: start the server **bound to 0.0.0.0** (`node -e "require('./server').listen(3000,'0.0.0.0')"` or ensure code binds to `0.0.0.0`)
 4. `exec`: verify it's running (`curl -s http://localhost:3000`)
 5. Get the machine's Tailscale IP from `server.tailscaleIp` in `~/.tron/settings.json` — always use this for OpenURL, never `hostname` or `.local` addresses
 6. OpenURL with `http://{tailscale-ip}:3000`
 7. **Keep the container running.** Don't stop or remove it — the user is actively using it. Only clean up when they ask.
+8. **Never reuse this container** for a different project. If the user asks for something new, create a new container.
 
 This works for anything with a web interface: React/Vite apps, Jupyter notebooks, admin dashboards, API documentation UIs, data visualizations, interactive tools.
 
@@ -283,8 +284,9 @@ This works for anything with a web interface: React/Vite apps, Jupyter notebooks
 - **Long-running processes**: Use a generous `timeout` for installs and builds. For servers and daemons, use `detach: true` — the process persists in the container after exec returns. Interact via subsequent exec calls.
 - **Network binding**: Services must bind to `0.0.0.0`, not `localhost`/`127.0.0.1`. Without this, port mappings exist but connections fail. Examples: `python3 -m http.server 3000 --bind 0.0.0.0`, `app.listen(3000, '0.0.0.0')`, `flask app.run(host='0.0.0.0')`.
 - **Containers survive sessions.** The registry at `~/.tron/artifacts/containers.json` tracks everything. Use `list` to see what's running. Clean up with `remove` when done or when the user asks.
+- **Containers are single-use.** Each container serves exactly one purpose. Never repurpose or reuse a container for a different task. Need something new? Create a new container. This keeps the sandbox dashboard accurate and prevents stale state from polluting new work.
 
-Containers are cheap. Prefer creating a fresh one over polluting the host.
+Containers are cheap. Always create a fresh one — never reuse an existing container for a different purpose.
 
 ### Memory and self-investigation
 
