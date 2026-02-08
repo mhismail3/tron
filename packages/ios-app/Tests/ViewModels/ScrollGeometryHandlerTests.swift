@@ -285,6 +285,43 @@ struct ScrollGeometryHandlerTests {
         #expect(decision == .noChange)
     }
 
+    // MARK: - Content Shrink (ProcessingIndicator disappearing)
+
+    @Test("Content shrink with offset drop should not trigger scrolledUp")
+    func testContentShrinkDoesNotTriggerScrolledUp() {
+        // Simulates ProcessingIndicator disappearing: content height drops ~40pt,
+        // scroll offset drops correspondingly. This is NOT a user scroll-up action.
+        let oldState = ScrollState(isNearBottom: true, offset: 500, contentHeight: 1000)
+        let newState = ScrollState(isNearBottom: true, offset: 460, contentHeight: 960)
+
+        let decision = ScrollGeometryHandler.processGeometryChange(
+            oldState: oldState,
+            newState: newState,
+            isFollowingMode: true,
+            isCascading: false
+        )
+
+        // Offset dropped 40pt but content shrunk 40pt — NOT user scroll
+        #expect(decision != .scrolledUp)
+    }
+
+    @Test("Content shrink in following mode not near bottom returns noChange")
+    func testContentShrinkFollowingNotNearBottom() {
+        // Content shrinks and isNearBottom becomes false
+        let oldState = ScrollState(isNearBottom: true, offset: 500, contentHeight: 1000)
+        let newState = ScrollState(isNearBottom: false, offset: 470, contentHeight: 960)
+
+        let decision = ScrollGeometryHandler.processGeometryChange(
+            oldState: oldState,
+            newState: newState,
+            isFollowingMode: true,
+            isCascading: false
+        )
+
+        // Following mode + content shrunk + not near bottom = noChange, not scrolledUp
+        #expect(decision == .noChange)
+    }
+
     @Test("Reviewing mode not near bottom - should update status")
     func testReviewingModeNotNearBottom() {
         // In reviewing mode, we DO want to report isNearBottom status

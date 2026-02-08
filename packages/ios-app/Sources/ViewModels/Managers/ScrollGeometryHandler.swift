@@ -63,8 +63,10 @@ public enum ScrollGeometryHandler {
         guard !isCascading else { return .noChange }
 
         // Detect user actively scrolling up: offset DECREASES by more than threshold
-        // This is the only reliable indicator of intentional upward scroll
-        let userScrolledUp = newState.offset < oldState.offset - scrollThreshold
+        // while content height didn't shrink. If content height decreased (e.g.
+        // ProcessingIndicator disappearing), offset drops naturally — not a user action.
+        let contentShrunk = newState.contentHeight < oldState.contentHeight - 1
+        let userScrolledUp = !contentShrunk && newState.offset < oldState.offset - scrollThreshold
 
         if userScrolledUp {
             // User intentionally scrolled up - always switch to reviewing mode
