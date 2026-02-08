@@ -9,7 +9,7 @@ import Foundation
 struct ToolCallRecord {
     let toolCallId: String
     let toolName: String
-    let arguments: String
+    var arguments: String
     var result: String?
     var isError: Bool = false
 }

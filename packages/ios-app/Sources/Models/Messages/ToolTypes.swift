@@ -5,7 +5,7 @@ import Foundation
 struct ToolUseData: Equatable {
     let toolName: String
     let toolCallId: String
-    let arguments: String
+    var arguments: String
     var status: ToolStatus
     var result: String?
     var durationMs: Int?

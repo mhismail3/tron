@@ -131,24 +131,24 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages.count, 0)
     }
 
-    func testToolStartSkipsDuplicateFromGenerating() async throws {
-        // Given: tool_generating already created a chip
+    func testToolStartUpdatesDuplicateFromGenerating() async throws {
+        // Given: tool_generating already created a chip with empty arguments
         let genResult = ToolGeneratingPlugin.Result(toolName: "Write", toolCallId: "gen_first")
         coordinator.handleToolGenerating(genResult, context: mockContext)
         XCTAssertEqual(mockContext.messages.count, 1)
 
-        // When: tool_start arrives for same toolCallId
+        // When: tool_start arrives for same toolCallId with full arguments
         let event = ToolStartPlugin.Result(
             toolName: "Write",
             toolCallId: "gen_first",
-            arguments: nil,
-            formattedArguments: "{\"file_path\": \"/test.txt\"}"
+            arguments: ["file_path": AnyCodable("/test.txt")],
+            formattedArguments: "{\"file_path\":\"/test.txt\"}"
         )
         let startResult = ToolStartResult(
             tool: ToolUseData(
                 toolName: "Write",
                 toolCallId: "gen_first",
-                arguments: "{\"file_path\": \"/test.txt\"}",
+                arguments: "{\"file_path\":\"/test.txt\"}",
                 status: .running
             ),
             isAskUserQuestion: false,
@@ -163,6 +163,19 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages.count, 1)
         // Then: Tool is still visible
         XCTAssertTrue(mockContext.visibleToolCallIds.contains("gen_first"))
+        // Then: Arguments are updated from empty to full
+        if case .toolUse(let tool) = mockContext.messages[0].content {
+            XCTAssertFalse(tool.arguments.isEmpty, "Arguments should be updated from empty")
+            XCTAssertTrue(tool.arguments.contains("file_path"), "Arguments should contain the file_path")
+        } else {
+            XCTFail("Expected toolUse content")
+        }
+        // Then: currentToolMessages is updated
+        XCTAssertEqual(mockContext.currentToolMessages.count, 1)
+        // Then: currentTurnToolCalls arguments are updated
+        XCTAssertTrue(mockContext.currentTurnToolCalls[0].arguments.contains("file_path"))
+        // Then: Message window is updated
+        XCTAssertEqual(mockContext.updatedInMessageWindow.count, 1)
     }
 
     func testToolEndUpdatesGeneratingChip() async throws {
@@ -228,18 +241,18 @@ final class ToolEventCoordinatorTests: XCTestCase {
         coordinator.handleToolGenerating(genResult, context: mockContext)
         XCTAssertEqual(mockContext.messages.count, 1)
 
-        // When: tool_start arrives with isBrowserTool: true
+        // When: tool_start arrives with isBrowserTool: true and full arguments
         let event = ToolStartPlugin.Result(
             toolName: "BrowseTheWeb",
             toolCallId: "browser_dup",
-            arguments: nil,
-            formattedArguments: "{}"
+            arguments: ["action": AnyCodable("navigate"), "url": AnyCodable("https://example.com")],
+            formattedArguments: "{\"action\":\"navigate\",\"url\":\"https://example.com\"}"
         )
         let startResult = ToolStartResult(
             tool: ToolUseData(
                 toolName: "BrowseTheWeb",
                 toolCallId: "browser_dup",
-                arguments: "{}",
+                arguments: "{\"action\":\"navigate\",\"url\":\"https://example.com\"}",
                 status: .running
             ),
             isAskUserQuestion: false,
@@ -252,6 +265,12 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
         // Then: No duplicate message
         XCTAssertEqual(mockContext.messages.count, 1)
+        // Then: Arguments are updated
+        if case .toolUse(let tool) = mockContext.messages[0].content {
+            XCTAssertTrue(tool.arguments.contains("navigate"))
+        } else {
+            XCTFail("Expected toolUse content")
+        }
         // Then: Browser status is still set
         XCTAssertNotNil(mockContext.browserStatus)
         // Then: Browser streaming is started
@@ -1041,6 +1060,7 @@ final class MockToolEventContext: ToolEventContext {
     var finalizeStreamingMessageCalled = false
     var visibleToolCallIds: Set<String> = []
     var appendedToMessageWindow: [ChatMessage] = []
+    var updatedInMessageWindow: [ChatMessage] = []
     var enqueuedToolStarts: [UIUpdateQueue.ToolStartData] = []
     var enqueuedToolEnds: [UIUpdateQueue.ToolEndData] = []
     var askUserQuestionSheetOpened = false
@@ -1065,6 +1085,10 @@ final class MockToolEventContext: ToolEventContext {
 
     func appendToMessageWindow(_ message: ChatMessage) {
         appendedToMessageWindow.append(message)
+    }
+
+    func updateInMessageWindow(_ message: ChatMessage) {
+        updatedInMessageWindow.append(message)
     }
 
     func enqueueToolStart(_ data: UIUpdateQueue.ToolStartData) {

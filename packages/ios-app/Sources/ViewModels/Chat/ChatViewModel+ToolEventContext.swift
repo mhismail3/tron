@@ -28,6 +28,11 @@ extension ChatViewModel: ToolEventContext {
         messageWindowManager.appendMessage(message)
     }
 
+    /// Update an existing message in the MessageWindowManager (ToolEventContext)
+    func updateInMessageWindow(_ message: ChatMessage) {
+        messageWindowManager.updateMessage(message)
+    }
+
     /// Enqueue a tool start for ordered processing (ToolEventContext)
     func enqueueToolStart(_ data: UIUpdateQueue.ToolStartData) {
         uiUpdateQueue.enqueueToolStart(data)

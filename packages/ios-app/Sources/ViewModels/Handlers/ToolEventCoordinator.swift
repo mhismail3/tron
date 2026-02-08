@@ -93,10 +93,24 @@ final class ToolEventCoordinator {
         // When resuming an in-progress session, catch-up creates tool messages for running/completed tools.
         // tool_generating also pre-creates chips before tool_start arrives.
         // The server then continues streaming those same tools, which would cause duplicates.
-        if MessageFinder.hasToolMessage(toolCallId: pluginResult.toolCallId, in: context.messages) {
-            context.logInfo("Skipping duplicate tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) - already exists")
-            // Still make the tool visible (in case it wasn't) and track it
+        if let existingIndex = MessageFinder.lastIndexOfToolUse(toolCallId: pluginResult.toolCallId, in: context.messages) {
+            context.logInfo("Updating existing tool.start for \(pluginResult.toolName) (toolCallId: \(pluginResult.toolCallId)) with arguments")
+            // Still make the tool visible (in case it wasn't)
             context.makeToolVisible(pluginResult.toolCallId)
+
+            // Update the existing chip with full arguments from tool_start
+            if case .toolUse(var tool) = context.messages[existingIndex].content {
+                tool.arguments = pluginResult.formattedArguments
+                context.messages[existingIndex].content = .toolUse(tool)
+                context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
+                context.updateInMessageWindow(context.messages[existingIndex])
+            }
+
+            // Update tracked tool call arguments
+            if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
+                context.currentTurnToolCalls[idx].arguments = pluginResult.formattedArguments
+            }
+
             // Still handle browser tool detection for pre-existing chips
             if result.isBrowserTool {
                 let shouldStartStreaming = context.updateBrowserStatusIfNeeded()
