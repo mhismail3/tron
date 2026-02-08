@@ -83,6 +83,14 @@ export interface RpcRulesInfo {
   tokens: number;
 }
 
+/** Memory loaded for the session (if auto-inject enabled) */
+export interface RpcMemoryInfo {
+  /** Number of ledger entries loaded */
+  count: number;
+  /** Estimated token count */
+  tokens: number;
+}
+
 export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {
   messages: ContextDetailedMessageInfo[];
   systemPromptContent: string;
@@ -91,6 +99,8 @@ export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResu
   addedSkills: RpcAddedSkillInfo[];
   /** Rules files loaded for this session (if any) */
   rules?: RpcRulesInfo;
+  /** Memory loaded for this session (if auto-inject enabled) */
+  memory?: RpcMemoryInfo;
 }
 
 /** Check if compaction is needed */

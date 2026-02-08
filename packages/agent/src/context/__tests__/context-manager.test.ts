@@ -887,4 +887,45 @@ describe('ContextManager', () => {
       expect(restored.getMessages()).toHaveLength(1);
     });
   });
+
+  // ===========================================================================
+  // Memory Content
+  // ===========================================================================
+
+  describe('Memory Content', () => {
+    it('starts with no memory content', () => {
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      expect(cm.getMemoryContent()).toBeUndefined();
+    });
+
+    it('sets and gets memory content', () => {
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      cm.setMemoryContent('## Lessons from past sessions\n\n- Always use vitest');
+      expect(cm.getMemoryContent()).toBe('## Lessons from past sessions\n\n- Always use vitest');
+    });
+
+    it('clears memory content with undefined', () => {
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      cm.setMemoryContent('some content');
+      cm.setMemoryContent(undefined);
+      expect(cm.getMemoryContent()).toBeUndefined();
+    });
+
+    it('includes memory content in token estimation', () => {
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      const tokensBefore = cm.getCurrentTokens();
+      cm.setMemoryContent('A'.repeat(4000)); // ~1000 tokens
+      const tokensAfter = cm.getCurrentTokens();
+      expect(tokensAfter).toBeGreaterThan(tokensBefore);
+    });
+
+    it('does not lose memory content on clearMessages', () => {
+      const cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+      cm.setMemoryContent('important lessons');
+      cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.clearMessages();
+      expect(cm.getMemoryContent()).toBe('important lessons');
+      expect(cm.getMessages()).toHaveLength(0);
+    });
+  });
 });

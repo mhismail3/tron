@@ -14,6 +14,7 @@ import { migration as v002Backlog } from './versions/v002-backlog.js';
 import { migration as v003DeviceTokens } from './versions/v003-device-tokens.js';
 import { migration as v004Indexes } from './versions/v004-indexes.js';
 import { migration as v005TraceColumns } from './versions/v005-trace-columns.js';
+import { migration as v006MemoryVectors } from './versions/v006-memory-vectors.js';
 
 /**
  * All registered migrations in order
@@ -24,6 +25,7 @@ export const migrations: Migration[] = [
   v003DeviceTokens,
   v004Indexes,
   v005TraceColumns,
+  v006MemoryVectors,
 ];
 
 /**

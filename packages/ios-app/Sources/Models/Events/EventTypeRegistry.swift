@@ -75,6 +75,7 @@ enum PersistedEventType: String, CaseIterable {
 
     // Memory
     case memoryLedger = "memory.ledger"
+    case memoryLoaded = "memory.loaded"
 
     // Error events
     case errorAgent = "error.agent"
@@ -94,7 +95,7 @@ enum PersistedEventType: String, CaseIterable {
              .notificationInterrupted, .notificationSubagentResult,
              .configModelSwitch, .configReasoningLevel,
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
-             .memoryLedger,
+             .memoryLedger, .memoryLoaded,
              .errorAgent, .errorTool, .errorProvider,
              .streamThinkingComplete, .turnFailed:
             return true
@@ -186,6 +187,7 @@ enum PersistedEventType: String, CaseIterable {
         case .worktreeReleased: return "Worktree released"
         case .worktreeMerged: return "Worktree merged"
         case .memoryLedger: return "Memory updated"
+        case .memoryLoaded: return "Memories loaded"
         case .errorAgent: return "Agent error"
         case .errorTool: return "Tool error"
         case .errorProvider: return "Provider error"

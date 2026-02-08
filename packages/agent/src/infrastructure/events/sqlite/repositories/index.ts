@@ -17,3 +17,4 @@ export {
   type SpawnType,
 } from './session.repo.js';
 export { SearchRepository, type SearchOptions } from './search.repo.js';
+export { VectorRepository, type VectorSearchResult, type VectorSearchOptions } from './vector.repo.js';

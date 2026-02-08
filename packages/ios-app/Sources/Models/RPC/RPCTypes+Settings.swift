@@ -6,6 +6,7 @@ struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let compaction: CompactionSettings
+    let memory: MemorySettings
     let tools: ToolSettings
 
     struct CompactionSettings: Decodable {
@@ -15,6 +16,15 @@ struct ServerSettings: Decodable {
         let alertZoneThreshold: Double
         let defaultTurnFallback: Int
         let alertTurnFallback: Int
+    }
+
+    struct MemorySettings: Decodable {
+        let autoInject: AutoInjectSettings
+
+        struct AutoInjectSettings: Decodable {
+            let enabled: Bool
+            let count: Int
+        }
     }
 
     struct ToolSettings: Decodable {
@@ -48,6 +58,7 @@ struct ServerSettingsUpdate: Encodable {
 
     struct ContextUpdate: Encodable {
         var compactor: CompactorUpdate?
+        var memory: MemoryUpdate?
 
         struct CompactorUpdate: Encodable {
             var preserveRecentCount: Int?
@@ -56,6 +67,15 @@ struct ServerSettingsUpdate: Encodable {
             var alertZoneThreshold: Double?
             var defaultTurnFallback: Int?
             var alertTurnFallback: Int?
+        }
+
+        struct MemoryUpdate: Encodable {
+            var autoInject: AutoInjectUpdate?
+
+            struct AutoInjectUpdate: Encodable {
+                var enabled: Bool?
+                var count: Int?
+            }
         }
     }
 

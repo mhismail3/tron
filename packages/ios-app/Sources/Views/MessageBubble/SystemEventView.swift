@@ -75,6 +75,9 @@ struct SystemEventView: View {
                     onMemoryUpdatedTap?(title, entryType)
                 }
             )
+
+        case .memoriesLoaded(let count):
+            MemoriesLoadedNotificationView(count: count)
         }
     }
 }

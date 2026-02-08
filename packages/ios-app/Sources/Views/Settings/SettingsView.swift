@@ -37,6 +37,8 @@ struct SettingsView: View {
     @State private var forceAlwaysCompact: Bool = false
     @State private var triggerTokenThreshold: Double = 0.70
     @State private var defaultTurnFallback: Int = 8
+    @State private var memoryAutoInject: Bool = false
+    @State private var memoryAutoInjectCount: Int = 5
     @State private var webFetchTimeoutMs: Int = 30000
     @State private var webCacheTtlMs: Int = 900000
     @State private var webCacheMaxEntries: Int = 100
@@ -199,6 +201,9 @@ struct SettingsView: View {
 
                 // Compaction Section
                 compactionSection
+
+                // Memory Section
+                memorySection
 
                 // Web Section
                 webSection
@@ -468,6 +473,54 @@ struct SettingsView: View {
         .listSectionSpacing(16)
     }
 
+    // MARK: - Memory Section
+
+    @ViewBuilder
+    private var memorySection: some View {
+        Section {
+            Toggle(isOn: $memoryAutoInject) {
+                Label("Auto-inject memories", systemImage: "brain.head.profile")
+                    .font(TronTypography.subheadline)
+            }
+            .tint(.tronEmerald)
+            .onChange(of: memoryAutoInject) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(memory: .init(autoInject: .init(enabled: newValue))))
+                }
+            }
+
+            if memoryAutoInject {
+                HStack {
+                    Label("Entries to load", systemImage: "list.number")
+                        .font(TronTypography.subheadline)
+                        .foregroundStyle(.tronTextSecondary)
+                    Spacer()
+                    Text("\(memoryAutoInjectCount)")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .monospacedDigit()
+                        .frame(minWidth: 20)
+                    Stepper("", value: $memoryAutoInjectCount, in: 1...10)
+                        .labelsHidden()
+                        .fixedSize()
+                        .controlSize(.small)
+                }
+                .onChange(of: memoryAutoInjectCount) { _, newValue in
+                    updateServerSetting {
+                        ServerSettingsUpdate(context: .init(memory: .init(autoInject: .init(count: newValue))))
+                    }
+                }
+            }
+        } header: {
+            Text("Memory")
+                .font(TronTypography.caption)
+        } footer: {
+            Text("Load recent session memories at start of new sessions")
+                .font(TronTypography.caption2)
+        }
+        .listSectionSpacing(16)
+    }
+
     // MARK: - Web Section
 
     @ViewBuilder
@@ -599,6 +652,8 @@ struct SettingsView: View {
             forceAlwaysCompact = settings.compaction.forceAlways
             triggerTokenThreshold = settings.compaction.triggerTokenThreshold
             defaultTurnFallback = settings.compaction.defaultTurnFallback
+            memoryAutoInject = settings.memory.autoInject.enabled
+            memoryAutoInjectCount = settings.memory.autoInject.count
             webFetchTimeoutMs = settings.tools.web.fetch.timeoutMs
             webCacheTtlMs = settings.tools.web.cache.ttlMs
             webCacheMaxEntries = settings.tools.web.cache.maxEntries

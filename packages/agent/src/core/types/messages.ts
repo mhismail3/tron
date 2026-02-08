@@ -247,6 +247,8 @@ export interface Context {
   workingDirectory?: string;
   /** Rules content from AGENTS.md / CLAUDE.md hierarchy (cacheable, static) */
   rulesContent?: string;
+  /** Memory content (workspace lessons + cross-project recall) */
+  memoryContent?: string;
   /** Skill context to inject as system-level instructions (ephemeral, changes per-skill) */
   skillContext?: string;
   /** Sub-agent results context to inform agent of completed sub-agent tasks */

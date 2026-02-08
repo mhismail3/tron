@@ -63,6 +63,10 @@ export interface LedgerWriteResult {
   reason?: string;
   title?: string;
   entryType?: string;
+  /** The event ID of the persisted ledger entry (only set when written=true) */
+  eventId?: string;
+  /** The full payload (only set when written=true) */
+  payload?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -145,7 +149,7 @@ export class LedgerWriter {
         workingDirectory: opts.workingDirectory,
       };
 
-      await this.deps.appendEvent({
+      const event = await this.deps.appendEvent({
         type: 'memory.ledger',
         payload: payload as unknown as Record<string, unknown>,
       });
@@ -154,9 +158,16 @@ export class LedgerWriter {
         sessionId: this.deps.sessionId,
         title: payload.title,
         entryType: payload.entryType,
+        eventId: event.id,
       });
 
-      return { written: true, title: payload.title, entryType: payload.entryType };
+      return {
+        written: true,
+        title: payload.title,
+        entryType: payload.entryType,
+        eventId: event.id,
+        payload: payload as unknown as Record<string, unknown>,
+      };
     } catch (error) {
       const err = error as Error;
       logger.error('Ledger write failed', { error: err.message });

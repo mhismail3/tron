@@ -31,6 +31,7 @@ import type { WorkingDirectory } from '@platform/session/working-directory.js';
 import { createSessionContext } from './session-context.js';
 import { buildWorktreeInfo } from '../operations/worktree-ops.js';
 import { detectProviderFromModel } from '@llm/providers/factory.js';
+import { getSettings } from '@infrastructure/settings/loader.js';
 import type {
   ActiveSession,
   CreateSessionOptions,
@@ -82,6 +83,8 @@ export interface SessionManagerConfig {
   hasBrowserSession?: (sessionId: string) => boolean;
   /** Close browser session */
   closeBrowserSession?: (sessionId: string) => Promise<void>;
+  /** Load workspace memory content for injection into session context */
+  loadWorkspaceMemory?: (workspacePath: string, options?: { count?: number }) => Promise<{ content: string; count: number; tokens: number } | undefined>;
 }
 
 // =============================================================================
@@ -211,6 +214,35 @@ export class SessionManager {
       workingDirectory: workingDir.path,
       workingDir,
     });
+
+    // Load and inject workspace memory (conditional on settings)
+    const memSettings = getSettings().context?.memory?.autoInject;
+    if (memSettings?.enabled && this.config.loadWorkspaceMemory) {
+      try {
+        const result = await this.config.loadWorkspaceMemory(
+          options.workingDirectory,
+          { count: memSettings.count ?? 5 }
+        );
+        if (result?.content) {
+          agent.setMemoryContent(result.content);
+          await sessionContext.appendEvent('memory.loaded' as EventType, {
+            count: result.count,
+            tokens: result.tokens,
+            workspaceId: '',
+          });
+          logger.info('Memory auto-injected', {
+            sessionId,
+            count: result.count,
+            tokens: result.tokens,
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to load workspace memory', {
+          sessionId,
+          error: (error as Error).message,
+        });
+      }
+    }
 
     const activeSession: ActiveSession = {
       sessionId,
@@ -383,6 +415,33 @@ export class SessionManager {
     sessionContext.restoreFromEvents(events as TronSessionEvent[]);
     // Sync message event IDs for context audit (extract from unified messagesWithEventIds)
     sessionContext.setMessagesWithEventIds(sessionState.messagesWithEventIds);
+
+    // Load and inject workspace memory for resumed sessions (conditional on settings).
+    // Note: we do NOT emit memory.loaded here — the original event from createSession
+    // is already in the event history and will be rendered by iOS during reconstruction.
+    // We only re-inject the content into the agent's in-memory context.
+    const memSettings = getSettings().context?.memory?.autoInject;
+    if (memSettings?.enabled && this.config.loadWorkspaceMemory) {
+      try {
+        const result = await this.config.loadWorkspaceMemory(
+          session.workingDirectory,
+          { count: memSettings.count ?? 5 }
+        );
+        if (result?.content) {
+          agent.setMemoryContent(result.content);
+          logger.info('Memory auto-injected for resumed session', {
+            sessionId,
+            count: result.count,
+            tokens: result.tokens,
+          });
+        }
+      } catch (error) {
+        logger.warn('Failed to load workspace memory for resumed session', {
+          sessionId,
+          error: (error as Error).message,
+        });
+      }
+    }
 
     const activeSession: ActiveSession = {
       sessionId: session.id,

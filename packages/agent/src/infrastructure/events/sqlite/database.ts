@@ -10,6 +10,7 @@
 
 import { Database } from 'bun:sqlite';
 import { AsyncLocalStorage } from 'async_hooks';
+import { existsSync } from 'fs';
 import type { DatabaseConfig, DatabaseState } from './types.js';
 
 /**
@@ -18,6 +19,40 @@ import type { DatabaseConfig, DatabaseState } from './types.js';
 function isTestEnvironment(): boolean {
   return process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
 }
+
+// =============================================================================
+// Custom SQLite for macOS (extension loading support)
+// =============================================================================
+
+/**
+ * macOS ships SQLite with extension loading disabled. Use Homebrew's vanilla
+ * build to enable sqlite-vec. This must be called before any Database instances.
+ */
+let customSqliteConfigured = false;
+
+function configureCustomSqlite(): void {
+  if (customSqliteConfigured) return;
+  customSqliteConfigured = true;
+
+  if (process.platform !== 'darwin') return;
+  if (isTestEnvironment()) return;
+
+  const HOMEBREW_SQLITE_ARM = '/opt/homebrew/opt/sqlite3/lib/libsqlite3.dylib';
+  const HOMEBREW_SQLITE_INTEL = '/usr/local/opt/sqlite3/lib/libsqlite3.dylib';
+  const sqlitePath = existsSync(HOMEBREW_SQLITE_ARM) ? HOMEBREW_SQLITE_ARM
+    : existsSync(HOMEBREW_SQLITE_INTEL) ? HOMEBREW_SQLITE_INTEL
+    : null;
+
+  if (sqlitePath && typeof Database.setCustomSQLite === 'function') {
+    try {
+      Database.setCustomSQLite(sqlitePath);
+    } catch {
+      // Ignore — if it fails, extension loading won't work but everything else will
+    }
+  }
+}
+
+configureCustomSqlite();
 
 /**
  * Default database configuration values (production)

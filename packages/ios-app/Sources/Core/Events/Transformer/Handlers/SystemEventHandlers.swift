@@ -139,6 +139,22 @@ enum SystemEventHandlers {
         )
     }
 
+    /// Transform memory.loaded event into a ChatMessage.
+    ///
+    /// Memory loaded events indicate when memories were auto-injected at session start.
+    static func transformMemoryLoaded(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        guard let count = payload["count"]?.value as? Int, count > 0 else { return nil }
+
+        return ChatMessage(
+            role: .system,
+            content: .memoriesLoaded(count: count),
+            timestamp: timestamp
+        )
+    }
+
     /// Transform notification.subagent_result event into a ChatMessage.
     ///
     /// These events are persisted when a non-blocking subagent completes while

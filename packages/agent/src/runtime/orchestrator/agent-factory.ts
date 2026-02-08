@@ -176,7 +176,15 @@ export interface AgentFactoryConfig {
     getRecentToolCalls: (sessionId: string) => Promise<string[]>;
     /** Execute compaction for a session */
     executeCompaction: (sessionId: string) => Promise<{ success: boolean }>;
+    /** Embed a memory ledger entry for semantic search (optional) */
+    embedMemory?: (eventId: string, workspaceId: string, payload: Record<string, unknown>) => Promise<void>;
+    /** Get workspace ID for a session */
+    getWorkspaceId?: (sessionId: string) => string;
   };
+  /** Embedding service for semantic search in Remember tool (optional) */
+  embeddingService?: import('@infrastructure/embeddings/index.js').EmbeddingService;
+  /** Vector repository for semantic search in Remember tool (optional) */
+  vectorRepo?: import('@infrastructure/events/sqlite/repositories/vector.repo.js').VectorRepository;
   /** Browser service (optional) */
   browserService?: {
     execute: (sessionId: string, action: string, params: Record<string, unknown>) => Promise<{
@@ -269,7 +277,11 @@ export class AgentFactory {
         generateId: () => this.config.generateTodoId(),
         onTodosUpdated: (todos) => this.config.onTodosUpdated(sessionId, todos),
       }),
-      new RememberTool({ dbPath: this.config.dbPath }),
+      new RememberTool({
+        dbPath: this.config.dbPath,
+        embeddingService: this.config.embeddingService,
+        vectorRepo: this.config.vectorRepo,
+      }),
     ];
 
     // Add Adapt tool if TRON_REPO_ROOT is set and this is not a subagent
@@ -536,13 +548,16 @@ export class AgentFactory {
         workspaceId: '', // Not needed for ledger writing
       });
 
+      const workspaceId = memCfg.getWorkspaceId?.(sessionId) ?? '';
       const memoryManager = new MemoryManager({
         writeLedgerEntry: (opts) => ledgerWriter.writeLedgerEntry(opts),
         shouldCompact: (input) => compactionTrigger.shouldCompact(input),
         resetCompactionTrigger: () => compactionTrigger.reset(),
         executeCompaction: () => memCfg.executeCompaction(sessionId),
         emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
+        embedMemory: memCfg.embedMemory,
         sessionId,
+        workspaceId,
       });
 
       // Track cycle state for the hook

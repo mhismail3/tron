@@ -35,6 +35,8 @@ enum SystemEvent: Equatable {
     case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
     /// Memory ledger entry was written after a response cycle
     case memoryUpdated(title: String, entryType: String)
+    /// Memories were auto-injected at session start
+    case memoriesLoaded(count: Int)
 
     /// Human-readable description for the event
     var textContent: String {
@@ -74,6 +76,8 @@ enum SystemEvent: Equatable {
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
         case .memoryUpdated(let title, _):
             return "Memory updated: \(title)"
+        case .memoriesLoaded(let count):
+            return "Loaded \(count) \(count == 1 ? "memory" : "memories")"
         }
     }
 

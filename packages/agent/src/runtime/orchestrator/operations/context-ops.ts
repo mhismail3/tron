@@ -137,7 +137,21 @@ export class ContextOps {
         addedVia: s.addedVia,
         eventId: s.eventId,
       })),
+    } as DetailedContextSnapshot & {
+      addedSkills: typeof addedSkills;
+      memory?: { count: number; tokens: number };
     };
+
+    // Include memory info if memory was auto-injected
+    const memoryContent = active.agent.getContextManager().getMemoryContent();
+    if (memoryContent) {
+      // Count entries by counting ### headings in the formatted content
+      const entryCount = (memoryContent.match(/^### /gm) || []).length;
+      result.memory = {
+        count: Math.max(entryCount, 1),
+        tokens: Math.ceil(memoryContent.length / 4),
+      };
+    }
 
     return result;
   }

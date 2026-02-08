@@ -81,6 +81,10 @@ enum MessageContent: Equatable {
     static func memoryUpdated(title: String, entryType: String) -> MessageContent {
         .systemEvent(.memoryUpdated(title: title, entryType: entryType))
     }
+    /// In-chat notification for memories auto-injected at session start
+    static func memoriesLoaded(count: Int) -> MessageContent {
+        .systemEvent(.memoriesLoaded(count: count))
+    }
 
     var textContent: String {
         switch self {

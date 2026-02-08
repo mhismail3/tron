@@ -69,7 +69,11 @@ function createMockSettings(overrides: Record<string, any> = {}) {
         alertTurnFallback: 5,
         ...overrides.compactor,
       },
-      memory: { maxEntries: 1000 },
+      memory: {
+        maxEntries: 1000,
+        autoInject: { enabled: false, count: 5 },
+        ...overrides.memory,
+      },
       ...overrides.context,
     },
     tools: {
@@ -124,6 +128,9 @@ describe('Settings Handlers', () => {
           defaultTurnFallback: 8,
           alertTurnFallback: 5,
         },
+        memory: {
+          autoInject: { enabled: false, count: 5 },
+        },
         tools: {
           web: {
             fetch: { timeoutMs: 30000 },
@@ -167,6 +174,9 @@ describe('Settings Handlers', () => {
           defaultTurnFallback: 10,
           alertTurnFallback: 4,
         },
+        memory: {
+          autoInject: { enabled: false, count: 5 },
+        },
         tools: {
           web: {
             fetch: { timeoutMs: 30000 },
@@ -188,6 +198,19 @@ describe('Settings Handlers', () => {
       const result = response.result as any;
 
       expect(result.compaction.forceAlways).toBe(false);
+    });
+
+    it('should return memory autoInject settings', async () => {
+      mockGetSettings.mockReturnValue(createMockSettings({
+        memory: { autoInject: { enabled: true, count: 7 } },
+      }));
+
+      const request: RpcRequest = { id: '3b', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.memory.autoInject.enabled).toBe(true);
+      expect(result.memory.autoInject.count).toBe(7);
     });
 
     it('should return web tool settings', async () => {
@@ -337,6 +360,50 @@ describe('Settings Handlers', () => {
 
       const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
       expect(savedArg.context.compactor.triggerTokenThreshold).toBe(0.85);
+    });
+
+    it('should update memory autoInject enabled', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        context: { memory: { autoInject: { enabled: false, count: 5 } } },
+      });
+
+      const request: RpcRequest = {
+        id: '10',
+        method: 'settings.update',
+        params: {
+          settings: {
+            context: { memory: { autoInject: { enabled: true } } },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.context.memory.autoInject.enabled).toBe(true);
+      expect(savedArg.context.memory.autoInject.count).toBe(5);
+    });
+
+    it('should update memory autoInject count', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        context: { memory: { autoInject: { enabled: true, count: 5 } } },
+      });
+
+      const request: RpcRequest = {
+        id: '11',
+        method: 'settings.update',
+        params: {
+          settings: {
+            context: { memory: { autoInject: { count: 3 } } },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.context.memory.autoInject.count).toBe(3);
+      expect(savedArg.context.memory.autoInject.enabled).toBe(true);
     });
   });
 

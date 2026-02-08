@@ -74,6 +74,14 @@ class StatementWrapper {
 export class Database {
   private db: BetterSqliteDatabase;
 
+  /**
+   * No-op in better-sqlite3 — extension loading is built-in and doesn't need
+   * a custom SQLite path. This matches bun:sqlite's static method signature.
+   */
+  static setCustomSQLite(_path: string): void {
+    // No-op for test environment
+  }
+
   constructor(filename: string, options?: { readonly?: boolean }) {
     this.db = new BetterSqlite3(filename, options);
   }
@@ -122,6 +130,13 @@ export class Database {
   transaction<T>(fn: () => T): () => T {
     const wrapped = this.db.transaction(fn);
     return () => wrapped();
+  }
+
+  /**
+   * Load a native SQLite extension. Used by sqlite-vec for vector search.
+   */
+  loadExtension(path: string): void {
+    this.db.loadExtension(path);
   }
 
   /**

@@ -264,6 +264,14 @@ struct DetailedContextSnapshotResult: Codable {
     let addedSkills: [AddedSkillInfo]
     /// Rules files loaded for this session (immutable, cannot be removed)
     let rules: LoadedRules?
+    /// Memory loaded for this session (if auto-inject enabled)
+    let memory: LoadedMemory?
+}
+
+/// Memory auto-injected at session start
+struct LoadedMemory: Codable {
+    let count: Int
+    let tokens: Int
 }
 
 // MARK: - Worktree Payloads

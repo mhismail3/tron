@@ -481,6 +481,7 @@ export class AnthropicProvider {
       isOAuth: this.isOAuth,
       hasSystemPrompt: !!context.systemPrompt,
       hasRulesContent: !!context.rulesContent,
+      hasMemoryContent: !!context.memoryContent,
     });
 
     if (this.isOAuth) {
@@ -499,6 +500,13 @@ export class AnthropicProvider {
         systemBlocks.push({
           type: 'text',
           text: `# Project Rules\n\n${context.rulesContent}`,
+        });
+      }
+
+      if (context.memoryContent) {
+        systemBlocks.push({
+          type: 'text',
+          text: context.memoryContent,
         });
       }
 
@@ -528,6 +536,7 @@ export class AnthropicProvider {
       const parts: string[] = [];
       if (context.systemPrompt) parts.push(context.systemPrompt);
       if (context.rulesContent) parts.push(`# Project Rules\n\n${context.rulesContent}`);
+      if (context.memoryContent) parts.push(context.memoryContent);
       if (context.skillContext) parts.push(context.skillContext);
       if (context.subagentResultsContext) parts.push(context.subagentResultsContext);
       if (context.todoContext) parts.push(`<current-todos>\n${context.todoContext}\n</current-todos>`);

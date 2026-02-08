@@ -250,6 +250,11 @@ struct ContextAuditView: View {
                                     )
                                 }
 
+                                // Memory section (auto-injected memories, purple)
+                                if let memory = snapshot.memory, memory.count > 0 {
+                                    MemorySection(memory: memory)
+                                }
+
                                 // Skill References (standalone container with badge and token count)
                                 if let skills = skillStore?.skills, !skills.isEmpty {
                                     SkillReferencesSection(skills: skills)

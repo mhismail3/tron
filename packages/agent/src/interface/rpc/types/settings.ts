@@ -20,6 +20,9 @@ export interface SettingsGetResult {
     defaultTurnFallback: number;
     alertTurnFallback: number;
   };
+  memory: {
+    autoInject: { enabled: boolean; count: number };
+  };
   tools: {
     web: {
       fetch: { timeoutMs: number };
@@ -40,6 +43,9 @@ export interface SettingsUpdateParams {
         alertZoneThreshold?: number;
         defaultTurnFallback?: number;
         alertTurnFallback?: number;
+      };
+      memory?: {
+        autoInject?: { enabled?: boolean; count?: number };
       };
     };
     tools?: {

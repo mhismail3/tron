@@ -374,6 +374,10 @@ export class TronAgent {
     this.contextManager.setRulesContent(rulesContent);
   }
 
+  setMemoryContent(memoryContent: string | undefined): void {
+    this.contextManager.setMemoryContent(memoryContent);
+  }
+
   // ===========================================================================
   // State Access
   // ===========================================================================

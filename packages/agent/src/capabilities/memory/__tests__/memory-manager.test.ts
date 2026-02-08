@@ -171,4 +171,111 @@ describe('MemoryManager', () => {
       ]);
     });
   });
+
+  describe('embedMemory', () => {
+    it('should call embedMemory after successful ledger write', async () => {
+      const embedMemory = vi.fn().mockResolvedValue(undefined);
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          eventId: 'evt-ledger-1',
+          payload: { title: 'Test', lessons: ['lesson1'] },
+        }),
+        embedMemory,
+        workspaceId: 'ws-1',
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(embedMemory).toHaveBeenCalledWith(
+        'evt-ledger-1',
+        'ws-1',
+        { title: 'Test', lessons: ['lesson1'] }
+      );
+    });
+
+    it('should not call embedMemory when ledger write is skipped', async () => {
+      const embedMemory = vi.fn().mockResolvedValue(undefined);
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({ written: false, reason: 'skipped' }),
+        embedMemory,
+        workspaceId: 'ws-1',
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(embedMemory).not.toHaveBeenCalled();
+    });
+
+    it('should not call embedMemory when eventId is missing from result', async () => {
+      const embedMemory = vi.fn().mockResolvedValue(undefined);
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({ written: true }),
+        embedMemory,
+        workspaceId: 'ws-1',
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(embedMemory).not.toHaveBeenCalled();
+    });
+
+    it('should not block ledger completion if embedMemory fails', async () => {
+      const embedMemory = vi.fn().mockRejectedValue(new Error('Embedding failed'));
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          eventId: 'evt-ledger-1',
+          payload: { title: 'Test' },
+        }),
+        embedMemory,
+        workspaceId: 'ws-1',
+      });
+
+      const manager = new MemoryManager(deps);
+      // Should not throw despite embedding failure
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(embedMemory).toHaveBeenCalled();
+      expect(deps.emitMemoryUpdated).toHaveBeenCalled();
+    });
+
+    it('should use empty string for workspaceId when not provided', async () => {
+      const embedMemory = vi.fn().mockResolvedValue(undefined);
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          eventId: 'evt-ledger-1',
+          payload: { title: 'Test' },
+        }),
+        embedMemory,
+        // No workspaceId
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(embedMemory).toHaveBeenCalledWith('evt-ledger-1', '', { title: 'Test' });
+    });
+
+    it('should work when embedMemory callback is not provided', async () => {
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          eventId: 'evt-ledger-1',
+          payload: { title: 'Test' },
+        }),
+        // No embedMemory callback
+      });
+
+      const manager = new MemoryManager(deps);
+      // Should complete without error
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.emitMemoryUpdated).toHaveBeenCalled();
+    });
+  });
 });

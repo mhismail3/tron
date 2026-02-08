@@ -6,7 +6,8 @@
  * debug session behavior.
  *
  * Actions:
- * - memory: Recall past work from memory ledger entries
+ * - recall: Semantic memory search (default, uses vector embeddings)
+ * - search: Keyword search via FTS5 (fallback for exact terms)
  * - schema: List tables and columns
  * - sessions: List recent sessions
  * - session: Get session details
@@ -21,6 +22,8 @@
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import type { TronTool, TronToolResult } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import type { EmbeddingService } from '@infrastructure/embeddings/index.js';
+import type { VectorRepository } from '@infrastructure/events/sqlite/repositories/vector.repo.js';
 
 const logger = createLogger('tool:remember');
 
@@ -33,6 +36,10 @@ const REMEMBER_MAX_LIMIT = 500;
 export interface RememberToolConfig {
   /** Path to the SQLite database */
   dbPath: string;
+  /** Optional embedding service for semantic recall */
+  embeddingService?: EmbeddingService;
+  /** Optional vector repository for semantic recall */
+  vectorRepo?: VectorRepository;
 }
 
 export interface RememberParams {
@@ -57,7 +64,8 @@ export class RememberTool implements TronTool<RememberParams> {
   readonly description = `Your memory and self-analysis tool. Query your internal database to recall past work, review session history, and retrieve stored content.
 
 Available actions:
-- memory: Search past work from structured memory ledger entries. ALWAYS provide a query to search by keyword (matches title, actions, lessons, files, decisions). Only omit query when you need a broad overview of recent work.
+- recall (default): Semantic memory search — "find memories about X". Uses vector similarity to find the most relevant past work even when exact keywords don't match. ALWAYS provide a query describing what you want to remember.
+- search: Keyword search via exact term matching in memory ledger entries. Use when you know the exact term to search for.
 - sessions: List recent sessions (title, tokens, cost)
 - session: Get details for a specific session
 - events: Get raw events (filter by session_id, type, turn)
@@ -68,7 +76,7 @@ Available actions:
 - schema: List database tables and columns
 - read_blob: Read stored content from blob storage
 
-Search strategy: Start narrow (query + small limit), then broaden if needed. Avoid retrieving all entries.
+Search strategy: Use "recall" for finding relevant past work (semantic). Use "search" for exact keyword matching. Start narrow (query + small limit), then broaden if needed.
 Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
   readonly parameters = {
@@ -76,8 +84,8 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
     properties: {
       action: {
         type: 'string' as const,
-        enum: ['memory', 'sessions', 'session', 'events', 'messages', 'tools', 'logs', 'stats', 'schema', 'read_blob'],
-        description: 'The action to perform',
+        enum: ['recall', 'search', 'memory', 'sessions', 'session', 'events', 'messages', 'tools', 'logs', 'stats', 'schema', 'read_blob'],
+        description: 'The action to perform. Use "recall" for semantic search (recommended), "search" for keyword matching.',
       },
       session_id: {
         type: 'string' as const,
@@ -89,7 +97,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
       },
       query: {
         type: 'string' as const,
-        description: 'Search keyword for memory action — filters ledger entries by title, actions, lessons, files, and decisions. Always provide this to avoid retrieving all entries.',
+        description: 'Search query — for recall: describe what you want to remember; for search: exact keyword to match.',
       },
       type: {
         type: 'string' as const,
@@ -121,9 +129,13 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
   private dbPath: string;
   private _db: Database | null = null;
+  private embeddingService?: EmbeddingService;
+  private vectorRepo?: VectorRepository;
 
   constructor(config: RememberToolConfig) {
     this.dbPath = config.dbPath;
+    this.embeddingService = config.embeddingService;
+    this.vectorRepo = config.vectorRepo;
   }
 
   private get db(): Database {
@@ -146,8 +158,13 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
     try {
       switch (params.action) {
+        case 'recall':
+          return this.recallMemory(params.query, limit);
+
+        // 'memory' is kept as an alias for backward compatibility
         case 'memory':
-          return this.getMemoryLedger(params.session_id, params.query, limit, offset);
+        case 'search':
+          return this.searchMemory(params.session_id, params.query, limit, offset);
 
         case 'schema':
           return this.getSchema();
@@ -201,10 +218,114 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
   }
 
   // ===========================================================================
-  // Memory — the primary recall action
+  // Recall — semantic memory search (primary)
   // ===========================================================================
 
-  private getMemoryLedger(
+  private async recallMemory(query: string | undefined, limit: number): Promise<TronToolResult> {
+    if (!query) {
+      return { content: 'query is required for recall action — describe what you want to remember', isError: true };
+    }
+
+    // If embedding service and vector repo are available, use semantic search
+    if (this.embeddingService?.isReady() && this.vectorRepo) {
+      try {
+        const queryEmbedding = await this.embeddingService.embedSingle(query);
+        const results = this.vectorRepo.search(queryEmbedding, { limit });
+
+        if (results.length === 0) {
+          // Fall back to FTS5 search if no vector results
+          return this.searchMemory(undefined, query, limit, 0);
+        }
+
+        // Look up event payloads for the results
+        const eventIds = results.map(r => r.eventId);
+        const placeholders = eventIds.map(() => '?').join(',');
+        const rows = this.db.prepare(`
+          SELECT id, session_id, timestamp, payload
+          FROM events
+          WHERE id IN (${placeholders})
+        `).all(...eventIds) as Array<{
+          id: string;
+          session_id: string;
+          timestamp: string;
+          payload: string;
+        }>;
+
+        // Order by vector search ranking
+        const rowMap = new Map(rows.map(r => [r.id, r]));
+        const orderedRows = results
+          .map(r => {
+            const row = rowMap.get(r.eventId);
+            return row ? { ...row, distance: r.distance } : null;
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null);
+
+        return this.formatRecallRows(orderedRows, query);
+      } catch (error) {
+        logger.warn('Semantic recall failed, falling back to FTS5', { error: (error as Error).message });
+        // Fall back to FTS5 keyword search
+        return this.searchMemory(undefined, query, limit, 0);
+      }
+    }
+
+    // No embedding service — fall back to FTS5 search
+    return this.searchMemory(undefined, query, limit, 0);
+  }
+
+  /**
+   * Format semantic recall results with relevance scores
+   */
+  private formatRecallRows(
+    rows: Array<{ id: string; session_id: string; timestamp: string; payload: string; distance: number }>,
+    query: string
+  ): TronToolResult {
+    if (rows.length === 0) {
+      return { content: `No memories found matching "${query}"`, isError: false };
+    }
+
+    const lines = [`Memory Recall (query: "${query}", ${rows.length} results):`, ''];
+
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload);
+        const relevance = Math.round((1 - row.distance) * 100);
+        lines.push(`[${row.timestamp}] ${payload.title ?? 'Untitled'} (${relevance}% relevant)`);
+        lines.push(`  Session: ${row.session_id}`);
+        lines.push(`  Type: ${payload.entryType ?? '?'} | Status: ${payload.status ?? '?'}`);
+        if (payload.input) lines.push(`  Request: ${payload.input}`);
+        if (Array.isArray(payload.actions) && payload.actions.length > 0) {
+          lines.push(`  Actions: ${payload.actions.join('; ')}`);
+        }
+        if (Array.isArray(payload.files) && payload.files.length > 0) {
+          const fileStrs = payload.files.map((f: Record<string, unknown>) =>
+            `${f.op ?? '?'}:${f.path ?? '?'}`
+          );
+          lines.push(`  Files: ${fileStrs.join(', ')}`);
+        }
+        if (Array.isArray(payload.decisions) && payload.decisions.length > 0) {
+          for (const d of payload.decisions) {
+            if (d && typeof d === 'object') {
+              lines.push(`  Decision: ${(d as Record<string, unknown>).choice ?? '?'} — ${(d as Record<string, unknown>).reason ?? ''}`);
+            }
+          }
+        }
+        if (Array.isArray(payload.lessons) && payload.lessons.length > 0) {
+          lines.push(`  Lessons: ${payload.lessons.join('; ')}`);
+        }
+      } catch {
+        lines.push(`[${row.timestamp}] (could not parse payload)`);
+      }
+      lines.push('');
+    }
+
+    return { content: lines.join('\n'), isError: false };
+  }
+
+  // ===========================================================================
+  // Search — keyword-based memory search (FTS5)
+  // ===========================================================================
+
+  private searchMemory(
     sessionId: string | undefined,
     searchQuery: string | undefined,
     limit: number,
@@ -250,10 +371,13 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
     limit: number,
     offset: number
   ): TronToolResult {
-    // Build FTS5 query — quote search terms to handle special characters (hyphens, dots, etc.)
-    // Use column filter to search in content only (not id/session_id/type/tool_name)
-    const quoted = searchQuery.replace(/"/g, '""');
-    const ftsQuery = `content:"${quoted}"`;
+    // Build FTS5 query — split into individual terms joined by OR for broad matching.
+    // Each term is quoted to handle special characters (hyphens, dots, etc.).
+    // BM25 ranks results with more matching terms higher.
+    const terms = searchQuery.split(/\s+/).filter(t => t.length > 0);
+    const ftsQuery = terms.length === 1
+      ? `content:"${terms[0]!.replace(/"/g, '""')}"`
+      : `content:(${terms.map(t => `"${t.replace(/"/g, '""')}"`).join(' OR ')})`;
 
     let sql = `
       SELECT
@@ -314,7 +438,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
     }
 
     const lines = searchQuery
-      ? [`Memory Ledger (search: "${searchQuery}", ${rows.length} results):`, '']
+      ? [`Memory Search (keyword: "${searchQuery}", ${rows.length} results):`, '']
       : ['Memory Ledger:', ''];
 
     for (const row of rows) {

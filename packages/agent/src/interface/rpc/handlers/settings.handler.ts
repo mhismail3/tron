@@ -73,6 +73,12 @@ export function createSettingsHandlers(): MethodRegistration[] {
         defaultTurnFallback: settings.context.compactor.defaultTurnFallback ?? 8,
         alertTurnFallback: settings.context.compactor.alertTurnFallback ?? 5,
       },
+      memory: {
+        autoInject: {
+          enabled: settings.context.memory.autoInject?.enabled ?? false,
+          count: settings.context.memory.autoInject?.count ?? 5,
+        },
+      },
       tools: {
         web: {
           fetch: { timeoutMs: settings.tools.web.fetch.timeoutMs },

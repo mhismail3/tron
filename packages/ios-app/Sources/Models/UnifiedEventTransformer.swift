@@ -159,6 +159,8 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformContextCleared(payload, timestamp: ts)
         case .memoryLedger:
             return SystemEventHandlers.transformMemoryLedger(payload, timestamp: ts)
+        case .memoryLoaded:
+            return SystemEventHandlers.transformMemoryLoaded(payload, timestamp: ts)
         case .compactBoundary:
             return SystemEventHandlers.transformCompactBoundary(payload, timestamp: ts)
         case .skillRemoved:

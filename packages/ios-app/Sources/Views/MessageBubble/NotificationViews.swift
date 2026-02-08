@@ -526,6 +526,33 @@ struct MemoryUpdatedNotificationView: View {
     }
 }
 
+// MARK: - Memories Loaded Notification View (Lavender pill-style in-chat notification)
+
+struct MemoriesLoadedNotificationView: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "brain.head.profile")
+                .font(TronTypography.codeSM)
+                .foregroundStyle(.purple)
+
+            Text("Loaded \(count) \(count == 1 ? "memory" : "memories")")
+                .font(TronTypography.filePath)
+                .foregroundStyle(.purple.opacity(0.9))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.purple.opacity(0.1))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.purple.opacity(0.3), lineWidth: 0.5)
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
 // MARK: - Interactive Capsule Glass Modifier
 
 /// Applies interactive liquid glass on iOS 26+, falls back to tinted background + stroke on older iOS

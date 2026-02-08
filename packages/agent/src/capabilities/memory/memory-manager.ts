@@ -33,7 +33,10 @@ export interface MemoryManagerDeps {
   resetCompactionTrigger: () => void;
   executeCompaction: () => Promise<{ success: boolean }>;
   emitMemoryUpdated: (data: { sessionId: string; title?: string; entryType?: string }) => void;
+  /** Fire-and-forget embedding callback. Called after successful ledger write. */
+  embedMemory?: (eventId: string, workspaceId: string, payload: Record<string, unknown>) => Promise<void>;
   sessionId: string;
+  workspaceId?: string;
 }
 
 // =============================================================================
@@ -88,6 +91,17 @@ export class MemoryManager {
           title: ledgerResult.title,
           entryType: ledgerResult.entryType,
         });
+
+        // Fire-and-forget embedding for semantic search
+        if (this.deps.embedMemory && ledgerResult.eventId && ledgerResult.payload) {
+          this.deps.embedMemory(
+            ledgerResult.eventId,
+            this.deps.workspaceId ?? '',
+            ledgerResult.payload
+          ).catch(err => {
+            logger.warn('Failed to embed memory', { error: (err as Error).message });
+          });
+        }
       }
     } catch (error) {
       logger.error('Ledger write failed', {

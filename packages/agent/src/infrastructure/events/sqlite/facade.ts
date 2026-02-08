@@ -9,6 +9,7 @@
  * individual repositories directly when possible.
  */
 
+import { createRequire } from 'module';
 import type { Database } from 'bun:sqlite';
 import { DatabaseConnection, getDefaultConfig } from './database.js';
 import { runMigrations, runIncrementalMigrations } from './migrations/index.js';
@@ -19,6 +20,7 @@ import {
   EventRepository,
   SessionRepository,
   SearchRepository,
+  VectorRepository,
   type SessionRow,
   type BranchRow,
   type CreateSessionOptions,
@@ -26,6 +28,9 @@ import {
   type IncrementCountersOptions,
   type CreateBranchOptions,
 } from './repositories/index.js';
+import { createLogger } from '@infrastructure/logging/index.js';
+
+const logger = createLogger('sqlite-event-store');
 import {
   EventId,
   SessionId,
@@ -91,6 +96,8 @@ export class SQLiteEventStore {
   private eventRepo!: EventRepository;
   private sessionRepo!: SessionRepository;
   private searchRepo!: SearchRepository;
+  private vectorRepo: VectorRepository | null = null;
+  private sqliteVecLoaded = false;
 
   constructor(dbPath: string, config?: Partial<SQLiteBackendConfig>) {
     const defaults = getDefaultConfig();
@@ -121,6 +128,9 @@ export class SQLiteEventStore {
     this.eventRepo = new EventRepository(this.connection);
     this.sessionRepo = new SessionRepository(this.connection);
     this.searchRepo = new SearchRepository(this.connection);
+
+    // Load sqlite-vec extension for vector search
+    this.loadSqliteVec(db);
 
     this.initialized = true;
   }
@@ -157,6 +167,48 @@ export class SQLiteEventStore {
    */
   getDb(): Database {
     return this.connection.getDatabase();
+  }
+
+  // ===========================================================================
+  // sqlite-vec Extension
+  // ===========================================================================
+
+  private loadSqliteVec(db: Database): void {
+    try {
+      // sqlite-vec provides getLoadablePath() which returns the native extension path.
+      // We call db.loadExtension() directly to avoid the load() wrapper's
+      // compatibility issues across different SQLite bindings.
+      //
+      const require = createRequire(import.meta.url);
+      const { getLoadablePath } = require('sqlite-vec');
+      const extensionPath = getLoadablePath();
+      db.loadExtension(extensionPath);
+      this.sqliteVecLoaded = true;
+
+      // Create vector repo and ensure table exists
+      this.vectorRepo = new VectorRepository(this.connection);
+      this.vectorRepo.ensureTable();
+
+      logger.info('sqlite-vec extension loaded');
+    } catch (err) {
+      logger.debug('sqlite-vec extension not available, semantic search disabled', {
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Get the VectorRepository (null if sqlite-vec not loaded)
+   */
+  getVectorRepository(): VectorRepository | null {
+    return this.vectorRepo;
+  }
+
+  /**
+   * Check if sqlite-vec is available
+   */
+  hasVectorSupport(): boolean {
+    return this.sqliteVecLoaded;
   }
 
   // ===========================================================================
@@ -275,6 +327,15 @@ export class SQLiteEventStore {
     options?: { limit?: number }
   ): Promise<SessionEvent[]> {
     const events = this.eventRepo.getByTypes(sessionId, types, options);
+    return events.map(({ depth, ...event }) => event as SessionEvent);
+  }
+
+  async getEventsByWorkspaceAndTypes(
+    workspaceId: WorkspaceId,
+    types: EventType[],
+    options?: { limit?: number }
+  ): Promise<SessionEvent[]> {
+    const events = this.eventRepo.getByWorkspaceAndTypes(workspaceId, types, options);
     return events.map(({ depth, ...event }) => event as SessionEvent);
   }
 
@@ -433,6 +494,7 @@ export class SQLiteEventStore {
       event: this.eventRepo,
       session: this.sessionRepo,
       search: this.searchRepo,
+      vector: this.vectorRepo,
     };
   }
 

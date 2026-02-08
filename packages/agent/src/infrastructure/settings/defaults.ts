@@ -5,6 +5,8 @@
  * These serve as the fallback when user settings are not specified.
  */
 
+import { homedir } from 'os';
+import { join } from 'path';
 import type { TronSettings } from './types.js';
 import { DEFAULT_API_MODEL, DEFAULT_SERVER_MODEL } from '@llm/providers/model-ids.js';
 
@@ -185,6 +187,20 @@ export const DEFAULT_SETTINGS: TronSettings = {
     },
     memory: {
       maxEntries: 1000,
+      embedding: {
+        enabled: true,
+        model: 'onnx-community/Qwen3-Embedding-0.6B-ONNX',
+        dtype: 'q4',
+        dimensions: 512,
+        cacheDir: join(homedir(), '.tron', 'mods', 'models'),
+        maxWorkspaceLessonsTokens: 2000,
+        maxCrossProjectTokens: 1000,
+        crossProjectTopK: 5,
+      },
+      autoInject: {
+        enabled: false,
+        count: 5,
+      },
     },
   },
 

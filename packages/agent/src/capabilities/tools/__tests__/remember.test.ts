@@ -112,6 +112,8 @@ describe('RememberTool', () => {
       const params = tool.parameters;
       expect(params.properties).toHaveProperty('action');
       expect(params.required).toContain('action');
+      expect(params.properties.action.enum).toContain('recall');
+      expect(params.properties.action.enum).toContain('search');
       expect(params.properties.action.enum).toContain('memory');
       expect(params.properties.action.enum).toContain('read_blob');
     });
@@ -874,6 +876,34 @@ describe('RememberTool', () => {
       expect(result.content).not.toContain('Auth work in session 2');
     });
 
+    it('should match multi-word queries using OR (not phrase)', async () => {
+      ftsDb.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
+
+      insertMemoryWithFts('evt_1', 'sess_1', '2024-01-15T10:30:00Z', {
+        title: 'OAuth implementation',
+        entryType: 'feature',
+        status: 'completed',
+        input: 'Add Google OAuth login',
+        actions: ['Created auth module'],
+        lessons: ['Use passport.js for OAuth providers'],
+      });
+
+      insertMemoryWithFts('evt_2', 'sess_1', '2024-01-15T10:31:00Z', {
+        title: 'Database setup work',
+        entryType: 'feature',
+        status: 'completed',
+        input: 'Set up database infrastructure',
+        actions: ['Created migration runner'],
+      });
+
+      // Multi-word query should find entries matching ANY term (OR), not requiring exact phrase
+      const result = await ftsTool.execute({ action: 'search', query: 'OAuth authentication setup implementation' });
+
+      expect(result.isError).toBe(false);
+      // Should find the OAuth entry (matches "OAuth") even though the full phrase doesn't appear
+      expect(result.content).toContain('OAuth implementation');
+    });
+
     it('should return all entries when no query provided (even with FTS table)', async () => {
       ftsDb.exec(`INSERT INTO sessions (id, created_at) VALUES ('sess_1', '2024-01-15T10:00:00Z')`);
 
@@ -920,6 +950,95 @@ describe('RememberTool', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content).toContain('Error');
+    });
+  });
+
+  // ===========================================================================
+  // recall action (semantic search)
+  // ===========================================================================
+
+  describe('recall action', () => {
+    it('should require query parameter', async () => {
+      const result = await tool.execute({ action: 'recall' });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toContain('query is required');
+    });
+
+    it('should fall back to FTS5 when no embedding service', async () => {
+      // Tool was created without embedding service — recall should fall back to FTS search
+      const result = await tool.execute({ action: 'recall', query: 'OAuth' });
+
+      // Since there's no FTS table in our basic test DB, this returns the table scan results
+      expect(result.isError).toBe(false);
+    });
+
+    it('should use semantic search when embedding service is available', async () => {
+      const mockEmbeddingService = {
+        isReady: () => true,
+        embedSingle: async () => new Float32Array([1, 0, 0, 0]),
+        embed: async () => [new Float32Array([1, 0, 0, 0])],
+        dimensions: 4,
+        isModelCached: () => true,
+        initialize: async () => {},
+      };
+
+      const mockVectorRepo = {
+        search: () => [
+          { eventId: 'evt_1', workspaceId: 'ws_1', distance: 0.1 },
+        ],
+        store: () => {},
+        delete: () => {},
+        hasTable: () => true,
+        count: () => 1,
+        ensureTable: () => {},
+      };
+
+      // Insert test data (session first for FK constraint)
+      db.exec(`
+        INSERT INTO sessions (id, created_at, last_activity_at)
+        VALUES ('sess_1', '2024-01-15T10:00:00Z', '2024-01-15T10:30:00Z')
+      `);
+      db.exec(`
+        INSERT INTO events (id, session_id, sequence, type, timestamp, payload)
+        VALUES ('evt_1', 'sess_1', 1, 'memory.ledger', '2024-01-15T10:30:00Z',
+          '${JSON.stringify({
+            title: 'OAuth implementation',
+            entryType: 'feature',
+            status: 'completed',
+            input: 'Add OAuth support',
+            actions: ['Created OAuth flow'],
+            lessons: ['Use PKCE for CLI'],
+            decisions: [],
+            files: [],
+            tags: ['auth'],
+          }).replace(/'/g, "''")}')
+      `);
+
+      const recallTool = new RememberTool({
+        dbPath,
+        embeddingService: mockEmbeddingService as any,
+        vectorRepo: mockVectorRepo as any,
+      });
+
+      const result = await recallTool.execute({ action: 'recall', query: 'authentication' });
+
+      expect(result.isError).toBe(false);
+      expect(result.content).toContain('OAuth implementation');
+      expect(result.content).toContain('90%'); // 1 - 0.1 = 0.9 = 90% relevant
+      recallTool.close();
+    });
+  });
+
+  // ===========================================================================
+  // search action (renamed from memory)
+  // ===========================================================================
+
+  describe('search action', () => {
+    it('should work as alias for memory action', async () => {
+      const result = await tool.execute({ action: 'search' });
+
+      expect(result.isError).toBe(false);
     });
   });
 });

@@ -553,6 +553,14 @@ export class EventStore {
     return this.backend.getWorkspaceByPath(path);
   }
 
+  async getEventsByWorkspaceAndTypes(
+    workspaceId: WorkspaceId,
+    types: EventType[],
+    options?: { limit?: number }
+  ): Promise<SessionEvent[]> {
+    return this.backend.getEventsByWorkspaceAndTypes(workspaceId, types, options);
+  }
+
   // ===========================================================================
   // Database Path
   // ===========================================================================
@@ -626,6 +634,13 @@ export class EventStore {
       getContent: (blobId: string) =>
         this.backend.getRepositories().blob.getContent(blobId),
     };
+  }
+
+  /**
+   * Get the VectorRepository for semantic search (null if sqlite-vec not available).
+   */
+  getVectorRepository(): import('./sqlite/repositories/vector.repo.js').VectorRepository | null {
+    return this.backend.getVectorRepository();
   }
 
   /**

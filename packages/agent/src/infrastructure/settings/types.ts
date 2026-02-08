@@ -257,9 +257,42 @@ export interface CompactorSettings {
 /**
  * Memory store configuration
  */
+export interface MemoryEmbeddingSettings {
+  /** Enable/disable embedding-based semantic memory */
+  enabled: boolean;
+  /** ONNX model ID for embeddings */
+  model: string;
+  /** Quantization dtype */
+  dtype: string;
+  /** Vector dimensions (Matryoshka truncation) */
+  dimensions: number;
+  /** Directory for cached model files */
+  cacheDir: string;
+  /** Max tokens for workspace lessons injection */
+  maxWorkspaceLessonsTokens: number;
+  /** Max tokens for cross-project recall injection */
+  maxCrossProjectTokens: number;
+  /** Number of cross-project results to retrieve */
+  crossProjectTopK: number;
+}
+
+/**
+ * Auto-injection of recent ledger entries at session start
+ */
+export interface MemoryAutoInjectSettings {
+  /** Enable auto-injection of recent ledger entries at session start */
+  enabled: boolean;
+  /** Number of recent ledger entries to inject (1-10) */
+  count: number;
+}
+
 export interface MemorySettings {
   /** Maximum entries in memory cache */
   maxEntries: number;
+  /** Embedding-based semantic memory settings */
+  embedding: MemoryEmbeddingSettings;
+  /** Auto-injection of recent session memories */
+  autoInject: MemoryAutoInjectSettings;
 }
 
 /**

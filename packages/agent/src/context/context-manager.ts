@@ -70,6 +70,8 @@ export class ContextManager {
   private snapshotBuilder: ContextSnapshotBuilder;
   /** Rules content from AGENTS.md / CLAUDE.md hierarchy */
   private rulesContent: string | undefined;
+  /** Memory content (workspace lessons + cross-project recall) */
+  private memoryContent: string | undefined;
 
   // Cached values for performance
   private cachedSystemPromptTokens: number | null = null;
@@ -252,6 +254,22 @@ export class ContextManager {
   }
 
   /**
+   * Set memory content (workspace lessons + cross-project recall).
+   * Invalidates cached token counts.
+   */
+  setMemoryContent(content: string | undefined): void {
+    this.memoryContent = content;
+    this.invalidateSystemPromptCache();
+  }
+
+  /**
+   * Get memory content.
+   */
+  getMemoryContent(): string | undefined {
+    return this.memoryContent;
+  }
+
+  /**
    * Set working directory (updates cached system prompt tokens).
    */
   setWorkingDirectory(dir: string): void {
@@ -283,6 +301,7 @@ export class ContextManager {
     return this.estimateSystemPromptTokens()
       + this.estimateToolsTokens()
       + this.estimateRulesTokens()
+      + this.estimateMemoryTokens()
       + this.getMessagesTokens();
   }
 
@@ -512,6 +531,11 @@ export class ContextManager {
 
   private estimateRulesTokens(): number {
     return estimateRulesTokensUtil(this.rulesContent);
+  }
+
+  private estimateMemoryTokens(): number {
+    if (!this.memoryContent) return 0;
+    return Math.ceil(this.memoryContent.length / 4);
   }
 
   private getMessagesTokens(): number {

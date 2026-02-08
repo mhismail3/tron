@@ -349,6 +349,29 @@ export class EventRepository extends BaseRepository {
   }
 
   /**
+   * Get events by workspace ID and type(s)
+   */
+  getByWorkspaceAndTypes(
+    workspaceId: WorkspaceId,
+    types: EventType[],
+    options?: { limit?: number }
+  ): EventWithDepth[] {
+    if (types.length === 0) return [];
+
+    const placeholders = this.inPlaceholders(types);
+    let sql = `SELECT * FROM events WHERE workspace_id = ? AND type IN (${placeholders}) ORDER BY timestamp DESC`;
+    const params: SQLQueryBindings[] = [workspaceId, ...types];
+
+    if (options?.limit) {
+      sql += ' LIMIT ?';
+      params.push(options.limit);
+    }
+
+    const rows = this.all<EventDbRow>(sql, ...params);
+    return rows.map(row => this.rowToEvent(row));
+  }
+
+  /**
    * Check if an event exists
    */
   exists(eventId: EventId): boolean {
