@@ -225,7 +225,7 @@ describe('SandboxTool', () => {
       expect(asText(result2.content)).toContain('command');
     });
 
-    it('executes command in container', async () => {
+    it('wraps command in sh -c for shell syntax support', async () => {
       mockRunner.run.mockResolvedValue({ stdout: 'file1\nfile2\n', stderr: '', exitCode: 0 });
 
       const result = await tool.execute('tc-1', {
@@ -238,7 +238,21 @@ describe('SandboxTool', () => {
       const args = mockRunner.run.mock.calls[0][0] as string[];
       expect(args[0]).toBe('exec');
       expect(args).toContain('tron-abc');
-      expect(args[args.length - 1]).toBe('ls /workspace');
+      // Command must be wrapped: sh -c "ls /workspace"
+      expect(args.slice(-3)).toEqual(['sh', '-c', 'ls /workspace']);
+    });
+
+    it('supports complex shell syntax via sh -c wrapping', async () => {
+      mockRunner.run.mockResolvedValue({ stdout: 'hello\n', stderr: '', exitCode: 0 });
+
+      await tool.execute('tc-1', {
+        action: 'exec',
+        name: 'tron-abc',
+        command: 'echo hello && ls / | head -5',
+      } as SandboxParams, new AbortController().signal);
+
+      const args = mockRunner.run.mock.calls[0][0] as string[];
+      expect(args.slice(-3)).toEqual(['sh', '-c', 'echo hello && ls / | head -5']);
     });
 
     it('passes workdir and env to exec', async () => {
@@ -257,6 +271,39 @@ describe('SandboxTool', () => {
       expect(args[args.indexOf('--workdir') + 1]).toBe('/app');
       expect(args).toContain('--env');
       expect(args[args.indexOf('--env') + 1]).toBe('PORT=3000');
+    });
+
+    it('supports detach mode for long-running processes', async () => {
+      mockRunner.run.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+
+      const result = await tool.execute('tc-1', {
+        action: 'exec',
+        name: 'tron-abc',
+        command: 'node /workspace/server.js',
+        detach: true,
+      } as SandboxParams, new AbortController().signal);
+
+      expect(result.isError).toBeFalsy();
+      const args = mockRunner.run.mock.calls[0][0] as string[];
+      expect(args).toContain('--detach');
+      // --detach should come before the container name
+      expect(args.indexOf('--detach')).toBeLessThan(args.indexOf('tron-abc'));
+      // Still wrapped in sh -c
+      expect(args.slice(-3)).toEqual(['sh', '-c', 'node /workspace/server.js']);
+      expect(asText(result.content)).toContain('started in background');
+    });
+
+    it('does not include --detach by default', async () => {
+      mockRunner.run.mockResolvedValue({ stdout: 'output\n', stderr: '', exitCode: 0 });
+
+      await tool.execute('tc-1', {
+        action: 'exec',
+        name: 'tron-abc',
+        command: 'echo hi',
+      } as SandboxParams, new AbortController().signal);
+
+      const args = mockRunner.run.mock.calls[0][0] as string[];
+      expect(args).not.toContain('--detach');
     });
 
     it('respects custom timeout', async () => {

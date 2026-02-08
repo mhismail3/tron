@@ -54,6 +54,7 @@ export interface SandboxParams {
   volumes?: string[];
   workdir?: string;
   timeout?: number;
+  detach?: boolean;
   tail?: number;
 }
 

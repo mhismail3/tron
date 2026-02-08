@@ -232,7 +232,7 @@ After deploy succeeds, the swap starts in 3 seconds — your response is the LAS
 
 Actions:
 - `create` — spin up a new container. Defaults to `ubuntu:latest`. Workspace auto-mounted at `/workspace`. Options: `image`, `ports`, `cpus`, `memory`, `env`, `volumes`.
-- `exec` — run a command inside a container. Requires `name` + `command`. Options: `workdir`, `env`, `timeout`.
+- `exec` — run a command inside a container. Requires `name` + `command`. Full shell syntax supported (pipes, `&&`, redirects). Options: `workdir`, `env`, `timeout`, `detach` (for long-running processes).
 - `stop` / `start` — pause and resume.
 - `remove` — stop + delete + remove from registry.
 - `list` — all tracked containers with live status (running/stopped/gone).
@@ -257,7 +257,7 @@ Actions:
 The pattern:
 1. `create` with `ports: ["3000:3000"]` (or whatever port the app uses)
 2. `exec`: install dependencies, scaffold the app, write code — all in `/workspace`
-3. `exec`: start the server in the background (`nohup node server.js > /tmp/server.log 2>&1 &`)
+3. `exec` with `detach: true`: start the server as a persistent background process (`node /workspace/server.js`)
 4. `exec`: verify it's running (`curl -s http://localhost:3000`)
 5. OpenURL with `http://{server-ip}:3000` — use the same IP/hostname the iOS app connects to
 6. **Keep the container running.** Don't stop or remove it — the user is actively using it. Only clean up when they ask.
@@ -272,7 +272,7 @@ This works for anything with a web interface: React/Vite apps, Jupyter notebooks
 
 - **Workspace mount**: `/workspace` inside the container maps to the session's working directory. Files flow both ways — write a script on the host, exec it in the container; generate output in the container, read it from the host.
 - **Each exec is a separate command.** No persistent shell session. Set environment variables and working directory per-call via `env` and `workdir` params.
-- **Long-running processes**: Use a generous `timeout` for installs and builds. For servers, start them in the background (e.g. `nohup node server.js &`) and interact via subsequent exec calls.
+- **Long-running processes**: Use a generous `timeout` for installs and builds. For servers and daemons, use `detach: true` — the process persists in the container after exec returns. Interact via subsequent exec calls.
 - **Containers survive sessions.** The registry at `~/.tron/artifacts/containers.json` tracks everything. Use `list` to see what's running. Clean up with `remove` when done or when the user asks.
 
 Containers are cheap. Prefer creating a fresh one over polluting the host.

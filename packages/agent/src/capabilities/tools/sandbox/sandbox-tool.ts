@@ -36,7 +36,7 @@ export class SandboxTool implements TronTool<SandboxParams> {
 
 Actions:
 - create: Create + start a new container (default: ubuntu:latest). Mounts workspace at /workspace.
-- exec: Execute a command inside a running container. Requires name + command.
+- exec: Execute a command inside a running container. Requires name + command. Supports full shell syntax (pipes, &&, redirects). Use detach: true for long-running processes (servers, daemons).
 - stop: Stop a running container.
 - start: Resume a stopped container.
 - remove: Stop + delete a container.
@@ -98,6 +98,10 @@ Interactive UIs: To build something the user can interact with on their phone:
       timeout: {
         type: 'number' as const,
         description: 'Timeout in ms for exec (default: 120000)',
+      },
+      detach: {
+        type: 'boolean' as const,
+        description: 'Run exec command in background (detached). Process persists after exec returns. Use for long-running services.',
       },
       tail: {
         type: 'number' as const,
@@ -244,6 +248,9 @@ Interactive UIs: To build something the user can interact with on their phone:
 
     const args: string[] = ['exec'];
 
+    if (params.detach) {
+      args.push('--detach');
+    }
     if (params.workdir) {
       args.push('--workdir', params.workdir);
     }
@@ -253,12 +260,23 @@ Interactive UIs: To build something the user can interact with on their phone:
       }
     }
 
-    args.push(params.name, params.command);
+    // Wrap command in sh -c so shell syntax (pipes, &&, redirects, etc.) works.
+    // Without this, the container CLI treats the entire string as an executable path.
+    args.push(params.name, 'sh', '-c', params.command);
 
     const result = await this.runner.run(args, {
       timeout: params.timeout ?? DEFAULT_EXEC_TIMEOUT,
       signal,
     });
+
+    if (params.detach) {
+      return {
+        content: result.exitCode === 0
+          ? `Process started in background: ${params.command}`
+          : `Failed to start background process:\n${[result.stdout, result.stderr].filter(Boolean).join('\n')}`,
+        isError: result.exitCode !== 0,
+      };
+    }
 
     const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
     const interrupted = result.interrupted ? '\n[Interrupted]' : '';
