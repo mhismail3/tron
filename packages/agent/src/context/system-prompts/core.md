@@ -248,7 +248,7 @@ Actions:
 - Analyze data: container with Python + pandas/numpy, run the analysis
 - Process documents: container with pandoc, LibreOffice, or any CLI tool
 
-**Running services.** Start databases, web servers, API backends — anything that listens on a port. Interact with them via exec (curl, psql, redis-cli, etc.) from inside the container.
+**Running services.** Start databases, web servers, API backends — anything that listens on a port. Interact with them via exec (curl, psql, redis-cli, etc.) from inside the container. **Services must bind to `0.0.0.0`** (not localhost/127.0.0.1) to be reachable via port mappings from external hosts.
 - `create` with `ports: ["5432:5432"]`, then exec to start PostgreSQL and run queries
 - `create` with `ports: ["6379:6379"]` for Redis, then exec redis-cli commands
 
@@ -257,7 +257,7 @@ Actions:
 The pattern:
 1. `create` with `ports: ["3000:3000"]` (or whatever port the app uses)
 2. `exec`: install dependencies, scaffold the app, write code — all in `/workspace`
-3. `exec` with `detach: true`: start the server as a persistent background process (`node /workspace/server.js`)
+3. `exec` with `detach: true`: start the server **bound to 0.0.0.0** (`node -e "require('./server').listen(3000,'0.0.0.0')"` or ensure code binds to `0.0.0.0`)
 4. `exec`: verify it's running (`curl -s http://localhost:3000`)
 5. OpenURL with `http://{server-ip}:3000` — use the same IP/hostname the iOS app connects to
 6. **Keep the container running.** Don't stop or remove it — the user is actively using it. Only clean up when they ask.
@@ -273,6 +273,7 @@ This works for anything with a web interface: React/Vite apps, Jupyter notebooks
 - **Workspace mount**: `/workspace` inside the container maps to the session's working directory. Files flow both ways — write a script on the host, exec it in the container; generate output in the container, read it from the host.
 - **Each exec is a separate command.** No persistent shell session. Set environment variables and working directory per-call via `env` and `workdir` params.
 - **Long-running processes**: Use a generous `timeout` for installs and builds. For servers and daemons, use `detach: true` — the process persists in the container after exec returns. Interact via subsequent exec calls.
+- **Network binding**: Services must bind to `0.0.0.0`, not `localhost`/`127.0.0.1`. Without this, port mappings exist but connections fail. Examples: `python3 -m http.server 3000 --bind 0.0.0.0`, `app.listen(3000, '0.0.0.0')`, `flask app.run(host='0.0.0.0')`.
 - **Containers survive sessions.** The registry at `~/.tron/artifacts/containers.json` tracks everything. Use `list` to see what's running. Clean up with `remove` when done or when the user asks.
 
 Containers are cheap. Prefer creating a fresh one over polluting the host.

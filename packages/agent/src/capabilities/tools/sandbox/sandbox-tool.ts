@@ -43,10 +43,12 @@ Actions:
 - list: List all tracked containers with their current status.
 - logs: Get container logs.
 
+Network binding: Services inside containers MUST bind to 0.0.0.0 (not localhost/127.0.0.1) to be reachable from external hosts via port mappings. Examples: python3 -m http.server 3000 --bind 0.0.0.0, node app.listen(3000, '0.0.0.0'), flask app.run(host='0.0.0.0').
+
 Interactive UIs: To build something the user can interact with on their phone:
 1. Create a container with port mappings (e.g. ports: ["3000:3000"])
-2. Install dependencies and start a dev server inside the container
-3. Use OpenURL to open the app via Tailscale hostname`;
+2. Install dependencies and start a dev server bound to 0.0.0.0 inside the container
+3. Use OpenURL to open the app via Tailscale IP`;
 
   readonly parameters = {
     type: 'object' as const,
