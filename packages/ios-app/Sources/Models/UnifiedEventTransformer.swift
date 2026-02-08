@@ -311,7 +311,7 @@ extension UnifiedEventTransformer {
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .notificationSubagentResult,
                  .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .memoryLedger, .skillRemoved, .rulesLoaded,
+                 .contextCleared, .memoryLedger, .memoryLoaded, .skillRemoved, .rulesLoaded,
                  .errorAgent, .errorTool, .errorProvider,
                  .streamThinkingComplete:
                 if var message = transformPersistedEvent(event) {
