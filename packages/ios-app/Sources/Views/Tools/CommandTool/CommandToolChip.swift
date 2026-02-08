@@ -24,14 +24,14 @@ struct CommandToolChip: View {
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(statusColor.opacity(0.7))
                         .lineLimit(1)
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .transition(.blurReplace)
                 }
 
                 if let duration = data.formattedDuration {
                     Text(duration)
                         .font(TronTypography.codeSM)
                         .foregroundStyle(statusColor.opacity(0.5))
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .transition(.blurReplace)
                 }
 
                 Image(systemName: "chevron.right")
@@ -40,9 +40,10 @@ struct CommandToolChip: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            .clipShape(Capsule())
             .contentShape(Capsule())
-            .animation(.snappy(duration: 0.25), value: data.summary)
-            .animation(.snappy(duration: 0.25), value: data.formattedDuration)
+            .animation(.smooth(duration: 0.3), value: data.summary)
+            .animation(.smooth(duration: 0.3), value: data.formattedDuration)
         }
         .buttonStyle(.plain)
         .glassEffect(
@@ -101,14 +102,14 @@ struct CommandToolChipFallback: View {
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(statusColor.opacity(0.7))
                         .lineLimit(1)
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .transition(.blurReplace)
                 }
 
                 if let duration = data.formattedDuration {
                     Text(duration)
                         .font(TronTypography.codeSM)
                         .foregroundStyle(statusColor.opacity(0.5))
-                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                        .transition(.blurReplace)
                 }
 
                 Image(systemName: "chevron.right")
@@ -125,9 +126,10 @@ struct CommandToolChipFallback: View {
                 Capsule()
                     .strokeBorder(statusColor.opacity(0.3), lineWidth: 0.5)
             )
+            .clipShape(Capsule())
             .contentShape(Capsule())
-            .animation(.snappy(duration: 0.25), value: data.summary)
-            .animation(.snappy(duration: 0.25), value: data.formattedDuration)
+            .animation(.smooth(duration: 0.3), value: data.summary)
+            .animation(.smooth(duration: 0.3), value: data.formattedDuration)
         }
         .buttonStyle(.plain)
     }
