@@ -21,12 +21,6 @@ const logger = createLogger('hooks:memory-ledger');
 
 export interface MemoryLedgerHookConfig {
   onCycleComplete: (info: CycleInfo) => Promise<void>;
-  getCycleRange: () => {
-    firstEventId: string;
-    lastEventId: string;
-    firstTurn: number;
-    lastTurn: number;
-  };
   getModel: () => string;
   getWorkingDirectory: () => string;
   getTokenRatio: () => number;
@@ -55,13 +49,11 @@ export function createMemoryLedgerHook(config: MemoryLedgerHookConfig): HookDefi
       }
 
       try {
-        const range = config.getCycleRange();
         const [recentEventTypes, recentToolCalls] = await Promise.all([
           config.getRecentEventTypes(),
           config.getRecentToolCalls(),
         ]);
         const info: CycleInfo = {
-          ...range,
           model: config.getModel(),
           workingDirectory: config.getWorkingDirectory(),
           currentTokenRatio: config.getTokenRatio(),

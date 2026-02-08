@@ -36,10 +36,6 @@ function createDeps(overrides: Partial<MemoryManagerDeps> = {}): MemoryManagerDe
 
 function createCycleInfo(overrides: Partial<CycleInfo> = {}): CycleInfo {
   return {
-    firstEventId: 'evt-1',
-    lastEventId: 'evt-4',
-    firstTurn: 1,
-    lastTurn: 1,
     model: 'claude-sonnet-4-5-20250929',
     workingDirectory: '/project',
     currentTokenRatio: 0.30,
@@ -66,10 +62,6 @@ describe('MemoryManager', () => {
       await manager.onCycleComplete(createCycleInfo());
 
       expect(deps.writeLedgerEntry).toHaveBeenCalledWith({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });

@@ -16,10 +16,6 @@ const logger = createLogger('memory:manager');
 // =============================================================================
 
 export interface CycleInfo {
-  firstEventId: string;
-  lastEventId: string;
-  firstTurn: number;
-  lastTurn: number;
   model: string;
   workingDirectory: string;
   currentTokenRatio: number;
@@ -77,10 +73,6 @@ export class MemoryManager {
 
     try {
       const ledgerResult = await this.deps.writeLedgerEntry({
-        firstEventId: info.firstEventId,
-        lastEventId: info.lastEventId,
-        firstTurn: info.firstTurn,
-        lastTurn: info.lastTurn,
         model: info.model,
         workingDirectory: info.workingDirectory,
       });

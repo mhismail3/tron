@@ -560,37 +560,8 @@ export class AgentFactory {
         workspaceId,
       });
 
-      // Track cycle state for the hook
-      let cycleFirstEventId = '';
-      let cycleLastEventId = '';
-      let cycleFirstTurn = 0;
-      let cycleLastTurn = 0;
-
-      // Listen for events to track cycle range
-      agent.onEvent((event) => {
-        if (event.type === 'turn_start') {
-          const turn = (event as any).data?.turn ?? 0;
-          if (!cycleFirstEventId) {
-            cycleFirstTurn = turn;
-          }
-          cycleLastTurn = turn;
-        }
-        // Track first/last event IDs from persisted events
-        const eventId = (event as any).data?.eventId ?? (event as any).id ?? '';
-        if (eventId) {
-          if (!cycleFirstEventId) cycleFirstEventId = eventId;
-          cycleLastEventId = eventId;
-        }
-      });
-
       agent.registerHook(createMemoryLedgerHook({
         onCycleComplete: (info) => memoryManager.onCycleComplete(info),
-        getCycleRange: () => ({
-          firstEventId: cycleFirstEventId || 'unknown',
-          lastEventId: cycleLastEventId || 'unknown',
-          firstTurn: cycleFirstTurn,
-          lastTurn: cycleLastTurn,
-        }),
         getModel: () => model,
         getWorkingDirectory: () => workingDirectory,
         getTokenRatio: () => memCfg.getTokenRatio(sessionId),

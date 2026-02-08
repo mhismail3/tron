@@ -57,10 +57,11 @@ function createDeps(overrides: Partial<LedgerWriterDeps> = {}): LedgerWriterDeps
     }),
     appendEvent: vi.fn().mockResolvedValue({ id: 'evt-ledger-1' }),
     getEventsBySession: vi.fn().mockResolvedValue([
-      createMockEvent({ type: 'message.user', sequence: 1, payload: { content: 'Add feature X' } }),
-      createMockEvent({ type: 'tool.call', sequence: 2, payload: { name: 'Write', arguments: { file_path: 'src/foo.ts' } } }),
-      createMockEvent({ type: 'tool.result', sequence: 3, payload: { content: 'File written' } }),
-      createMockEvent({ type: 'message.assistant', sequence: 4, payload: { content: [{ type: 'text', text: 'Done!' }] } }),
+      createMockEvent({ id: 'evt-1' as any, type: 'message.user', sequence: 1, payload: { content: 'Add feature X' } }),
+      createMockEvent({ id: 'evt-2' as any, type: 'stream.turn_start', sequence: 2, payload: { turn: 1 } }),
+      createMockEvent({ id: 'evt-3' as any, type: 'tool.call', sequence: 3, payload: { name: 'Write', arguments: { file_path: 'src/foo.ts' } } }),
+      createMockEvent({ id: 'evt-4' as any, type: 'tool.result', sequence: 4, payload: { content: 'File written' } }),
+      createMockEvent({ id: 'evt-5' as any, type: 'message.assistant', sequence: 5, payload: { content: [{ type: 'text', text: 'Done!' }] } }),
     ]),
     sessionId: 'sess-1',
     workspaceId: 'ws-1',
@@ -83,10 +84,6 @@ describe('LedgerWriter', () => {
     it('should write a ledger entry when Haiku returns structured JSON', async () => {
       const writer = new LedgerWriter(deps);
       const result = await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -115,10 +112,6 @@ describe('LedgerWriter', () => {
 
       const writer = new LedgerWriter(deps);
       const result = await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -133,10 +126,6 @@ describe('LedgerWriter', () => {
 
       const writer = new LedgerWriter(deps);
       const result = await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -155,10 +144,6 @@ describe('LedgerWriter', () => {
 
       const writer = new LedgerWriter(deps);
       const result = await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -176,10 +161,6 @@ describe('LedgerWriter', () => {
 
       const writer = new LedgerWriter(deps);
       const result = await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -191,10 +172,6 @@ describe('LedgerWriter', () => {
     it('should extract relevant events for the subagent prompt', async () => {
       const writer = new LedgerWriter(deps);
       await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -227,10 +204,6 @@ describe('LedgerWriter', () => {
 
       const writer = new LedgerWriter(deps);
       await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-2',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -239,13 +212,18 @@ describe('LedgerWriter', () => {
       expect(call.task).toContain('approach A vs B');
     });
 
-    it('should set event range and turn range in the persisted payload', async () => {
+    it('should derive event range and turn range from persisted events', async () => {
+      // Set up events with stream.turn_start events for turn tracking
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-10' as any, type: 'message.user', sequence: 1, payload: { content: 'Do X' } }),
+        createMockEvent({ id: 'evt-11' as any, type: 'stream.turn_start', sequence: 2, payload: { turn: 3 } }),
+        createMockEvent({ id: 'evt-12' as any, type: 'message.assistant', sequence: 3, payload: { content: [{ type: 'text', text: 'Turn 3' }] } }),
+        createMockEvent({ id: 'evt-13' as any, type: 'stream.turn_start', sequence: 4, payload: { turn: 5 } }),
+        createMockEvent({ id: 'evt-20' as any, type: 'message.assistant', sequence: 5, payload: { content: [{ type: 'text', text: 'Turn 5' }] } }),
+      ]);
+
       const writer = new LedgerWriter(deps);
       await writer.writeLedgerEntry({
-        firstEventId: 'evt-10',
-        lastEventId: 'evt-20',
-        firstTurn: 3,
-        lastTurn: 5,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });
@@ -260,6 +238,59 @@ describe('LedgerWriter', () => {
       );
     });
 
+    it('should only include events after last memory.ledger boundary', async () => {
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-old' as any, type: 'message.user', sequence: 1, payload: { content: 'Old' } }),
+        createMockEvent({ id: 'evt-boundary' as any, type: 'memory.ledger', sequence: 2, payload: {} }),
+        createMockEvent({ id: 'evt-new-1' as any, type: 'message.user', sequence: 3, payload: { content: 'New' } }),
+        createMockEvent({ id: 'evt-new-2' as any, type: 'stream.turn_start', sequence: 4, payload: { turn: 2 } }),
+        createMockEvent({ id: 'evt-new-3' as any, type: 'message.assistant', sequence: 5, payload: { content: [{ type: 'text', text: 'Response' }] } }),
+      ]);
+
+      const writer = new LedgerWriter(deps);
+      await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      expect(deps.appendEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            eventRange: { firstEventId: 'evt-new-1', lastEventId: 'evt-new-3' },
+            turnRange: { firstTurn: 2, lastTurn: 2 },
+          }),
+        })
+      );
+    });
+
+    it('should include events across compact.boundary (compaction is not a cycle boundary)', async () => {
+      // compact.boundary can appear mid-cycle when compaction runs in the same Stop hook.
+      // It should NOT split the cycle — only memory.ledger marks cycle boundaries.
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-1' as any, type: 'message.user', sequence: 1, payload: { content: 'Do X' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'stream.turn_start', sequence: 2, payload: { turn: 1 } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'message.assistant', sequence: 3, payload: { content: [{ type: 'text', text: 'Done' }] } }),
+        createMockEvent({ id: 'evt-4' as any, type: 'compact.boundary', sequence: 4, payload: { range: { from: 'x', to: 'y' }, originalTokens: 1000, compactedTokens: 500 } }),
+        createMockEvent({ id: 'evt-5' as any, type: 'compact.summary', sequence: 5, payload: { summary: 'Summarized' } }),
+      ]);
+
+      const writer = new LedgerWriter(deps);
+      await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      // All events should be in the range, including compact events
+      expect(deps.appendEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            eventRange: { firstEventId: 'evt-1', lastEventId: 'evt-5' },
+            turnRange: { firstTurn: 1, lastTurn: 1 },
+          }),
+        })
+      );
+    });
+
     it('should handle empty output from subagent', async () => {
       deps.spawnSubsession = vi.fn().mockResolvedValue({
         sessionId: 'sub-1',
@@ -269,10 +300,6 @@ describe('LedgerWriter', () => {
 
       const writer = new LedgerWriter(deps);
       const result = await writer.writeLedgerEntry({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-4',
-        firstTurn: 1,
-        lastTurn: 1,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
       });

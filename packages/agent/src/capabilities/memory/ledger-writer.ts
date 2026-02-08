@@ -50,10 +50,6 @@ export interface LedgerWriterDeps {
 }
 
 export interface LedgerWriteOpts {
-  firstEventId: string;
-  lastEventId: string;
-  firstTurn: number;
-  lastTurn: number;
   model: string;
   workingDirectory: string;
 }
@@ -86,7 +82,10 @@ export class LedgerWriter {
       const events = await this.deps.getEventsBySession();
       const context = this.buildEventContext(events);
 
-      // 2. Spawn Haiku subagent
+      // 2. Derive cycle range from persisted events (ground truth)
+      const cycleRange = this.computeCycleRange(events);
+
+      // 3. Spawn Haiku subagent
       const result = await this.deps.spawnSubsession({
         task: context,
         model: SUBAGENT_MODEL,
@@ -97,18 +96,18 @@ export class LedgerWriter {
         timeout: 30_000,
       });
 
-      // 3. Handle failure
+      // 4. Handle failure
       if (!result.success) {
         logger.warn('Ledger subagent failed', { error: result.error });
         return { written: false, reason: result.error ?? 'subagent failed' };
       }
 
-      // 4. Handle empty output
+      // 5. Handle empty output
       if (!result.output) {
         return { written: false, reason: 'empty output from subagent' };
       }
 
-      // 5. Parse response
+      // 6. Parse response
       let parsed: Record<string, unknown>;
       try {
         // Strip markdown code fences if present
@@ -121,16 +120,16 @@ export class LedgerWriter {
         return { written: false, reason: 'Failed to parse subagent response as JSON' };
       }
 
-      // 6. Check if Haiku decided to skip
+      // 7. Check if Haiku decided to skip
       if (parsed.skip === true) {
         logger.debug('Ledger subagent decided to skip', { sessionId: this.deps.sessionId });
         return { written: false, reason: 'skipped' };
       }
 
-      // 7. Build payload and persist
+      // 8. Build payload and persist
       const payload: MemoryLedgerPayload = {
-        eventRange: { firstEventId: opts.firstEventId, lastEventId: opts.lastEventId },
-        turnRange: { firstTurn: opts.firstTurn, lastTurn: opts.lastTurn },
+        eventRange: { firstEventId: cycleRange.firstEventId, lastEventId: cycleRange.lastEventId },
+        turnRange: { firstTurn: cycleRange.firstTurn, lastTurn: cycleRange.lastTurn },
         title: String(parsed.title ?? 'Untitled'),
         entryType: this.validateEntryType(parsed.entryType),
         status: this.validateStatus(parsed.status),
@@ -178,6 +177,60 @@ export class LedgerWriter {
   // ===========================================================================
   // Private Helpers
   // ===========================================================================
+
+  /**
+   * Compute event and turn ranges for the current cycle from persisted events.
+   *
+   * The cycle boundary is the last `memory.ledger` event — it marks where the
+   * previous cycle's summary was written. Everything after it belongs to the
+   * current cycle. We don't use `compact.boundary` because compaction runs in
+   * the same Stop hook as ledger writing, so its events appear interleaved
+   * with the current cycle's events.
+   *
+   * By the time this runs (background Stop hook), all cycle events are already
+   * persisted to SQLite.
+   */
+  private computeCycleRange(events: SessionEvent[]): {
+    firstEventId: string; lastEventId: string;
+    firstTurn: number; lastTurn: number;
+  } {
+    // Find the most recent memory.ledger event (previous cycle's summary)
+    let boundaryIndex = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const evt = events[i]!;
+      if (evt.type === 'memory.ledger') {
+        boundaryIndex = i;
+        break;
+      }
+    }
+
+    // Current cycle = events after the boundary
+    const cycleEvents = events.slice(boundaryIndex + 1);
+    const first = cycleEvents[0];
+    const last = cycleEvents[cycleEvents.length - 1];
+
+    if (!first || !last) {
+      return { firstEventId: 'unknown', lastEventId: 'unknown', firstTurn: 0, lastTurn: 0 };
+    }
+
+    // Extract turn numbers from stream.turn_start events
+    let firstTurn = 0;
+    let lastTurn = 0;
+    for (const event of cycleEvents) {
+      if (event.type === 'stream.turn_start') {
+        const turn = event.payload.turn ?? 0;
+        if (firstTurn === 0) firstTurn = turn;
+        lastTurn = turn;
+      }
+    }
+
+    return {
+      firstEventId: first.id,
+      lastEventId: last.id,
+      firstTurn,
+      lastTurn,
+    };
+  }
 
   private buildEventContext(events: SessionEvent[]): string {
     const parts: string[] = ['Analyze these session events and create a ledger entry:\n'];

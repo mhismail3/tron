@@ -26,12 +26,6 @@ function createStopContext(overrides: Partial<StopHookContext> = {}): StopHookCo
 function createConfig(overrides: Partial<MemoryLedgerHookConfig> = {}): MemoryLedgerHookConfig {
   return {
     onCycleComplete: vi.fn().mockResolvedValue(undefined),
-    getCycleRange: vi.fn().mockReturnValue({
-      firstEventId: 'evt-1',
-      lastEventId: 'evt-10',
-      firstTurn: 1,
-      lastTurn: 3,
-    }),
     getModel: vi.fn().mockReturnValue('claude-sonnet-4-5-20250929'),
     getWorkingDirectory: vi.fn().mockReturnValue('/project'),
     getTokenRatio: vi.fn().mockReturnValue(0.40),
@@ -67,10 +61,6 @@ describe('memory-ledger hook', () => {
 
       expect(result.action).toBe('continue');
       expect(config.onCycleComplete).toHaveBeenCalledWith(expect.objectContaining({
-        firstEventId: 'evt-1',
-        lastEventId: 'evt-10',
-        firstTurn: 1,
-        lastTurn: 3,
         model: 'claude-sonnet-4-5-20250929',
         workingDirectory: '/project',
         currentTokenRatio: 0.40,
