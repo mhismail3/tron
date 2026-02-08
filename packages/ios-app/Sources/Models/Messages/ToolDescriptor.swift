@@ -35,7 +35,8 @@ enum ToolRegistry {
         "browsetheweb", "openurl",
         "webfetch", "websearch",
         "task",
-        "remember"
+        "remember",
+        "sandbox"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -275,6 +276,24 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 let action = ToolArgumentParser.string("action", from: args) ?? ""
                 return action.isEmpty ? "" : action
+            },
+            viewerFactory: nil
+        ),
+        "sandbox": ToolDescriptor(
+            icon: "shippingbox",
+            iconColor: .tronEmerald,
+            displayName: "Sandbox",
+            summaryExtractor: { args in
+                let action = ToolArgumentParser.action(from: args)
+                guard !action.isEmpty else { return "" }
+                let name = ToolArgumentParser.string("name", from: args) ?? ""
+                let command = ToolArgumentParser.command(from: args)
+                if action == "exec" && !command.isEmpty {
+                    let label = name.isEmpty ? "" : "\(name): "
+                    return "\(label)\(ToolArgumentParser.truncate(command))"
+                }
+                if !name.isEmpty { return "\(action): \(name)" }
+                return action
             },
             viewerFactory: nil
         )
