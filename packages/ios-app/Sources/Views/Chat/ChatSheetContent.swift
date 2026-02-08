@@ -11,6 +11,7 @@ struct ChatSheetContent: View {
     let sessionId: String
     let skillStore: SkillStore?
     let workspaceDeleted: Bool
+    let sheetCoordinator: SheetCoordinator?
     @Environment(\.dependencies) var dependencies
 
     // Convenience accessor
@@ -93,7 +94,11 @@ struct ChatSheetContent: View {
             ThinkingDetailSheet(content: content)
 
         case .commandToolDetail(let data):
-            CommandToolDetailSheet(data: data)
+            CommandToolDetailSheet(data: data, onOpenURL: { url in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    sheetCoordinator?.showSafari(url)
+                }
+            })
 
         case .adaptDetail(let data):
             AdaptDetailSheet(data: data)

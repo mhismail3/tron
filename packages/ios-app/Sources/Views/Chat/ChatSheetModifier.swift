@@ -20,7 +20,8 @@ struct ChatSheetModifier: ViewModifier {
                     rpcClient: rpcClient,
                     sessionId: sessionId,
                     skillStore: skillStore,
-                    workspaceDeleted: workspaceDeleted
+                    workspaceDeleted: workspaceDeleted,
+                    sheetCoordinator: sheetCoordinator
                 )
             }
             .onChange(of: viewModel.browserState.safariURL) { _, url in

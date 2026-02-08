@@ -7,8 +7,17 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct CommandToolDetailSheet: View {
     let data: CommandToolChipData
+    var onOpenURL: ((URL) -> Void)?
     @Environment(\.dismiss) private var dismiss
     @State private var isResultExpanded = true
+
+    /// Parsed URL for openurl tools
+    private var parsedURL: URL? {
+        guard data.normalizedName == "openurl" else { return nil }
+        let urlString = extractUrl(from: data.arguments)
+        guard !urlString.isEmpty else { return nil }
+        return URL(string: urlString)
+    }
 
     var body: some View {
         NavigationStack {
@@ -18,6 +27,22 @@ struct CommandToolDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if let url = parsedURL, let onOpenURL {
+                        Button {
+                            dismiss()
+                            onOpenURL(url)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "safari")
+                                    .font(.system(size: 14))
+                                Text("Open")
+                            }
+                        }
+                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(data.iconColor)
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: data.icon)

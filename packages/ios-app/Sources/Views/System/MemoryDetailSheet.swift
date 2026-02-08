@@ -168,7 +168,7 @@ struct MemoryDetailSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "cpu")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    Text(model)
+                    Text(formatModelDisplayName(model))
                         .font(TronTypography.codeSM)
                 }
                 .foregroundStyle(.white.opacity(0.5))
