@@ -493,7 +493,6 @@ struct SettingsView: View {
                 HStack {
                     Label("Entries to load", systemImage: "list.number")
                         .font(TronTypography.subheadline)
-                        .foregroundStyle(.tronTextSecondary)
                     Spacer()
                     Text("\(memoryAutoInjectCount)")
                         .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
@@ -525,7 +524,6 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var webSection: some View {
-        // Fetch Timeout picker
         Section {
             Picker(selection: $webFetchTimeoutMs) {
                 ForEach(Self.fetchTimeoutOptions, id: \.value) { option in
@@ -540,16 +538,7 @@ struct SettingsView: View {
                     ServerSettingsUpdate(tools: .init(web: .init(fetch: .init(timeoutMs: newValue))))
                 }
             }
-        } header: {
-            Text("Web")
-                .font(TronTypography.caption)
-        } footer: {
-            Text("How long to wait for a page to respond before giving up.")
-                .font(TronTypography.caption2)
-        }
 
-        // Cache Duration picker
-        Section {
             Picker(selection: $webCacheTtlMs) {
                 ForEach(Self.cacheTtlOptions, id: \.value) { option in
                     Text(option.label).tag(option.value)
@@ -563,13 +552,7 @@ struct SettingsView: View {
                     ServerSettingsUpdate(tools: .init(web: .init(cache: .init(ttlMs: newValue))))
                 }
             }
-        } footer: {
-            Text("How long fetched pages are cached before being re-fetched.")
-                .font(TronTypography.caption2)
-        }
 
-        // Max Cached Pages stepper (25–500, step 25)
-        Section {
             HStack {
                 Label("Max Cached Pages", systemImage: "doc.on.doc")
                     .font(TronTypography.subheadline)
@@ -589,9 +572,9 @@ struct SettingsView: View {
                     ServerSettingsUpdate(tools: .init(web: .init(cache: .init(maxEntries: newValue))))
                 }
             }
-        } footer: {
-            Text("Maximum number of pages kept in cache. Oldest entries are evicted first.")
-                .font(TronTypography.caption2)
+        } header: {
+            Text("Web")
+                .font(TronTypography.caption)
         }
         .listSectionSpacing(16)
     }
