@@ -139,17 +139,25 @@ export class ContextOps {
       })),
     } as DetailedContextSnapshot & {
       addedSkills: typeof addedSkills;
-      memory?: { count: number; tokens: number };
+      memory?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
     };
 
     // Include memory info if memory was auto-injected
     const memoryContent = active.agent.getContextManager().getMemoryContent();
     if (memoryContent) {
-      // Count entries by counting ### headings in the formatted content
-      const entryCount = (memoryContent.match(/^### /gm) || []).length;
+      // Parse entries by splitting on ### headings
+      const entries: Array<{ title: string; content: string }> = [];
+      const sections = memoryContent.split(/^### /gm).slice(1); // skip preamble
+      for (const section of sections) {
+        const newlineIdx = section.indexOf('\n');
+        const title = newlineIdx >= 0 ? section.slice(0, newlineIdx).trim() : section.trim();
+        const content = newlineIdx >= 0 ? section.slice(newlineIdx + 1).trim() : '';
+        entries.push({ title, content });
+      }
       result.memory = {
-        count: Math.max(entryCount, 1),
+        count: Math.max(entries.length, 1),
         tokens: Math.ceil(memoryContent.length / 4),
+        entries,
       };
     }
 

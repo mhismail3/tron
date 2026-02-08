@@ -268,10 +268,19 @@ struct DetailedContextSnapshotResult: Codable {
     let memory: LoadedMemory?
 }
 
+/// A single auto-injected memory entry
+struct LoadedMemoryEntry: Codable, Identifiable {
+    let title: String
+    let content: String
+
+    var id: String { title }
+}
+
 /// Memory auto-injected at session start
 struct LoadedMemory: Codable {
     let count: Int
     let tokens: Int
+    let entries: [LoadedMemoryEntry]
 }
 
 // MARK: - Worktree Payloads

@@ -83,12 +83,20 @@ export interface RpcRulesInfo {
   tokens: number;
 }
 
+/** A single auto-injected memory entry */
+export interface RpcMemoryEntry {
+  title: string;
+  content: string;
+}
+
 /** Memory loaded for the session (if auto-inject enabled) */
 export interface RpcMemoryInfo {
   /** Number of ledger entries loaded */
   count: number;
   /** Estimated token count */
   tokens: number;
+  /** Individual memory entries with title and content */
+  entries: RpcMemoryEntry[];
 }
 
 export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {

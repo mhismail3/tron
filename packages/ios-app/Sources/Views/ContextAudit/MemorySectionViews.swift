@@ -1,41 +1,137 @@
 import SwiftUI
 
-// MARK: - Memory Section (auto-injected memories, non-expandable)
+// MARK: - Memory Section (expandable, shows auto-injected memory entries)
 
 @available(iOS 26.0, *)
 struct MemorySection: View {
     let memory: LoadedMemory
+    @State private var isExpanded = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "brain.head.profile")
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.purple)
-                .frame(width: 18)
-            Text("Memory")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.purple)
+        VStack(spacing: 0) {
+            // Header row (tappable)
+            HStack(spacing: 8) {
+                Image(systemName: "brain.head.profile")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.purple)
+                    .frame(width: 18)
+                Text("Memory")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.purple)
 
-            // Count badge
-            Text("\(memory.count)")
-                .font(TronTypography.pillValue)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.purple.opacity(0.7))
-                .clipShape(Capsule())
+                // Count badge
+                Text("\(memory.count)")
+                    .font(TronTypography.pillValue)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.purple.opacity(0.7))
+                    .clipShape(Capsule())
 
-            Spacer()
+                Spacer()
 
-            Text(TokenFormatter.format(memory.tokens))
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                Text(TokenFormatter.format(memory.tokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Expandable content
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(memory.entries) { entry in
+                        MemoryEntryRow(entry: entry)
+                    }
+                }
+                .padding(10)
+            }
         }
-        .padding(12)
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.purple.opacity(0.15))
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+// MARK: - Memory Entry Row (expandable to view content)
+
+@available(iOS 26.0, *)
+struct MemoryEntryRow: View {
+    let entry: LoadedMemoryEntry
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row (tappable)
+            HStack(spacing: 10) {
+                Image(systemName: "note.text")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.purple.opacity(0.8))
+                    .frame(width: 20)
+
+                Text(entry.title)
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(10)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            // Expanded content
+            if isExpanded {
+                if !entry.content.isEmpty {
+                    ScrollView {
+                        Text(entry.content)
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 300)
+                    .background(Color.black.opacity(0.2))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                } else {
+                    Text("No details recorded")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 10)
+                }
+            }
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.purple.opacity(0.08))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
