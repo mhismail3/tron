@@ -281,7 +281,7 @@ enum ToolRegistry {
         ),
         "sandbox": ToolDescriptor(
             icon: "shippingbox",
-            iconColor: .tronEmerald,
+            iconColor: .tronIndigo,
             displayName: "Sandbox",
             summaryExtractor: { args in
                 let action = ToolArgumentParser.action(from: args)
