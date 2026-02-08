@@ -301,8 +301,15 @@ describe('SessionManager - Memory Injection', () => {
       const manager = new SessionManager(config);
       await manager.createSession({ workingDirectory: '/project' });
 
-      const mockSessionContext = (createSessionContext as ReturnType<typeof vi.fn>).mock.results[0]!.value;
-      expect(mockSessionContext.appendEvent).toHaveBeenCalledWith('memory.loaded', {
+      // memory.loaded is emitted via eventStore.append (not sessionContext.appendEvent)
+      // so it broadcasts over WebSocket for pill notifications
+      const mockEventStore = config.eventStore as ReturnType<typeof createMockEventStore>;
+      const appendCalls = mockEventStore.append.mock.calls;
+      const memoryCall = appendCalls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).type === 'memory.loaded'
+      );
+      expect(memoryCall).toBeDefined();
+      expect((memoryCall![0] as Record<string, unknown>).payload).toEqual({
         count: 3,
         tokens: 42,
         workspaceId: '',
@@ -342,8 +349,12 @@ describe('SessionManager - Memory Injection', () => {
       const manager = new SessionManager(config);
       await manager.createSession({ workingDirectory: '/project' });
 
-      const mockSessionContext = (createSessionContext as ReturnType<typeof vi.fn>).mock.results[0]!.value;
-      expect(mockSessionContext.appendEvent).not.toHaveBeenCalled();
+      const mockEventStore = config.eventStore as ReturnType<typeof createMockEventStore>;
+      const appendCalls = mockEventStore.append.mock.calls;
+      const memoryCall = appendCalls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).type === 'memory.loaded'
+      );
+      expect(memoryCall).toBeUndefined();
     });
 
     it('should handle loadWorkspaceMemory failure gracefully', async () => {
@@ -424,8 +435,13 @@ describe('SessionManager - Memory Injection', () => {
       const manager = new SessionManager(config);
       await manager.resumeSession('sess-1');
 
-      const mockSessionContext = (createSessionContext as ReturnType<typeof vi.fn>).mock.results[0]!.value;
-      expect(mockSessionContext.appendEvent).not.toHaveBeenCalled();
+      // No memory.loaded via eventStore.append on resume
+      const mockEventStore = config.eventStore as ReturnType<typeof createMockEventStore>;
+      const appendCalls = mockEventStore.append.mock.calls;
+      const memoryCall = appendCalls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).type === 'memory.loaded'
+      );
+      expect(memoryCall).toBeUndefined();
     });
 
     it('should handle loadWorkspaceMemory failure gracefully on resume', async () => {

@@ -205,35 +205,33 @@ export class SessionManager {
       });
     }
 
-    // Create SessionContext for modular state management
-    const sessionContext = createSessionContext({
-      sessionId,
-      eventStore: this.eventStore,
-      initialHeadEventId: rulesHeadEventId,
-      model,
-      workingDirectory: workingDir.path,
-      workingDir,
-    });
-
     // Load and inject workspace memory (conditional on settings)
+    // Emit via eventStore.append() (like rules.loaded) so it broadcasts over WebSocket
+    let memoryHeadEventId = rulesHeadEventId;
     const memSettings = getSettings().context?.memory?.autoInject;
     if (memSettings?.enabled && this.config.loadWorkspaceMemory) {
       try {
-        const result = await this.config.loadWorkspaceMemory(
+        const memResult = await this.config.loadWorkspaceMemory(
           options.workingDirectory,
           { count: memSettings.count ?? 5 }
         );
-        if (result?.content) {
-          agent.setMemoryContent(result.content);
-          await sessionContext.appendEvent('memory.loaded' as EventType, {
-            count: result.count,
-            tokens: result.tokens,
-            workspaceId: '',
+        if (memResult?.content) {
+          agent.setMemoryContent(memResult.content);
+          const memEvent = await this.eventStore.append({
+            sessionId,
+            type: 'memory.loaded' as EventType,
+            payload: {
+              count: memResult.count,
+              tokens: memResult.tokens,
+              workspaceId: '',
+            },
+            parentId: memoryHeadEventId,
           });
+          memoryHeadEventId = memEvent.id;
           logger.info('Memory auto-injected', {
             sessionId,
-            count: result.count,
-            tokens: result.tokens,
+            count: memResult.count,
+            tokens: memResult.tokens,
           });
         }
       } catch (error) {
@@ -243,6 +241,16 @@ export class SessionManager {
         });
       }
     }
+
+    // Create SessionContext for modular state management
+    const sessionContext = createSessionContext({
+      sessionId,
+      eventStore: this.eventStore,
+      initialHeadEventId: memoryHeadEventId,
+      model,
+      workingDirectory: workingDir.path,
+      workingDir,
+    });
 
     const activeSession: ActiveSession = {
       sessionId,
