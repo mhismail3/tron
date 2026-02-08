@@ -441,66 +441,33 @@ struct ChatView: View {
                 // because it tries to re-anchor when container size changes.
                 // Instead, we manually scroll to bottom on initial load and when keyboard appears.
                 .scrollDismissesKeyboard(.interactively)
-                .onScrollGeometryChange(for: ScrollState.self) { geometry in
-                    // Track near-bottom status, scroll offset, AND content height
-                    // Content height is critical for detecting content growth vs user scroll
-                    let distanceFromBottom = geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height
-                    let isNearBottom = distanceFromBottom < 100
-                    return ScrollState(
-                        isNearBottom: isNearBottom,
-                        offset: geometry.contentOffset.y,
-                        contentHeight: geometry.contentSize.height
-                    )
-                } action: { oldState, newState in
-                    guard initialLoadComplete else { return }
-
-                    let decision = ScrollGeometryHandler.processGeometryChange(
-                        oldState: oldState,
-                        newState: newState,
-                        isFollowingMode: scrollCoordinator.shouldAutoScroll,
-                        isCascading: viewModel.animationCoordinator.isCascading
-                    )
-
-                    switch decision {
-                    case .noChange:
-                        break
-                    case .scrolledUp:
-                        scrollCoordinator.userDidScroll(isNearBottom: false)
-                    case .updateNearBottom(let isNear):
-                        scrollCoordinator.userDidScroll(isNearBottom: isNear)
-                    }
+                // Track scroll phases — definitively know user vs programmatic scroll
+                .onScrollPhaseChange { oldPhase, newPhase in
+                    scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
                 }
-                // Scroll to bottom when keyboard appears (container height shrinks significantly)
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.containerSize.height
-                } action: { oldHeight, newHeight in
+                // Track near-bottom geometry — simple boolean, no inference
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let distanceFromBottom = geometry.contentSize.height
+                        - geometry.contentOffset.y
+                        - geometry.containerSize.height
+                    return distanceFromBottom < 100
+                } action: { _, isNearBottom in
                     guard initialLoadComplete else { return }
-                    let heightChange = oldHeight - newHeight
-                    // Container shrank significantly (keyboard appeared, not just pill animation)
-                    // Always scroll to bottom when keyboard appears - this is the expected behavior
-                    if heightChange > 100 {
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
+                    scrollCoordinator.geometryChanged(isNearBottom: isNearBottom)
                 }
                 .onAppear {
                     scrollProxy = proxy
                 }
                 // Auto-scroll on new messages
                 .onChange(of: viewModel.messages.count) { oldCount, newCount in
-                    guard newCount > oldCount else { return }  // Only for new messages, not history
+                    guard newCount > oldCount else { return }
 
-                    // If new messages arrive during initial cascade, complete cascade immediately
-                    // This prevents visibility calculation issues when total changes mid-cascade
                     if viewModel.animationCoordinator.isCascading {
                         viewModel.animationCoordinator.makeAllMessagesVisible(count: newCount)
                     }
 
                     guard initialLoadComplete else { return }
 
-                    // After cascade, new messages are immediately visible via messageIsVisible()
-                    scrollCoordinator.contentAdded()
                     if scrollCoordinator.shouldAutoScroll {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("bottom", anchor: .bottom)
@@ -513,45 +480,23 @@ struct ChatView: View {
                     guard viewModel.isProcessing else { return }
 
                     if scrollCoordinator.shouldAutoScroll {
-                        // Use animation for smooth scrolling during streaming
                         withAnimation(.easeOut(duration: 0.15)) {
                             proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    } else {
-                        // In reviewing mode - mark that new content is available
-                        // This shows the "New Content" button
-                        scrollCoordinator.contentAdded()
-                    }
-                }
-                // Final scroll when processing ends
-                .onChange(of: viewModel.isProcessing) { wasProcessing, isProcessing in
-                    guard initialLoadComplete else { return }
-
-                    if wasProcessing && !isProcessing {
-                        scrollCoordinator.processingEnded()
-                        if scrollCoordinator.shouldAutoScroll {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
                         }
                     }
                 }
                 // Restore scroll position after loading older messages
                 .onChange(of: viewModel.isLoadingMoreMessages) { wasLoading, isLoading in
                     if wasLoading && !isLoading {
-                        // Older messages are now visible via messageIsVisible() (cascade complete = all visible)
                         scrollCoordinator.didPrependHistory(using: proxy)
                     }
                 }
-                // Scroll to bottom when keyboard appears (using reliable system notification)
-                // This is more robust than container height changes because safeAreaInset
-                // may not change containerSize when keyboard appears
+                // Scroll to bottom when keyboard appears
                 .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
                     guard initialLoadComplete else { return }
-                    guard !wasVisible && isVisible else { return }  // Only when keyboard appears
-                    guard scrollCoordinator.shouldAutoScroll else { return }  // Only in following mode
+                    guard !wasVisible && isVisible else { return }
+                    guard scrollCoordinator.shouldAutoScroll else { return }
 
-                    // Small delay to let layout settle before scrolling
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(50))
                         withAnimation(.easeOut(duration: 0.25)) {
@@ -561,23 +506,21 @@ struct ChatView: View {
                 }
             }
 
-            // Floating "New Messages" button
-            if scrollCoordinator.shouldShowScrollToBottomButton {
+            // Floating "New Content" pill — only during active streaming when user scrolled away
+            if scrollCoordinator.shouldShowNewContentPill && viewModel.isProcessing {
                 scrollToBottomButton
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     .padding(.bottom, 16)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowScrollToBottomButton)
+        .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill && viewModel.isProcessing)
     }
 
     // MARK: - Scroll to Bottom Button
 
     private var scrollToBottomButton: some View {
         Button {
-            // Use coordinator for state management
             scrollCoordinator.userTappedScrollToBottom()
-            // Also scroll via proxy for reliability
             withAnimation(.tronStandard) {
                 scrollProxy?.scrollTo("bottom", anchor: .bottom)
             }
@@ -585,13 +528,11 @@ struct ChatView: View {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                if scrollCoordinator.hasUnreadContent {
-                    Text("New content")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                }
+                Text("New content")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, scrollCoordinator.hasUnreadContent ? 14 : 10)
+            .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.tronEmerald.opacity(0.9))
             .clipShape(Capsule())

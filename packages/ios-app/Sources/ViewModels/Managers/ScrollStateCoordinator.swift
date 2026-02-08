@@ -1,116 +1,102 @@
 import SwiftUI
 
-/// Simplified scroll state coordinator for ChatView
-/// Tracks whether user is "following" (auto-scroll on new content) or "reviewing" (scrolled up)
+/// Scroll state coordinator using `onScrollPhaseChange` for definitive user-scroll detection.
+/// Replaces geometry-inference heuristics with phase-based knowledge of whether the user is dragging.
 @Observable
-@available(iOS 17.0, *)
+@available(iOS 18.0, *)
 @MainActor
 final class ScrollStateCoordinator {
 
     // MARK: - State
 
-    /// Current scroll mode
-    enum Mode: Equatable {
-        case following    // Auto-scroll to bottom on new content
-        case reviewing    // User scrolled up, preserve position
+    /// Whether the scroll view is near the bottom of its content
+    private(set) var isAtBottom = true
+
+    /// Whether the user has actively scrolled away from bottom.
+    /// Only set by user drag gestures, never by programmatic scroll or layout changes.
+    private(set) var userScrolledAway = false
+
+    /// Whether the user is currently interacting with the scroll view
+    private var isUserInteracting = false
+
+    // MARK: - History Loading
+
+    private var anchoredItemId: UUID?
+
+    // MARK: - Scroll Phase
+
+    /// Call from onScrollPhaseChange — tells us definitively if user is dragging
+    func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase) {
+        let wasUserInteracting = isUserInteracting
+        isUserInteracting = newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating
+
+        // When user interaction ends (decelerating → idle), evaluate final position
+        if wasUserInteracting && !isUserInteracting {
+            if isAtBottom {
+                userScrolledAway = false
+            }
+        }
     }
 
-    private(set) var mode: Mode = .following
-    private(set) var hasUnreadContent = false
+    // MARK: - Geometry Updates
 
-    // MARK: - Internal
+    /// Call from onScrollGeometryChange — just tracks isAtBottom, nothing more
+    func geometryChanged(isNearBottom: Bool) {
+        isAtBottom = isNearBottom
 
-    /// Grace period after explicit user actions to prevent accidental mode switches
-    private var graceUntil: Date = .distantPast
-    private let gracePeriod: TimeInterval = 0.5
+        // If user is interacting and scrolled away from bottom, mark it
+        if isUserInteracting && !isNearBottom {
+            userScrolledAway = true
+        }
+
+        // If we're at bottom (regardless of how we got here), clear the flag
+        if isNearBottom {
+            userScrolledAway = false
+        }
+    }
 
     // MARK: - User Actions
 
-    /// Call when user sends a new message - always scroll to bottom
     func userSentMessage() {
-        mode = .following
-        hasUnreadContent = false
-        graceUntil = Date().addingTimeInterval(gracePeriod)
+        userScrolledAway = false
     }
 
-    /// Call when user taps "scroll to bottom" button
     func userTappedScrollToBottom() {
-        mode = .following
-        hasUnreadContent = false
-        graceUntil = Date().addingTimeInterval(gracePeriod)
-    }
-
-    /// Call when user explicitly scrolls (via drag gesture)
-    /// Only switch to reviewing if scrolled significantly
-    func userDidScroll(isNearBottom: Bool) {
-        guard Date() > graceUntil else { return }
-
-        if isNearBottom {
-            if mode == .reviewing {
-                mode = .following
-                hasUnreadContent = false
-            }
-        } else {
-            if mode == .following {
-                mode = .reviewing
-            }
-        }
-    }
-
-    // MARK: - Content Changes
-
-    /// Call when new content is added at bottom
-    func contentAdded() {
-        if mode == .reviewing {
-            hasUnreadContent = true
-        }
-    }
-
-    /// Call when processing ends
-    func processingEnded() {
-        hasUnreadContent = false
-    }
-
-    // MARK: - Navigation
-
-    /// Call when navigating to a specific message (e.g., deep link)
-    /// Switches to reviewing mode to prevent auto-scroll from interfering
-    func scrollToTarget(messageId: UUID, using proxy: ScrollViewProxy?) {
-        mode = .reviewing
-        hasUnreadContent = false
-        graceUntil = Date().addingTimeInterval(gracePeriod)
-
-        withAnimation(.easeOut(duration: 0.3)) {
-            proxy?.scrollTo(messageId, anchor: .center)
-        }
+        userScrolledAway = false
     }
 
     // MARK: - History Loading
 
-    /// Item ID to anchor during prepend operations
-    private var anchoredItemId: UUID?
-
-    /// Call BEFORE loading older messages to preserve scroll position
     func willPrependHistory(firstVisibleId: UUID?) {
         anchoredItemId = firstVisibleId
     }
 
-    /// Call AFTER older messages are loaded - scrolls back to anchored position
     func didPrependHistory(using proxy: ScrollViewProxy?) {
         if let id = anchoredItemId {
-            // Scroll back to where user was before prepend
             proxy?.scrollTo(id, anchor: .top)
             anchoredItemId = nil
         }
     }
 
-    // MARK: - Query
+    // MARK: - Navigation
 
-    var shouldAutoScroll: Bool {
-        mode == .following
+    func scrollToTarget(messageId: UUID, using proxy: ScrollViewProxy?) {
+        userScrolledAway = true
+        withAnimation(.easeOut(duration: 0.3)) {
+            proxy?.scrollTo(messageId, anchor: .center)
+        }
     }
 
-    var shouldShowScrollToBottomButton: Bool {
-        mode == .reviewing && hasUnreadContent
+    // MARK: - Query
+
+    /// Whether to auto-scroll on new content
+    var shouldAutoScroll: Bool {
+        !userScrolledAway
+    }
+
+    /// Whether to show the "New Content" pill.
+    /// Caller must also check isProcessing — pill only shows during active streaming.
+    var shouldShowNewContentPill: Bool {
+        userScrolledAway
     }
 }

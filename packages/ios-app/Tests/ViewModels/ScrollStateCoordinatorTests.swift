@@ -3,270 +3,205 @@ import Foundation
 import SwiftUI
 @testable import TronMobile
 
-/// Tests for ScrollStateCoordinator scroll functionality
-/// Verifies scroll mode transitions, unread content tracking, and history loading
+/// Tests for ScrollStateCoordinator — phase-based scroll detection
 @Suite("ScrollStateCoordinator Tests")
 @MainActor
 struct ScrollStateCoordinatorTests {
 
-    // MARK: - Initial State Tests
+    // MARK: - Initial State
 
-    @Test("Initial mode is following")
-    func testInitialModeIsFollowing() {
+    @Test("Initial state: at bottom, not scrolled away, should auto-scroll")
+    func testInitialState() {
         let coordinator = ScrollStateCoordinator()
 
-        #expect(coordinator.mode == .following)
+        #expect(coordinator.isAtBottom)
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
+        #expect(!coordinator.shouldShowNewContentPill)
     }
 
-    @Test("Initial hasUnreadContent is false")
-    func testInitialHasUnreadContentIsFalse() {
+    // MARK: - Geometry Updates (no user interaction)
+
+    @Test("Geometry not near bottom without user interaction does not set userScrolledAway")
+    func testGeometryNotNearBottomWithoutInteraction() {
         let coordinator = ScrollStateCoordinator()
 
-        #expect(!coordinator.hasUnreadContent)
-    }
+        coordinator.geometryChanged(isNearBottom: false)
 
-    @Test("Initial shouldAutoScroll is true")
-    func testInitialShouldAutoScrollIsTrue() {
-        let coordinator = ScrollStateCoordinator()
-
+        #expect(!coordinator.isAtBottom)
+        // No user interaction → userScrolledAway stays false
+        // (This is the key fix: content growth doesn't trigger the pill)
+        #expect(!coordinator.userScrolledAway)
         #expect(coordinator.shouldAutoScroll)
     }
 
-    @Test("Initial shouldShowScrollToBottomButton is false")
-    func testInitialShouldShowScrollToBottomButtonIsFalse() {
+    @Test("Geometry near bottom clears userScrolledAway")
+    func testGeometryNearBottomClearsFlag() {
         let coordinator = ScrollStateCoordinator()
 
-        #expect(!coordinator.shouldShowScrollToBottomButton)
+        // Simulate user having scrolled away previously
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        #expect(coordinator.userScrolledAway)
+
+        // Now geometry reports near bottom (e.g. user scrolled back)
+        coordinator.geometryChanged(isNearBottom: true)
+
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
     }
 
-    // MARK: - Mode Transition Tests
+    // MARK: - User Scroll Detection (phase + geometry)
 
-    @Test("Scroll to target sets reviewing mode")
-    func testScrollToTargetSetsReviewingMode() {
+    @Test("User drag away from bottom sets userScrolledAway")
+    func testUserDragSetsScrolledAway() {
         let coordinator = ScrollStateCoordinator()
-        #expect(coordinator.mode == .following)
 
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+        // User starts dragging
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        // Geometry reports not near bottom while user is interacting
+        coordinator.geometryChanged(isNearBottom: false)
 
-        #expect(coordinator.mode == .reviewing)
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.shouldAutoScroll)
+        #expect(coordinator.shouldShowNewContentPill)
     }
 
-    @Test("Scroll to target clears unread content")
-    func testScrollToTargetClearsUnreadContent() {
+    @Test("User drag near bottom does not set userScrolledAway")
+    func testUserDragNearBottomDoesNotSet() {
         let coordinator = ScrollStateCoordinator()
 
-        // Put it in reviewing mode with unread content
-        coordinator.userDidScroll(isNearBottom: false)
-        coordinator.contentAdded()
-        #expect(coordinator.hasUnreadContent)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: true)
 
-        // Scroll to target
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-
-        #expect(!coordinator.hasUnreadContent)
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
     }
 
-    @Test("Scroll to target sets grace period")
-    func testScrollToTargetSetsGracePeriod() {
+    @Test("Deceleration phase counts as user interacting")
+    func testDecelerationIsUserInteracting() {
         let coordinator = ScrollStateCoordinator()
 
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        // Grace period should prevent immediate mode switches
-        coordinator.userDidScroll(isNearBottom: true)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .decelerating)
+        // Still user-interacting during deceleration
+        coordinator.geometryChanged(isNearBottom: false)
 
-        // Mode should still be reviewing because we're in grace period
-        #expect(coordinator.mode == .reviewing)
+        #expect(coordinator.userScrolledAway)
     }
 
-    @Test("User sent message resets to following")
-    func testUserSentMessageResetsToFollowing() {
+    @Test("User deceleration ending at bottom clears userScrolledAway")
+    func testDecelerationEndingAtBottomClears() {
         let coordinator = ScrollStateCoordinator()
 
-        // Put in reviewing mode
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        #expect(coordinator.mode == .reviewing)
+        // User scrolls away
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        #expect(coordinator.userScrolledAway)
+
+        // Momentum carries back to bottom
+        coordinator.scrollPhaseChanged(from: .interacting, to: .decelerating)
+        coordinator.geometryChanged(isNearBottom: true)
+        // userScrolledAway already cleared by geometryChanged(isNearBottom: true)
+        #expect(!coordinator.userScrolledAway)
+
+        // Deceleration ends
+        coordinator.scrollPhaseChanged(from: .decelerating, to: .idle)
+        #expect(!coordinator.userScrolledAway)
+    }
+
+    @Test("User deceleration ending away from bottom keeps userScrolledAway")
+    func testDecelerationEndingAwayKeeps() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .decelerating)
+        coordinator.scrollPhaseChanged(from: .decelerating, to: .idle)
+
+        #expect(coordinator.userScrolledAway)
+    }
+
+    // MARK: - Programmatic Scroll (animating phase)
+
+    @Test("Animating phase is not user interaction")
+    func testAnimatingPhaseNotUserInteraction() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollPhaseChanged(from: .idle, to: .animating)
+        coordinator.geometryChanged(isNearBottom: false)
+
+        // Programmatic scroll → should NOT set userScrolledAway
+        #expect(!coordinator.userScrolledAway)
+    }
+
+    // MARK: - User Actions
+
+    @Test("userSentMessage clears userScrolledAway")
+    func testUserSentMessage() {
+        let coordinator = ScrollStateCoordinator()
+
+        // User scrolled away
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        #expect(coordinator.userScrolledAway)
 
         coordinator.userSentMessage()
 
-        #expect(coordinator.mode == .following)
-    }
-
-    @Test("User tapped scroll to bottom resets to following")
-    func testUserTappedScrollToBottomResetsToFollowing() {
-        let coordinator = ScrollStateCoordinator()
-
-        // Put in reviewing mode
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        #expect(coordinator.mode == .reviewing)
-
-        coordinator.userTappedScrollToBottom()
-
-        #expect(coordinator.mode == .following)
-    }
-
-    @Test("User did scroll away from bottom switches to reviewing")
-    func testUserDidScrollSwitchesToReviewing() {
-        let coordinator = ScrollStateCoordinator()
-        #expect(coordinator.mode == .following)
-
-        coordinator.userDidScroll(isNearBottom: false)
-
-        #expect(coordinator.mode == .reviewing)
-    }
-
-    @Test("User did scroll near bottom stays following")
-    func testUserDidScrollNearBottomStaysFollowing() {
-        let coordinator = ScrollStateCoordinator()
-        #expect(coordinator.mode == .following)
-
-        coordinator.userDidScroll(isNearBottom: true)
-
-        #expect(coordinator.mode == .following)
-    }
-
-    @Test("User did scroll near bottom switches back to following from reviewing")
-    func testUserDidScrollNearBottomSwitchesBackToFollowing() {
-        let coordinator = ScrollStateCoordinator()
-
-        // Put in reviewing mode
-        coordinator.userDidScroll(isNearBottom: false)
-        #expect(coordinator.mode == .reviewing)
-
-        coordinator.userDidScroll(isNearBottom: true)
-
-        #expect(coordinator.mode == .following)
-    }
-
-    @Test("Switch from reviewing to following clears unread")
-    func testSwitchFromReviewingToFollowingClearsUnread() {
-        let coordinator = ScrollStateCoordinator()
-
-        // In reviewing mode with unread content
-        coordinator.userDidScroll(isNearBottom: false)
-        coordinator.contentAdded()
-        #expect(coordinator.hasUnreadContent)
-
-        // Scroll back to bottom
-        coordinator.userDidScroll(isNearBottom: true)
-
-        #expect(!coordinator.hasUnreadContent)
-        #expect(coordinator.mode == .following)
-    }
-
-    // MARK: - Content Changes Tests
-
-    @Test("Content added sets unread when reviewing")
-    func testContentAddedSetsUnreadWhenReviewing() {
-        let coordinator = ScrollStateCoordinator()
-
-        // Put in reviewing mode
-        coordinator.userDidScroll(isNearBottom: false)
-        #expect(!coordinator.hasUnreadContent)
-
-        coordinator.contentAdded()
-
-        #expect(coordinator.hasUnreadContent)
-    }
-
-    @Test("Content added does not set unread when following")
-    func testContentAddedDoesNotSetUnreadWhenFollowing() {
-        let coordinator = ScrollStateCoordinator()
-        #expect(coordinator.mode == .following)
-
-        coordinator.contentAdded()
-
-        #expect(!coordinator.hasUnreadContent)
-    }
-
-    @Test("Processing ended clears unread content")
-    func testProcessingEndedClearsUnreadContent() {
-        let coordinator = ScrollStateCoordinator()
-
-        // Set up unread content
-        coordinator.userDidScroll(isNearBottom: false)
-        coordinator.contentAdded()
-        #expect(coordinator.hasUnreadContent)
-
-        coordinator.processingEnded()
-
-        #expect(!coordinator.hasUnreadContent)
-    }
-
-    @Test("Multiple content adds stay true")
-    func testMultipleContentAddsAccumulate() {
-        let coordinator = ScrollStateCoordinator()
-
-        // In reviewing mode
-        coordinator.userDidScroll(isNearBottom: false)
-
-        coordinator.contentAdded()
-        coordinator.contentAdded()
-        coordinator.contentAdded()
-
-        #expect(coordinator.hasUnreadContent)
-    }
-
-    // MARK: - Scroll Button Visibility Tests
-
-    @Test("Should not show button after target scroll with no unread")
-    func testShouldNotShowButtonAfterTargetScrollWithNoUnread() {
-        let coordinator = ScrollStateCoordinator()
-
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-
-        #expect(!coordinator.shouldShowScrollToBottomButton)
-    }
-
-    @Test("Should show button after target scroll with new content")
-    func testShouldShowButtonAfterTargetScrollWithNewContent() {
-        let coordinator = ScrollStateCoordinator()
-
-        coordinator.scrollToTarget(messageId: UUID(), using: nil)
-        coordinator.contentAdded()
-
-        #expect(coordinator.shouldShowScrollToBottomButton)
-    }
-
-    @Test("Should auto scroll when following")
-    func testShouldAutoScrollWhenFollowing() {
-        let coordinator = ScrollStateCoordinator()
-        #expect(coordinator.mode == .following)
-
+        #expect(!coordinator.userScrolledAway)
         #expect(coordinator.shouldAutoScroll)
     }
 
-    @Test("Should not auto scroll when reviewing")
-    func testShouldNotAutoScrollWhenReviewing() {
+    @Test("userTappedScrollToBottom clears userScrolledAway")
+    func testUserTappedScrollToBottom() {
         let coordinator = ScrollStateCoordinator()
 
-        coordinator.userDidScroll(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        #expect(coordinator.userScrolledAway)
 
+        coordinator.userTappedScrollToBottom()
+
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    // MARK: - Navigation
+
+    @Test("scrollToTarget sets userScrolledAway")
+    func testScrollToTarget() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.scrollToTarget(messageId: UUID(), using: nil)
+
+        #expect(coordinator.userScrolledAway)
         #expect(!coordinator.shouldAutoScroll)
     }
 
-    // MARK: - History Loading Tests
+    // MARK: - History Loading
 
-    @Test("Will prepend history saves anchor ID")
-    func testWillPrependHistorySavesAnchorId() {
+    @Test("willPrependHistory saves anchor ID")
+    func testWillPrependHistory() {
         let coordinator = ScrollStateCoordinator()
         let anchorId = UUID()
 
         coordinator.willPrependHistory(firstVisibleId: anchorId)
 
-        // Mode should be unchanged
-        #expect(coordinator.mode == .following)
+        // Should not affect scroll state
+        #expect(!coordinator.userScrolledAway)
     }
 
-    @Test("Will prepend history with nil ID handles gracefully")
-    func testWillPrependHistoryWithNilIdHandlesGracefully() {
+    @Test("willPrependHistory with nil handles gracefully")
+    func testWillPrependHistoryNil() {
         let coordinator = ScrollStateCoordinator()
 
         coordinator.willPrependHistory(firstVisibleId: nil)
+        coordinator.didPrependHistory(using: nil)
 
-        #expect(coordinator.mode == .following)
+        #expect(!coordinator.userScrolledAway)
     }
 
-    @Test("Did prepend history clears anchor")
+    @Test("didPrependHistory clears anchor after use")
     func testDidPrependHistoryClearsAnchor() {
         let coordinator = ScrollStateCoordinator()
         let anchorId = UUID()
@@ -274,32 +209,94 @@ struct ScrollStateCoordinatorTests {
         coordinator.willPrependHistory(firstVisibleId: anchorId)
         coordinator.didPrependHistory(using: nil)
 
-        // Subsequent calls should be no-op (no crash)
+        // Subsequent calls should be no-op
         coordinator.didPrependHistory(using: nil)
-        #expect(coordinator.mode == .following)
+        #expect(!coordinator.userScrolledAway)
     }
 
-    // MARK: - Grace Period Edge Cases
+    // MARK: - Pill Visibility (requires isProcessing from caller)
 
-    @Test("Grace period from send prevents reviewing switch")
-    func testGracePeriodPreventsReviewingToFollowingSwitch() {
+    @Test("shouldShowNewContentPill is true when user scrolled away")
+    func testPillVisibleWhenScrolledAway() {
         let coordinator = ScrollStateCoordinator()
 
-        coordinator.userSentMessage()
-        // Scroll event during grace period (simulating layout changes)
-        coordinator.userDidScroll(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
 
-        // Should stay following
-        #expect(coordinator.mode == .following)
+        #expect(coordinator.shouldShowNewContentPill)
     }
 
-    @Test("Grace period from tap prevents switch")
-    func testGracePeriodFromTapPreventsSwitch() {
+    @Test("shouldShowNewContentPill is false when at bottom")
+    func testPillNotVisibleWhenAtBottom() {
         let coordinator = ScrollStateCoordinator()
 
+        #expect(!coordinator.shouldShowNewContentPill)
+    }
+
+    // MARK: - Bug Fix Scenarios
+
+    @Test("Post-processing content growth does not show pill")
+    func testPostProcessingContentGrowth() {
+        let coordinator = ScrollStateCoordinator()
+
+        // User never touched the scroll view — content grows from post-processing
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.geometryChanged(isNearBottom: false)
+
+        // No user interaction → no pill
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldShowNewContentPill)
+    }
+
+    @Test("Load earlier messages does not trigger pill")
+    func testLoadEarlierMessages() {
+        let coordinator = ScrollStateCoordinator()
+
+        // User is scrolled up to load history (user interaction sets this)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+        #expect(coordinator.userScrolledAway)
+
+        // Prepend history
+        coordinator.willPrependHistory(firstVisibleId: UUID())
+
+        // shouldShowNewContentPill is true but isProcessing is false
+        // so ChatView won't show the pill (isProcessing && shouldShowNewContentPill)
+        #expect(coordinator.shouldShowNewContentPill)
+        // The key: caller gates on isProcessing, which is false during history load
+    }
+
+    @Test("Content growth during streaming with no user touch does not show pill")
+    func testStreamingContentGrowthNoTouch() {
+        let coordinator = ScrollStateCoordinator()
+
+        // Streaming causes content growth, geometry momentarily not near bottom
+        coordinator.geometryChanged(isNearBottom: false)
+
+        // No user interaction → userScrolledAway stays false
+        #expect(!coordinator.userScrolledAway)
+        #expect(coordinator.shouldAutoScroll)
+    }
+
+    @Test("User scrolls up during streaming then taps pill")
+    func testUserScrollsUpDuringStreamingThenTapsPill() {
+        let coordinator = ScrollStateCoordinator()
+
+        // User drags up during streaming
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting)
+        coordinator.geometryChanged(isNearBottom: false)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle)
+
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.shouldShowNewContentPill)
+        #expect(!coordinator.shouldAutoScroll)
+
+        // User taps pill
         coordinator.userTappedScrollToBottom()
-        coordinator.userDidScroll(isNearBottom: false)
 
-        #expect(coordinator.mode == .following)
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.shouldShowNewContentPill)
+        #expect(coordinator.shouldAutoScroll)
     }
 }
