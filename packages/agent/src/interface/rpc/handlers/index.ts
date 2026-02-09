@@ -12,7 +12,6 @@ export {
   requireManager,
   withErrorHandling,
   createHandler,
-  ErrorCodes,
   notFoundError,
   type TypedHandler,
   type ParamsOf,

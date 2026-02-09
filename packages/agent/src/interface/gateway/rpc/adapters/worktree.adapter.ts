@@ -8,7 +8,7 @@
 import type { AdapterDependencies, WorktreeManagerAdapter } from '../types.js';
 
 /**
- * Creates a WorktreeManager adapter from EventStoreOrchestrator
+ * Creates a WorktreeController adapter from EventStoreOrchestrator
  */
 export function createWorktreeAdapter(deps: AdapterDependencies): WorktreeManagerAdapter {
   const { orchestrator } = deps;

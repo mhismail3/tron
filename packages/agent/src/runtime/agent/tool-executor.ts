@@ -5,7 +5,7 @@
  * Extracted from TronAgent for better separation of concerns.
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import type { HookEngine } from '@capabilities/extensions/hooks/engine.js';
 import type { ContextManager } from '@context/context-manager.js';
 import { createHookContextFactory, type HookContextFactory } from '@capabilities/extensions/hooks/index.js';
@@ -322,11 +322,7 @@ export class AgentToolExecutor implements IToolExecutor {
       case 'options': {
         const optionsExecute = tool.execute as (
           params: Record<string, unknown>,
-          options?: {
-            toolCallId?: string;
-            sessionId?: string;
-            signal?: AbortSignal;
-          }
+          options?: ToolExecutionOptions
         ) => Promise<TronToolResult>;
         return optionsExecute.call(tool, args, {
           toolCallId,

@@ -50,7 +50,6 @@ export {
   createHandler,
   withErrorHandling,
   notFoundError,
-  ErrorCodes,
   type TypedHandler,
   type ParamsOf,
   type CreateHandlerOptions,

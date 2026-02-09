@@ -74,7 +74,7 @@ export class TronAgent {
   private abortController: AbortController | null;
   readonly workingDirectory: string;
 
-  /** Per-run context — set via setters or run(content, runContext), consumed during turns */
+  /** Per-run context — passed to run(content, runContext), consumed during turns */
   private currentRunContext: import('./types.js').RunContext = {};
 
   // Extracted modules
@@ -198,13 +198,6 @@ export class TronAgent {
    */
   getModel(): string {
     return this.provider.model;
-  }
-
-  /**
-   * Get current reasoning level (from active run context).
-   */
-  getReasoningLevel(): import('./types.js').ReasoningLevel | undefined {
-    return this.currentRunContext.reasoningLevel;
   }
 
   /**

@@ -124,11 +124,6 @@ export function requireManager<K extends keyof RpcContext>(
 // Error Handling
 // =============================================================================
 
-/**
- * Standard error codes (re-exported from core/errors for backwards compatibility)
- * @deprecated Use RpcErrorCode from @core/errors/rpc-errors.js instead
- */
-export const ErrorCodes = RpcErrorCode;
 
 /**
  * Create an error response for a "not found" scenario
