@@ -488,10 +488,28 @@ struct ChatView: View {
                 // Auto-scroll during streaming
                 .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
                     guard initialLoadComplete else { return }
-                    guard viewModel.isProcessing else { return }
 
                     if scrollCoordinator.shouldAutoScroll {
                         withAnimation(.easeOut(duration: 0.15)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                    }
+                }
+                // Auto-scroll when ProcessingIndicator appears/disappears
+                .onChange(of: viewModel.isProcessing) { _, _ in
+                    guard initialLoadComplete else { return }
+                    guard scrollCoordinator.shouldAutoScroll else { return }
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                // Auto-scroll when ConnectionStatusPill appears/disappears
+                .onChange(of: rpcClient.connectionState) { _, _ in
+                    guard initialLoadComplete else { return }
+                    guard scrollCoordinator.shouldAutoScroll else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("bottom", anchor: .bottom)
                         }
                     }

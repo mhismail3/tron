@@ -118,10 +118,10 @@ extension ChatViewModel {
     }
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
-        // Clear stale flags (safety: handles events not arriving from previous cycle)
-        if agentPhase != .idle {
-            agentPhase = .idle
-        }
+        // A turn starting means the agent is actively processing.
+        // Also clears any stale postProcessing state from a previous cycle.
+        agentPhase = .processing
+
         if isCompacting {
             isCompacting = false
             compactionInProgressMessageId = nil

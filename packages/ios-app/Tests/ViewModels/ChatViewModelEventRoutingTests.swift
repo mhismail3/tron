@@ -357,6 +357,47 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     // MARK: - Turn Lifecycle Routing Tests
 
+    func test_turnStart_setsAgentPhaseToProcessing() {
+        // Given - agent is idle
+        viewModel.agentPhase = .idle
+
+        // When
+        let result = TurnStartPlugin.Result(turnNumber: 1)
+        viewModel.handleTurnStart(result)
+
+        // Then - should be processing (not idle)
+        XCTAssertEqual(viewModel.agentPhase, .processing)
+    }
+
+    func test_turnStart_restoresProcessingFromStalePostProcessing() {
+        // Given - stale postProcessing from a previous cycle that never got agent_ready
+        viewModel.agentPhase = .postProcessing
+
+        // When
+        let result = TurnStartPlugin.Result(turnNumber: 2)
+        viewModel.handleTurnStart(result)
+
+        // Then - should clear stale postProcessing and set to processing
+        XCTAssertEqual(viewModel.agentPhase, .processing)
+    }
+
+    func test_fullLifecycle_processingStateTransitions() {
+        // Given - simulate sendMessage sets processing
+        viewModel.agentPhase = .processing
+
+        // When - turn starts: should remain processing
+        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1))
+        XCTAssertEqual(viewModel.agentPhase, .processing)
+
+        // When - complete: should transition to postProcessing
+        viewModel.handleComplete()
+        XCTAssertEqual(viewModel.agentPhase, .postProcessing)
+
+        // When - agent ready: should transition to idle
+        viewModel.handleAgentReady()
+        XCTAssertEqual(viewModel.agentPhase, .idle)
+    }
+
     func test_turnStart_resetsToolTracking() {
         // Given - have some tool calls from previous turn
         viewModel.currentTurnToolCalls = [
