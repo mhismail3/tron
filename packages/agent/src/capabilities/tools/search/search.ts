@@ -9,7 +9,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import {
@@ -74,6 +74,7 @@ Examples:
 - Force: { "pattern": "test", "type": "ast" }`;
 
   readonly category = 'search' as const;
+  readonly executionContract = 'options' as const;
   readonly parameters = {
     type: 'object' as const,
     properties: {
@@ -113,7 +114,7 @@ Examples:
     this.config = config;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate pattern
     const patternValidation = validateRequiredString(
       args,

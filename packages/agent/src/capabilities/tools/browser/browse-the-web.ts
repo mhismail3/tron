@@ -2,7 +2,7 @@
  * @fileoverview BrowseTheWeb tool using agent-browser library
  */
 
-import type { TronTool, TronToolResult, ToolResultContentType } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolResultContentType, ToolExecutionOptions } from '@core/types/index.js';
 
 export interface BrowseTheWebToolConfig {
   workingDirectory?: string;
@@ -52,6 +52,7 @@ interface BrowserSession {
  */
 export class BrowseTheWebTool implements TronTool {
   readonly name = 'BrowseTheWeb';
+  readonly executionContract = 'options' as const;
   readonly description = `Control a web browser with automation capabilities using agent-browser.
 
 IMPORTANT: Execute browser actions ONE AT A TIME sequentially - wait for each action to complete before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.
@@ -199,7 +200,7 @@ The browser runs headless by default and streams frames to the iOS app.`;
     this.configuredSessionId = config.sessionId;
   }
 
-  async execute(params: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(params: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     if (!this.delegate) {
       return {
         content: [

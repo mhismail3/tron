@@ -4,7 +4,7 @@
  * Allows agents to send messages to other agent sessions.
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import type { MessageBus } from '@infrastructure/communication/bus/types.js';
 import type { SendMessageParams, SendMessageResult } from './types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
@@ -57,6 +57,8 @@ export class SendMessageTool implements TronTool<SendMessageParams, SendMessageR
     required: ['targetSessionId', 'messageType', 'payload'] as string[],
   };
 
+  readonly executionContract = 'options' as const;
+
   private config: SendMessageToolConfig;
 
   constructor(config: SendMessageToolConfig) {
@@ -66,7 +68,7 @@ export class SendMessageTool implements TronTool<SendMessageParams, SendMessageR
     };
   }
 
-  async execute(params: SendMessageParams): Promise<TronToolResult<SendMessageResult>> {
+  async execute(params: SendMessageParams, _options?: ToolExecutionOptions): Promise<TronToolResult<SendMessageResult>> {
     const { targetSessionId, messageType, payload, waitForReply, timeout } = params;
 
     try {

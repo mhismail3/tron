@@ -12,7 +12,7 @@
  * - Hour-level freshness via Exa
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import type {
   SearchProvider,
@@ -139,6 +139,7 @@ export class UnifiedSearchTool implements TronTool {
 
   readonly category = 'network' as const;
   readonly label = 'Web Search';
+  readonly executionContract = 'options' as const;
 
   private braveProvider?: SearchProvider;
   private exaProvider?: SearchProvider;
@@ -168,7 +169,7 @@ export class UnifiedSearchTool implements TronTool {
     });
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate query
     const query = args.query as string | undefined;
 

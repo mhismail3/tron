@@ -307,7 +307,7 @@ export class AgentToolExecutor implements IToolExecutor {
     toolCallId: string,
     args: Record<string, unknown>
   ): Promise<TronToolResult> {
-    const contract = tool.executionContract ?? 'legacy';
+    const contract = tool.executionContract;
     const signal = this.getAbortSignal() ?? new AbortController().signal;
 
     switch (contract) {
@@ -333,13 +333,6 @@ export class AgentToolExecutor implements IToolExecutor {
           sessionId: this.sessionId,
           signal,
         });
-      }
-      case 'legacy':
-      default: {
-        const legacyExecute = tool.execute as (
-          params: Record<string, unknown>
-        ) => Promise<TronToolResult>;
-        return legacyExecute.call(tool, args);
       }
     }
   }

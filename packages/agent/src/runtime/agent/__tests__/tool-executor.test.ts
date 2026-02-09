@@ -55,6 +55,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -79,6 +80,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'Tool result' }),
       };
       mockTools.set('TestTool', tool);
@@ -110,6 +112,7 @@ describe('AgentToolExecutor', () => {
         name: 'ErrorTool',
         description: 'Tool that throws',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockRejectedValue(new Error('Tool failed')),
       };
       mockTools.set('ErrorTool', tool);
@@ -132,6 +135,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -163,6 +167,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: executeFn,
       };
       mockTools.set('TestTool', tool);
@@ -174,15 +179,17 @@ describe('AgentToolExecutor', () => {
       });
 
       expect(executeFn).toHaveBeenCalledWith(
-        expect.objectContaining({ file_path: '/test.txt', line: 42 })
+        expect.objectContaining({ file_path: '/test.txt', line: 42 }),
+        expect.objectContaining({ toolCallId: 'call_123', sessionId: 'sess_test' })
       );
     });
 
-    it('preserves class tool context for legacy contract execution', async () => {
+    it('preserves class tool context for options contract execution', async () => {
       class ContextAwareTool implements TronTool<Record<string, unknown>> {
         readonly name = 'ContextAwareTool';
         readonly description = 'Uses instance config in execute';
         readonly parameters = { type: 'object' as const };
+        readonly executionContract = 'options' as const;
         private readonly config = { prefix: 'ctx' };
 
         async execute(args: Record<string, unknown>) {
@@ -212,8 +219,8 @@ describe('AgentToolExecutor', () => {
         name: 'NewTool',
         description: 'Tool with new signature',
         parameters: { type: 'object' },
+        executionContract: 'contextual' as const,
         execute: executeFn,
-        executionContract: 'contextual',
       };
       mockTools.set('NewTool', tool);
 
@@ -240,8 +247,8 @@ describe('AgentToolExecutor', () => {
         name: 'OptionsTool',
         description: 'Tool with options contract',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: executeFn,
-        executionContract: 'options',
       };
       mockTools.set('OptionsTool', tool);
 
@@ -256,28 +263,26 @@ describe('AgentToolExecutor', () => {
       expect(result.result.content).toContain('hasSignal=true');
     });
 
-    it('defaults to legacy execution contract when no contract is declared', async () => {
-      const executeFn = vi.fn(
-        async (_id: string, _args: Record<string, unknown>, _signal: AbortSignal) => ({
-          content: 'legacy fallback',
-        })
-      );
+    it('options contract passes args and options object', async () => {
+      const executeFn = vi.fn().mockResolvedValue({ content: 'ok' });
       const tool: TronTool = {
-        name: 'LegacyFallback',
-        description: 'Tool with multi-param function but no contract metadata',
+        name: 'OptionsTestTool',
+        description: 'Tool with options contract',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: executeFn,
       };
-      mockTools.set('LegacyFallback', tool);
+      mockTools.set('OptionsTestTool', tool);
 
       await executor.execute({
-        toolCallId: 'call_legacy',
-        toolName: 'LegacyFallback',
+        toolCallId: 'call_opts',
+        toolName: 'OptionsTestTool',
         arguments: { x: 1 },
       });
 
       expect(executeFn).toHaveBeenCalledWith(
-        expect.objectContaining({ x: 1 })
+        expect.objectContaining({ x: 1 }),
+        expect.objectContaining({ toolCallId: 'call_opts', sessionId: 'sess_test' })
       );
     });
 
@@ -286,6 +291,7 @@ describe('AgentToolExecutor', () => {
         name: 'StopTool',
         description: 'Tool that stops turn',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({
           content: 'Waiting for user input',
           stopTurn: true,
@@ -315,6 +321,7 @@ describe('AgentToolExecutor', () => {
         name: 'LargeTool',
         description: 'Tool with large output',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'x'.repeat(10000) }),
       };
       mockTools.set('LargeTool', tool);
@@ -333,6 +340,7 @@ describe('AgentToolExecutor', () => {
         name: 'ImageTool',
         description: 'Tool with image output',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({
           content: [
             { type: 'text', text: 'Here is an image:' },
@@ -366,6 +374,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -396,6 +405,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -426,6 +436,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: executeFn,
       };
       mockTools.set('TestTool', tool);
@@ -437,7 +448,8 @@ describe('AgentToolExecutor', () => {
       });
 
       expect(executeFn).toHaveBeenCalledWith(
-        expect.objectContaining({ original: 'value', extra: 'modified' })
+        expect.objectContaining({ original: 'value', extra: 'modified' }),
+        expect.any(Object)
       );
     });
 
@@ -455,6 +467,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -500,6 +513,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);
@@ -531,6 +545,7 @@ describe('AgentToolExecutor', () => {
         name: 'TestTool',
         description: 'Test tool',
         parameters: { type: 'object' },
+        executionContract: 'options' as const,
         execute: vi.fn().mockResolvedValue({ content: 'result' }),
       };
       mockTools.set('TestTool', tool);

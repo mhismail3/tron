@@ -5,7 +5,7 @@
  * Uses snapshot-based updates (each call replaces the full list).
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import type { TodoItem } from '../../todos/types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
@@ -67,6 +67,7 @@ export interface TodoWriteDetails {
 export class TodoWriteTool implements TronTool<TodoWriteParams, TodoWriteDetails> {
   readonly name = 'TodoWrite';
   readonly label = 'Task Manager';
+  readonly executionContract = 'options' as const;
   readonly description = `Create and manage a structured task list for your current session.
 
 ## When to Use
@@ -128,7 +129,7 @@ export class TodoWriteTool implements TronTool<TodoWriteParams, TodoWriteDetails
     this.config = config;
   }
 
-  async execute(args: TodoWriteParams): Promise<TronToolResult<TodoWriteDetails>> {
+  async execute(args: TodoWriteParams, _options?: ToolExecutionOptions): Promise<TronToolResult<TodoWriteDetails>> {
     // Validate required parameters
     if (!args.todos) {
       return {

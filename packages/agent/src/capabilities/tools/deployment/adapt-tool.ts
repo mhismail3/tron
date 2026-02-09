@@ -1,7 +1,7 @@
 import { spawnSync, spawn } from 'child_process';
 import { readFileSync, existsSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import type { TronTool, TronToolResult } from '@core/types/tools.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/tools.js';
 import type { AdaptToolConfig, AdaptParams, DeploymentRecord } from './types.js';
 
 export class AdaptTool implements TronTool<AdaptParams> {
@@ -30,6 +30,7 @@ The deploy action runs build+test synchronously, then triggers a detached swap s
 
   readonly requiresConfirmation = true;
   readonly category = 'custom' as const;
+  readonly executionContract = 'options' as const;
 
   private readonly config: AdaptToolConfig;
   private readonly tronScript: string;
@@ -43,7 +44,7 @@ The deploy action runs build+test synchronously, then triggers a detached swap s
     this.resultPath = join(config.tronHome, 'app', 'last-deployment.json');
   }
 
-  async execute(args: AdaptParams): Promise<TronToolResult> {
+  async execute(args: AdaptParams, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     const { action } = args;
     switch (action) {
       case 'deploy':  return this.deploy();

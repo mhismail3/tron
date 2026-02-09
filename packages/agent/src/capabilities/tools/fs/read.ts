@@ -5,7 +5,7 @@
  */
 
 import * as fs from 'fs/promises';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { ReadToolSettings } from '@infrastructure/settings/types.js';
@@ -35,6 +35,7 @@ export interface ReadToolConfig {
 
 export class ReadTool implements TronTool {
   readonly name = 'Read';
+  readonly executionContract = 'options' as const;
   readonly description = 'Read the contents of a file. Returns the file content with line numbers.';
   readonly parameters = {
     type: 'object' as const,
@@ -63,7 +64,7 @@ export class ReadTool implements TronTool {
     this.readSettings = config.readSettings ?? getDefaultReadSettings();
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate required parameters
     const stringValidation = validateRequiredString(
       args, 'file_path', 'the path to the file you want to read',

@@ -11,7 +11,7 @@
  * This is a deterministic tool - same inputs always produce same outputs.
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { BraveKeyRotator } from './brave-key-rotator.js';
 import { BraveMultiClient, type BraveSearchParams, type BraveSearchResult } from './brave-multi-client.js';
@@ -163,6 +163,7 @@ Tips:
 
   readonly category = 'network' as const;
   readonly label = 'Web Search';
+  readonly executionContract = 'options' as const;
 
   private client: BraveMultiClient;
   private configBlockedDomains: string[];
@@ -191,7 +192,7 @@ Tips:
     });
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate query parameter
     const query = args.query as string | undefined;
 

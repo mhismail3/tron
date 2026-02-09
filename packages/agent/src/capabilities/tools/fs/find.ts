@@ -7,7 +7,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { FindToolSettings } from '@infrastructure/settings/types.js';
@@ -44,6 +44,7 @@ interface FileEntry {
 
 export class FindTool implements TronTool {
   readonly name = 'Find';
+  readonly executionContract = 'options' as const;
   readonly description = 'Search for files matching a glob pattern. Returns file paths relative to search directory.';
   readonly category = 'search' as const;
   readonly parameters = {
@@ -95,7 +96,7 @@ export class FindTool implements TronTool {
     this.findSettings = config.findSettings ?? getDefaultFindSettings();
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate required parameters
     const patternValidation = validateRequiredString(
       args, 'pattern', 'a glob pattern to match files',

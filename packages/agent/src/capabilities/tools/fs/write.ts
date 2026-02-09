@@ -6,7 +6,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import {
   resolvePath,
@@ -22,6 +22,7 @@ export interface WriteToolConfig {
 
 export class WriteTool implements TronTool {
   readonly name = 'Write';
+  readonly executionContract = 'options' as const;
   readonly description = 'Write content to a file. Creates parent directories if they do not exist.';
   readonly parameters = {
     type: 'object' as const,
@@ -44,7 +45,7 @@ export class WriteTool implements TronTool {
     this.config = config;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate required parameters
     const pathValidation = validateRequiredString(args, 'file_path', 'the path to write to');
     if (!pathValidation.valid) return pathValidation.error!;

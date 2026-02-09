@@ -46,6 +46,7 @@ describe('Tool Types', () => {
           },
           required: ['path'],
         },
+        executionContract: 'contextual',
         execute: async (_toolCallId, _params, _signal) => {
           return {
             content: [{ type: 'text', text: 'file contents' }],
@@ -71,6 +72,7 @@ describe('Tool Types', () => {
           properties: { path: { type: 'string' } },
           required: ['path'],
         },
+        executionContract: 'options',
         execute: async () => {
           return {
             content: [{ type: 'text', text: 'line1\nline2' }],

@@ -5,7 +5,7 @@
  * It's a fire-and-forget operation - returns immediately after validating the URL.
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('tool:open-browser');
@@ -44,12 +44,13 @@ Examples:
 
   readonly label = 'Open Browser';
   readonly category = 'custom' as const;
+  readonly executionContract = 'options' as const;
 
   constructor(_config: OpenURLConfig = {}) {
     // Config accepted for API compatibility
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     const url = args.url as string | undefined;
 
     if (!url || typeof url !== 'string') {

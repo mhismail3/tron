@@ -20,7 +20,7 @@
  */
 
 import { Database, type SQLQueryBindings } from 'bun:sqlite';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import type { EmbeddingService } from '@infrastructure/embeddings/index.js';
 import type { VectorRepository } from '@infrastructure/events/sqlite/repositories/vector.repo.js';
@@ -126,6 +126,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
 
   readonly label = 'Remember';
   readonly category = 'custom' as const;
+  readonly executionContract = 'options' as const;
 
   private dbPath: string;
   private _db: Database | null = null;
@@ -152,7 +153,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.`;
     }
   }
 
-  async execute(params: RememberParams): Promise<TronToolResult> {
+  async execute(params: RememberParams, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     const limit = Math.max(1, Math.min(params.limit ?? 20, REMEMBER_MAX_LIMIT));
     const offset = Math.max(0, params.offset ?? 0);
 

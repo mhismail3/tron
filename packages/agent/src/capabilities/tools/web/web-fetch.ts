@@ -5,7 +5,7 @@
  * Provides 88-98% token savings compared to including raw web content in context.
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { validateUrl } from './url-validator.js';
 import { parseHtml } from './html-parser.js';
@@ -69,6 +69,7 @@ Note: Results are cached for 15 minutes. Same URL + same prompt = instant cached
 
   readonly category = 'network' as const;
   readonly label = 'Web Fetch';
+  readonly executionContract = 'options' as const;
 
   private config: WebFetchToolConfig;
   private cache: WebCache;
@@ -78,7 +79,7 @@ Note: Results are cached for 15 minutes. Same URL + same prompt = instant cached
     this.cache = new WebCache(config.cache);
   }
 
-  async execute(args: WebFetchParams): Promise<TronToolResult<WebFetchResult>> {
+  async execute(args: WebFetchParams, _options?: ToolExecutionOptions): Promise<TronToolResult<WebFetchResult>> {
     // Validate required parameters
     const url = args.url as string | undefined;
     const prompt = args.prompt as string | undefined;

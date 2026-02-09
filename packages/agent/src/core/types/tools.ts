@@ -84,7 +84,7 @@ export type ToolProgressCallback = (update: string) => void;
 /**
  * Explicit execution contract for tool invocation.
  */
-export type ToolExecutionContract = 'legacy' | 'contextual' | 'options';
+export type ToolExecutionContract = 'contextual' | 'options';
 
 /**
  * Structured execution options for tools that use the options contract.
@@ -99,9 +99,6 @@ export interface ToolExecutionOptions {
 /**
  * Tool execution function signatures.
  *
- * `legacy`:
- * - execute(params)
- *
  * `contextual`:
  * - execute(toolCallId, params, signal)
  *
@@ -112,7 +109,6 @@ export type ToolExecuteFunction<
   TParams = never,
   TDetails = unknown,
 > =
-  | ((params: TParams) => Promise<TronToolResult<TDetails>>)
   | ((
       toolCallId: string,
       params: TParams,
@@ -147,9 +143,8 @@ export interface TronTool<
 
   /**
    * Explicit invocation contract used by AgentToolExecutor.
-   * If omitted, executor defaults to the `legacy` contract.
    */
-  executionContract?: ToolExecutionContract;
+  executionContract: ToolExecutionContract;
 
   /**
    * Optional timeout in milliseconds

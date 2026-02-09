@@ -6,7 +6,7 @@
  */
 
 import * as fs from 'fs/promises';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger, categorizeError } from '@infrastructure/logging/index.js';
 import {
   resolvePath,
@@ -93,6 +93,7 @@ export interface EditToolConfig {
 
 export class EditTool implements TronTool {
   readonly name = 'Edit';
+  readonly executionContract = 'options' as const;
   readonly description = 'Edit a file by replacing old_string with new_string. Requires exact match.';
   readonly parameters = {
     type: 'object' as const,
@@ -124,7 +125,7 @@ export class EditTool implements TronTool {
     this.config = config;
   }
 
-  async execute(args: Record<string, unknown>): Promise<TronToolResult> {
+  async execute(args: Record<string, unknown>, _options?: ToolExecutionOptions): Promise<TronToolResult> {
     // Validate required parameters
     const pathValidation = validateRequiredString(args, 'file_path', 'the path to the file to edit');
     if (!pathValidation.valid) return pathValidation.error!;

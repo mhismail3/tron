@@ -4,7 +4,7 @@
  * Allows agents to receive messages from other agent sessions.
  */
 
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import type { MessageBus } from '@infrastructure/communication/bus/types.js';
 import type { ReceiveMessagesParams, ReceiveMessagesResult, ReceivedMessage } from './types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
@@ -54,6 +54,8 @@ export class ReceiveMessagesTool implements TronTool<ReceiveMessagesParams, Rece
     required: [] as string[],
   };
 
+  readonly executionContract = 'options' as const;
+
   private config: ReceiveMessagesToolConfig;
 
   constructor(config: ReceiveMessagesToolConfig) {
@@ -63,7 +65,7 @@ export class ReceiveMessagesTool implements TronTool<ReceiveMessagesParams, Rece
     };
   }
 
-  async execute(params: ReceiveMessagesParams): Promise<TronToolResult<ReceiveMessagesResult>> {
+  async execute(params: ReceiveMessagesParams, _options?: ToolExecutionOptions): Promise<TronToolResult<ReceiveMessagesResult>> {
     const { type, fromSessionId, limit, markAsRead = true } = params;
 
     try {
