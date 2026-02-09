@@ -31,10 +31,6 @@ function createMockActiveSession(): ActiveSession {
       messages: [],
       totalTokenUsage: { inputTokens: 100, outputTokens: 50 },
     } as RunResult),
-    setSkillContext: vi.fn(),
-    setSubagentResultsContext: vi.fn(),
-    setTodoContext: vi.fn(),
-    setReasoningLevel: vi.fn(),
   };
 
   const mockSessionContext = {
@@ -72,7 +68,6 @@ function createMockActiveSession(): ActiveSession {
     sessionContext: mockSessionContext as any,
     skillTracker: mockSkillTracker as any,
     todoTracker: mockTodoTracker as any,
-    lastActivity: new Date(),
     workingDirectory: '/test/project',
     model: 'claude-sonnet-4-20250514',
     currentTurn: 0,

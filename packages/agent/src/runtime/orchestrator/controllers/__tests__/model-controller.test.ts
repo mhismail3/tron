@@ -66,7 +66,7 @@ function createMockConfig(overrides: Partial<ModelControllerConfig> = {}): Model
   return {
     eventStore: mockEventStore as any,
     authProvider: mockAuthProvider as any,
-    getActiveSession: vi.fn().mockReturnValue(undefined),
+    sessionStore: { get: vi.fn().mockReturnValue(undefined) } as any,
     normalizeToUnifiedAuth: vi.fn().mockImplementation((auth) => auth),
     ...overrides,
   };
@@ -109,7 +109,7 @@ describe('ModelController', () => {
     it('throws if active session is processing', async () => {
       const active = createMockActiveSession();
       (active.sessionContext.isProcessing as Mock).mockReturnValue(true);
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
 
       await expect(controller.switchModel('sess_test123', 'gpt-4o'))
         .rejects.toThrow('Cannot switch model while agent is processing');
@@ -119,7 +119,7 @@ describe('ModelController', () => {
   describe('switchModel() - Event Persistence', () => {
     it('appends config.model_switch event via sessionContext for active session', async () => {
       const active = createMockActiveSession();
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 
@@ -133,7 +133,7 @@ describe('ModelController', () => {
     });
 
     it('appends config.model_switch event directly for inactive session', async () => {
-      (config.getActiveSession as Mock).mockReturnValue(undefined);
+      (config.sessionStore.get as Mock).mockReturnValue(undefined);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 
@@ -162,7 +162,7 @@ describe('ModelController', () => {
   describe('switchModel() - Active Session Updates', () => {
     it('updates active session model property', async () => {
       const active = createMockActiveSession();
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 
@@ -171,7 +171,7 @@ describe('ModelController', () => {
 
     it('updates provider type for token normalization', async () => {
       const active = createMockActiveSession();
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 
@@ -180,7 +180,7 @@ describe('ModelController', () => {
 
     it('loads auth for new model', async () => {
       const active = createMockActiveSession();
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 
@@ -189,7 +189,7 @@ describe('ModelController', () => {
 
     it('switches agent model with normalized auth', async () => {
       const active = createMockActiveSession();
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
       (config.authProvider.getAuthForProvider as Mock).mockResolvedValue({
         type: 'api_key',
         apiKey: 'openai-key',
@@ -206,7 +206,7 @@ describe('ModelController', () => {
 
     it('preserves endpoint for Google models', async () => {
       const active = createMockActiveSession();
-      (config.getActiveSession as Mock).mockReturnValue(active);
+      (config.sessionStore.get as Mock).mockReturnValue(active);
       (config.authProvider.getAuthForProvider as Mock).mockResolvedValue({
         type: 'oauth',
         accessToken: 'google-token',
@@ -238,7 +238,7 @@ describe('ModelController', () => {
 
   describe('switchModel() - No Active Session', () => {
     it('skips agent updates when session is not active', async () => {
-      (config.getActiveSession as Mock).mockReturnValue(undefined);
+      (config.sessionStore.get as Mock).mockReturnValue(undefined);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 
@@ -247,7 +247,7 @@ describe('ModelController', () => {
     });
 
     it('still persists to database when session is not active', async () => {
-      (config.getActiveSession as Mock).mockReturnValue(undefined);
+      (config.sessionStore.get as Mock).mockReturnValue(undefined);
 
       await controller.switchModel('sess_test123', 'gpt-4o');
 

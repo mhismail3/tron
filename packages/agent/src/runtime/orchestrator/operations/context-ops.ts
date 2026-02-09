@@ -19,7 +19,7 @@ import type {
   CompactionPreview,
   CompactionResult,
 } from '@context/context-manager.js';
-import type { ActiveSession } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 
 const logger = createLogger('context-ops');
 
@@ -28,8 +28,8 @@ const logger = createLogger('context-ops');
 // =============================================================================
 
 export interface ContextOpsConfig {
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
 }
@@ -55,7 +55,7 @@ export class ContextOps {
    * For inactive sessions, returns a default snapshot with zero usage.
    */
   getContextSnapshot(sessionId: string): ContextSnapshot {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       // Return default snapshot for inactive sessions
       // Use default model's context limit (200k for Claude Sonnet 4)
@@ -80,7 +80,7 @@ export class ContextOps {
    * Returns empty messages array for inactive sessions.
    */
   getDetailedContextSnapshot(sessionId: string): DetailedContextSnapshot {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       // Return default snapshot for inactive sessions
       return {
@@ -173,7 +173,7 @@ export class ContextOps {
    * Returns false for inactive sessions (nothing to compact).
    */
   shouldCompact(sessionId: string): boolean {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       return false; // Inactive sessions don't need compaction
     }
@@ -185,7 +185,7 @@ export class ContextOps {
    * Returns estimated token reduction and generated summary.
    */
   async previewCompaction(sessionId: string): Promise<CompactionPreview> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       const err = new Error('Session not active');
       (err as any).code = 'SESSION_NOT_ACTIVE';
@@ -204,7 +204,7 @@ export class ContextOps {
     sessionId: string,
     opts?: { editedSummary?: string; reason?: string }
   ): Promise<CompactionResult> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       const err = new Error('Session not active');
       (err as any).code = 'SESSION_NOT_ACTIVE';
@@ -279,7 +279,7 @@ export class ContextOps {
     sessionId: string,
     opts: { estimatedResponseTokens: number }
   ): PreTurnValidation {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       // Inactive sessions can always accept turns - they'll be activated first
       return {
@@ -311,7 +311,7 @@ export class ContextOps {
     tokensAfter: number;
     clearedTodos: Array<{ id: string; content: string; status: string; source: string }>;
   }> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       const err = new Error('Session not active');
       (err as any).code = 'SESSION_NOT_ACTIVE';
@@ -378,7 +378,7 @@ export class ContextOps {
    * Prefers the agent's LLM summarizer if available.
    */
   private getSummarizer(sessionId: string): Summarizer {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     return active?.agent.getSummarizer() ?? new KeywordSummarizer();
   }
 }

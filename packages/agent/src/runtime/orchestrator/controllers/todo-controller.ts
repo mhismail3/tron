@@ -18,7 +18,7 @@ import { createLogger } from '@infrastructure/logging/index.js';
 import { BacklogService, createBacklogService } from '@capabilities/todos/backlog-service.js';
 import type { TodoItem, BackloggedTask } from '@capabilities/todos/types.js';
 import type { EventStore } from '@infrastructure/events/event-store.js';
-import type { ActiveSession } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 
 const logger = createLogger('todo-controller');
 
@@ -27,8 +27,8 @@ const logger = createLogger('todo-controller');
 // =============================================================================
 
 export interface TodoControllerConfig {
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Event store for backlog service */
   eventStore: EventStore;
   /** Emit event */
@@ -73,7 +73,7 @@ export class TodoController {
    * Updates the tracker and persists a todo.write event.
    */
   async handleTodosUpdated(sessionId: string, todos: TodoItem[]): Promise<void> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       throw new Error(`Session not found: ${sessionId}`);
     }
@@ -106,7 +106,7 @@ export class TodoController {
    * Get current todos for a session.
    */
   getTodos(sessionId: string): TodoItem[] {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       return [];
     }
@@ -117,7 +117,7 @@ export class TodoController {
    * Get todo summary for a session.
    */
   getTodoSummary(sessionId: string): string {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       return 'no tasks';
     }
@@ -147,7 +147,7 @@ export class TodoController {
    * Creates new TodoItems in the session and records a todo.write event.
    */
   async restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<TodoItem[]> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       const err = new Error('Session not active');
       (err as any).code = 'SESSION_NOT_ACTIVE';
@@ -204,7 +204,7 @@ export class TodoController {
     workspaceId: string,
     reason: 'session_clear' | 'context_compact' | 'session_end'
   ): Promise<number> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     if (!active) {
       return 0;
     }

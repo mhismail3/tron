@@ -34,7 +34,7 @@ describe('SpawnHandler tmux hardening', () => {
   const mockedSpawn = vi.mocked(spawn);
 
   let appendEventLinearized: Mock;
-  let getActiveSession: Mock;
+  let mockSessionStoreGet: Mock;
   let handler: SpawnHandler;
 
   beforeEach(() => {
@@ -51,7 +51,7 @@ describe('SpawnHandler tmux hardening', () => {
       },
     } as unknown as ActiveSession;
 
-    getActiveSession = vi.fn().mockReturnValue(mockParentSession);
+    mockSessionStoreGet = vi.fn().mockReturnValue(mockParentSession);
     appendEventLinearized = vi.fn();
 
     const mockEventStore = {
@@ -60,7 +60,7 @@ describe('SpawnHandler tmux hardening', () => {
 
     handler = createSpawnHandler({
       eventStore: mockEventStore,
-      getActiveSession,
+      sessionStore: { get: mockSessionStoreGet } as any,
       createSession: vi.fn(),
       runAgent: vi.fn(),
       appendEventLinearized,

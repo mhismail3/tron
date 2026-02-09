@@ -72,6 +72,7 @@ import { createTrackerReconstructor } from '../tracker-reconstructor.js';
 import { createSessionContext } from '../session-context.js';
 import { buildWorktreeInfo } from '../../operations/worktree-ops.js';
 import type { ActiveSession } from '../../types.js';
+import type { ActiveSessionStore } from '../active-session-store.js';
 import { DEFAULT_SETTINGS } from '@infrastructure/settings/defaults.js';
 
 const mockGetSettings = vi.mocked(getSettings);
@@ -204,19 +205,27 @@ function createMockWorktreeCoordinator() {
   };
 }
 
-function createConfig(overrides: Partial<SessionManagerConfig> = {}): SessionManagerConfig {
+function createMockSessionStore(): ActiveSessionStore {
   const activeSessions = new Map<string, ActiveSession>();
 
+  return {
+    get: (id: string) => activeSessions.get(id),
+    set: (id: string, session: ActiveSession) => { activeSessions.set(id, session); },
+    delete: (id: string) => { activeSessions.delete(id); },
+    clear: () => { activeSessions.clear(); },
+    get size() { return activeSessions.size; },
+    entries: () => activeSessions.entries(),
+    values: () => activeSessions.values(),
+  };
+}
+
+function createConfig(overrides: Partial<SessionManagerConfig> = {}): SessionManagerConfig {
   return {
     eventStore: createMockEventStore() as any,
     worktreeCoordinator: createMockWorktreeCoordinator() as any,
     defaultModel: 'claude-sonnet-4-5-20250929',
     defaultProvider: 'anthropic',
-    getActiveSession: (id: string) => activeSessions.get(id),
-    setActiveSession: (id: string, session: ActiveSession) => activeSessions.set(id, session),
-    deleteActiveSession: (id: string) => activeSessions.delete(id),
-    getActiveSessionCount: () => activeSessions.size,
-    getAllActiveSessions: () => activeSessions.entries(),
+    sessionStore: createMockSessionStore(),
     createAgentForSession: vi.fn().mockResolvedValue(createMockAgent()),
     emit: vi.fn(),
     estimateTokens: vi.fn().mockReturnValue(100),

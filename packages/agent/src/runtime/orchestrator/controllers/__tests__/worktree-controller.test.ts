@@ -13,7 +13,7 @@ import type { ActiveSession } from '../../types.js';
 
 describe('WorktreeController', () => {
   let mockWorktreeCoordinator: any;
-  let mockGetActiveSession: ReturnType<typeof vi.fn>;
+  let mockSessionStore: { get: ReturnType<typeof vi.fn> };
   let controller: WorktreeController;
 
   const mockWorkingDir = '/test/worktree';
@@ -24,11 +24,11 @@ describe('WorktreeController', () => {
       listWorktrees: vi.fn(),
     };
 
-    mockGetActiveSession = vi.fn();
+    mockSessionStore = { get: vi.fn() };
 
     controller = createWorktreeController({
       worktreeCoordinator: mockWorktreeCoordinator,
-      getActiveSession: mockGetActiveSession,
+      sessionStore: mockSessionStore as any,
     });
   });
 
@@ -38,7 +38,7 @@ describe('WorktreeController', () => {
 
   describe('getStatus', () => {
     it('returns null when session not found', async () => {
-      mockGetActiveSession.mockReturnValue(undefined);
+      mockSessionStore.get.mockReturnValue(undefined);
 
       const result = await controller.getStatus('sess-123');
 
@@ -46,7 +46,7 @@ describe('WorktreeController', () => {
     });
 
     it('returns null when session has no worktree', async () => {
-      mockGetActiveSession.mockReturnValue({ workingDir: null } as any);
+      mockSessionStore.get.mockReturnValue({ workingDir: null } as any);
 
       const result = await controller.getStatus('sess-123');
 
@@ -54,7 +54,7 @@ describe('WorktreeController', () => {
     });
 
     it('returns worktree info for session with worktree', async () => {
-      mockGetActiveSession.mockReturnValue({ workingDir: mockWorkingDir } as any);
+      mockSessionStore.get.mockReturnValue({ workingDir: mockWorkingDir } as any);
 
       // Mock the buildWorktreeInfoWithStatus function by testing the controller
       // delegates correctly - the actual git operations are tested in integration tests
@@ -62,7 +62,7 @@ describe('WorktreeController', () => {
 
       // Result will be null in unit test since we can't mock the file system
       // The important thing is the method doesn't throw
-      expect(mockGetActiveSession).toHaveBeenCalledWith('sess-123');
+      expect(mockSessionStore.get).toHaveBeenCalledWith('sess-123');
     });
   });
 
@@ -72,7 +72,7 @@ describe('WorktreeController', () => {
 
   describe('commit', () => {
     it('returns error when session not found', async () => {
-      mockGetActiveSession.mockReturnValue(undefined);
+      mockSessionStore.get.mockReturnValue(undefined);
 
       const result = await controller.commit('sess-123', 'Test commit');
 
@@ -81,7 +81,7 @@ describe('WorktreeController', () => {
     });
 
     it('returns error when session has no worktree', async () => {
-      mockGetActiveSession.mockReturnValue({ workingDir: null } as any);
+      mockSessionStore.get.mockReturnValue({ workingDir: null } as any);
 
       const result = await controller.commit('sess-123', 'Test commit');
 
@@ -90,13 +90,13 @@ describe('WorktreeController', () => {
     });
 
     it('attempts commit for session with worktree', async () => {
-      mockGetActiveSession.mockReturnValue({ workingDir: mockWorkingDir } as any);
+      mockSessionStore.get.mockReturnValue({ workingDir: mockWorkingDir } as any);
 
       // The actual git operations are tested in integration tests
       // Here we just verify the method doesn't throw
       const result = await controller.commit('sess-123', 'Test commit');
 
-      expect(mockGetActiveSession).toHaveBeenCalledWith('sess-123');
+      expect(mockSessionStore.get).toHaveBeenCalledWith('sess-123');
     });
   });
 
@@ -192,7 +192,7 @@ describe('WorktreeController', () => {
     it('creates a WorktreeController instance', () => {
       const ctrl = createWorktreeController({
         worktreeCoordinator: mockWorktreeCoordinator,
-        getActiveSession: mockGetActiveSession,
+        sessionStore: mockSessionStore as any,
       });
 
       expect(ctrl).toBeInstanceOf(WorktreeController);

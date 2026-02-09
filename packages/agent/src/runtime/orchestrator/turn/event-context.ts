@@ -32,6 +32,7 @@
 
 import type { SessionId, EventType, SessionEvent as TronSessionEvent } from '@infrastructure/events/types.js';
 import type { ActiveSession } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 
 // =============================================================================
 // Types
@@ -65,8 +66,8 @@ export type AgentEventType =
  * Injected from the coordinator (AgentEventHandler).
  */
 export interface EventContextDeps {
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Append event to session (fire-and-forget, linearized) */
   appendEventLinearized: (
     sessionId: SessionId,
@@ -153,7 +154,7 @@ export class EventContextImpl implements EventContext {
     this.deps = deps;
 
     // Resolve session ONCE at creation
-    this.active = deps.getActiveSession(sessionId);
+    this.active = deps.sessionStore.get(sessionId);
     this.runId = this.active?.currentRunId;
 
     // Expose appendEventLinearized for special cases (with callbacks)

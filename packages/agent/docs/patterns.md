@@ -378,6 +378,43 @@ export function loadAuthStorageSync(): AuthStorage | null {
 
 **Files:** `infrastructure/auth/unified.ts`
 
+## Error Handling Strategy
+
+Each architectural layer has a distinct error philosophy. Using the wrong strategy in a layer causes either unnecessary crashes or swallowed failures.
+
+| Layer | Strategy | Behavior | Rationale |
+|-------|----------|----------|-----------|
+| **Hooks** | Fail-open | Log + continue | Extensions must not crash core |
+| **Memory** | Fail-silent | Log, swallow | Memory loss is preferable to crash |
+| **Tools** | Fail-result | Return `isError` result | LLM can read the error and recover |
+| **Agent** | Fail-loud | Persist `error.agent` event, throw | Caller (orchestrator) must handle |
+| **RPC** | Fail-code | Return `RpcError` with typed code | Client needs structured error codes |
+
+### Hooks (fail-open)
+Hook failures are logged but never propagate. A broken hook must not prevent the agent from completing its work. Background hooks run in parallel and their errors are tracked via `BackgroundTracker`.
+
+**Files:** `capabilities/extensions/hooks/engine.ts`
+
+### Memory (fail-silent)
+Memory operations (embedding, ledger writes, compaction) catch all errors and log them. Losing a memory entry is acceptable; crashing the session is not.
+
+**Files:** `runtime/orchestrator/operations/memory-manager.ts`
+
+### Tools (fail-result)
+Tool execution errors are returned as `{ content: errorMessage, isError: true }` — the LLM sees the error and can decide to retry, try a different approach, or report to the user.
+
+**Files:** `runtime/agent/tool-executor.ts`
+
+### Agent (fail-loud)
+Agent-level errors (LLM API failures, unrecoverable state) are persisted as `error.agent` events and then re-thrown. The orchestrator catches these and emits `agent.complete` with `success: false`.
+
+**Files:** `runtime/orchestrator/agent-runner.ts`
+
+### RPC (fail-code)
+RPC handlers throw typed `RpcError` subclasses with numeric codes. The registry catches these and maps them to structured JSON-RPC error responses with `code`, `message`, and `data` fields.
+
+**Files:** `interface/rpc/rpc-errors.ts`, `interface/rpc/registry.ts`
+
 ## Pattern Selection Guide
 
 | Situation | Pattern |

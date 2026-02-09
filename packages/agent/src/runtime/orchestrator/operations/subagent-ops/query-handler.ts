@@ -6,7 +6,7 @@
 import { createLogger } from '@infrastructure/logging/index.js';
 import type { EventStore, SessionId, TronSessionEvent } from '@infrastructure/events/index.js';
 import type { SubagentQueryType } from '@capabilities/tools/subagent/index.js';
-import type { ActiveSession } from '../../types.js';
+import type { ActiveSessionStore } from '../../session/active-session-store.js';
 import type { QuerySubagentResult } from './types.js';
 
 const logger = createLogger('subagent-query');
@@ -21,8 +21,8 @@ const logger = createLogger('subagent-query');
 export interface QueryHandlerDeps {
   /** EventStore for querying session data */
   eventStore: EventStore;
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
 }
 
 // =============================================================================
@@ -61,7 +61,7 @@ export class QueryHandler {
           const isEnded = session.endedAt !== null;
           let status: 'running' | 'completed' | 'failed' | 'unknown' =
             'unknown';
-          if (this.deps.getActiveSession(sessionId)) {
+          if (this.deps.sessionStore.get(sessionId)) {
             status = 'running';
           } else if (isEnded) {
             // Check if there's a failure event

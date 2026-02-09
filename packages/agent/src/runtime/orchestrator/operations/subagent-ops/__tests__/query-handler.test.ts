@@ -10,14 +10,14 @@ describe('QueryHandler', () => {
   let getSession: Mock;
   let getAncestors: Mock;
   let getLogsForSession: Mock;
-  let getActiveSession: Mock;
+  let mockSessionStoreGet: Mock;
   let handler: QueryHandler;
 
   beforeEach(() => {
     getSession = vi.fn();
     getAncestors = vi.fn();
     getLogsForSession = vi.fn();
-    getActiveSession = vi.fn();
+    mockSessionStoreGet = vi.fn();
 
     const mockEventStore = {
       getSession,
@@ -27,7 +27,7 @@ describe('QueryHandler', () => {
 
     handler = createQueryHandler({
       eventStore: mockEventStore,
-      getActiveSession,
+      sessionStore: { get: mockSessionStoreGet } as any,
     });
   });
 
@@ -56,7 +56,7 @@ describe('QueryHandler', () => {
         latestModel: 'claude-3-sonnet',
         workingDirectory: '/test',
       });
-      getActiveSession.mockReturnValue({} as ActiveSession);
+      mockSessionStoreGet.mockReturnValue({} as ActiveSession);
 
       const result = await handler.querySubagent('sess_123', 'status');
 
@@ -75,7 +75,7 @@ describe('QueryHandler', () => {
         spawnTask: 'Test task',
         turnCount: 5,
       });
-      getActiveSession.mockReturnValue(undefined);
+      mockSessionStoreGet.mockReturnValue(undefined);
       getAncestors.mockResolvedValue([
         { id: 'evt_1', type: 'message.user', timestamp: '', payload: {} },
         { id: 'evt_2', type: 'message.assistant', timestamp: '', payload: {} },
@@ -96,7 +96,7 @@ describe('QueryHandler', () => {
         spawnTask: 'Test task',
         turnCount: 2,
       });
-      getActiveSession.mockReturnValue(undefined);
+      mockSessionStoreGet.mockReturnValue(undefined);
       getAncestors.mockResolvedValue([
         { id: 'evt_1', type: 'message.user', timestamp: '', payload: {} },
         { id: 'evt_2', type: 'error.agent', timestamp: '', payload: {} },

@@ -11,12 +11,12 @@ import type {
 } from '@capabilities/tools/subagent/index.js';
 import type { SubagentResult } from '@capabilities/tools/subagent/index.js';
 import type {
-  ActiveSession,
   AgentRunOptions,
   SessionInfo,
   CreateSessionOptions,
 } from '../../types.js';
 import type { RunResult } from '../../../agent/types.js';
+import type { ActiveSessionStore } from '../../session/active-session-store.js';
 
 // =============================================================================
 // Configuration Types
@@ -28,8 +28,8 @@ import type { RunResult } from '../../../agent/types.js';
 export interface SubagentOperationsConfig {
   /** EventStore instance for querying sessions */
   eventStore: EventStore;
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Create a new session */
   createSession: (options: CreateSessionOptions) => Promise<SessionInfo>;
   /** Run agent for a session - returns RunResult[] */

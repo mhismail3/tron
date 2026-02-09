@@ -10,11 +10,11 @@ import type { SessionId, EventType } from '@infrastructure/events/index.js';
 import type { SpawnSubagentParams, SubagentCompletionType } from '@capabilities/tools/subagent/index.js';
 import { spawn as spawnProcess } from 'child_process';
 import type {
-  ActiveSession,
   AgentRunOptions,
   SessionInfo,
   CreateSessionOptions,
 } from '../../types.js';
+import type { ActiveSessionStore } from '../../session/active-session-store.js';
 import type { SpawnSubagentResult, SpawnTmuxAgentResult } from './types.js';
 import type { RunResult } from '../../../agent/types.js';
 import { DEFAULT_GUARDRAIL_TIMEOUT_MS, TMUX_STARTUP_TIMEOUT_MS } from '../../../constants.js';
@@ -28,8 +28,8 @@ const TMUX_SESSION_NAME_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
 export interface SpawnHandlerDeps {
   /** EventStore instance for querying sessions */
   eventStore: EventStore;
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Create a new session */
   createSession: (options: CreateSessionOptions) => Promise<SessionInfo>;
   /** Run agent for a session - returns RunResult[] */
@@ -67,7 +67,7 @@ export class SpawnHandler {
     params: SpawnSubagentParams,
     toolCallId?: string
   ): Promise<SpawnSubagentResult> {
-    const parent = this.deps.getActiveSession(parentSessionId);
+    const parent = this.deps.sessionStore.get(parentSessionId);
     if (!parent) {
       return {
         sessionId: '',
@@ -237,7 +237,7 @@ export class SpawnHandler {
     parentSessionId: string,
     params: SpawnSubagentParams
   ): Promise<SpawnTmuxAgentResult> {
-    const parent = this.deps.getActiveSession(parentSessionId);
+    const parent = this.deps.sessionStore.get(parentSessionId);
     if (!parent) {
       return {
         sessionId: '',
@@ -416,7 +416,7 @@ export class SpawnHandler {
     }, guardrailTimeoutMs);
 
     try {
-      const parent = this.deps.getActiveSession(parentSessionId);
+      const parent = this.deps.sessionStore.get(parentSessionId);
 
       // Update status to running
       if (parent) {
@@ -532,7 +532,7 @@ export class SpawnHandler {
 
       // Update tracker (this triggers waiting promises and callbacks)
       // Re-fetch parent since time has passed
-      const currentParent = this.deps.getActiveSession(parentSessionId);
+      const currentParent = this.deps.sessionStore.get(parentSessionId);
       if (currentParent) {
         currentParent.subagentTracker.complete(
           sessionId as SessionId,
@@ -654,7 +654,7 @@ export class SpawnHandler {
 
       // Update tracker
       // Re-fetch parent since time has passed
-      const currentParent = this.deps.getActiveSession(parentSessionId);
+      const currentParent = this.deps.sessionStore.get(parentSessionId);
       if (currentParent) {
         currentParent.subagentTracker.fail(sessionId as SessionId, errorMessage, {
           duration,
@@ -732,7 +732,7 @@ export class SpawnHandler {
       // the tracker always gets a result.
       if (!resultDelivered) {
         const duration = Date.now() - startTime;
-        const currentParent = this.deps.getActiveSession(parentSessionId);
+        const currentParent = this.deps.sessionStore.get(parentSessionId);
 
         if (currentParent && !currentParent.subagentTracker.isTerminated(sessionId as SessionId)) {
           const errorMessage = 'Subagent terminated without delivering result (unexpected code path)';

@@ -13,12 +13,12 @@ describe('AgentEventHandler - UI Render Events', () => {
   let handler: AgentEventHandler;
   let mockEmit: ReturnType<typeof vi.fn>;
   let mockAppendEventLinearized: ReturnType<typeof vi.fn>;
-  let mockGetActiveSession: ReturnType<typeof vi.fn>;
+  let mockSessionStoreGet: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mockEmit = vi.fn();
     mockAppendEventLinearized = vi.fn();
-    mockGetActiveSession = vi.fn().mockReturnValue({
+    mockSessionStoreGet = vi.fn().mockReturnValue({
       sessionContext: {
         startToolCall: vi.fn(),
         endToolCall: vi.fn(),
@@ -33,7 +33,7 @@ describe('AgentEventHandler - UI Render Events', () => {
 
     handler = new AgentEventHandler({
       defaultProvider: 'anthropic',
-      getActiveSession: mockGetActiveSession,
+      sessionStore: { get: mockSessionStoreGet } as any,
       appendEventLinearized: mockAppendEventLinearized,
       emit: mockEmit,
     });

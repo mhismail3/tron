@@ -37,6 +37,12 @@ export {
   type ReconstructedTrackers,
 } from './tracker-reconstructor.js';
 
+// Active session store
+export {
+  MapActiveSessionStore,
+  type ActiveSessionStore,
+} from './active-session-store.js';
+
 // Auth provider
 export {
   AuthProvider,

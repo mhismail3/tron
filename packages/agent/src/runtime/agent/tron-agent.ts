@@ -201,15 +201,7 @@ export class TronAgent {
   }
 
   /**
-   * Set reasoning level for models with reasoning/effort support (Codex, Opus 4.6).
-   * Call this before run() to set the reasoning effort.
-   */
-  setReasoningLevel(level: import('./types.js').ReasoningLevel | undefined): void {
-    this.currentRunContext.reasoningLevel = level;
-  }
-
-  /**
-   * Get current reasoning level
+   * Get current reasoning level (from active run context).
    */
   getReasoningLevel(): import('./types.js').ReasoningLevel | undefined {
     return this.currentRunContext.reasoningLevel;
@@ -338,29 +330,6 @@ export class TronAgent {
   // ===========================================================================
   // Skill and Rules Context
   // ===========================================================================
-
-  /**
-   * Set skill context to inject into system prompt for the next run.
-   */
-  setSkillContext(skillContext: string | undefined): void {
-    this.currentRunContext.skillContext = skillContext;
-  }
-
-  /**
-   * Set subagent results context to inject for the next run.
-   * This informs the agent about completed sub-agents and their results.
-   */
-  setSubagentResultsContext(resultsContext: string | undefined): void {
-    this.currentRunContext.subagentResults = resultsContext;
-  }
-
-  /**
-   * Set todo context to inject for the next run.
-   * This shows the agent's current task list for tracking progress.
-   */
-  setTodoContext(todoContext: string | undefined): void {
-    this.currentRunContext.todoContext = todoContext;
-  }
 
   /**
    * Set rules content from AGENTS.md / CLAUDE.md hierarchy.
@@ -628,64 +597,103 @@ export class TronAgent {
   /**
    * Run agent until completion or max turns
    * @param userContent - User message as string or array of content blocks
+   * @param runContext - Per-run context (skills, subagent results, todos, reasoning level).
+   *                     Consumed for this run only, then cleared.
    */
-  async run(userContent: string | import('../../core/types/index.js').UserContent[]): Promise<RunResult> {
-    this.emit({
-      type: 'agent_start',
-      sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
-    });
-
-    // === SessionStart Hook ===
-    await this.executeLifecycleHook('SessionStart', {
-      workingDirectory: this.workingDirectory,
-    });
-
-    // Add user message
-    this.addMessage({ role: 'user', content: userContent });
-
-    // === UserPromptSubmit Hook (can block) ===
-    const promptText = typeof userContent === 'string'
-      ? userContent
-      : userContent.map(c => ('text' in c ? c.text : '')).join('\n');
-
-    const promptResult = await this.executeLifecycleHook('UserPromptSubmit', {
-      prompt: promptText,
-    });
-
-    if (promptResult.action === 'block') {
-      await this.executeLifecycleHook('Stop', { stopReason: 'blocked', finalMessage: promptResult.reason });
-      await this.executeLifecycleHook('SessionEnd', { messageCount: 1, toolCallCount: 0 });
-
-      this.emit({
-        type: 'agent_end',
-        sessionId: this.sessionId,
-        timestamp: new Date().toISOString(),
-        error: promptResult.reason ?? 'Prompt blocked by hook',
-      });
-
-      return {
-        success: false,
-        messages: this.contextManager.getMessages(),
-        turns: 0,
-        totalTokenUsage: this.tokenUsage,
-        error: promptResult.reason ?? 'Prompt blocked by hook',
-      };
+  async run(
+    userContent: string | import('../../core/types/index.js').UserContent[],
+    runContext?: import('./types.js').RunContext,
+  ): Promise<RunResult> {
+    // Set run context for this execution (cleared in finally)
+    if (runContext) {
+      this.currentRunContext = { ...runContext };
     }
 
-    const maxTurns = this.config.maxTurns ?? MAX_TURNS_DEFAULT;
-    let lastResult: TurnResult | undefined;
+    try {
+      this.emit({
+        type: 'agent_start',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+      });
 
-    while (this.currentTurn < maxTurns) {
-      lastResult = await this.turn();
+      // === SessionStart Hook ===
+      await this.executeLifecycleHook('SessionStart', {
+        workingDirectory: this.workingDirectory,
+      });
 
-      if (!lastResult.success) {
-        if (lastResult.interrupted) {
-          // === Stop Hook (interrupted) ===
-          await this.executeLifecycleHook('Stop', { stopReason: 'interrupted' });
+      // Add user message
+      this.addMessage({ role: 'user', content: userContent });
+
+      // === UserPromptSubmit Hook (can block) ===
+      const promptText = typeof userContent === 'string'
+        ? userContent
+        : userContent.map(c => ('text' in c ? c.text : '')).join('\n');
+
+      const promptResult = await this.executeLifecycleHook('UserPromptSubmit', {
+        prompt: promptText,
+      });
+
+      if (promptResult.action === 'block') {
+        await this.executeLifecycleHook('Stop', { stopReason: 'blocked', finalMessage: promptResult.reason });
+        await this.executeLifecycleHook('SessionEnd', { messageCount: 1, toolCallCount: 0 });
+
+        this.emit({
+          type: 'agent_end',
+          sessionId: this.sessionId,
+          timestamp: new Date().toISOString(),
+          error: promptResult.reason ?? 'Prompt blocked by hook',
+        });
+
+        return {
+          success: false,
+          messages: this.contextManager.getMessages(),
+          turns: 0,
+          totalTokenUsage: this.tokenUsage,
+          error: promptResult.reason ?? 'Prompt blocked by hook',
+        };
+      }
+
+      const maxTurns = this.config.maxTurns ?? MAX_TURNS_DEFAULT;
+      let lastResult: TurnResult | undefined;
+
+      while (this.currentTurn < maxTurns) {
+        lastResult = await this.turn();
+
+        if (!lastResult.success) {
+          if (lastResult.interrupted) {
+            // === Stop Hook (interrupted) ===
+            await this.executeLifecycleHook('Stop', { stopReason: 'interrupted' });
+            await this.executeLifecycleHook('SessionEnd', {
+              messageCount: this.contextManager.getMessages().length,
+              toolCallCount: this.currentTurn,
+            });
+
+            return {
+              success: false,
+              messages: this.contextManager.getMessages(),
+              turns: this.currentTurn,
+              totalTokenUsage: this.tokenUsage,
+              error: lastResult.error,
+              interrupted: true,
+              partialContent: lastResult.partialContent,
+            };
+          }
+
+          // === Stop Hook (error) ===
+          await this.executeLifecycleHook('Stop', {
+            stopReason: 'error',
+            finalMessage: lastResult.error,
+          });
           await this.executeLifecycleHook('SessionEnd', {
             messageCount: this.contextManager.getMessages().length,
             toolCallCount: this.currentTurn,
+          });
+
+          this.emit({
+            type: 'agent_end',
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            error: lastResult.error,
           });
 
           return {
@@ -694,65 +702,41 @@ export class TronAgent {
             turns: this.currentTurn,
             totalTokenUsage: this.tokenUsage,
             error: lastResult.error,
-            interrupted: true,
-            partialContent: lastResult.partialContent,
           };
         }
 
-        // === Stop Hook (error) ===
-        await this.executeLifecycleHook('Stop', {
-          stopReason: 'error',
-          finalMessage: lastResult.error,
-        });
-        await this.executeLifecycleHook('SessionEnd', {
-          messageCount: this.contextManager.getMessages().length,
-          toolCallCount: this.currentTurn,
-        });
-
-        this.emit({
-          type: 'agent_end',
-          sessionId: this.sessionId,
-          timestamp: new Date().toISOString(),
-          error: lastResult.error,
-        });
-
-        return {
-          success: false,
-          messages: this.contextManager.getMessages(),
-          turns: this.currentTurn,
-          totalTokenUsage: this.tokenUsage,
-          error: lastResult.error,
-        };
+        // Stop if no tools were called or a tool requested stop
+        if (lastResult.toolCallsExecuted === 0 || lastResult.stopTurnRequested) {
+          break;
+        }
       }
 
-      // Stop if no tools were called or a tool requested stop
-      if (lastResult.toolCallsExecuted === 0 || lastResult.stopTurnRequested) {
-        break;
-      }
+      // === Stop Hook (success) ===
+      await this.executeLifecycleHook('Stop', {
+        stopReason: 'completed',
+        stoppedReason: lastResult?.stopReason,
+      });
+      await this.executeLifecycleHook('SessionEnd', {
+        messageCount: this.contextManager.getMessages().length,
+        toolCallCount: this.currentTurn,
+      });
+
+      this.emit({
+        type: 'agent_end',
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return {
+        success: true,
+        messages: this.contextManager.getMessages(),
+        turns: this.currentTurn,
+        totalTokenUsage: this.tokenUsage,
+        stoppedReason: lastResult?.stopReason,
+      };
+    } finally {
+      // Clear run context to prevent leaking between runs
+      this.currentRunContext = {};
     }
-
-    // === Stop Hook (success) ===
-    await this.executeLifecycleHook('Stop', {
-      stopReason: 'completed',
-      stoppedReason: lastResult?.stopReason,
-    });
-    await this.executeLifecycleHook('SessionEnd', {
-      messageCount: this.contextManager.getMessages().length,
-      toolCallCount: this.currentTurn,
-    });
-
-    this.emit({
-      type: 'agent_end',
-      sessionId: this.sessionId,
-      timestamp: new Date().toISOString(),
-    });
-
-    return {
-      success: true,
-      messages: this.contextManager.getMessages(),
-      turns: this.currentTurn,
-      totalTokenUsage: this.tokenUsage,
-      stoppedReason: lastResult?.stopReason,
-    };
   }
 }

@@ -160,20 +160,50 @@ function isOpenAICodexModel(modelId: string): boolean {
 }
 
 /**
+ * Family-to-provider mapping for models not in the registry.
+ * Each key is a model ID prefix; checked with startsWith.
+ */
+const PROVIDER_FAMILY_PREFIXES: Array<[string, ProviderType]> = [
+  ['claude', 'anthropic'],
+  ['gpt', 'openai'],
+  ['gemini', 'google'],
+];
+
+function detectProviderByFamily(modelId: string): ProviderType | null {
+  const lower = modelId.toLowerCase();
+  // O-series codex models checked first (before generic gpt)
+  if (isOpenAICodexModel(lower)) return 'openai-codex';
+  for (const [prefix, provider] of PROVIDER_FAMILY_PREFIXES) {
+    if (lower.startsWith(prefix)) return provider;
+  }
+  return null;
+}
+
+export interface DetectProviderOptions {
+  /** When true, throws for models that match neither registry nor family prefix. */
+  strict?: boolean;
+}
+
+/**
  * Detect provider from model ID
  *
- * Handles various naming patterns including:
- * - Direct model names: claude-sonnet-4, gpt-4o, gemini-2.5-flash
- * - Prefixed names: openai/gpt-4, google/gemini-pro
- * - O-series reasoning models: o1-preview, o3-mini, o4-mini
+ * Resolution order:
+ * 1. Explicit provider prefix (e.g. "openai/gpt-5")
+ * 2. Registry lookup (exact match against known models)
+ * 3. Family prefix (e.g. "claude-*" → anthropic, "gpt-*" → openai, "gemini-*" → google)
+ * 4. Default to 'anthropic' (or throw in strict mode)
  */
-export function detectProviderFromModel(modelId: string): ProviderType {
+export function detectProviderFromModel(
+  modelId: string,
+  options?: DetectProviderOptions,
+): ProviderType {
   const normalized = modelId.trim();
   if (!normalized) {
+    if (options?.strict) throw new Error(`Unknown model: "${modelId}"`);
     return 'anthropic';
   }
 
-  // Explicit provider prefix has highest priority.
+  // 1. Explicit provider prefix has highest priority.
   const slashIndex = normalized.indexOf('/');
   if (slashIndex > 0) {
     const prefix = normalized.slice(0, slashIndex).toLowerCase();
@@ -187,7 +217,7 @@ export function detectProviderFromModel(modelId: string): ProviderType {
     }
   }
 
-  // Exact model registry match next.
+  // 2. Exact model registry match.
   const registryMatch = detectProviderByRegistry(normalized);
   if (registryMatch) {
     if (registryMatch === 'openai' && isOpenAICodexModel(normalized)) {
@@ -196,24 +226,43 @@ export function detectProviderFromModel(modelId: string): ProviderType {
     return registryMatch;
   }
 
-  const lowerModel = normalized.toLowerCase();
+  // 3. Family prefix match.
+  const familyMatch = detectProviderByFamily(normalized);
+  if (familyMatch) return familyMatch;
 
-  // Family heuristics fallback.
-  if (isOpenAICodexModel(lowerModel)) {
-    return 'openai-codex';
+  // 4. Unknown model — warn and fall back (or throw in strict mode).
+  if (options?.strict) {
+    throw new Error(`Unknown model: "${modelId}" — not found in registry or known model families`);
   }
-  if (lowerModel.startsWith('gpt') || lowerModel.includes('gpt')) {
-    return 'openai';
-  }
-  if (lowerModel.startsWith('gemini') || lowerModel.includes('gemini')) {
-    return 'google';
-  }
-  if (lowerModel.startsWith('claude') || lowerModel.includes('claude')) {
-    return 'anthropic';
-  }
-
-  // Deterministic fallback.
+  logger.warn('Unknown model ID, falling back to anthropic', { modelId });
   return 'anthropic';
+}
+
+/**
+ * Validate a model ID for diagnostics.
+ *
+ * Returns structured information about whether the model is recognized,
+ * which provider it maps to, and whether it's in the known registry.
+ */
+export function validateModelId(modelId: string): {
+  valid: boolean;
+  provider?: ProviderType;
+  inRegistry: boolean;
+} {
+  const normalized = modelId.trim();
+  if (!normalized) return { valid: false, inRegistry: false };
+
+  const registryMatch = detectProviderByRegistry(normalized);
+  if (registryMatch) {
+    return { valid: true, provider: registryMatch, inRegistry: true };
+  }
+
+  const familyMatch = detectProviderByFamily(normalized);
+  if (familyMatch) {
+    return { valid: true, provider: familyMatch, inRegistry: false };
+  }
+
+  return { valid: false, inRegistry: false };
 }
 
 /**
@@ -390,25 +439,11 @@ function createGoogleProvider(config: ProviderConfig): Provider {
 export function isModelSupported(provider: ProviderType, modelId: string): boolean {
   const models = PROVIDER_MODELS[provider];
 
-  // Check for exact match in registry
-  if (modelId in models) {
-    return true;
-  }
+  if (modelId in models) return true;
 
-  // Check for provider-specific naming patterns
-  // This allows new models to work without code changes
-  switch (provider) {
-    case 'anthropic':
-      return modelId.startsWith('claude') || modelId.includes('claude');
-    case 'openai':
-      return modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4');
-    case 'openai-codex':
-      return modelId.includes('codex');
-    case 'google':
-      return modelId.startsWith('gemini');
-    default:
-      return false;
-  }
+  // Check via family detection — model belongs to the given provider if family matches
+  const detected = detectProviderByFamily(modelId);
+  return detected === provider;
 }
 
 /**

@@ -34,6 +34,7 @@ export {
 export {
   createProvider,
   detectProviderFromModel,
+  validateModelId,
   getDefaultModel,
   getModelInfo,
   getModelsForProvider,
@@ -46,6 +47,7 @@ export {
   type ProviderStreamOptions,
   type UnifiedAuth,
   type ModelCapabilities,
+  type DetectProviderOptions,
 } from './factory.js';
 
 // Model catalog with rich metadata

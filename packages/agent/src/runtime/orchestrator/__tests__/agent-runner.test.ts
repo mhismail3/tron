@@ -33,10 +33,6 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
       messages: [],
       totalTokenUsage: { inputTokens: 100, outputTokens: 50 },
     } as RunResult),
-    setSkillContext: vi.fn(),
-    setSubagentResultsContext: vi.fn(),
-    setTodoContext: vi.fn(),
-    setReasoningLevel: vi.fn(),
   };
 
   const mockSessionContext = {
@@ -74,7 +70,6 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
     sessionContext: mockSessionContext as any,
     skillTracker: mockSkillTracker as any,
     todoTracker: mockTodoTracker as any,
-    lastActivity: new Date(),
     workingDirectory: '/test/project',
     model: 'claude-sonnet-4-20250514',
     currentTurn: 0,
@@ -185,15 +180,12 @@ describe('AgentRunner', () => {
       expect(active.agent.run).toHaveBeenCalled();
     });
 
-    it('updates lastActivity timestamp', async () => {
-      const before = active.lastActivity;
+    it('touches session context to update activity timestamp', async () => {
       const options = createRunOptions();
 
-      // Small delay to ensure time difference
-      await new Promise((resolve) => setTimeout(resolve, 10));
       await runner.run(active, options);
 
-      expect(active.lastActivity.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(active.sessionContext.touch).toHaveBeenCalled();
     });
 
     it('touches session context after agent run', async () => {
@@ -205,8 +197,8 @@ describe('AgentRunner', () => {
     });
   });
 
-  describe('run() - Context Injection', () => {
-    it('loads skill context before execution', async () => {
+  describe('run() - Context Injection via RunContext', () => {
+    it('loads skill context via skillLoader', async () => {
       const options = createRunOptions({
         skills: [{ name: 'test-skill', source: 'global' }],
       });
@@ -223,7 +215,7 @@ describe('AgentRunner', () => {
       );
     });
 
-    it('sets skill context on agent when available', async () => {
+    it('passes skill context to agent.run via RunContext', async () => {
       (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue(
         '<skills><skill>Test skill content</skill></skills>'
       );
@@ -231,54 +223,109 @@ describe('AgentRunner', () => {
 
       await runner.run(active, options);
 
-      expect(active.agent.setSkillContext).toHaveBeenCalledWith(
-        '<skills><skill>Test skill content</skill></skills>'
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          skillContext: '<skills><skill>Test skill content</skill></skills>',
+        })
       );
     });
 
-    it('clears skill context when none available', async () => {
+    it('passes undefined skillContext when none available', async () => {
       (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue(undefined);
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      expect(active.agent.setSkillContext).toHaveBeenCalledWith(undefined);
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          skillContext: undefined,
+        })
+      );
     });
 
-    it('injects subagent context when available', async () => {
+    it('passes subagent results via RunContext', async () => {
       (config.buildSubagentResultsContext as Mock).mockReturnValue('Subagent completed: result');
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      expect(active.agent.setSubagentResultsContext).toHaveBeenCalledWith('Subagent completed: result');
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          subagentResults: 'Subagent completed: result',
+        })
+      );
     });
 
-    it('clears subagent context when not available', async () => {
+    it('passes undefined subagentResults when not available', async () => {
       (config.buildSubagentResultsContext as Mock).mockReturnValue(undefined);
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      expect(active.agent.setSubagentResultsContext).toHaveBeenCalledWith(undefined);
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          subagentResults: undefined,
+        })
+      );
     });
 
-    it('injects todo context when available', async () => {
+    it('passes todo context via RunContext', async () => {
       (active.todoTracker.buildContextString as Mock).mockReturnValue('Todo: Fix bug');
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      expect(active.agent.setTodoContext).toHaveBeenCalledWith('Todo: Fix bug');
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          todoContext: 'Todo: Fix bug',
+        })
+      );
     });
 
-    it('clears todo context when not available', async () => {
+    it('passes undefined todoContext when not available', async () => {
       (active.todoTracker.buildContextString as Mock).mockReturnValue(undefined);
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      expect(active.agent.setTodoContext).toHaveBeenCalledWith(undefined);
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          todoContext: undefined,
+        })
+      );
+    });
+
+    it('passes effective reasoning level from options', async () => {
+      const options = createRunOptions({ reasoningLevel: 'high' });
+
+      await runner.run(active, options);
+
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          reasoningLevel: 'high',
+        })
+      );
+    });
+
+    it('passes persisted reasoning level from sessionContext when not in options', async () => {
+      (active.sessionContext.getReasoningLevel as Mock).mockReturnValue('medium');
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          reasoningLevel: 'medium',
+        })
+      );
     });
   });
 
@@ -390,30 +437,33 @@ describe('AgentRunner', () => {
   });
 
   describe('run() - Reasoning Level', () => {
-    it('does not change reasoning level when not specified', async () => {
+    it('does not persist event when reasoning level not specified', async () => {
       const options = createRunOptions();
 
       await runner.run(active, options);
 
-      expect(active.agent.setReasoningLevel).not.toHaveBeenCalled();
+      const appendCalls = (active.sessionContext.appendEvent as Mock).mock.calls;
+      const reasoningCalls = appendCalls.filter(([type]: [string]) => type === 'config.reasoning_level');
+      expect(reasoningCalls).toHaveLength(0);
     });
 
-    it('does not change reasoning level when same as current', async () => {
+    it('does not persist event when reasoning level unchanged', async () => {
       (active.sessionContext.getReasoningLevel as Mock).mockReturnValue('high');
       const options = createRunOptions({ reasoningLevel: 'high' });
 
       await runner.run(active, options);
 
-      expect(active.agent.setReasoningLevel).not.toHaveBeenCalled();
+      const appendCalls = (active.sessionContext.appendEvent as Mock).mock.calls;
+      const reasoningCalls = appendCalls.filter(([type]: [string]) => type === 'config.reasoning_level');
+      expect(reasoningCalls).toHaveLength(0);
     });
 
-    it('changes reasoning level and records event', async () => {
+    it('persists reasoning level change to sessionContext and records event', async () => {
       (active.sessionContext.getReasoningLevel as Mock).mockReturnValue('low');
       const options = createRunOptions({ reasoningLevel: 'high' });
 
       await runner.run(active, options);
 
-      expect(active.agent.setReasoningLevel).toHaveBeenCalledWith('high');
       expect(active.sessionContext.setReasoningLevel).toHaveBeenCalledWith('high');
       expect(active.sessionContext.appendEvent).toHaveBeenCalledWith(
         'config.reasoning_level',

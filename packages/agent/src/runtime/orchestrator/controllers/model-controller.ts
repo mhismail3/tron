@@ -22,6 +22,7 @@ import type { EventStore } from '@infrastructure/events/event-store.js';
 import type { SessionId } from '@infrastructure/events/types.js';
 import type { AuthProvider } from '../session/auth-provider.js';
 import type { ActiveSession } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 import { normalizeToUnifiedAuth } from '../agent-factory.js';
 
 const logger = createLogger('model-controller');
@@ -41,8 +42,8 @@ export interface ModelControllerConfig {
   /** AuthProvider for loading auth credentials for new model */
   authProvider: AuthProvider;
 
-  /** Get active session by ID (may not exist if session is inactive) */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
 
   /** Optional: normalize auth to unified format (injected for testing) */
   normalizeToUnifiedAuth?: (auth: unknown) => unknown;
@@ -92,7 +93,7 @@ export class ModelController {
     const previousModel = session.latestModel;
 
     // 2. Get active session (if any)
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
 
     // 3. Validate not processing
     if (active?.sessionContext.isProcessing()) {

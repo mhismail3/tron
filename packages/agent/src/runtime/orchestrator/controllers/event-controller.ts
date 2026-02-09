@@ -41,7 +41,7 @@ import type {
   EventType,
   SearchResult,
 } from '@infrastructure/events/types.js';
-import type { ActiveSession } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 
 // =============================================================================
 // Types
@@ -50,10 +50,8 @@ import type { ActiveSession } from '../types.js';
 export interface EventControllerConfig {
   /** EventStore instance for persistence */
   eventStore: EventStore;
-  /** Callback to get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  /** Callback to get all active sessions (for flushAll) */
-  getAllActiveSessions?: () => IterableIterator<[string, ActiveSession]>;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Optional callback when an event is created */
   onEventCreated?: (event: SessionEvent, sessionId: string) => void;
 }
@@ -82,14 +80,12 @@ export interface DeleteMessageResult {
  */
 export class EventController {
   private readonly eventStore: EventStore;
-  private readonly getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  private readonly getAllActiveSessions?: () => IterableIterator<[string, ActiveSession]>;
+  private readonly sessionStore: ActiveSessionStore;
   private readonly onEventCreated?: (event: SessionEvent, sessionId: string) => void;
 
   constructor(config: EventControllerConfig) {
     this.eventStore = config.eventStore;
-    this.getActiveSession = config.getActiveSession;
-    this.getAllActiveSessions = config.getAllActiveSessions;
+    this.sessionStore = config.sessionStore;
     this.onEventCreated = config.onEventCreated;
   }
 
@@ -183,7 +179,7 @@ export class EventController {
    * @throws If linearized append fails for active session
    */
   async append(options: AppendEventOptions): Promise<SessionEvent> {
-    const active = this.getActiveSession(options.sessionId);
+    const active = this.sessionStore.get(options.sessionId);
     let event: SessionEvent;
 
     if (active) {
@@ -228,7 +224,7 @@ export class EventController {
     targetEventId: string,
     reason?: 'user_request' | 'content_policy' | 'context_management'
   ): Promise<SessionEvent> {
-    const active = this.getActiveSession(sessionId);
+    const active = this.sessionStore.get(sessionId);
     let deletionEvent: SessionEvent;
 
     if (active?.sessionContext) {
@@ -269,7 +265,7 @@ export class EventController {
    * @param sessionId - Session ID to flush
    */
   async flush(sessionId: string): Promise<void> {
-    const active = this.getActiveSession(sessionId);
+    const active = this.sessionStore.get(sessionId);
     if (active?.sessionContext) {
       await active.sessionContext.flushEvents();
     }
@@ -279,12 +275,8 @@ export class EventController {
    * Flush all active sessions' pending events.
    */
   async flushAll(): Promise<void> {
-    if (!this.getAllActiveSessions) {
-      return;
-    }
-
     const promises: Promise<void>[] = [];
-    for (const [, active] of this.getAllActiveSessions()) {
+    for (const [, active] of this.sessionStore.entries()) {
       if (active.sessionContext) {
         promises.push(active.sessionContext.flushEvents());
       }

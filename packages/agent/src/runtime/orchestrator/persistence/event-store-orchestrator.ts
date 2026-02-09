@@ -157,6 +157,8 @@ import {
   AgentController,
   createAgentController,
 } from '../controllers/agent-controller.js';
+import { MapActiveSessionStore } from '../session/active-session-store.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 
 // Re-export types for consumers
 export type {
@@ -184,7 +186,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   private agentFactory: AgentFactory;
   private authProvider: AuthProvider;
   private apnsService: APNSService | null = null;
-  private activeSessions: Map<string, ActiveSession> = new Map();
+  private activeSessions: ActiveSessionStore = new MapActiveSessionStore();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private initialized = false;
 
@@ -262,7 +264,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Note: agent.run() is a lazy callback - by the time it's invoked, AgentController will be initialized
     this.subagents = createSubagentOperations({
       eventStore: this.eventStore,
-      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
       createSession: (options) => this.sessions.createSession(options),
       runAgent: (options) => this.agent.run(options),
       appendEventLinearized: (sessionId, type, payload) =>
@@ -273,7 +275,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Initialize AgentEventHandler (delegated module)
     this.agentEventHandler = createAgentEventHandler({
       defaultProvider: config.defaultProvider,
-      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
       appendEventLinearized: (sessionId, type, payload, onCreated) =>
         this.appendEventLinearized(sessionId, type, payload, onCreated),
       emit: (event, data) => this.emit(event, data),
@@ -292,12 +294,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       defaultModel: config.defaultModel,
       defaultProvider: config.defaultProvider,
       maxConcurrentSessions: config.maxConcurrentSessions,
-      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
-      setActiveSession: (sessionId: string, session: ActiveSession) =>
-        this.activeSessions.set(sessionId, session),
-      deleteActiveSession: (sessionId: string) => this.activeSessions.delete(sessionId),
-      getActiveSessionCount: () => this.activeSessions.size,
-      getAllActiveSessions: () => this.activeSessions.entries(),
+      sessionStore: this.activeSessions,
       createAgentForSession: (sessionId, workingDirectory, model, systemPrompt, isSubagent) =>
         this.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent),
       emit: (event, data) => this.emit(event, data),
@@ -311,7 +308,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // Initialize ContextOps (delegated module)
     this.context = createContextOps({
-      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
       emit: (event, data) => this.emit(event, data),
     });
 
@@ -416,7 +413,7 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     // Initialize TodoController (delegated module)
     this.todos = createTodoController({
-      getActiveSession: (sessionId: string) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
       eventStore: this.eventStore,
       emit: (event, data) => this.emit(event, data),
     });
@@ -438,14 +435,13 @@ export class EventStoreOrchestrator extends EventEmitter {
     this.models = createModelController({
       eventStore: this.eventStore,
       authProvider: this.authProvider,
-      getActiveSession: (sessionId) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
     });
 
     // Initialize EventController (event query and mutation with linearization)
     this.events = createEventController({
       eventStore: this.eventStore,
-      getActiveSession: (sessionId) => this.activeSessions.get(sessionId),
-      getAllActiveSessions: () => this.activeSessions.entries(),
+      sessionStore: this.activeSessions,
       onEventCreated: (event, sessionId) => {
         this.emit('event_new', { event, sessionId });
       },
@@ -459,13 +455,13 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Initialize WorktreeController (git worktree operations)
     this.worktree = createWorktreeController({
       worktreeCoordinator: this.worktreeCoordinator,
-      getActiveSession: (sessionId) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
     });
 
     // Initialize AgentController (agent execution)
     this.agent = createAgentController({
       agentRunner: this.agentRunner,
-      getActiveSession: (sessionId) => this.activeSessions.get(sessionId),
+      sessionStore: this.activeSessions,
       resumeSession: (sessionId) => this.sessions.resumeSession(sessionId),
     });
   }

@@ -13,14 +13,21 @@ import type { ActiveSession } from '../../types.js';
 
 describe('AgentController', () => {
   let mockAgentRunner: any;
-  let mockGetActiveSession: ReturnType<typeof vi.fn>;
+  let mockSessionStore: {
+    get: ReturnType<typeof vi.fn>;
+    set: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+    clear: ReturnType<typeof vi.fn>;
+    size: number;
+    entries: ReturnType<typeof vi.fn>;
+    values: ReturnType<typeof vi.fn>;
+  };
   let mockResumeSession: ReturnType<typeof vi.fn>;
   let controller: AgentController;
 
   const mockActiveSession = {
     sessionId: 'sess-123',
     workingDir: '/test/project',
-    lastActivity: new Date(),
     wasInterrupted: false,
     agent: {
       abort: vi.fn(),
@@ -30,6 +37,7 @@ describe('AgentController', () => {
     sessionContext: {
       isProcessing: vi.fn(),
       setProcessing: vi.fn(),
+      touch: vi.fn(),
     },
     subagentTracker: {},
     skillTracker: {},
@@ -42,12 +50,20 @@ describe('AgentController', () => {
       run: vi.fn(),
     };
 
-    mockGetActiveSession = vi.fn();
+    mockSessionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      clear: vi.fn(),
+      get size() { return 0; },
+      entries: vi.fn().mockReturnValue([][Symbol.iterator]()),
+      values: vi.fn().mockReturnValue([][Symbol.iterator]()),
+    };
     mockResumeSession = vi.fn();
 
     controller = createAgentController({
       agentRunner: mockAgentRunner,
-      getActiveSession: mockGetActiveSession,
+      sessionStore: mockSessionStore,
       resumeSession: mockResumeSession,
     });
   });
@@ -58,7 +74,7 @@ describe('AgentController', () => {
 
   describe('run', () => {
     it('runs agent on active session', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([{ content: 'Hello' }]);
 
@@ -67,7 +83,7 @@ describe('AgentController', () => {
         prompt: 'Hello',
       });
 
-      expect(mockGetActiveSession).toHaveBeenCalledWith('sess-123');
+      expect(mockSessionStore.get).toHaveBeenCalledWith('sess-123');
       expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenCalledWith(true);
       expect(mockAgentRunner.run).toHaveBeenCalledWith(mockActiveSession, {
         sessionId: 'sess-123',
@@ -78,7 +94,7 @@ describe('AgentController', () => {
 
     it('auto-resumes inactive session', async () => {
       // First call returns undefined (not active), second returns the session
-      mockGetActiveSession
+      mockSessionStore.get
         .mockReturnValueOnce(undefined)
         .mockReturnValueOnce(mockActiveSession);
       mockResumeSession.mockResolvedValue({});
@@ -95,7 +111,7 @@ describe('AgentController', () => {
     });
 
     it('throws error if session not found after resume attempt', async () => {
-      mockGetActiveSession.mockReturnValue(undefined);
+      mockSessionStore.get.mockReturnValue(undefined);
       mockResumeSession.mockRejectedValue(new Error('Not found'));
 
       await expect(controller.run({
@@ -105,7 +121,7 @@ describe('AgentController', () => {
     });
 
     it('throws error if resume succeeds but session still not active', async () => {
-      mockGetActiveSession.mockReturnValue(undefined);
+      mockSessionStore.get.mockReturnValue(undefined);
       mockResumeSession.mockResolvedValue({});
 
       await expect(controller.run({
@@ -115,7 +131,7 @@ describe('AgentController', () => {
     });
 
     it('throws error if session already processing', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(true);
 
       await expect(controller.run({
@@ -125,7 +141,7 @@ describe('AgentController', () => {
     });
 
     it('clears processing state on success', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([]);
 
@@ -140,7 +156,7 @@ describe('AgentController', () => {
     });
 
     it('clears processing state on error', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockRejectedValue(new Error('Agent failed'));
 
@@ -154,7 +170,7 @@ describe('AgentController', () => {
     });
 
     it('waits for pending background hooks before starting new run', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(2);
       mockAgentRunner.run.mockResolvedValue([]);
@@ -169,7 +185,7 @@ describe('AgentController', () => {
     });
 
     it('skips background hook wait when none are pending', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(0);
       mockAgentRunner.run.mockResolvedValue([]);
@@ -182,9 +198,8 @@ describe('AgentController', () => {
       expect((mockActiveSession.agent as any).waitForBackgroundHooks).not.toHaveBeenCalled();
     });
 
-    it('updates lastActivity timestamp', async () => {
-      const originalDate = mockActiveSession.lastActivity;
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+    it('updates activity timestamp via sessionContext.setProcessing', async () => {
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([]);
 
@@ -193,7 +208,8 @@ describe('AgentController', () => {
         prompt: 'Hello',
       });
 
-      expect(mockActiveSession.lastActivity).not.toBe(originalDate);
+      // setProcessing(true) internally calls touch() on SessionContext
+      expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenCalledWith(true);
     });
   });
 
@@ -203,7 +219,7 @@ describe('AgentController', () => {
 
   describe('cancel', () => {
     it('returns false when session not found', async () => {
-      mockGetActiveSession.mockReturnValue(undefined);
+      mockSessionStore.get.mockReturnValue(undefined);
 
       const result = await controller.cancel('sess-123');
 
@@ -211,7 +227,7 @@ describe('AgentController', () => {
     });
 
     it('returns false when session not processing', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
 
       const result = await controller.cancel('sess-123');
@@ -221,7 +237,7 @@ describe('AgentController', () => {
     });
 
     it('aborts agent and returns true when processing', async () => {
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(true);
 
       const result = await controller.cancel('sess-123');
@@ -231,14 +247,13 @@ describe('AgentController', () => {
       expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenCalledWith(false);
     });
 
-    it('updates lastActivity timestamp on cancel', async () => {
-      const originalDate = mockActiveSession.lastActivity;
-      mockGetActiveSession.mockReturnValue(mockActiveSession);
+    it('touches session context on cancel', async () => {
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(true);
 
       await controller.cancel('sess-123');
 
-      expect(mockActiveSession.lastActivity).not.toBe(originalDate);
+      expect((mockActiveSession.sessionContext as any).touch).toHaveBeenCalled();
     });
   });
 
@@ -250,7 +265,7 @@ describe('AgentController', () => {
     it('creates an AgentController instance', () => {
       const ctrl = createAgentController({
         agentRunner: mockAgentRunner,
-        getActiveSession: mockGetActiveSession,
+        sessionStore: mockSessionStore,
         resumeSession: mockResumeSession,
       });
 

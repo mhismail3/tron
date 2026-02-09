@@ -45,7 +45,7 @@ import type {
   EventType,
   SessionEvent as TronSessionEvent,
 } from '@infrastructure/events/types.js';
-import type { ActiveSession } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 import { createUIRenderHandler, type UIRenderHandler } from '../ui-render-handler.js';
 import {
   createTurnEventHandler,
@@ -78,8 +78,8 @@ import { createEventContext, type EventContext } from './event-context.js';
 export interface AgentEventHandlerConfig {
   /** Default provider for error events */
   defaultProvider: string;
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Append event to session (fire-and-forget) */
   appendEventLinearized: (
     sessionId: SessionId,
@@ -292,7 +292,7 @@ export class AgentEventHandler {
    */
   private createEventContext(sessionId: SessionId): EventContext {
     return createEventContext(sessionId, {
-      getActiveSession: this.config.getActiveSession,
+      sessionStore: this.config.sessionStore,
       appendEventLinearized: this.config.appendEventLinearized,
       emit: this.config.emit,
     });

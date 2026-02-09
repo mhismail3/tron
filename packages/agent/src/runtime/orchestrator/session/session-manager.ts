@@ -42,6 +42,7 @@ import type {
   ForkResult,
 } from '../types.js';
 import type { SessionRow } from '@infrastructure/events/sqlite/repositories/session.repo.js';
+import type { ActiveSessionStore } from './active-session-store.js';
 
 const logger = createLogger('session-manager');
 
@@ -60,16 +61,8 @@ export interface SessionManagerConfig {
   defaultProvider: string;
   /** Maximum concurrent sessions */
   maxConcurrentSessions?: number;
-  /** Get active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
-  /** Set active session */
-  setActiveSession: (sessionId: string, session: ActiveSession) => void;
-  /** Delete active session */
-  deleteActiveSession: (sessionId: string) => void;
-  /** Get count of active sessions */
-  getActiveSessionCount: () => number;
-  /** Get all active sessions */
-  getAllActiveSessions: () => IterableIterator<[string, ActiveSession]>;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Create agent for a session */
   createAgentForSession: (
     sessionId: SessionId,
@@ -111,7 +104,7 @@ export class SessionManager {
 
   async createSession(options: CreateSessionOptions): Promise<SessionInfo> {
     const maxSessions = this.config.maxConcurrentSessions ?? 10;
-    if (this.config.getActiveSessionCount() >= maxSessions) {
+    if (this.config.sessionStore.size >= maxSessions) {
       throw new Error(`Maximum concurrent sessions (${maxSessions}) reached`);
     }
 
@@ -258,7 +251,6 @@ export class SessionManager {
     const activeSession: ActiveSession = {
       sessionId,
       agent,
-      lastActivity: new Date(),
       workingDirectory: workingDir.path,
       model,
       // Parent session ID if this is a subagent (for event forwarding)
@@ -276,7 +268,7 @@ export class SessionManager {
       todoTracker: createTodoTracker(),
     };
 
-    this.config.setActiveSession(sessionId, activeSession);
+    this.config.sessionStore.set(sessionId, activeSession);
 
     this.config.emit('session_created', {
       sessionId,
@@ -296,14 +288,14 @@ export class SessionManager {
 
   async resumeSession(sessionId: string): Promise<SessionInfo> {
     // Check if already active
-    const existing = this.config.getActiveSession(sessionId);
+    const existing = this.config.sessionStore.get(sessionId);
     if (existing) {
       // Drain any pending background hooks (compaction, memory ledger) so
       // events they persist are visible when iOS fetches history.
       if (existing.agent.getPendingBackgroundHookCount() > 0) {
         await existing.agent.waitForBackgroundHooks(10_000);
       }
-      existing.lastActivity = new Date();
+      existing.sessionContext.touch();
       const session = await this.eventStore.getSession(sessionId as SessionId);
       return this.sessionRowToInfo(session!, true, existing.workingDir);
     }
@@ -344,10 +336,10 @@ export class SessionManager {
       agent.addMessage(msg as CoreMessage);
     }
 
-    // Restore reasoning level if persisted (for extended thinking models)
+    // Reasoning level is restored via sessionContext.restoreFromEvents() below.
+    // It will be passed to the agent via RunContext on the next run.
     const reasoningLevel = sessionState.reasoningLevel;
     if (reasoningLevel) {
-      agent.setReasoningLevel(reasoningLevel);
       logger.info('Reasoning level restored from events', {
         sessionId,
         reasoningLevel,
@@ -462,11 +454,9 @@ export class SessionManager {
     const activeSession: ActiveSession = {
       sessionId: session.id,
       agent,
-      lastActivity: new Date(),
       workingDirectory: workingDir.path,
       model: session.latestModel,
       workingDir,
-      reasoningLevel,
       skillTracker,
       rulesTracker,
       sessionContext,
@@ -474,7 +464,7 @@ export class SessionManager {
       todoTracker,
     };
 
-    this.config.setActiveSession(sessionId, activeSession);
+    this.config.sessionStore.set(sessionId, activeSession);
 
     logger.info('Session resumed', {
       sessionId,
@@ -488,7 +478,7 @@ export class SessionManager {
     mergeStrategy?: 'merge' | 'rebase' | 'squash';
     commitMessage?: string;
   }): Promise<void> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     // Use sessionContext.isProcessing() as the authoritative source of truth
     if (active?.sessionContext.isProcessing()) {
       throw new Error('Cannot end session while processing');
@@ -501,7 +491,7 @@ export class SessionManager {
 
       // Clean up any local state even if session doesn't exist in DB
       if (active) {
-        this.config.deleteActiveSession(sessionId);
+        this.config.sessionStore.delete(sessionId);
       }
 
       // Release worktree if any (may not exist, that's fine)
@@ -568,7 +558,7 @@ export class SessionManager {
     }
 
     await this.eventStore.endSession(sessionId as SessionId);
-    this.config.deleteActiveSession(sessionId);
+    this.config.sessionStore.delete(sessionId);
 
     this.config.emit('session_ended', { sessionId, reason: 'completed' });
     logger.info('Session ended', { sessionId });
@@ -579,7 +569,7 @@ export class SessionManager {
   // ===========================================================================
 
   async getSession(sessionId: string): Promise<SessionInfo | null> {
-    const active = this.config.getActiveSession(sessionId);
+    const active = this.config.sessionStore.get(sessionId);
     const isActive = !!active;
     const session = await this.eventStore.getSession(sessionId as SessionId);
     if (!session) return null;
@@ -592,7 +582,7 @@ export class SessionManager {
     activeOnly?: boolean;
   }): Promise<SessionInfo[]> {
     if (options.activeOnly) {
-      const active = Array.from(this.config.getAllActiveSessions())
+      const active = Array.from(this.config.sessionStore.entries())
         .filter(([_, a]) => !options.workingDirectory || a.workingDirectory === options.workingDirectory)
         .slice(0, options.limit ?? 50);
 
@@ -628,13 +618,13 @@ export class SessionManager {
     const previews = await this.eventStore.getSessionMessagePreviews(sessionIds);
 
     return filtered.map(row => {
-      const active = this.config.getActiveSession(row.id);
+      const active = this.config.sessionStore.get(row.id);
       return this.sessionRowToInfo(row, !!active, active?.workingDir, previews.get(row.id));
     });
   }
 
   getActiveSession(sessionId: string): ActiveSession | undefined {
-    return this.config.getActiveSession(sessionId);
+    return this.config.sessionStore.get(sessionId);
   }
 
   async wasSessionInterrupted(sessionId: string): Promise<boolean> {
@@ -685,7 +675,7 @@ export class SessionManager {
     });
 
     // Get parent's working directory to determine commit to branch from
-    const parentActive = this.config.getActiveSession(sessionId);
+    const parentActive = this.config.sessionStore.get(sessionId);
     let parentCommit: string | undefined;
     if (parentActive?.workingDir) {
       try {
@@ -738,7 +728,7 @@ export class SessionManager {
     const now = Date.now();
 
     // Create snapshot to avoid modification during iteration
-    const entries = Array.from(this.config.getAllActiveSessions());
+    const entries = Array.from(this.config.sessionStore.entries());
 
     for (const [sessionId, active] of entries) {
       // Skip sessions that are currently processing
@@ -763,7 +753,7 @@ export class SessionManager {
             error: structured.message,
             retryable: structured.retryable,
           });
-          this.config.deleteActiveSession(sessionId);
+          this.config.sessionStore.delete(sessionId);
         }
       }
     }

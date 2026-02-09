@@ -57,7 +57,7 @@ function createMockDeps(overrides: Partial<SpawnHandlerDeps> = {}): SpawnHandler
       ]),
       getDbPath: () => '/tmp/test.db',
     } as any,
-    getActiveSession: vi.fn().mockReturnValue(mockActiveSession),
+    sessionStore: { get: vi.fn().mockReturnValue(mockActiveSession) } as any,
     createSession: vi.fn().mockResolvedValue({
       sessionId: 'sess_sub_123',
       workingDirectory: '/tmp/test',

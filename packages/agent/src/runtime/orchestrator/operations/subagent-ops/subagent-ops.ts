@@ -50,7 +50,7 @@ export class SubagentOperations {
     // Initialize query handler with subset of config
     this.queryHandler = createQueryHandler({
       eventStore: config.eventStore,
-      getActiveSession: config.getActiveSession,
+      sessionStore: config.sessionStore,
     });
   }
 

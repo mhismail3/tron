@@ -32,7 +32,7 @@ import { createLogger } from '@infrastructure/logging/index.js';
 import { withLoggingContext, getLoggingContext } from '@infrastructure/logging/log-context.js';
 import { normalizeContentBlocks } from '@core/utils/content-normalizer.js';
 import { PersistenceError } from '@core/utils/errors.js';
-import type { RunResult } from '../agent/types.js';
+import type { RunResult, RunContext } from '../agent/types.js';
 import type { UserContent } from '@core/types/messages.js';
 import type { SkillLoader } from './operations/skill-loader.js';
 import type {
@@ -171,21 +171,21 @@ export class AgentRunner {
     }
 
     try {
-      // Phase 1: Pre-execution setup
-      await this.preExecutionSetup(active, options);
+      // Phase 1: Pre-execution setup (flush events, build contexts)
+      await active.sessionContext.flushEvents();
 
       // Phase 2: Build and record user message
       const { messageContent } = await this.buildAndRecordUserMessage(active, options);
 
-      // Phase 3: Handle reasoning level changes
+      // Phase 3: Handle reasoning level changes (persist event if changed)
       await this.handleReasoningLevel(active, options);
 
-      // Phase 4: Transform content and execute agent
+      // Phase 4: Build run context, transform content, and execute agent
+      const runContext = await this.buildRunContext(active, options);
       const llmContent = this.config.skillLoader.transformContentForLLM(messageContent);
-      const runResult = await active.agent.run(llmContent);
+      const runResult = await active.agent.run(llmContent, runContext);
 
       // Update activity timestamp
-      active.lastActivity = new Date();
       active.sessionContext.touch();
 
       // Phase 5: Handle result (interrupt, completion, or error in catch)
@@ -205,38 +205,15 @@ export class AgentRunner {
   }
 
   // ===========================================================================
-  // Phase 1: Pre-execution Setup
+  // Run Context Building
   // ===========================================================================
 
   /**
-   * Prepare session for agent execution.
-   * Flushes pending events and injects all contexts.
+   * Build the complete RunContext for this execution.
+   * All per-run context is gathered here and passed to agent.run() as a single parameter.
    */
-  private async preExecutionSetup(
-    active: ActiveSession,
-    options: AgentRunOptions
-  ): Promise<void> {
-    // CRITICAL: Wait for any pending stream events to complete before appending message events
-    // This prevents race conditions where stream events (turn_start, etc.) capture wrong parentId
-    await active.sessionContext.flushEvents();
-
-    // Inject all contexts
-    await this.injectSkillContext(active, options);
-    this.injectSubagentContext(active);
-    this.injectTodoContext(active);
-  }
-
-  // ===========================================================================
-  // Context Injection
-  // ===========================================================================
-
-  /**
-   * Load and inject skill context into the agent.
-   */
-  private async injectSkillContext(
-    active: ActiveSession,
-    options: AgentRunOptions
-  ): Promise<void> {
+  private async buildRunContext(active: ActiveSession, options: AgentRunOptions): Promise<RunContext> {
+    // Skill context
     const skillContext = await this.config.skillLoader.loadSkillContextForPrompt(
       {
         sessionId: active.sessionId,
@@ -245,58 +222,46 @@ export class AgentRunner {
       },
       options
     );
-
-    // Set skill context on agent (will be injected into system prompt)
     if (skillContext) {
       const isRemovedInstruction = skillContext.includes('<removed-skills>');
-      logger.info('[SKILL] Setting skill context on agent', {
+      logger.info('[SKILL] Including skill context in run', {
         sessionId: active.sessionId,
         skillContextLength: skillContext.length,
         contextType: isRemovedInstruction ? 'removed-skills-instruction' : 'skill-content',
         preview: skillContext.substring(0, 150),
       });
-      active.agent.setSkillContext(skillContext);
-    } else {
-      logger.info('[SKILL] No skill context to set (clearing)', {
-        sessionId: active.sessionId,
-      });
-      active.agent.setSkillContext(undefined);
     }
-  }
 
-  /**
-   * Inject pending subagent results context into the agent.
-   */
-  private injectSubagentContext(active: ActiveSession): void {
-    const subagentResultsContext = this.config.buildSubagentResultsContext(active);
-    if (subagentResultsContext) {
-      logger.info('[SUBAGENT] Injecting pending sub-agent results', {
+    // Subagent results
+    const subagentResults = this.config.buildSubagentResultsContext(active);
+    if (subagentResults) {
+      logger.info('[SUBAGENT] Including pending sub-agent results in run', {
         sessionId: active.sessionId,
-        contextLength: subagentResultsContext.length,
-        preview: subagentResultsContext.substring(0, 200),
+        contextLength: subagentResults.length,
+        preview: subagentResults.substring(0, 200),
       });
-      active.agent.setSubagentResultsContext(subagentResultsContext);
-    } else {
-      active.agent.setSubagentResultsContext(undefined);
     }
-  }
 
-  /**
-   * Inject todo context into the agent.
-   */
-  private injectTodoContext(active: ActiveSession): void {
+    // Todo context
     const todoContext = active.todoTracker.buildContextString();
     if (todoContext) {
-      logger.info('[TODO] Injecting todo context', {
+      logger.info('[TODO] Including todo context in run', {
         sessionId: active.sessionId,
         contextLength: todoContext.length,
         todoCount: active.todoTracker.count,
         summary: active.todoTracker.buildSummaryString(),
       });
-      active.agent.setTodoContext(todoContext);
-    } else {
-      active.agent.setTodoContext(undefined);
     }
+
+    // Effective reasoning level: explicit option > sessionContext persisted value
+    const reasoningLevel = options.reasoningLevel ?? active.sessionContext.getReasoningLevel();
+
+    return {
+      skillContext: skillContext ?? undefined,
+      subagentResults: subagentResults ?? undefined,
+      todoContext: todoContext ?? undefined,
+      reasoningLevel: reasoningLevel as RunContext['reasoningLevel'],
+    };
   }
 
   // ===========================================================================
@@ -434,7 +399,6 @@ export class AgentRunner {
     if (options.reasoningLevel === active.sessionContext.getReasoningLevel()) return;
 
     const previousLevel = active.sessionContext.getReasoningLevel();
-    active.agent.setReasoningLevel(options.reasoningLevel);
     active.sessionContext.setReasoningLevel(options.reasoningLevel);
 
     // Persist reasoning level change as linearized event

@@ -9,7 +9,8 @@
 
 import type { WorktreeCoordinator } from '@platform/session/worktree-coordinator.js';
 import type { SessionId } from '@infrastructure/events/types.js';
-import type { ActiveSession, WorktreeInfo } from '../types.js';
+import type { WorktreeInfo } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 import {
   buildWorktreeInfoWithStatus,
   commitWorkingDirectory,
@@ -21,7 +22,7 @@ import {
 
 export interface WorktreeControllerConfig {
   worktreeCoordinator: WorktreeCoordinator;
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  sessionStore: ActiveSessionStore;
 }
 
 export interface CommitResult {
@@ -60,11 +61,11 @@ export interface WorktreeListItem {
  */
 export class WorktreeController {
   private readonly worktreeCoordinator: WorktreeCoordinator;
-  private readonly getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  private readonly sessionStore: ActiveSessionStore;
 
   constructor(config: WorktreeControllerConfig) {
     this.worktreeCoordinator = config.worktreeCoordinator;
-    this.getActiveSession = config.getActiveSession;
+    this.sessionStore = config.sessionStore;
   }
 
   /**
@@ -72,7 +73,7 @@ export class WorktreeController {
    * Returns null if session not found or has no worktree.
    */
   async getStatus(sessionId: string): Promise<WorktreeInfo | null> {
-    const active = this.getActiveSession(sessionId);
+    const active = this.sessionStore.get(sessionId);
     if (!active?.workingDir) {
       return null;
     }
@@ -84,7 +85,7 @@ export class WorktreeController {
    * Commit changes in a session's worktree.
    */
   async commit(sessionId: string, message: string): Promise<CommitResult> {
-    const active = this.getActiveSession(sessionId);
+    const active = this.sessionStore.get(sessionId);
     if (!active?.workingDir) {
       return { success: false, error: 'Session not found or no worktree' };
     }

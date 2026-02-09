@@ -50,7 +50,6 @@ describe('runId Correlation', () => {
         sessionId: 'sess_123',
         currentRunId: randomUUID(),
         agent: {},
-        lastActivity: new Date(),
       };
 
       expect(activeSession.currentRunId).toBeDefined();

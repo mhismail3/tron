@@ -1,6 +1,23 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { detectProviderFromModel, getModelCapabilities, getDefaultModel, createProvider } from '../factory.js';
+import {
+  detectProviderFromModel,
+  getModelCapabilities,
+  getDefaultModel,
+  createProvider,
+  validateModelId,
+} from '../factory.js';
 import { AnthropicProvider } from '../anthropic/index.js';
+
+// Mock logger to capture warnings
+const mockWarn = vi.fn();
+vi.mock('@infrastructure/logging/index.js', () => ({
+  createLogger: vi.fn().mockReturnValue({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}));
 
 // Mock Anthropic provider to capture stream options
 const mockStream = vi.fn();
@@ -42,6 +59,66 @@ describe('detectProviderFromModel', () => {
   it('uses deterministic anthropic fallback for unknown models', () => {
     expect(detectProviderFromModel('custom-provider-unknown-model')).toBe('anthropic');
     expect(detectProviderFromModel('   ')).toBe('anthropic');
+  });
+
+  it('detects provider by family prefix for unregistered models', () => {
+    expect(detectProviderFromModel('claude-future-9000')).toBe('anthropic');
+    expect(detectProviderFromModel('gpt-99-turbo')).toBe('openai');
+    expect(detectProviderFromModel('gemini-4-ultra')).toBe('google');
+  });
+
+  it('detects o-series models as openai-codex via family prefix', () => {
+    expect(detectProviderFromModel('o1-preview')).toBe('openai-codex');
+    expect(detectProviderFromModel('o3-mini')).toBe('openai-codex');
+    expect(detectProviderFromModel('o4-mega')).toBe('openai-codex');
+  });
+
+  describe('strict mode', () => {
+    it('throws for unknown models when strict=true', () => {
+      expect(() => detectProviderFromModel('totally-unknown-model', { strict: true }))
+        .toThrow('Unknown model');
+    });
+
+    it('still resolves known registry models in strict mode', () => {
+      expect(detectProviderFromModel('claude-opus-4-6', { strict: true })).toBe('anthropic');
+      expect(detectProviderFromModel('gpt-5.3-codex', { strict: true })).toBe('openai-codex');
+      expect(detectProviderFromModel('gemini-2.5-flash', { strict: true })).toBe('google');
+    });
+
+    it('resolves family-prefix models in strict mode', () => {
+      expect(detectProviderFromModel('claude-future-model', { strict: true })).toBe('anthropic');
+      expect(detectProviderFromModel('gpt-99', { strict: true })).toBe('openai');
+      expect(detectProviderFromModel('gemini-99', { strict: true })).toBe('google');
+    });
+  });
+});
+
+describe('validateModelId', () => {
+  it('returns valid for known registry models', () => {
+    const result = validateModelId('claude-opus-4-6');
+    expect(result.valid).toBe(true);
+    expect(result.provider).toBe('anthropic');
+    expect(result.inRegistry).toBe(true);
+  });
+
+  it('returns valid but not in registry for family-matched models', () => {
+    const result = validateModelId('claude-future-9000');
+    expect(result.valid).toBe(true);
+    expect(result.provider).toBe('anthropic');
+    expect(result.inRegistry).toBe(false);
+  });
+
+  it('returns invalid for unrecognized models', () => {
+    const result = validateModelId('totally-unknown');
+    expect(result.valid).toBe(false);
+    expect(result.provider).toBeUndefined();
+    expect(result.inRegistry).toBe(false);
+  });
+
+  it('returns invalid for empty strings', () => {
+    const result = validateModelId('');
+    expect(result.valid).toBe(false);
+    expect(result.provider).toBeUndefined();
   });
 });
 

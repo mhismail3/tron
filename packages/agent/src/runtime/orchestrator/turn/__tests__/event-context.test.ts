@@ -34,7 +34,7 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
 
 function createMockDeps(activeSession?: ActiveSession): EventContextDeps {
   return {
-    getActiveSession: vi.fn().mockReturnValue(activeSession),
+    sessionStore: { get: vi.fn().mockReturnValue(activeSession) } as any,
     appendEventLinearized: vi.fn(),
     emit: vi.fn(),
   };
@@ -75,8 +75,8 @@ describe('EventContext', () => {
 
       const ctx = createEventContext(sessionId, deps);
 
-      expect(deps.getActiveSession).toHaveBeenCalledTimes(1);
-      expect(deps.getActiveSession).toHaveBeenCalledWith(sessionId);
+      expect(deps.sessionStore.get).toHaveBeenCalledTimes(1);
+      expect(deps.sessionStore.get).toHaveBeenCalledWith(sessionId);
       expect(ctx.active).toBe(mockActive);
     });
 

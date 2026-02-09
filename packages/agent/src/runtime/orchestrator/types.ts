@@ -116,11 +116,8 @@ export interface SessionTracking {
  * Mutable metadata that changes during the session's lifecycle.
  */
 export interface SessionMetadata {
-  lastActivity: Date;
   /** Flag indicating if this session was interrupted by user */
   wasInterrupted?: boolean;
-  /** Current reasoning level for extended thinking models */
-  reasoningLevel?: ReasoningLevel;
   /** Current run ID — set when a run starts, cleared when it completes */
   currentRunId?: string;
 }
@@ -136,7 +133,7 @@ export interface SessionMetadata {
  * - SessionIdentity:  immutable session identity (id, directory, model, parent)
  * - SessionRuntime:   agent instance and persistence context
  * - SessionTracking:  skill/rules/subagent/todo trackers
- * - SessionMetadata:  mutable activity/interruption/reasoning state
+ * - SessionMetadata:  mutable activity/interruption state
  *
  * Consumers that only need a subset should accept the appropriate sub-interface.
  */

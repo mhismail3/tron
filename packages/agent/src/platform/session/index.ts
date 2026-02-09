@@ -6,7 +6,6 @@
  * - WorktreeCoordinator: Orchestrates session ↔ worktree lifecycle
  * - WorkingDirectory: Abstraction for session's working directory
  * - GitExecutor: Low-level git command execution (canonical implementation)
- * - WorktreeManager: Legacy manager (deprecated, use WorktreeCoordinator)
  * - TmuxManager: Terminal multiplexer integration for agent sessions
  */
 
@@ -48,15 +47,3 @@ export {
   createGitExecutor,
 } from './worktree/git-executor.js';
 
-// Legacy worktree manager (deprecated, use WorktreeCoordinator)
-/**
- * @deprecated Use WorktreeCoordinator instead.
- * WorktreeManager is maintained for backward compatibility only.
- */
-export {
-  WorktreeManager,
-  createWorktreeManager,
-  type WorktreeManagerConfig,
-  type Worktree,
-  type WorktreeStatus,
-} from './worktree.js';

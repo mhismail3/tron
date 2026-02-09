@@ -44,8 +44,15 @@ describe('EventController', () => {
 
     controller = createEventController({
       eventStore,
-      getActiveSession: (sessionId: string) => activeSessions.get(sessionId),
-      getAllActiveSessions: () => activeSessions.entries(),
+      sessionStore: {
+        get: (sessionId: string) => activeSessions.get(sessionId),
+        set: (sessionId: string, session: any) => activeSessions.set(sessionId, session),
+        delete: (sessionId: string) => activeSessions.delete(sessionId),
+        clear: () => activeSessions.clear(),
+        get size() { return activeSessions.size; },
+        entries: () => activeSessions.entries(),
+        values: () => activeSessions.values(),
+      },
       onEventCreated: (event, sessionId) => {
         emittedEvents.push({ event: 'event_new', data: { event, sessionId } });
       },
@@ -100,7 +107,6 @@ describe('EventController', () => {
       todoTracker: {} as any,
       workingDirectory: '/tmp/test',
       model: 'claude-sonnet-4-20250514',
-      lastActivity: new Date(),
     };
   }
 

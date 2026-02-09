@@ -10,7 +10,8 @@
 import { createLogger } from '@infrastructure/logging/index.js';
 import type { RunResult } from '../../agent/types.js';
 import type { AgentRunner } from '../agent-runner.js';
-import type { ActiveSession, AgentRunOptions } from '../types.js';
+import type { AgentRunOptions } from '../types.js';
+import type { ActiveSessionStore } from '../session/active-session-store.js';
 
 const logger = createLogger('agent-controller');
 
@@ -21,8 +22,8 @@ const logger = createLogger('agent-controller');
 export interface AgentControllerConfig {
   /** AgentRunner for actual execution coordination */
   agentRunner: AgentRunner;
-  /** Get an active session by ID */
-  getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  /** Active session store */
+  sessionStore: ActiveSessionStore;
   /** Resume an inactive session */
   resumeSession: (sessionId: string) => Promise<unknown>;
 }
@@ -40,12 +41,12 @@ export interface AgentControllerConfig {
  */
 export class AgentController {
   private readonly agentRunner: AgentRunner;
-  private readonly getActiveSession: (sessionId: string) => ActiveSession | undefined;
+  private readonly sessionStore: ActiveSessionStore;
   private readonly resumeSession: (sessionId: string) => Promise<unknown>;
 
   constructor(config: AgentControllerConfig) {
     this.agentRunner = config.agentRunner;
-    this.getActiveSession = config.getActiveSession;
+    this.sessionStore = config.sessionStore;
     this.resumeSession = config.resumeSession;
   }
 
@@ -54,14 +55,14 @@ export class AgentController {
    * Auto-resumes inactive sessions.
    */
   async run(options: AgentRunOptions): Promise<RunResult[]> {
-    let active = this.getActiveSession(options.sessionId);
+    let active = this.sessionStore.get(options.sessionId);
 
     // Auto-resume session if not active (handles app reopen, server restart, etc.)
     if (!active) {
       logger.info('[AGENT] Auto-resuming inactive session', { sessionId: options.sessionId });
       try {
         await this.resumeSession(options.sessionId);
-        active = this.getActiveSession(options.sessionId);
+        active = this.sessionStore.get(options.sessionId);
       } catch (err) {
         // Session doesn't exist or can't be resumed
         throw new Error(`Session not found: ${options.sessionId}`);
@@ -86,8 +87,7 @@ export class AgentController {
       await active.agent.waitForBackgroundHooks(10_000);
     }
 
-    // Update processing state
-    active.lastActivity = new Date();
+    // Update processing state (setProcessing also updates lastActivity)
     active.sessionContext.setProcessing(true);
 
     // Set currentRunId for event correlation (event handlers access this from active session)
@@ -110,7 +110,7 @@ export class AgentController {
    * Returns true if agent was cancelled, false if session not found or not processing.
    */
   async cancel(sessionId: string): Promise<boolean> {
-    const active = this.getActiveSession(sessionId);
+    const active = this.sessionStore.get(sessionId);
     if (!active) {
       return false;
     }
@@ -122,8 +122,8 @@ export class AgentController {
     // Actually abort the agent - triggers AbortController and interrupts execution
     active.agent.abort();
 
-    // Clear processing state
-    active.lastActivity = new Date();
+    // Clear processing state and update activity timestamp
+    active.sessionContext.touch();
     active.sessionContext.setProcessing(false);
     logger.info('Agent cancelled', { sessionId });
     return true;

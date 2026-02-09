@@ -19,7 +19,7 @@ describe('SpawnHandler', () => {
   let getSession: Mock;
   let getAncestors: Mock;
   let getDbPath: Mock;
-  let getActiveSession: Mock;
+  let mockSessionStoreGet: Mock;
   let createSession: Mock;
   let runAgent: Mock;
   let appendEventLinearized: Mock;
@@ -49,7 +49,7 @@ describe('SpawnHandler', () => {
     getSession = vi.fn();
     getAncestors = vi.fn();
     getDbPath = vi.fn().mockReturnValue('/test/db.sqlite');
-    getActiveSession = vi.fn().mockReturnValue(mockParentSession);
+    mockSessionStoreGet = vi.fn().mockReturnValue(mockParentSession);
     createSession = vi.fn().mockResolvedValue({ sessionId: 'sess_sub_123' });
     runAgent = vi.fn().mockResolvedValue(undefined);
     appendEventLinearized = vi.fn();
@@ -76,7 +76,7 @@ describe('SpawnHandler', () => {
 
     handler = createSpawnHandler({
       eventStore: mockEventStore,
-      getActiveSession,
+      sessionStore: { get: mockSessionStoreGet } as any,
       createSession,
       runAgent,
       appendEventLinearized,
@@ -86,7 +86,7 @@ describe('SpawnHandler', () => {
 
   describe('spawnSubsession', () => {
     it('should return error when parent session not found', async () => {
-      getActiveSession.mockReturnValue(undefined);
+      mockSessionStoreGet.mockReturnValue(undefined);
 
       const result = await handler.spawnSubsession('parent_123', {
         task: 'Test task',
@@ -323,7 +323,7 @@ describe('SpawnHandler', () => {
         },
       } as unknown as ActiveSession;
 
-      getActiveSession.mockReturnValue(mockParentSession);
+      mockSessionStoreGet.mockReturnValue(mockParentSession);
 
       // runAgent resolves with a basic result
       runAgent.mockResolvedValue([{ stoppedReason: 'end_turn' }]);
@@ -447,7 +447,7 @@ describe('SpawnHandler', () => {
 
   describe('spawnTmuxAgent', () => {
     it('should return error when parent session not found', async () => {
-      getActiveSession.mockReturnValue(undefined);
+      mockSessionStoreGet.mockReturnValue(undefined);
 
       const result = await handler.spawnTmuxAgent('parent_123', {
         task: 'Test task',
