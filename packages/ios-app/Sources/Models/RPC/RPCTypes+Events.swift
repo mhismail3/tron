@@ -141,3 +141,11 @@ struct SandboxListResult: Decodable {
     let containers: [ContainerDTO]
     let tailscaleIp: String?
 }
+
+struct ContainerActionParams: Encodable {
+    let name: String
+}
+
+struct ContainerActionResult: Decodable {
+    let success: Bool
+}

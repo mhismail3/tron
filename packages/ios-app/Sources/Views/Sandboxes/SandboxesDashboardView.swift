@@ -13,6 +13,23 @@ struct SandboxesDashboardView: View {
     @State private var selectedContainer: ContainerDTO?
     @State private var safariURL: URL?
 
+    @State private var containerAction: ContainerAction?
+    @State private var showKillConfirmation = false
+    @State private var actionInProgress: String?
+    @State private var actionError: String?
+
+    private enum ContainerAction {
+        case kill(ContainerDTO)
+        case stop(ContainerDTO)
+        case start(ContainerDTO)
+
+        var container: ContainerDTO {
+            switch self {
+            case .kill(let c), .stop(let c), .start(let c): return c
+            }
+        }
+    }
+
     private var runningContainers: [ContainerDTO] {
         containers.filter { $0.status == "running" }
     }
@@ -87,6 +104,30 @@ struct SandboxesDashboardView: View {
                 SafariView(url: url)
             }
         }
+        .alert("Kill Container?", isPresented: $showKillConfirmation) {
+            Button("Cancel", role: .cancel) {
+                containerAction = nil
+            }
+            Button("Kill", role: .destructive) {
+                if let action = containerAction {
+                    performAction(action)
+                }
+            }
+        } message: {
+            if let action = containerAction {
+                Text("This will immediately terminate all processes in \"\(action.container.name)\".")
+            }
+        }
+        .alert("Action Failed", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            if let error = actionError {
+                Text(error)
+            }
+        }
         .task {
             await loadContainers()
         }
@@ -98,29 +139,75 @@ struct SandboxesDashboardView: View {
     // MARK: - Container List
 
     private var containerList: some View {
-        ScrollView {
-            LazyVStack(spacing: 10) {
-                if !runningContainers.isEmpty {
-                    sectionHeader("Running", color: .green)
+        List {
+            if !runningContainers.isEmpty {
+                Section {
                     ForEach(runningContainers) { container in
-                        ContainerRow(container: container)
-                            .onTapGesture { selectedContainer = container }
+                        containerRow(container, dimmed: false)
                     }
-                }
-
-                if !otherContainers.isEmpty {
-                    sectionHeader("Stopped", color: .white.opacity(0.4))
-                    ForEach(otherContainers) { container in
-                        ContainerRow(container: container)
-                            .opacity(0.6)
-                            .onTapGesture { selectedContainer = container }
-                    }
+                } header: {
+                    sectionHeader("Running", color: .green)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+
+            if !otherContainers.isEmpty {
+                Section {
+                    ForEach(otherContainers) { container in
+                        containerRow(container, dimmed: true)
+                    }
+                } header: {
+                    sectionHeader("Stopped", color: .white.opacity(0.4))
+                }
+            }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder
+    private func containerRow(_ container: ContainerDTO, dimmed: Bool) -> some View {
+        ContainerRow(container: container)
+            .opacity(actionInProgress == container.name ? 0.5 : (dimmed ? 0.6 : 1.0))
+            .overlay {
+                if actionInProgress == container.name {
+                    ProgressView()
+                        .tint(.tronIndigo)
+                }
+            }
+            .onTapGesture { selectedContainer = container }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                swipeButtons(for: container)
+            }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12))
+    }
+
+    @ViewBuilder
+    private func swipeButtons(for container: ContainerDTO) -> some View {
+        Button(role: .destructive) {
+            containerAction = .kill(container)
+            showKillConfirmation = true
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+        }
+        .tint(.red)
+
+        if container.status == "running" {
+            Button {
+                performAction(.stop(container))
+            } label: {
+                Image(systemName: "stop.fill")
+            }
+            .tint(.orange)
+        } else if container.status == "stopped" {
+            Button {
+                performAction(.start(container))
+            } label: {
+                Image(systemName: "play.fill")
+            }
+            .tint(.green)
+        }
     }
 
     private func sectionHeader(_ title: String, color: Color) -> some View {
@@ -131,8 +218,31 @@ struct SandboxesDashboardView: View {
                 .tracking(1.5)
             Spacer()
         }
-        .padding(.top, 8)
-        .padding(.leading, 4)
+    }
+
+    // MARK: - Actions
+
+    private func performAction(_ action: ContainerAction) {
+        let name = action.container.name
+        actionInProgress = name
+        containerAction = nil
+
+        Task {
+            do {
+                switch action {
+                case .stop(let c):
+                    _ = try await rpcClient.misc.stopContainer(name: c.name)
+                case .start(let c):
+                    _ = try await rpcClient.misc.startContainer(name: c.name)
+                case .kill(let c):
+                    _ = try await rpcClient.misc.killContainer(name: c.name)
+                }
+                await loadContainers()
+            } catch {
+                actionError = error.localizedDescription
+            }
+            actionInProgress = nil
+        }
     }
 
     // MARK: - Empty & Error States

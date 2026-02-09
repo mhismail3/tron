@@ -375,6 +375,39 @@ final class MiscClient {
         )
     }
 
+    /// Stop a running container
+    func stopContainer(name: String) async throws -> ContainerActionResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        return try await ws.send(
+            method: "sandbox.stopContainer",
+            params: ContainerActionParams(name: name)
+        )
+    }
+
+    /// Start a stopped container
+    func startContainer(name: String) async throws -> ContainerActionResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        return try await ws.send(
+            method: "sandbox.startContainer",
+            params: ContainerActionParams(name: name)
+        )
+    }
+
+    /// Kill a container (SIGKILL)
+    func killContainer(name: String) async throws -> ContainerActionResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        return try await ws.send(
+            method: "sandbox.killContainer",
+            params: ContainerActionParams(name: name)
+        )
+    }
+
     // MARK: - Logs Methods
 
     /// Export logs to server filesystem at $HOME/.tron/artifacts/ios-logs/

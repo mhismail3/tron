@@ -94,7 +94,29 @@ export function createSandboxAdapter(): SandboxRpcManager {
         tailscaleIp: settings.server?.tailscaleIp,
       };
     },
+
+    async stopContainer(name: string) {
+      return runContainerAction('stop', name);
+    },
+
+    async startContainer(name: string) {
+      return runContainerAction('start', name);
+    },
+
+    async killContainer(name: string) {
+      return runContainerAction('kill', name);
+    },
   };
+}
+
+async function runContainerAction(command: string, name: string): Promise<{ success: boolean }> {
+  const runner = new ContainerRunner();
+  const result = await runner.run([command, name], { timeout: 30_000 });
+  if (result.exitCode !== 0) {
+    const msg = result.stderr.trim() || `container ${command} failed with exit code ${result.exitCode}`;
+    throw new Error(msg);
+  }
+  return { success: true };
 }
 
 /**

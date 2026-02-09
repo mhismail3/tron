@@ -303,4 +303,68 @@ describe('SandboxAdapter', () => {
     // Only registry containers, all with unknown status
     expect(result.containers).toHaveLength(3);
   });
+
+  describe('stopContainer', () => {
+    it('should run container stop command', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+
+      const adapter = createSandboxAdapter();
+      const result = await adapter.stopContainer('web-app-1');
+
+      expect(result).toEqual({ success: true });
+      expect(mockRun).toHaveBeenCalledWith(['stop', 'web-app-1'], { timeout: 30_000 });
+    });
+
+    it('should throw on CLI failure', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: 'no such container', exitCode: 1 });
+
+      const adapter = createSandboxAdapter();
+      await expect(adapter.stopContainer('nonexistent')).rejects.toThrow('no such container');
+    });
+
+    it('should throw with default message when stderr is empty', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: '', exitCode: 1 });
+
+      const adapter = createSandboxAdapter();
+      await expect(adapter.stopContainer('web-app-1')).rejects.toThrow('container stop failed with exit code 1');
+    });
+  });
+
+  describe('startContainer', () => {
+    it('should run container start command', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+
+      const adapter = createSandboxAdapter();
+      const result = await adapter.startContainer('db-1');
+
+      expect(result).toEqual({ success: true });
+      expect(mockRun).toHaveBeenCalledWith(['start', 'db-1'], { timeout: 30_000 });
+    });
+
+    it('should throw on CLI failure', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: 'container is already running', exitCode: 1 });
+
+      const adapter = createSandboxAdapter();
+      await expect(adapter.startContainer('web-app-1')).rejects.toThrow('container is already running');
+    });
+  });
+
+  describe('killContainer', () => {
+    it('should run container kill command', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
+
+      const adapter = createSandboxAdapter();
+      const result = await adapter.killContainer('web-app-1');
+
+      expect(result).toEqual({ success: true });
+      expect(mockRun).toHaveBeenCalledWith(['kill', 'web-app-1'], { timeout: 30_000 });
+    });
+
+    it('should throw on CLI failure', async () => {
+      mockRun.mockResolvedValue({ stdout: '', stderr: 'no such container', exitCode: 1 });
+
+      const adapter = createSandboxAdapter();
+      await expect(adapter.killContainer('nonexistent')).rejects.toThrow('no such container');
+    });
+  });
 });

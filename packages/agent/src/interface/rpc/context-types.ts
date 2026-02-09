@@ -343,6 +343,9 @@ export interface SandboxRpcManager {
     }>;
     tailscaleIp?: string;
   }>;
+  stopContainer(name: string): Promise<{ success: boolean }>;
+  startContainer(name: string): Promise<{ success: boolean }>;
+  killContainer(name: string): Promise<{ success: boolean }>;
 }
 
 // =============================================================================
