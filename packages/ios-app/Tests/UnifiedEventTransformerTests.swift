@@ -1341,6 +1341,218 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertFalse(state.subagentSpawns[0].blocking)
     }
 
+    // MARK: - Subagent Session Chat Rendering Tests
+
+    func testSubagentSessionEventsTransformToChat() {
+        // A typical subagent session: user message (task), assistant reply with tool use, final output
+        let events = [
+            rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.user", payload: [
+                "content": AnyCodable("Count files in the current directory")
+            ], timestamp: timestamp(1), sequence: 2),
+            rawEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Bash"),
+                "toolCallId": AnyCodable("tc_1"),
+                "arguments": AnyCodable(["command": "ls -la | wc -l"]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(2), sequence: 3),
+            rawEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_1"),
+                "content": AnyCodable("9")
+            ], timestamp: timestamp(3), sequence: 4),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": "tc_1", "name": "Bash", "input": ["command": "ls -la | wc -l"]],
+                    ["type": "text", "text": "There are **9 files** in the directory."]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(4), sequence: 5)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // user + tool_use + text = 3 messages
+        XCTAssertEqual(messages.count, 3)
+
+        // First message should be the user's task
+        XCTAssertEqual(messages[0].role, .user)
+        if case .text(let text) = messages[0].content {
+            XCTAssertTrue(text.contains("Count files"))
+        } else {
+            XCTFail("Expected text content for user message")
+        }
+
+        // Second message: tool use with result
+        if case .toolUse(let tool) = messages[1].content {
+            XCTAssertEqual(tool.toolName, "Bash")
+            XCTAssertEqual(tool.toolCallId, "tc_1")
+            XCTAssertEqual(tool.result, "9")
+            XCTAssertEqual(tool.status, .success)
+        } else {
+            XCTFail("Expected toolUse content")
+        }
+
+        // Third message: assistant text with markdown
+        XCTAssertEqual(messages[2].role, .assistant)
+        if case .text(let text) = messages[2].content {
+            XCTAssertTrue(text.contains("**9 files**"))
+        } else {
+            XCTFail("Expected text content for assistant message")
+        }
+    }
+
+    func testSubagentSessionEmptyEventsProducesNoMessages() {
+        let events: [RawEvent] = []
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+        XCTAssertTrue(messages.isEmpty)
+    }
+
+    func testSubagentSessionWithOnlySessionStartProducesNoMessages() {
+        let events = [
+            rawEvent(type: "session.start", payload: [:], sequence: 1)
+        ]
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+        XCTAssertTrue(messages.isEmpty)
+    }
+
+    func testSubagentSessionMultiTurnConversation() {
+        // Subagent with multiple turns (reads two files)
+        let events = [
+            rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.user", payload: [
+                "content": AnyCodable("Analyze the codebase")
+            ], timestamp: timestamp(1), sequence: 2),
+            // Turn 1
+            rawEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc_1"),
+                "arguments": AnyCodable(["file_path": "/src/main.ts"]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(2), sequence: 3),
+            rawEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_1"),
+                "content": AnyCodable("const app = express();")
+            ], timestamp: timestamp(3), sequence: 4),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": "tc_1", "name": "Read", "input": ["file_path": "/src/main.ts"]],
+                    ["type": "text", "text": "Found the entry point. Let me check the config."]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(4), sequence: 5),
+            // Turn 2
+            rawEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc_2"),
+                "arguments": AnyCodable(["file_path": "/tsconfig.json"]),
+                "turn": AnyCodable(2)
+            ], timestamp: timestamp(5), sequence: 6),
+            rawEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_2"),
+                "content": AnyCodable("{\"compilerOptions\": {}}")
+            ], timestamp: timestamp(6), sequence: 7),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": "tc_2", "name": "Read", "input": ["file_path": "/tsconfig.json"]],
+                    ["type": "text", "text": "Analysis complete. The codebase uses TypeScript with Express."]
+                ]),
+                "turn": AnyCodable(2)
+            ], timestamp: timestamp(7), sequence: 8)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // user + (tool + text) turn 1 + (tool + text) turn 2 = 5
+        XCTAssertEqual(messages.count, 5)
+
+        // Exactly 1 user message (the task)
+        let userMessages = messages.filter { $0.role == .user }
+        XCTAssertEqual(userMessages.count, 1)
+
+        // 2 tool use messages
+        let toolMessages = messages.filter {
+            if case .toolUse = $0.content { return true }
+            return false
+        }
+        XCTAssertEqual(toolMessages.count, 2)
+
+        // 2 assistant text messages
+        let textMessages = messages.filter { message in
+            guard message.role == .assistant else { return false }
+            if case .text = message.content { return true }
+            return false
+        }
+        XCTAssertEqual(textMessages.count, 2)
+    }
+
+    func testSubagentSessionWithMarkdownTable() {
+        // Ensure markdown tables survive transformation
+        let events = [
+            rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.user", payload: [
+                "content": AnyCodable("Show file counts by extension")
+            ], timestamp: timestamp(1), sequence: 2),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "text", "text": "| Extension | Count |\n|-----------|-------|\n| .ts | 5 |\n| .md | 3 |"]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 2)
+
+        let assistantTexts = messages.filter { message in
+            guard message.role == .assistant else { return false }
+            if case .text(let t) = message.content { return t.contains("|") }
+            return false
+        }
+        XCTAssertEqual(assistantTexts.count, 1, "Markdown table text should be preserved")
+    }
+
+    func testSubagentSessionWithFailedTool() {
+        // Tool that returns error status
+        let events = [
+            rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
+            rawEvent(type: "message.user", payload: [
+                "content": AnyCodable("Read a nonexistent file")
+            ], timestamp: timestamp(1), sequence: 2),
+            rawEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc_1"),
+                "arguments": AnyCodable(["file_path": "/nonexistent"]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(2), sequence: 3),
+            rawEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_1"),
+                "content": AnyCodable("File not found"),
+                "isError": AnyCodable(true)
+            ], timestamp: timestamp(3), sequence: 4),
+            rawEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": "tc_1", "name": "Read", "input": ["file_path": "/nonexistent"]],
+                    ["type": "text", "text": "The file does not exist."]
+                ]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(4), sequence: 5)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // user + tool + text = 3
+        XCTAssertEqual(messages.count, 3)
+
+        let toolMessages = messages.filter {
+            if case .toolUse(let tool) = $0.content {
+                return tool.status == .error
+            }
+            return false
+        }
+        XCTAssertEqual(toolMessages.count, 1, "Failed tool should show error status")
+    }
+
     func testReconstructionSkipsDeletedEvents() {
         // Events targeted by message.deleted should be skipped in reconstruction
         let userEventId = UUID().uuidString

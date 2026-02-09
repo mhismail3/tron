@@ -315,7 +315,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             task: "Search for files",
             model: nil,
             workingDirectory: nil,
-            toolCallId: nil
+            toolCallId: nil,
+            blocking: false
         )
 
         // When: Dispatching

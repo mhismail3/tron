@@ -574,7 +574,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             task: "Exploring codebase",
             model: "claude-3-sonnet",
             workingDirectory: "/test/dir",
-            toolCallId: "toolu_spawn1"
+            toolCallId: "toolu_spawn1",
+            blocking: false
         )
         viewModel.handleSubagentSpawnedResult(result)
 
@@ -590,7 +591,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             task: "Planning",
             model: "claude-3-opus",
             workingDirectory: nil,
-            toolCallId: "toolu_spawn2"
+            toolCallId: "toolu_spawn2",
+            blocking: false
         )
         viewModel.handleSubagentSpawnedResult(spawnedResult)
 

@@ -9,11 +9,17 @@ struct SubagentDetailSheet: View {
     let data: SubagentToolData
     let subagentState: SubagentState
     let eventStoreManager: EventStoreManager
+    let rpcClient: RPCClient
     var onSendResults: ((SubagentToolData) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    /// Loading state for async event sync
+    /// Loading state for async event sync (running subagents)
     @State private var isLoadingEvents = false
+
+    /// Chat history state (completed/failed subagents)
+    @State private var chatEvents: [RawEvent] = []
+    @State private var isLoadingChat = false
+    @State private var chatLoadError: String? = nil
 
     /// Number of events to show per page
     private static let eventsPageSize = 15
@@ -47,6 +53,11 @@ struct SubagentDetailSheet: View {
         max(0, allEvents.count - visibleEventCount)
     }
 
+    /// Chat messages derived from raw events (completed/failed subagents)
+    private var chatMessages: [ChatMessage] {
+        UnifiedEventTransformer.transformPersistedEvents(chatEvents)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -71,10 +82,16 @@ struct SubagentDetailSheet: View {
                     taskSection
                         .padding(.horizontal)
 
-                    // Activity section - always show for subagents
-                    // Events are loaded lazily in onAppear
-                    activitySection
-                        .padding(.horizontal)
+                    // Chat/Activity section
+                    if data.status == .running {
+                        // Running: show live activity stream
+                        activitySection
+                            .padding(.horizontal)
+                    } else {
+                        // Completed/Failed: show full chat with MessageBubble rendering
+                        chatSection
+                            .padding(.horizontal)
+                    }
                 }
                 .padding(.vertical)
             }
@@ -116,9 +133,13 @@ struct SubagentDetailSheet: View {
         .tint(titleColor)
         .preferredColorScheme(.dark)
         .task {
-            // Lazy load events for resumed sessions
-            // First try local database, then sync from server if empty
-            await loadSubagentEvents()
+            if data.status == .running {
+                // Running: load activity events for live streaming
+                await loadSubagentEvents()
+            } else {
+                // Completed/Failed: load full chat history
+                await loadChatHistory()
+            }
         }
     }
 
@@ -148,6 +169,26 @@ struct SubagentDetailSheet: View {
             } catch {
                 // Sync failed - events will remain empty
             }
+        }
+    }
+
+    /// Load full chat history from server for completed/failed subagents
+    private func loadChatHistory() async {
+        guard data.status != .running else { return }
+
+        isLoadingChat = true
+        chatLoadError = nil
+        defer { isLoadingChat = false }
+
+        do {
+            let result = try await rpcClient.eventSync.getHistory(
+                sessionId: data.subagentSessionId,
+                types: nil,
+                limit: 1000
+            )
+            chatEvents = result.events
+        } catch {
+            chatLoadError = error.localizedDescription
         }
     }
 
@@ -301,6 +342,118 @@ struct SubagentDetailSheet: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.clear)
                     .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    // MARK: - Chat Section
+
+    private var chatSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header
+            HStack {
+                Text("Chat")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                if !chatMessages.isEmpty {
+                    Text("\(chatMessages.count)")
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(.white.opacity(0.4))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(.white.opacity(0.1)))
+                }
+
+                Spacer()
+            }
+
+            // Content
+            if isLoadingChat {
+                chatLoadingView
+            } else if let error = chatLoadError {
+                chatErrorView(error)
+            } else if chatMessages.isEmpty {
+                chatEmptyView
+            } else {
+                chatMessagesView
+            }
+        }
+    }
+
+    private var chatLoadingView: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .scaleEffect(0.7)
+                .frame(width: 14, height: 14)
+                .tint(.white.opacity(0.4))
+            Text("Loading chat history...")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(titleColor.opacity(0.12)),
+                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private func chatErrorView(_ error: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronError.opacity(0.8))
+                Text("Failed to load chat history")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            Text(error)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.white.opacity(0.3))
+            Button("Retry") {
+                Task { await loadChatHistory() }
+            }
+            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+            .foregroundStyle(titleColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(titleColor.opacity(0.12)),
+                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var chatEmptyView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "tray")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.white.opacity(0.4))
+            Text("No chat history")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.white.opacity(0.4))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(titleColor.opacity(0.12)),
+                             in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var chatMessagesView: some View {
+        LazyVStack(alignment: .leading, spacing: 8) {
+            ForEach(chatMessages) { message in
+                MessageBubble(message: message)
             }
         }
     }

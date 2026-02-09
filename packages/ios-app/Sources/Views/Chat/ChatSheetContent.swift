@@ -164,6 +164,7 @@ struct ChatSheetContent: View {
                 data: data,
                 subagentState: viewModel.subagentState,
                 eventStoreManager: eventStoreManager,
+                rpcClient: rpcClient,
                 onSendResults: { subagent in
                     viewModel.sendSubagentResults(subagent)
                 }
