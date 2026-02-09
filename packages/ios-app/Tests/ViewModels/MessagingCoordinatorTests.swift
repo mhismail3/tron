@@ -400,8 +400,7 @@ final class MockMessagingContext: MessagingContext {
     var inputText: String = ""
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
-    var isProcessing: Bool = false
-    var isPostProcessing: Bool = false
+    var agentPhase: AgentPhase = .idle
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
     var userDismissedBrowserThisTurn: Bool = false

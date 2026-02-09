@@ -15,7 +15,7 @@ struct ChatSheetContent: View {
     @Environment(\.dependencies) var dependencies
 
     // Convenience accessor
-    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
 
     var body: some View {
         sheetContent

@@ -392,8 +392,7 @@ struct TestToolCall {
 final class MockConnectionContext: ConnectionContext {
     // MARK: - State
     var sessionId: String = "test-session"
-    var isProcessing: Bool = false
-    var isPostProcessing: Bool = false
+    var agentPhase: AgentPhase = .idle
     var shouldDismiss: Bool = false
     var isConnected: Bool = false
 

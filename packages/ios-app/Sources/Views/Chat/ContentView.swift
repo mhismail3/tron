@@ -8,11 +8,11 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // Convenience accessors
-    private var rpcClient: RPCClient { dependencies!.rpcClient }
-    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
-    private var skillStore: SkillStore { dependencies!.skillStore }
-    private var defaultModel: String { dependencies!.defaultModel }
-    private var quickSessionWorkspace: String { dependencies!.quickSessionWorkspace }
+    private var rpcClient: RPCClient { dependencies.rpcClient }
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
+    private var skillStore: SkillStore { dependencies.skillStore }
+    private var defaultModel: String { dependencies.defaultModel }
+    private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
 
     // Deep link navigation from TronMobileApp
     @Binding var deepLinkSessionId: String?

@@ -112,8 +112,8 @@ final class MessagingCoordinator {
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, \(skills?.count ?? 0) skills, \(spells?.count ?? 0) spells, reasoningLevel=\(reasoningLevel ?? "nil")")
 
         // Check if this is a special prompt that should not trigger certain dismissals
-        let isAnswerPrompt = text.hasPrefix("[Answers to your questions]")
-        let isSubagentResultPrompt = text.hasPrefix("[SUBAGENT RESULTS")
+        let isAnswerPrompt = text.hasPrefix(AgentProtocol.askUserAnswerPrefix)
+        let isSubagentResultPrompt = text.hasPrefix(AgentProtocol.subagentResultPrefix)
 
         if !isAnswerPrompt {
             // Mark any pending AskUserQuestion chips as superseded

@@ -147,12 +147,7 @@ struct CompactionDetailSheet: View {
     // MARK: - Helpers
 
     private var reasonLabel: String {
-        switch reason {
-        case "pre_turn_guardrail": return "Auto"
-        case "threshold_exceeded": return "Threshold"
-        case "manual": return "Manual"
-        default: return reason
-        }
+        CompactionReason(rawValue: reason)?.detailDisplayText ?? reason
     }
 }
 

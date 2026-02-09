@@ -51,7 +51,7 @@ enum AskUserQuestionDetector {
             let event = events[i]
             if event.type == PersistedEventType.messageUser.rawValue {
                 guard let content = event.payload["content"]?.value as? String else { continue }
-                if content.contains("[Answers to your questions]") {
+                if content.contains(AgentProtocol.askUserAnswerPrefix) {
                     // Parse the answers from the message content
                     let answers = AnswerParser.parseAnswers(from: content, params: params)
                     return AskUserQuestionDetectionResult(status: .answered, answers: answers, answerMessageContent: content)

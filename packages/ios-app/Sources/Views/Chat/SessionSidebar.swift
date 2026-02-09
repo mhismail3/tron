@@ -27,7 +27,7 @@ struct SessionSidebar: View {
     @State private var showArchiveConfirmation = false
 
     // Convenience accessor
-    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     let onNewSession: () -> Void
     var onNewSessionLongPress: (() -> Void)? = nil
     let onDeleteSession: (String) -> Void

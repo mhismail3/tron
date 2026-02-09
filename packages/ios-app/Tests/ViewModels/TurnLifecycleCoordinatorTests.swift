@@ -494,8 +494,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var streamingText: String = ""
     var hasActiveStreaming: Bool = false
     var currentModel: String = "claude-3-sonnet"
-    var isProcessing: Bool = false
-    var isPostProcessing: Bool = false
+    var agentPhase: AgentPhase = .idle
     var catchingUpMessageId: UUID?
     var userDismissedBrowserThisTurn: Bool = false
     var sessionId: String = "test-session"

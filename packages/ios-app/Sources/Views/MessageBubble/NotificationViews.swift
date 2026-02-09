@@ -1,206 +1,223 @@
 import SwiftUI
 
-// MARK: - Model Change Notification View (Pill-style in-chat notification)
+// MARK: - NotificationPill
+
+struct NotificationPill<Content: View>: View {
+    let tint: Color
+    var interactive: Bool = false
+    var onTap: (() -> Void)? = nil
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Group {
+            if let onTap {
+                pillContent.onTapGesture { onTap() }
+            } else {
+                pillContent
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var pillContent: some View {
+        content()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .modifier(PillBackground(tint: tint, interactive: interactive))
+            .contentShape(Capsule())
+    }
+}
+
+// MARK: - PillBackground
+
+private struct PillBackground: ViewModifier {
+    let tint: Color
+    let interactive: Bool
+
+    func body(content: Content) -> some View {
+        if interactive {
+            if #available(iOS 26.0, *) {
+                content
+                    .glassEffect(
+                        .regular.tint(tint.opacity(0.35)).interactive(),
+                        in: .capsule
+                    )
+            } else {
+                solidBackground(content)
+            }
+        } else {
+            solidBackground(content)
+        }
+    }
+
+    private func solidBackground(_ content: Content) -> some View {
+        content
+            .background(tint.opacity(0.1))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(tint.opacity(0.3), lineWidth: 0.5)
+            )
+    }
+}
+
+// MARK: - Model Change Notification View
 
 struct ModelChangeNotificationView: View {
     let from: String
     let to: String
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "cpu")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronEmerald)
+        NotificationPill(tint: .tronEmerald) {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronEmerald)
 
-            Text("Switched from")
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextMuted)
+                Text("Switched from")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
 
-            Text(from)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                Text(from)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
 
-            Image(systemName: "arrow.right")
-                .font(TronTypography.pill)
-                .foregroundStyle(.tronTextMuted)
+                Image(systemName: "arrow.right")
+                    .font(TronTypography.pill)
+                    .foregroundStyle(.tronTextMuted)
 
-            Text(to)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
-                .foregroundStyle(.tronEmerald)
+                Text(to)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .foregroundStyle(.tronEmerald)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronSurface.opacity(0.6))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Reasoning Level Change Notification View (Pill-style in-chat notification)
+// MARK: - Reasoning Level Change Notification View
 
 struct ReasoningLevelChangeNotificationView: View {
     let from: String
     let to: String
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "brain")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronEmerald)
+        NotificationPill(tint: .tronEmerald) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronEmerald)
 
-            Text("Reasoning")
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronTextMuted)
+                Text("Reasoning")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
 
-            Text(from)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                Text(from)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
 
-            Image(systemName: "arrow.right")
-                .font(TronTypography.pill)
-                .foregroundStyle(.tronTextMuted)
+                Image(systemName: "arrow.right")
+                    .font(TronTypography.pill)
+                    .foregroundStyle(.tronTextMuted)
 
-            Text(to)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
-                .foregroundStyle(.tronEmerald)
+                Text(to)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
+                    .foregroundStyle(.tronEmerald)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronSurface.opacity(0.6))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.tronEmerald.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Interrupted Notification View (Red pill-style in-chat notification)
+// MARK: - Interrupted Notification View
 
 struct InterruptedNotificationView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "stop.circle.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.red)
+        NotificationPill(tint: .red) {
+            HStack(spacing: 8) {
+                Image(systemName: "stop.circle.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.red)
 
-            Text("Session interrupted")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.red.opacity(0.9))
+                Text("Session interrupted")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.red.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Catching Up Notification View (Gray pill-style in-chat notification)
+// MARK: - Catching Up Notification View
 
 struct CatchingUpNotificationView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(0.7)
-                .tint(.gray)
+        NotificationPill(tint: .gray) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(.gray)
 
-            Text("Loading latest messages...")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.gray)
+                Text("Loading latest messages...")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.gray)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.gray.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.gray.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Transcription Failed Notification View (Red pill-style in-chat notification)
+// MARK: - Transcription Failed Notification View
 
 struct TranscriptionFailedNotificationView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "mic.slash.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.red)
+        NotificationPill(tint: .red) {
+            HStack(spacing: 8) {
+                Image(systemName: "mic.slash.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.red)
 
-            Text("Transcription failed")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.red.opacity(0.9))
+                Text("Transcription failed")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.red.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - No Speech Detected Notification View (Amber pill-style in-chat notification)
+// MARK: - No Speech Detected Notification View
 
 struct TranscriptionNoSpeechNotificationView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "waveform")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(Color.orange)
+        NotificationPill(tint: .orange) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(Color.orange)
 
-            Text("No speech detected")
-                .font(TronTypography.filePath)
-                .foregroundStyle(Color.orange.opacity(0.9))
+                Text("No speech detected")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(Color.orange.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.orange.opacity(0.35), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Compaction In Progress Notification View (spinning cyan pill)
+// MARK: - Compaction In Progress Notification View
 
 struct CompactionInProgressNotificationView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(0.7)
-                .tint(.cyan)
+        NotificationPill(tint: .cyan, interactive: true) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(.cyan)
 
-            Text("Compacting context...")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.cyan.opacity(0.9))
+                Text("Compacting context...")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.cyan.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .modifier(InteractiveCapsuleGlass(tint: .cyan))
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Compaction Notification View (Cyan pill-style in-chat notification)
+// MARK: - Compaction Notification View
 
 struct CompactionNotificationView: View {
     let tokensBefore: Int
@@ -225,52 +242,37 @@ struct CompactionNotificationView: View {
     }
 
     private var reasonDisplay: String {
-        switch reason {
-        case "pre_turn_guardrail":
-            return "auto"
-        case "threshold_exceeded":
-            return "threshold"
-        case "manual":
-            return "manual"
-        default:
-            return reason
-        }
+        CompactionReason(rawValue: reason)?.displayText ?? reason
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.cyan)
+        NotificationPill(tint: .cyan, interactive: true, onTap: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.cyan)
 
-            Text("Context compacted")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.cyan.opacity(0.9))
+                Text("Context compacted")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.cyan.opacity(0.9))
 
-            Text("\u{2022}")
-                .font(TronTypography.badge)
-                .foregroundStyle(.cyan.opacity(0.5))
+                Text("\u{2022}")
+                    .font(TronTypography.badge)
+                    .foregroundStyle(.cyan.opacity(0.5))
 
-            Text("\(formattedSaved) tokens saved")
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.cyan.opacity(0.7))
+                Text("\(formattedSaved) tokens saved")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.cyan.opacity(0.7))
 
-            Text("(\(compressionPercent)%)")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.cyan.opacity(0.5))
+                Text("(\(compressionPercent)%)")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.cyan.opacity(0.5))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .modifier(InteractiveCapsuleGlass(tint: .cyan))
-        .contentShape(Capsule())
-        .onTapGesture {
-            onTap?()
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Context Cleared Notification View (Teal pill-style in-chat notification)
+// MARK: - Context Cleared Notification View
 
 struct ContextClearedNotificationView: View {
     let tokensBefore: Int
@@ -288,36 +290,29 @@ struct ContextClearedNotificationView: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "xmark.circle.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.teal)
+        NotificationPill(tint: .teal) {
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.teal)
 
-            Text("Context cleared")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.teal.opacity(0.9))
+                Text("Context cleared")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.teal.opacity(0.9))
 
-            Text("\u{2022}")
-                .font(TronTypography.badge)
-                .foregroundStyle(.teal.opacity(0.5))
+                Text("\u{2022}")
+                    .font(TronTypography.badge)
+                    .foregroundStyle(.teal.opacity(0.5))
 
-            Text("\(formattedFreed) tokens freed")
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.teal.opacity(0.7))
+                Text("\(formattedFreed) tokens freed")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.teal.opacity(0.7))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.teal.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.teal.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Message Deleted Notification View (Orange pill-style in-chat notification)
+// MARK: - Message Deleted Notification View
 
 struct MessageDeletedNotificationView: View {
     let targetType: String
@@ -349,149 +344,112 @@ struct MessageDeletedNotificationView: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronAmber)
+        NotificationPill(tint: .tronAmber) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronAmber)
 
-            Text("Deleted \(typeLabel) from context")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.tronAmber.opacity(0.9))
+                Text("Deleted \(typeLabel) from context")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.tronAmber.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronAmber.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.tronAmber.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Skill Removed Notification View (Teal pill-style in-chat notification)
+// MARK: - Skill Removed Notification View
 
 struct SkillRemovedNotificationView: View {
     let skillName: String
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronCyan)
+        NotificationPill(tint: .tronCyan) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronCyan)
 
-            Text(skillName)
-                .font(TronTypography.filePath)
-                .foregroundStyle(Color.tronCyan.opacity(0.9))
+                Text(skillName)
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(Color.tronCyan.opacity(0.9))
 
-            Text("removed from context")
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(Color.tronCyan.opacity(0.6))
+                Text("removed from context")
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(Color.tronCyan.opacity(0.6))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronCyan.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.tronCyan.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Rules Loaded Notification View (Amber pill-style in-chat notification)
+// MARK: - Rules Loaded Notification View
 
 struct RulesLoadedNotificationView: View {
     let count: Int
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "doc.text.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.tronAmber)
+        NotificationPill(tint: .tronAmber) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronAmber)
 
-            Text("Loaded \(count) \(count == 1 ? "rule" : "rules")")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.tronAmber.opacity(0.9))
+                Text("Loaded \(count) \(count == 1 ? "rule" : "rules")")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.tronAmber.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronAmber.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.tronAmber.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Workspace Deleted Notification View (Red pill-style in-chat notification)
+// MARK: - Workspace Deleted Notification View
 
-/// Notification shown when workspace folder was deleted
 struct WorkspaceDeletedNotificationView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "folder.badge.questionmark")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.red)
+        NotificationPill(tint: .red) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.badge.questionmark")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.red)
 
-            Text("Workspace deleted – session in read-only mode")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.red.opacity(0.9))
+                Text("Workspace deleted \u{2013} session in read-only mode")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.red.opacity(0.9))
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Turn Failed Notification View (Red pill-style in-chat notification)
+// MARK: - Turn Failed Notification View
 
-/// Notification shown when a turn fails due to errors
 struct TurnFailedNotificationView: View {
     let error: String
     let code: String?
     let recoverable: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.red)
+        NotificationPill(tint: .red) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.red)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Request failed")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.red.opacity(0.9))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Request failed")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(.red.opacity(0.9))
 
-                Text(error)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(2)
+                    Text(error)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
+                }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Memory Updated Notification View (Purple pill-style in-chat notification)
+// MARK: - Memory Updated Notification View
 
 struct MemoryUpdatedNotificationView: View {
     let title: String
@@ -499,81 +457,45 @@ struct MemoryUpdatedNotificationView: View {
     var onTap: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "brain.fill")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.purple)
+        NotificationPill(tint: .purple, interactive: true, onTap: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.purple)
 
-            Text("Memory updated")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.purple.opacity(0.9))
+                Text("Memory updated")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.purple.opacity(0.9))
 
-            Text("\u{2022}")
-                .font(TronTypography.badge)
-                .foregroundStyle(.purple.opacity(0.5))
+                Text("\u{2022}")
+                    .font(TronTypography.badge)
+                    .foregroundStyle(.purple.opacity(0.5))
 
-            Text(title)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.purple.opacity(0.7))
-                .lineLimit(1)
+                Text(title)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.purple.opacity(0.7))
+                    .lineLimit(1)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .modifier(InteractiveCapsuleGlass(tint: .purple))
-        .contentShape(Capsule())
-        .onTapGesture { onTap?() }
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// MARK: - Memories Loaded Notification View (Lavender pill-style in-chat notification)
+// MARK: - Memories Loaded Notification View
 
 struct MemoriesLoadedNotificationView: View {
     let count: Int
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "brain.head.profile")
-                .font(TronTypography.codeSM)
-                .foregroundStyle(.purple)
+        NotificationPill(tint: .purple) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain.head.profile")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.purple)
 
-            Text("Loaded \(count) \(count == 1 ? "memory" : "memories")")
-                .font(TronTypography.filePath)
-                .foregroundStyle(.purple.opacity(0.9))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.purple.opacity(0.1))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color.purple.opacity(0.3), lineWidth: 0.5)
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
-}
-
-// MARK: - Interactive Capsule Glass Modifier
-
-/// Applies interactive liquid glass on iOS 26+, falls back to tinted background + stroke on older iOS
-private struct InteractiveCapsuleGlass: ViewModifier {
-    let tint: Color
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .glassEffect(
-                    .regular.tint(tint.opacity(0.35)).interactive(),
-                    in: .capsule
-                )
-        } else {
-            content
-                .background(tint.opacity(0.1))
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(tint.opacity(0.3), lineWidth: 0.5)
-                )
+                Text("Loaded \(count) \(count == 1 ? "memory" : "memories")")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.purple.opacity(0.9))
+            }
         }
     }
 }

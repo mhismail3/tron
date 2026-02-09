@@ -25,7 +25,7 @@ enum MessageHandlers {
         }
 
         // AskUserQuestion answer prompts - render as a chip instead of full text
-        if parsed.content.contains("[Answers to your questions]") {
+        if parsed.content.contains(AgentProtocol.askUserAnswerPrefix) {
             // Count the questions by parsing the message (count ** markers)
             let questionCount = parsed.content.components(separatedBy: "\n**").count - 1
             return ChatMessage(

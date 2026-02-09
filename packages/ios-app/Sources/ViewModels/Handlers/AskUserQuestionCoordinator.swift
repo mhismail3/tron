@@ -147,7 +147,7 @@ final class AskUserQuestionCoordinator {
     ///   - answers: The user's answers
     /// - Returns: Formatted prompt string
     func formatAnswersAsPrompt(data: AskUserQuestionToolData, answers: [AskUserQuestionAnswer]) -> String {
-        var lines: [String] = ["[Answers to your questions]", ""]
+        var lines: [String] = [AgentProtocol.askUserAnswerPrefix, ""]
 
         for question in data.params.questions {
             guard let answer = answers.first(where: { $0.questionId == question.id }) else { continue }

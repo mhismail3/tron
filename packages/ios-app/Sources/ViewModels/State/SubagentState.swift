@@ -68,6 +68,25 @@ final class SubagentState {
 
     init() {}
 
+    // MARK: - Private Helpers
+
+    /// Mutate a tracked subagent and sync selectedSubagent if it matches.
+    private func updateAndSync(_ subagentSessionId: String, mutate: (inout SubagentToolData) -> Void) {
+        guard var data = subagents[subagentSessionId] else { return }
+        mutate(&data)
+        subagents[subagentSessionId] = data
+        if selectedSubagent?.subagentSessionId == subagentSessionId {
+            selectedSubagent = data
+        }
+    }
+
+    /// Normalize event type strings to canonical dot-separated form.
+    /// Handles: "tool_start", "tool.start", "agent.tool_start" -> "tool.start"
+    private static func normalizeEventType(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "agent.", with: "")
+           .replacingOccurrences(of: "_", with: ".")
+    }
+
     // MARK: - Subagent Lifecycle
 
     /// Track a newly spawned subagent
@@ -91,14 +110,9 @@ final class SubagentState {
 
     /// Update subagent status (running with turn count)
     func updateStatus(subagentSessionId: String, status: SubagentStatus, currentTurn: Int) {
-        guard var data = subagents[subagentSessionId] else { return }
-        data.status = status
-        data.currentTurn = currentTurn
-        subagents[subagentSessionId] = data
-
-        // Also update selectedSubagent if it's the same one
-        if selectedSubagent?.subagentSessionId == subagentSessionId {
-            selectedSubagent = data
+        updateAndSync(subagentSessionId) { data in
+            data.status = status
+            data.currentTurn = currentTurn
         }
     }
 
@@ -112,67 +126,41 @@ final class SubagentState {
         tokenUsage: TokenUsage?,
         model: String? = nil
     ) {
-        guard var data = subagents[subagentSessionId] else { return }
-        data.status = .completed
-        data.currentTurn = totalTurns
-        data.resultSummary = resultSummary
-        data.fullOutput = fullOutput
-        data.duration = duration
-        data.tokenUsage = tokenUsage
-        // Update model if provided (may not have been set during spawn for reconstructed sessions)
-        if let model = model {
-            data.model = model
-        }
-        subagents[subagentSessionId] = data
-
-        // Also update selectedSubagent if it's the same one
-        if selectedSubagent?.subagentSessionId == subagentSessionId {
-            selectedSubagent = data
+        updateAndSync(subagentSessionId) { data in
+            data.status = .completed
+            data.currentTurn = totalTurns
+            data.resultSummary = resultSummary
+            data.fullOutput = fullOutput
+            data.duration = duration
+            data.tokenUsage = tokenUsage
+            if let model = model {
+                data.model = model
+            }
         }
     }
 
     /// Mark subagent as failed
     func fail(subagentSessionId: String, error: String, duration: Int) {
-        guard var data = subagents[subagentSessionId] else { return }
-        data.status = .failed
-        data.error = error
-        data.duration = duration
-        subagents[subagentSessionId] = data
-
-        // Also update selectedSubagent if it's the same one
-        if selectedSubagent?.subagentSessionId == subagentSessionId {
-            selectedSubagent = data
+        updateAndSync(subagentSessionId) { data in
+            data.status = .failed
+            data.error = error
+            data.duration = duration
         }
     }
 
     /// Mark results as requiring user action (called when event received while parent idle)
     func markResultsPending(subagentSessionId: String) {
-        guard var data = subagents[subagentSessionId] else { return }
-        data.resultDeliveryStatus = .pending
-        subagents[subagentSessionId] = data
-        if selectedSubagent?.subagentSessionId == subagentSessionId {
-            selectedSubagent = data
-        }
+        updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .pending }
     }
 
     /// Mark results as sent to agent
     func markResultsSent(subagentSessionId: String) {
-        guard var data = subagents[subagentSessionId] else { return }
-        data.resultDeliveryStatus = .sent
-        subagents[subagentSessionId] = data
-        if selectedSubagent?.subagentSessionId == subagentSessionId {
-            selectedSubagent = data
-        }
+        updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .sent }
     }
 
     /// Mark results as dismissed without sending
     func markResultsDismissed(subagentSessionId: String) {
-        guard var data = subagents[subagentSessionId] else { return }
-        data.resultDeliveryStatus = .dismissed
-        subagents[subagentSessionId] = data
-        if selectedSubagent?.subagentSessionId == subagentSessionId {
-            selectedSubagent = data
-        }
+        updateAndSync(subagentSessionId) { $0.resultDeliveryStatus = .dismissed }
     }
 
     // MARK: - UI Actions
@@ -226,7 +214,7 @@ final class SubagentState {
         eventData: AnyCodable,
         timestamp: String
     ) {
-        let date = ISO8601DateFormatter().date(from: timestamp) ?? Date()
+        let date = DateParser.parse(timestamp) ?? Date()
         let dataDict = eventData.value as? [String: Any] ?? [:]
 
         // Initialize event list if needed
@@ -234,8 +222,8 @@ final class SubagentState {
             subagentEvents[subagentSessionId] = []
         }
 
-        switch eventType {
-        case "tool_start", "tool.start", "agent.tool_start":
+        switch Self.normalizeEventType(eventType) {
+        case "tool.start":
             let toolName = dataDict["toolName"] as? String ?? "unknown"
             let toolCallId = dataDict["toolCallId"] as? String
 
@@ -260,7 +248,7 @@ final class SubagentState {
             )
             subagentEvents[subagentSessionId]?.append(item)
 
-        case "tool_end", "tool.end", "agent.tool_end":
+        case "tool.end":
             let success = dataDict["success"] as? Bool ?? true
             let toolCallId = dataDict["toolCallId"] as? String
             let toolName = dataDict["toolName"] as? String
@@ -287,7 +275,7 @@ final class SubagentState {
                 subagentEvents[subagentSessionId]?.append(item)
             }
 
-        case "text_delta", "text.delta", "agent.text_delta":
+        case "text.delta":
             let delta = dataDict["delta"] as? String ?? ""
             guard !delta.isEmpty else { return }
 
@@ -321,7 +309,7 @@ final class SubagentState {
                 subagentEvents[subagentSessionId]?.append(item)
             }
 
-        case "thinking_delta", "thinking.delta", "agent.thinking_delta":
+        case "thinking.delta":
             // Only add thinking indicator if not already present
             if subagentEvents[subagentSessionId]?.contains(where: { $0.type == .thinking }) != true {
                 let item = SubagentEventItem(

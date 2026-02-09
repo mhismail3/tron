@@ -246,11 +246,7 @@ struct LogViewer: View {
             }.joined(separator: "\n")
 
             do {
-                guard let rpcClient = dependencies?.rpcClient else {
-                    logger.error("Cannot export logs - no RPC client available", category: .general)
-                    exportResult = "Error: Not connected"
-                    return
-                }
+                let rpcClient = dependencies.rpcClient
 
                 let result = try await rpcClient.misc.exportLogs(content: logText)
                 logger.info("Exported \(allLogs.count) log entries to server: \(result.path)", category: .general)

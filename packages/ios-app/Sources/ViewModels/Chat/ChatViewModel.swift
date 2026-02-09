@@ -13,10 +13,10 @@ final class ChatViewModel: ChatEventContext {
     // MARK: - Observable State
 
     var messages: [ChatMessage] = []
-    var isProcessing = false
-    /// Background hooks (compaction, memory) are running after agent_end.
-    /// While true: text field enabled (can type), send button disabled (can't send).
-    var isPostProcessing = false
+    /// Agent lifecycle phase (idle → processing → postProcessing → idle).
+    /// Replaces the previous `isProcessing` / `isPostProcessing` booleans
+    /// which could get into invalid states (both true simultaneously).
+    var agentPhase: AgentPhase = .idle
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
     var isCompacting = false
@@ -227,61 +227,55 @@ final class ChatViewModel: ChatEventContext {
         setupAudioRecorder()
     }
 
+    /// Observation tasks cancelled on deinit.
+    nonisolated(unsafe) private var observationTasks: [Task<Void, Never>] = []
+
     private func setupBindings() {
-        // Observe RPCClient connection state using Swift Observation
-        observeConnectionStateChanges()
-
-        // Handle image picker changes - observe inputBarState.selectedImages
-        // Using withObservationTracking to react to @Observable changes
-        observeSelectedImagesChanges()
-
-        // Observe audio recorder state changes
-        observeAudioRecorderChanges()
+        observationTasks.append(observeConnectionState())
+        observationTasks.append(observeAudioRecorderState())
+        observationTasks.append(observeSelectedImages())
     }
 
-    /// Observe changes to rpcClient.connectionState using Swift Observation
-    private func observeConnectionStateChanges() {
-        withObservationTracking {
-            // Access the property to register for tracking
-            _ = rpcClient.connectionState
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+    /// Continuation-based loop that reacts to rpcClient.connectionState changes.
+    /// Cancelled in deinit — no weak self needed.
+    private func observeConnectionState() -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                await withCheckedContinuation { cont in
+                    withObservationTracking {
+                        _ = self.rpcClient.connectionState
+                    } onChange: {
+                        cont.resume()
+                    }
+                }
+                guard !Task.isCancelled else { return }
                 self.connectionState = self.rpcClient.connectionState
 
                 // Clear stale processing state on disconnect — server may have
                 // crashed during post-processing, so agent_ready will never arrive.
                 if case .disconnected = self.connectionState {
-                    if self.isProcessing {
-                        self.isProcessing = false
-                    }
-                    if self.isPostProcessing {
-                        self.isPostProcessing = false
+                    if self.agentPhase != .idle {
+                        self.agentPhase = .idle
                     }
                 }
-
-                // Re-register for the next change
-                self.observeConnectionStateChanges()
             }
         }
     }
 
-    /// Observe changes to audioRecorder.isRecording using Swift Observation
-    private func observeAudioRecorderChanges() {
-        startAudioRecorderObservation()
-    }
-
-    /// Recursive observation helper for audioRecorder.isRecording changes
-    private func startAudioRecorderObservation() {
-        withObservationTracking {
-            // Access the property to register for tracking
-            _ = audioRecorder.isRecording
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+    /// Continuation-based loop that reacts to audioRecorder.isRecording changes.
+    /// Cancelled in deinit — no weak self needed.
+    private func observeAudioRecorderState() -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                await withCheckedContinuation { cont in
+                    withObservationTracking {
+                        _ = self.audioRecorder.isRecording
+                    } onChange: {
+                        cont.resume()
+                    }
+                }
+                guard !Task.isCancelled else { return }
                 self.isRecording = self.audioRecorder.isRecording
-                // Re-register for the next change
-                self.startAudioRecorderObservation()
             }
         }
     }
@@ -292,23 +286,20 @@ final class ChatViewModel: ChatEventContext {
         }
     }
 
-    /// Observe changes to inputBarState.selectedImages using Swift Observation
-    private func observeSelectedImagesChanges() {
-        startImageObservation()
-    }
-
-    /// Recursive observation helper for selectedImages changes
-    private func startImageObservation() {
-        withObservationTracking {
-            // Access the property to register for tracking
-            _ = self.inputBarState.selectedImages
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-                // Process the new images
+    /// Continuation-based loop that reacts to inputBarState.selectedImages changes.
+    /// Cancelled in deinit — no weak self needed.
+    private func observeSelectedImages() -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                await withCheckedContinuation { cont in
+                    withObservationTracking {
+                        _ = self.inputBarState.selectedImages
+                    } onChange: {
+                        cont.resume()
+                    }
+                }
+                guard !Task.isCancelled else { return }
                 await self.processSelectedImages(self.inputBarState.selectedImages)
-                // Re-schedule observation
-                self.startImageObservation()
             }
         }
     }
@@ -428,6 +419,7 @@ final class ChatViewModel: ChatEventContext {
 
     deinit {
         eventTask?.cancel()
+        for task in observationTasks { task.cancel() }
     }
 
     /// Unified event handler - dispatches ParsedEventV2 to specific handlers

@@ -563,75 +563,7 @@ struct CachedSession: Identifiable, Codable {
     }
 
     var formattedDate: String {
-        // Parse ISO8601 timestamp with fractional seconds support
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        var date = isoFormatter.date(from: lastActivityAt)
-
-        // Fallback: try without fractional seconds
-        if date == nil {
-            isoFormatter.formatOptions = [.withInternetDateTime]
-            date = isoFormatter.date(from: lastActivityAt)
-        }
-
-        guard let parsedDate = date else {
-            // Last resort: try to extract just the date/time portion
-            return formatFallbackDate(lastActivityAt)
-        }
-
-        let now = Date()
-        let interval = now.timeIntervalSince(parsedDate)
-
-        // Within last 24 hours - use relative time like "7 minutes ago"
-        if interval < 86400 && interval >= 0 {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .full
-            return formatter.localizedString(for: parsedDate, relativeTo: now)
-        }
-
-        // Beyond 24 hours - use readable date format
-        let dateFormatter = DateFormatter()
-        if Calendar.current.isDate(parsedDate, equalTo: now, toGranularity: .year) {
-            dateFormatter.dateFormat = "MMM d"  // e.g., "Jan 5"
-        } else {
-            dateFormatter.dateFormat = "MMM d, yyyy"  // e.g., "Jan 5, 2025"
-        }
-        return dateFormatter.string(from: parsedDate)
-    }
-
-    /// Fallback date formatting for non-standard ISO strings
-    private func formatFallbackDate(_ dateString: String) -> String {
-        // Try to extract date components from string like "2026-01-05T23:15:18.364Z"
-        let components = dateString.components(separatedBy: "T")
-        if components.count >= 2 {
-            let datePart = components[0]
-            let timePart = components[1].components(separatedBy: ".")[0]
-                .components(separatedBy: "Z")[0]
-
-            // Parse date manually
-            let dateComponents = datePart.components(separatedBy: "-")
-            let timeComponents = timePart.components(separatedBy: ":")
-
-            if dateComponents.count == 3, timeComponents.count >= 2 {
-                let month = Int(dateComponents[1]) ?? 1
-                let day = Int(dateComponents[2]) ?? 1
-                let hour = Int(timeComponents[0]) ?? 0
-                let minute = Int(timeComponents[1]) ?? 0
-
-                let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                let monthName = monthNames[max(0, min(11, month - 1))]
-
-                // Format as "Jan 5, 3:15 PM"
-                let hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour)
-                let ampm = hour >= 12 ? "PM" : "AM"
-                return "\(monthName) \(day), \(hour12):\(String(format: "%02d", minute)) \(ampm)"
-            }
-        }
-
-        // If all else fails, return the original string
-        return dateString
+        DateParser.formatRelativeOrAbsolute(lastActivityAt)
     }
 
     var shortModel: String {

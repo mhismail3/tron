@@ -79,9 +79,10 @@ struct InputBar: View {
         VStack(spacing: 10) {
             // Skill mention popup
             if showSkillMentionPopup, let store = config.skillStore {
-                SkillMentionPopup(
+                MentionPopup(
                     skills: store.skills,
                     query: skillMentionQuery,
+                    style: .skill,
                     onSelect: { skill in
                         selectSkillFromMention(skill)
                     },
@@ -95,9 +96,10 @@ struct InputBar: View {
 
             // Spell mention popup (ephemeral skills)
             if showSpellMentionPopup, let store = config.skillStore {
-                SpellMentionPopup(
+                MentionPopup(
                     skills: store.skills,
                     query: spellMentionQuery,
+                    style: .spell,
                     onSelect: { skill in
                         selectSpellFromMention(skill)
                     },
@@ -377,92 +379,98 @@ struct InputBar: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMicButton)
     }
 
-    // MARK: - Skill Mention Detection
+    // MARK: - Mention Detection (shared for skills and spells)
 
     private func detectSkillMention(in newText: String) {
+        detectMention(
+            in: newText,
+            detector: .skill,
+            selected: state.selectedSkills,
+            showPopup: $showSkillMentionPopup,
+            query: $skillMentionQuery,
+            onCompleted: { skill in
+                if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
+                    state.selectedSkills.append(skill)
+                }
+                actions.onSkillSelect?(skill)
+            }
+        )
+    }
+
+    private func detectSpellMention(in newText: String) {
+        detectMention(
+            in: newText,
+            detector: .spell,
+            selected: state.selectedSpells,
+            showPopup: $showSpellMentionPopup,
+            query: $spellMentionQuery,
+            onCompleted: { skill in
+                if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
+                    state.selectedSpells.append(skill)
+                }
+            }
+        )
+    }
+
+    private func detectMention(
+        in newText: String,
+        detector: MentionDetector,
+        selected: [Skill],
+        showPopup: Binding<Bool>,
+        query: Binding<String>,
+        onCompleted: (Skill) -> Void
+    ) {
         guard let store = config.skillStore else { return }
 
-        if let completedSkill = detectCompletedSkillMention(in: newText, skills: store.skills) {
-            selectCompletedSkillMention(completedSkill, in: newText)
+        if let completed = detector.detectCompletedMention(in: newText, skills: store.skills, alreadySelected: selected) {
+            onCompleted(completed)
+            withAnimation(.tronStandard) {
+                showPopup.wrappedValue = false
+                query.wrappedValue = ""
+            }
             return
         }
 
-        if let query = SkillMentionDetector.detectMention(in: newText) {
-            skillMentionQuery = query
-            if !showSkillMentionPopup {
+        if let q = detector.detectMention(in: newText) {
+            query.wrappedValue = q
+            if !showPopup.wrappedValue {
                 withAnimation(.tronStandard) {
-                    showSkillMentionPopup = true
+                    showPopup.wrappedValue = true
                 }
             }
-        } else {
-            if showSkillMentionPopup {
-                withAnimation(.tronStandard) {
-                    showSkillMentionPopup = false
-                    skillMentionQuery = ""
-                }
+        } else if showPopup.wrappedValue {
+            withAnimation(.tronStandard) {
+                showPopup.wrappedValue = false
+                query.wrappedValue = ""
             }
         }
-    }
-
-    private func detectCompletedSkillMention(in text: String, skills: [Skill]) -> Skill? {
-        let pattern = "@([a-zA-Z0-9][a-zA-Z0-9-]*)(?:\\s|$)"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return nil
-        }
-
-        let nsText = text as NSString
-        let range = NSRange(location: 0, length: nsText.length)
-        let matches = regex.matches(in: text, options: [], range: range)
-
-        for match in matches.reversed() {
-            guard match.numberOfRanges > 1 else { continue }
-            let skillNameRange = match.range(at: 1)
-            let skillName = nsText.substring(with: skillNameRange)
-
-            guard !skillName.isEmpty else { continue }
-
-            let atIndex = match.range.location
-            if atIndex > 0 {
-                let prevChar = nsText.character(at: atIndex - 1)
-                let prevCharScalar = Unicode.Scalar(prevChar)!
-                let isWhitespace = CharacterSet.whitespacesAndNewlines.contains(prevCharScalar)
-                guard isWhitespace else { continue }
-            }
-
-            let beforeAt = nsText.substring(to: atIndex)
-            let backtickCount = beforeAt.filter { $0 == "`" }.count
-            if backtickCount % 2 != 0 { continue }
-
-            if let skill = skills.first(where: { $0.name.lowercased() == skillName.lowercased() }) {
-                if !state.selectedSkills.contains(where: { $0.name.lowercased() == skillName.lowercased() }) {
-                    return skill
-                }
-            }
-        }
-
-        return nil
-    }
-
-    private func selectCompletedSkillMention(_ skill: Skill, in currentText: String) {
-        if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
-            state.selectedSkills.append(skill)
-        }
-        dismissSkillMentionPopup()
-        actions.onSkillSelect?(skill)
     }
 
     private func selectSkillFromMention(_ skill: Skill) {
-        if let atIndex = state.text.lastIndex(of: "@") {
-            let beforeAt = String(state.text[..<atIndex])
-            state.text = beforeAt + "@" + skill.name + " "
+        if let triggerIndex = state.text.lastIndex(of: "@") {
+            state.text = String(state.text[..<triggerIndex]) + "@" + skill.name + " "
         }
-
         if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
             state.selectedSkills.append(skill)
         }
-
-        dismissSkillMentionPopup()
+        withAnimation(.tronStandard) {
+            showSkillMentionPopup = false
+            skillMentionQuery = ""
+        }
         actions.onSkillSelect?(skill)
+    }
+
+    private func selectSpellFromMention(_ skill: Skill) {
+        if let triggerIndex = state.text.lastIndex(of: "%") {
+            state.text = String(state.text[..<triggerIndex]) + "%" + skill.name + " "
+        }
+        if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
+            state.selectedSpells.append(skill)
+        }
+        withAnimation(.tronStandard) {
+            showSpellMentionPopup = false
+            spellMentionQuery = ""
+        }
     }
 
     private func dismissSkillMentionPopup() {
@@ -472,109 +480,16 @@ struct InputBar: View {
         }
     }
 
-    private func removeSelectedSkill(_ skill: Skill) {
-        state.selectedSkills.removeAll { $0.name == skill.name }
-        actions.onSkillRemove?(skill)
-    }
-
-    // MARK: - Spell Mention Detection
-
-    private func detectSpellMention(in newText: String) {
-        guard let store = config.skillStore else { return }
-
-        // Check for completed %spellname mentions
-        if let completedSpell = detectCompletedSpellMention(in: newText, skills: store.skills) {
-            selectCompletedSpellMention(completedSpell, in: newText)
-            return
-        }
-
-        // Check for in-progress %mention
-        if let query = SpellMentionDetector.detectMention(in: newText) {
-            spellMentionQuery = query
-            if !showSpellMentionPopup {
-                withAnimation(.tronStandard) {
-                    showSpellMentionPopup = true
-                }
-            }
-        } else {
-            if showSpellMentionPopup {
-                withAnimation(.tronStandard) {
-                    showSpellMentionPopup = false
-                    spellMentionQuery = ""
-                }
-            }
-        }
-    }
-
-    private func detectCompletedSpellMention(in text: String, skills: [Skill]) -> Skill? {
-        // Pattern: %skillname followed by space or end of string
-        let pattern = "%([a-zA-Z0-9][a-zA-Z0-9-]*)(?:\\s|$)"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return nil
-        }
-
-        let nsText = text as NSString
-        let range = NSRange(location: 0, length: nsText.length)
-        let matches = regex.matches(in: text, options: [], range: range)
-
-        for match in matches.reversed() {
-            guard match.numberOfRanges > 1 else { continue }
-            let spellNameRange = match.range(at: 1)
-            let spellName = nsText.substring(with: spellNameRange)
-
-            guard !spellName.isEmpty else { continue }
-
-            let percentIndex = match.range.location
-            if percentIndex > 0 {
-                let prevChar = nsText.character(at: percentIndex - 1)
-                let prevCharScalar = Unicode.Scalar(prevChar)!
-                let isWhitespace = CharacterSet.whitespacesAndNewlines.contains(prevCharScalar)
-                guard isWhitespace else { continue }
-            }
-
-            // Check if % is inside backticks (code)
-            let beforePercent = nsText.substring(to: percentIndex)
-            let backtickCount = beforePercent.filter { $0 == "`" }.count
-            if backtickCount % 2 != 0 { continue }
-
-            // Match against skills (spells use the same source)
-            if let skill = skills.first(where: { $0.name.lowercased() == spellName.lowercased() }) {
-                // Don't add if already selected as a spell
-                if !state.selectedSpells.contains(where: { $0.name.lowercased() == spellName.lowercased() }) {
-                    return skill
-                }
-            }
-        }
-
-        return nil
-    }
-
-    private func selectCompletedSpellMention(_ skill: Skill, in currentText: String) {
-        if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
-            state.selectedSpells.append(skill)
-        }
-        dismissSpellMentionPopup()
-    }
-
-    private func selectSpellFromMention(_ skill: Skill) {
-        // Replace the %query with %skillname followed by space
-        if let percentIndex = state.text.lastIndex(of: "%") {
-            let beforePercent = String(state.text[..<percentIndex])
-            state.text = beforePercent + "%" + skill.name + " "
-        }
-
-        if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
-            state.selectedSpells.append(skill)
-        }
-
-        dismissSpellMentionPopup()
-    }
-
     private func dismissSpellMentionPopup() {
         withAnimation(.tronStandard) {
             showSpellMentionPopup = false
             spellMentionQuery = ""
         }
+    }
+
+    private func removeSelectedSkill(_ skill: Skill) {
+        state.selectedSkills.removeAll { $0.name == skill.name }
+        actions.onSkillRemove?(skill)
     }
 
     private func removeSelectedSpell(_ skill: Skill) {
@@ -615,7 +530,6 @@ extension Notification.Name {
         InputBar(
             state: previewState,
             config: InputBarConfig(
-                isProcessing: false,
                 isRecording: false,
                 isTranscribing: false,
                 modelName: "claude-sonnet-4-5-20260105",

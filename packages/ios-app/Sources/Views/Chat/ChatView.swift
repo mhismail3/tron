@@ -12,7 +12,7 @@ struct ChatView: View {
     @State var viewModel: ChatViewModel
 
     // Convenience accessor
-    var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State private var inputHistory = InputHistoryStore()
     @State var scrollCoordinator = ScrollStateCoordinator()
 
@@ -82,8 +82,7 @@ struct ChatView: View {
                     InputBar(
                         state: viewModel.inputBarState,
                         config: InputBarConfig(
-                            isProcessing: viewModel.isProcessing,
-                            isPostProcessing: viewModel.isPostProcessing,
+                            agentPhase: viewModel.agentPhase,
                             isCompacting: viewModel.isCompacting,
                             isRecording: viewModel.isRecording,
                             isTranscribing: viewModel.isTranscribing,

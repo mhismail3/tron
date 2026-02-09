@@ -14,7 +14,7 @@ struct ContextAuditView: View {
     @State private var isLoading = true
 
     // Convenience accessor
-    private var eventStoreManager: EventStoreManager { dependencies!.eventStoreManager }
+    private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var sessionEvents: [SessionEvent] = []

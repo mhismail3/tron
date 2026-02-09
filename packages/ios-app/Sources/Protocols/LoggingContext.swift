@@ -36,19 +36,53 @@ protocol SessionIdentifiable: AnyObject {
     var sessionId: String { get }
 }
 
+// MARK: - Agent Phase
+
+/// Lifecycle phases of the agent during a turn.
+///
+/// Valid transitions:
+/// ```
+/// idle → processing          (turn start / send message)
+/// processing → postProcessing (agent.complete)
+/// postProcessing → idle       (agent.ready)
+/// any → idle                  (agent.error / disconnect)
+/// ```
+///
+/// `isCompacting` is orthogonal and tracked separately.
+enum AgentPhase: Equatable, Sendable {
+    case idle
+    case processing
+    case postProcessing
+
+    var isIdle: Bool { self == .idle }
+    var isProcessing: Bool { self == .processing }
+    var isPostProcessing: Bool { self == .postProcessing }
+}
+
 // MARK: - Processing State
 
 /// Protocol for contexts that track agent processing state.
 @MainActor
 protocol ProcessingTrackable: AnyObject {
-    /// Whether the agent is currently processing.
-    var isProcessing: Bool { get set }
-
-    /// Whether background hooks (compaction, memory) are running after completion.
-    var isPostProcessing: Bool { get set }
+    /// The current agent lifecycle phase.
+    var agentPhase: AgentPhase { get set }
 
     /// Update the session's processing state in the dashboard/database.
     func setSessionProcessing(_ isProcessing: Bool)
+}
+
+extension ProcessingTrackable {
+    /// Whether the agent is currently processing (convenience).
+    var isProcessing: Bool {
+        get { agentPhase == .processing }
+        set { agentPhase = newValue ? .processing : .idle }
+    }
+
+    /// Whether background hooks are running after completion (convenience).
+    var isPostProcessing: Bool {
+        get { agentPhase == .postProcessing }
+        set { agentPhase = newValue ? .postProcessing : .idle }
+    }
 }
 
 // MARK: - Streaming Management

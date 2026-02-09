@@ -23,10 +23,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     // MARK: - Server Settings (Persisted)
 
     @ObservationIgnored
-    @AppStorage("serverHost") private var _serverHost = "localhost"
+    @AppStorage("serverHost") private var _serverHost = AppConstants.defaultHost
 
     @ObservationIgnored
-    @AppStorage("serverPort") private var _serverPort = "8082"
+    @AppStorage("serverPort") private var _serverPort = AppConstants.betaPort
 
     @ObservationIgnored
     @AppStorage("useTLS") private var _useTLS = false
@@ -40,7 +40,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @AppStorage("defaultModel") var defaultModel = ""
 
     @ObservationIgnored
-    @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = "/Users/moose/Workspace"
+    @AppStorage("quickSessionWorkspace") var quickSessionWorkspace = AppConstants.defaultWorkspace
 
     // MARK: - Core Services (Created Once)
 
@@ -113,8 +113,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     init() {
         // Read persisted values before initialization (workaround for @AppStorage in init)
-        let host = UserDefaults.standard.string(forKey: "serverHost") ?? "localhost"
-        let port = UserDefaults.standard.string(forKey: "serverPort") ?? "8082"
+        let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
+        let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.betaPort
         let tls = UserDefaults.standard.bool(forKey: "useTLS")
 
         // Initialize core services that persist across server changes
@@ -261,7 +261,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         let urlString = "\(scheme)://\(host):\(port)/ws"
         guard let url = URL(string: urlString) else {
             TronLogger.shared.error("Invalid server URL '\(urlString)', falling back to localhost", category: .general)
-            return URL(string: "ws://localhost:8082/ws")!
+            return AppConstants.fallbackServerURL
         }
         return url
     }

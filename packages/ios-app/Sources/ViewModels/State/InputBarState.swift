@@ -50,11 +50,15 @@ final class InputBarState {
 /// Read-only configuration for the InputBar component
 struct InputBarConfig {
     // MARK: - Processing State
-    let isProcessing: Bool
-    /// Background hooks running after completion (send blocked, typing allowed)
-    let isPostProcessing: Bool
+    /// Agent lifecycle phase (idle / processing / postProcessing)
+    let agentPhase: AgentPhase
     /// Compaction in progress (send blocked, spinning pill shown)
     let isCompacting: Bool
+
+    /// Whether the agent is currently processing (convenience).
+    var isProcessing: Bool { agentPhase.isProcessing }
+    /// Whether background hooks are running after completion (convenience).
+    var isPostProcessing: Bool { agentPhase.isPostProcessing }
     let isRecording: Bool
     let isTranscribing: Bool
 
@@ -81,8 +85,7 @@ struct InputBarConfig {
     let readOnly: Bool
 
     init(
-        isProcessing: Bool = false,
-        isPostProcessing: Bool = false,
+        agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
         isRecording: Bool = false,
         isTranscribing: Bool = false,
@@ -99,8 +102,7 @@ struct InputBarConfig {
         animationCoordinator: AnimationCoordinator? = nil,
         readOnly: Bool = false
     ) {
-        self.isProcessing = isProcessing
-        self.isPostProcessing = isPostProcessing
+        self.agentPhase = agentPhase
         self.isCompacting = isCompacting
         self.isRecording = isRecording
         self.isTranscribing = isTranscribing

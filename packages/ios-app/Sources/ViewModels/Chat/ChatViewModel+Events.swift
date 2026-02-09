@@ -119,8 +119,8 @@ extension ChatViewModel {
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
         // Clear stale flags (safety: handles events not arriving from previous cycle)
-        if isPostProcessing {
-            isPostProcessing = false
+        if agentPhase != .idle {
+            agentPhase = .idle
         }
         if isCompacting {
             isCompacting = false
@@ -160,11 +160,11 @@ extension ChatViewModel {
 
         // Enter post-processing state: text field enabled, send button disabled.
         // Cleared by agent_ready event when background hooks finish.
-        isPostProcessing = true
+        agentPhase = .postProcessing
     }
 
     func handleAgentReady() {
-        isPostProcessing = false
+        agentPhase = .idle
         logInfo("Agent ready - post-processing complete")
     }
 
@@ -304,8 +304,7 @@ extension ChatViewModel {
         animationCoordinator.resetToolState()
         streamingManager.reset()
 
-        isProcessing = false
-        isPostProcessing = false
+        agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
