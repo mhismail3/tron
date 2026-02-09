@@ -171,6 +171,36 @@ describe('SpawnHandler', () => {
       );
     });
 
+    it('should include toolCallId in persisted subagent.spawned event', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+      }, 'tool_call_789');
+
+      expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123',
+        'subagent.spawned',
+        expect.objectContaining({
+          subagentSessionId: 'sess_sub_123',
+          toolCallId: 'tool_call_789',
+        })
+      );
+    });
+
+    it('should include toolCallId as undefined when not provided', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+      });
+
+      expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123',
+        'subagent.spawned',
+        expect.objectContaining({
+          subagentSessionId: 'sess_sub_123',
+          toolCallId: undefined,
+        })
+      );
+    });
+
     it('should emit WebSocket event for iOS', async () => {
       await handler.spawnSubsession('parent_123', {
         task: 'Test task',

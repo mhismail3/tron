@@ -82,6 +82,11 @@ enum PersistedEventType: String, CaseIterable {
     case errorTool = "error.tool"
     case errorProvider = "error.provider"
 
+    // Subagent lifecycle
+    case subagentSpawned = "subagent.spawned"
+    case subagentCompleted = "subagent.completed"
+    case subagentFailed = "subagent.failed"
+
     // Turn events
     case turnFailed = "turn.failed"
 
@@ -114,6 +119,7 @@ enum PersistedEventType: String, CaseIterable {
              .configModelSwitch, .configPromptUpdate, .configReasoningLevel,
              .compactBoundary, .compactSummary,
              .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged,
+             .subagentSpawned, .subagentCompleted, .subagentFailed,
              .errorAgent:
             return true
         default:
@@ -191,6 +197,9 @@ enum PersistedEventType: String, CaseIterable {
         case .errorAgent: return "Agent error"
         case .errorTool: return "Tool error"
         case .errorProvider: return "Provider error"
+        case .subagentSpawned: return "Subagent spawned"
+        case .subagentCompleted: return "Subagent completed"
+        case .subagentFailed: return "Subagent failed"
         case .turnFailed: return "Turn failed"
         }
     }

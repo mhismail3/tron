@@ -142,39 +142,8 @@ extension ChatViewModel {
             let state = try manager.getReconstructedState(sessionId: sessionId)
             let loadedMessages = state.messages
 
-            // Store all messages for pagination
+            // Store all messages for pagination (mutable copy for subagent conversion)
             allReconstructedMessages = loadedMessages
-
-            // Show only the latest batch of messages
-            let batchSize = min(Self.initialMessageBatchSize, loadedMessages.count)
-            displayedMessageCount = batchSize
-            hasMoreMessages = loadedMessages.count > batchSize
-
-            if batchSize > 0 {
-                let startIndex = loadedMessages.count - batchSize
-                messages = Array(loadedMessages[startIndex...])
-            } else {
-                messages = []
-            }
-
-            // Restore catch-up messages at the end, with final deduplication.
-            // Even after filtering above, a tool might have completed between catch-up
-            // and sync, so we still check for duplicates by toolCallId.
-            if !catchUpMessagesToRestore.isEmpty {
-                let filteredCatchUp = catchUpMessagesToRestore.filter { catchUpMsg in
-                    // Check if this is a tool message that now exists in history
-                    if let toolCallId = catchUpMsg.toolCallId {
-                        return !MessageFinder.hasToolMessage(toolCallId: toolCallId, in: messages)
-                    }
-                    // Non-tool messages (streaming text, system events) are always kept
-                    return true
-                }
-
-                if !filteredCatchUp.isEmpty {
-                    messages.append(contentsOf: filteredCatchUp)
-                }
-                logger.info("Restored \(filteredCatchUp.count)/\(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
-            }
 
             // Update turn counter from unified state
             currentTurn = state.currentTurn
@@ -196,6 +165,110 @@ extension ChatViewModel {
                     tokenUsage: result.tokenUsage
                 )
                 subagentState.populateFromReconstruction(data)
+            }
+
+            // Convert SpawnSubagent tool messages to subagent chips using lifecycle events.
+            // Applied to allReconstructedMessages so loadMoreMessages() also gets converted chips.
+            if !state.subagentSpawns.isEmpty {
+                // Primary lookup: toolCallId → spawn
+                var spawnByToolCallId: [String: ReconstructedState.SubagentSpawnInfo] = [:]
+                for spawn in state.subagentSpawns {
+                    if let toolCallId = spawn.toolCallId {
+                        spawnByToolCallId[toolCallId] = spawn
+                    }
+                }
+
+                for i in allReconstructedMessages.indices {
+                    guard case .toolUse(let tool) = allReconstructedMessages[i].content,
+                          tool.toolName == "SpawnSubagent" else { continue }
+
+                    // Match spawn: primary by toolCallId, fallback by task content
+                    let spawn: ReconstructedState.SubagentSpawnInfo?
+                    if let match = spawnByToolCallId[tool.toolCallId] {
+                        spawn = match
+                    } else {
+                        // Fallback for old events without toolCallId
+                        let taskFromArgs = ToolArgumentParser.string("task", from: tool.arguments) ?? ""
+                        spawn = state.subagentSpawns.first { s in
+                            s.toolCallId == nil && !taskFromArgs.isEmpty && s.task == taskFromArgs
+                        }
+                    }
+
+                    guard let spawn = spawn else { continue }
+                    let sessionId = spawn.subagentSessionId
+
+                    let completion = state.subagentCompletions[sessionId]
+                    let failure = state.subagentFailures[sessionId]
+                    let status: SubagentStatus = completion != nil ? .completed : (failure != nil ? .failed : .running)
+
+                    let subagentData = SubagentToolData(
+                        toolCallId: tool.toolCallId,
+                        subagentSessionId: sessionId,
+                        task: spawn.task,
+                        model: completion?.model ?? spawn.model,
+                        status: status,
+                        currentTurn: completion?.totalTurns ?? 0,
+                        resultSummary: completion?.resultSummary,
+                        fullOutput: completion?.fullOutput,
+                        duration: completion?.duration ?? failure?.duration,
+                        error: failure?.error,
+                        tokenUsage: completion?.tokenUsage
+                    )
+
+                    allReconstructedMessages[i].content = .subagent(subagentData)
+                    subagentState.populateFromReconstruction(subagentData)
+                }
+            }
+
+            // Slice the latest batch for display (after subagent conversion)
+            let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
+            displayedMessageCount = batchSize
+            hasMoreMessages = allReconstructedMessages.count > batchSize
+
+            if batchSize > 0 {
+                let startIndex = allReconstructedMessages.count - batchSize
+                messages = Array(allReconstructedMessages[startIndex...])
+            } else {
+                messages = []
+            }
+
+            // Restore catch-up messages at the end, with final deduplication.
+            // Even after filtering above, a tool might have completed between catch-up
+            // and sync, so we still check for duplicates by toolCallId.
+            if !catchUpMessagesToRestore.isEmpty {
+                let filteredCatchUp = catchUpMessagesToRestore.filter { catchUpMsg in
+                    // Tool messages: check if tool already in history (includes .subagent after conversion)
+                    if let toolCallId = catchUpMsg.toolCallId {
+                        return !MessageFinder.hasToolMessage(toolCallId: toolCallId, in: messages)
+                    }
+
+                    // Streaming text: deduplicate against reconstructed text messages
+                    if catchUpMsg.isStreaming {
+                        if case .streaming(let text) = catchUpMsg.content, !text.isEmpty {
+                            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            return !messages.suffix(10).contains { msg in
+                                if case .text(let existingText) = msg.content {
+                                    return existingText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
+                                }
+                                return false
+                            }
+                        }
+                    }
+
+                    // System events: skip subagent result notifications (already reconstructed from DB)
+                    if case .systemEvent(let event) = catchUpMsg.content {
+                        if case .subagentResultAvailable = event {
+                            return false
+                        }
+                    }
+
+                    return true
+                }
+
+                if !filteredCatchUp.isEmpty {
+                    messages.append(contentsOf: filteredCatchUp)
+                }
+                logger.info("Restored \(filteredCatchUp.count)/\(catchUpMessagesToRestore.count) catch-up messages after loading \(loadedMessages.count) historical messages", category: .session)
             }
 
             // =============================================================================

@@ -1080,6 +1080,236 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
+    // MARK: - Subagent Reconstruction Tests
+
+    func testSubagentSpawnedExtraction() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "tool.call", payload: [
+                "toolCallId": AnyCodable("tc_1"),
+                "name": AnyCodable("SpawnSubagent"),
+                "arguments": AnyCodable("{\"task\":\"Research Swift concurrency\"}"),
+                "turn": AnyCodable(1)
+            ], sequence: 2),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_sess_1"),
+                "task": AnyCodable("Research Swift concurrency"),
+                "model": AnyCodable("claude-opus-4-6"),
+                "toolCallId": AnyCodable("tc_1"),
+                "spawnType": AnyCodable("subsession")
+            ], sequence: 3),
+            sessionEvent(type: "subagent.completed", payload: [
+                "subagentSessionId": AnyCodable("sub_sess_1"),
+                "resultSummary": AnyCodable("Found 5 key patterns"),
+                "totalTurns": AnyCodable(7),
+                "duration": AnyCodable(45000),
+                "totalTokenUsage": AnyCodable(["inputTokens": 50000, "outputTokens": 2000]),
+                "model": AnyCodable("claude-opus-4-6"),
+                "fullOutput": AnyCodable("Detailed findings...")
+            ], sequence: 4),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_1"),
+                "content": AnyCodable("Research complete"),
+                "isError": AnyCodable(false),
+                "duration": AnyCodable(45000)
+            ], sequence: 5)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(state.subagentSpawns.count, 1)
+        XCTAssertEqual(state.subagentSpawns[0].subagentSessionId, "sub_sess_1")
+        XCTAssertEqual(state.subagentSpawns[0].toolCallId, "tc_1")
+        XCTAssertEqual(state.subagentSpawns[0].task, "Research Swift concurrency")
+        XCTAssertEqual(state.subagentSpawns[0].model, "claude-opus-4-6")
+
+        XCTAssertEqual(state.subagentCompletions.count, 1)
+        let completion = state.subagentCompletions["sub_sess_1"]
+        XCTAssertNotNil(completion)
+        XCTAssertEqual(completion?.totalTurns, 7)
+        XCTAssertEqual(completion?.duration, 45000)
+        XCTAssertEqual(completion?.resultSummary, "Found 5 key patterns")
+        XCTAssertEqual(completion?.fullOutput, "Detailed findings...")
+    }
+
+    func testSubagentFailedExtraction() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "tool.call", payload: [
+                "toolCallId": AnyCodable("tc_2"),
+                "name": AnyCodable("SpawnSubagent"),
+                "arguments": AnyCodable("{\"task\":\"Failing task\"}"),
+                "turn": AnyCodable(1)
+            ], sequence: 2),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_sess_2"),
+                "task": AnyCodable("Failing task"),
+                "model": AnyCodable("claude-sonnet-4-5"),
+                "toolCallId": AnyCodable("tc_2")
+            ], sequence: 3),
+            sessionEvent(type: "subagent.failed", payload: [
+                "subagentSessionId": AnyCodable("sub_sess_2"),
+                "error": AnyCodable("Max turns exceeded"),
+                "duration": AnyCodable(30000)
+            ], sequence: 4),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_2"),
+                "content": AnyCodable("Agent failed: Max turns exceeded"),
+                "isError": AnyCodable(true),
+                "duration": AnyCodable(30000)
+            ], sequence: 5)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(state.subagentFailures.count, 1)
+        let failure = state.subagentFailures["sub_sess_2"]
+        XCTAssertNotNil(failure)
+        XCTAssertEqual(failure?.error, "Max turns exceeded")
+        XCTAssertEqual(failure?.duration, 30000)
+    }
+
+    func testMultipleParallelSubagentsExtraction() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "tool.call", payload: [
+                "toolCallId": AnyCodable("tc_a"),
+                "name": AnyCodable("SpawnSubagent"),
+                "arguments": AnyCodable("{\"task\":\"Explore auth\"}"),
+                "turn": AnyCodable(1)
+            ], sequence: 2),
+            sessionEvent(type: "tool.call", payload: [
+                "toolCallId": AnyCodable("tc_b"),
+                "name": AnyCodable("SpawnSubagent"),
+                "arguments": AnyCodable("{\"task\":\"Research OAuth\"}"),
+                "turn": AnyCodable(1)
+            ], sequence: 3),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_a"),
+                "task": AnyCodable("Explore auth"),
+                "model": AnyCodable("claude-sonnet-4-5"),
+                "toolCallId": AnyCodable("tc_a")
+            ], sequence: 4),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_b"),
+                "task": AnyCodable("Research OAuth"),
+                "model": AnyCodable("claude-opus-4-6"),
+                "toolCallId": AnyCodable("tc_b")
+            ], sequence: 5),
+            sessionEvent(type: "subagent.completed", payload: [
+                "subagentSessionId": AnyCodable("sub_a"),
+                "resultSummary": AnyCodable("Auth patterns found"),
+                "totalTurns": AnyCodable(4),
+                "duration": AnyCodable(20000),
+                "totalTokenUsage": AnyCodable(["inputTokens": 10000, "outputTokens": 500])
+            ], sequence: 6),
+            sessionEvent(type: "subagent.failed", payload: [
+                "subagentSessionId": AnyCodable("sub_b"),
+                "error": AnyCodable("Provider error"),
+                "duration": AnyCodable(5000)
+            ], sequence: 7),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_a"),
+                "content": AnyCodable("Done"),
+                "isError": AnyCodable(false)
+            ], sequence: 8),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_b"),
+                "content": AnyCodable("Failed"),
+                "isError": AnyCodable(true)
+            ], sequence: 9)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(state.subagentSpawns.count, 2)
+        XCTAssertEqual(state.subagentCompletions.count, 1)
+        XCTAssertNotNil(state.subagentCompletions["sub_a"])
+        XCTAssertEqual(state.subagentCompletions["sub_a"]?.totalTurns, 4)
+        XCTAssertEqual(state.subagentFailures.count, 1)
+        XCTAssertNotNil(state.subagentFailures["sub_b"])
+        XCTAssertEqual(state.subagentFailures["sub_b"]?.error, "Provider error")
+    }
+
+    func testSubagentSpawnedWithoutToolCallIdFallback() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "tool.call", payload: [
+                "toolCallId": AnyCodable("tc_old"),
+                "name": AnyCodable("SpawnSubagent"),
+                "arguments": AnyCodable("{\"task\":\"Old style task\"}"),
+                "turn": AnyCodable(1)
+            ], sequence: 2),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_old"),
+                "task": AnyCodable("Old style task"),
+                "model": AnyCodable("claude-sonnet-4-5")
+            ], sequence: 3),
+            sessionEvent(type: "subagent.completed", payload: [
+                "subagentSessionId": AnyCodable("sub_old"),
+                "resultSummary": AnyCodable("Done"),
+                "totalTurns": AnyCodable(3),
+                "duration": AnyCodable(15000),
+                "totalTokenUsage": AnyCodable(["inputTokens": 5000, "outputTokens": 300])
+            ], sequence: 4)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(state.subagentSpawns.count, 1)
+        XCTAssertNil(state.subagentSpawns[0].toolCallId)
+        XCTAssertEqual(state.subagentSpawns[0].subagentSessionId, "sub_old")
+    }
+
+    func testRunningSubagentNoCompletionEvent() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "tool.call", payload: [
+                "toolCallId": AnyCodable("tc_run"),
+                "name": AnyCodable("SpawnSubagent"),
+                "arguments": AnyCodable("{\"task\":\"Long running task\"}"),
+                "turn": AnyCodable(1)
+            ], sequence: 2),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_run"),
+                "task": AnyCodable("Long running task"),
+                "model": AnyCodable("claude-opus-4-6"),
+                "toolCallId": AnyCodable("tc_run")
+            ], sequence: 3)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(state.subagentSpawns.count, 1)
+        XCTAssertTrue(state.subagentCompletions.isEmpty)
+        XCTAssertTrue(state.subagentFailures.isEmpty)
+    }
+
+    func testBackgroundSubagentNoToolCall() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], sequence: 2),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_bg"),
+                "task": AnyCodable("LedgerWriter"),
+                "model": AnyCodable("claude-haiku-4-5"),
+                "spawnType": AnyCodable("subsession")
+            ], sequence: 3),
+            sessionEvent(type: "subagent.completed", payload: [
+                "subagentSessionId": AnyCodable("sub_bg"),
+                "resultSummary": AnyCodable("Ledger updated"),
+                "totalTurns": AnyCodable(1),
+                "duration": AnyCodable(2000),
+                "totalTokenUsage": AnyCodable(["inputTokens": 1000, "outputTokens": 50])
+            ], sequence: 4)
+        ]
+
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+
+        XCTAssertEqual(state.subagentSpawns.count, 1)
+        XCTAssertEqual(state.subagentCompletions.count, 1)
+    }
+
     func testReconstructionSkipsDeletedEvents() {
         // Events targeted by message.deleted should be skipped in reconstruction
         let userEventId = UUID().uuidString

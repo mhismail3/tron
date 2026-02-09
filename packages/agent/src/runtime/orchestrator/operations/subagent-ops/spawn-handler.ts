@@ -113,6 +113,7 @@ export class SpawnHandler {
           skills: params.skills,
           workingDirectory: params.workingDirectory ?? parent.workingDirectory,
           maxTurns: params.maxTurns ?? 50,
+          toolCallId,
         }
       );
 
@@ -439,6 +440,7 @@ export class SpawnHandler {
 
       // Get full output from the last assistant message
       let fullOutput = '';
+      let turnCount = 0;
       if (session?.headEventId) {
         const allEvents = await this.deps.eventStore.getAncestors(
           session.headEventId
@@ -458,13 +460,22 @@ export class SpawnHandler {
               .map((b: { text?: string }) => b.text)
               .join('\n') ?? '';
         }
+
+        // Derive turn count from events since sessions.turn_count is unreliable
+        // (never incremented for subagent sessions)
+        turnCount = allEvents
+          .filter((e) => e.type === 'message.assistant')
+          .reduce((max, e) => {
+            const turn = (e.payload as { turn?: number }).turn ?? 0;
+            return Math.max(max, turn);
+          }, 0);
       }
 
       // Detect problem scenarios and determine completion type
       const { resultSummary, completionType, truncated, warning } = this.analyzeCompletion(
         fullOutput,
         stopReason,
-        session?.turnCount ?? 0
+        turnCount
       );
 
       const tokenUsage = {
@@ -484,7 +495,7 @@ export class SpawnHandler {
           subagentSessionId: sessionId,
           resultSummary,
           fullOutput,
-          totalTurns: session?.turnCount ?? 0,
+          totalTurns: turnCount,
           totalTokenUsage: tokenUsage,
           duration,
           model,
@@ -504,7 +515,7 @@ export class SpawnHandler {
           subagentSessionId: sessionId,
           resultSummary,
           fullOutput,
-          totalTurns: session?.turnCount ?? 0,
+          totalTurns: turnCount,
           duration,
           tokenUsage,
           model,
@@ -522,7 +533,7 @@ export class SpawnHandler {
         currentParent.subagentTracker.complete(
           sessionId as SessionId,
           resultSummary,
-          session?.turnCount ?? 0,
+          turnCount,
           tokenUsage,
           duration,
           fullOutput,
@@ -541,7 +552,7 @@ export class SpawnHandler {
             task: currentParent.subagentTracker.get(sessionId as SessionId)?.task ?? '',
             resultSummary,
             success: true,
-            totalTurns: session?.turnCount ?? 0,
+            totalTurns: turnCount,
             duration,
             tokenUsage,
             completedAt: new Date().toISOString(),
@@ -573,7 +584,7 @@ export class SpawnHandler {
       logger.info('Subagent completed', {
         parentSessionId,
         subagentSessionId: sessionId,
-        turns: session?.turnCount,
+        turns: turnCount,
         duration,
         outputLength: fullOutput.length,
         stopReason,
@@ -591,7 +602,7 @@ export class SpawnHandler {
           stopReason: 'completed',
           result: {
             success: true,
-            turns: session?.turnCount ?? 0,
+            turns: turnCount,
             output: fullOutput,
             tokenUsage,
             duration,

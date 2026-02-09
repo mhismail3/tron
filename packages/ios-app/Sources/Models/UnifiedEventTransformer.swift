@@ -339,6 +339,45 @@ extension UnifiedEventTransformer {
                     state.subagentResults.append(info)
                 }
 
+            case .subagentSpawned:
+                if let sessionId = event.payload["subagentSessionId"]?.value as? String {
+                    state.subagentSpawns.append(ReconstructedState.SubagentSpawnInfo(
+                        subagentSessionId: sessionId,
+                        task: event.payload["task"]?.value as? String ?? "",
+                        model: event.payload["model"]?.value as? String ?? "unknown",
+                        toolCallId: event.payload["toolCallId"]?.value as? String
+                    ))
+                }
+
+            case .subagentCompleted:
+                if let sessionId = event.payload["subagentSessionId"]?.value as? String {
+                    let tokenDict = event.payload["totalTokenUsage"]?.value as? [String: Any]
+                    let tokenUsage: TokenUsage? = tokenDict.flatMap {
+                        guard let input = $0["inputTokens"] as? Int,
+                              let output = $0["outputTokens"] as? Int else { return nil }
+                        return TokenUsage(inputTokens: input, outputTokens: output,
+                                          cacheReadTokens: nil, cacheCreationTokens: nil)
+                    }
+                    state.subagentCompletions[sessionId] = ReconstructedState.SubagentCompletionInfo(
+                        subagentSessionId: sessionId,
+                        resultSummary: event.payload["resultSummary"]?.value as? String ?? "",
+                        totalTurns: event.payload["totalTurns"]?.value as? Int ?? 0,
+                        duration: event.payload["duration"]?.value as? Int ?? 0,
+                        tokenUsage: tokenUsage,
+                        fullOutput: event.payload["fullOutput"]?.value as? String,
+                        model: event.payload["model"]?.value as? String
+                    )
+                }
+
+            case .subagentFailed:
+                if let sessionId = event.payload["subagentSessionId"]?.value as? String {
+                    state.subagentFailures[sessionId] = ReconstructedState.SubagentFailureInfo(
+                        subagentSessionId: sessionId,
+                        error: event.payload["error"]?.value as? String ?? "Unknown error",
+                        duration: event.payload["duration"]?.value as? Int
+                    )
+                }
+
             case .streamTurnEnd:
                 let payload = StreamTurnEndPayload(from: event.payload)
                 if payload.turn > state.currentTurn {

@@ -60,6 +60,15 @@ struct ReconstructedState {
     /// Populated from notification.subagent_result events during reconstruction
     var subagentResults: [SubagentResultInfo]
 
+    /// Subagent spawn events (for tool→subagent chip conversion during reconstruction)
+    var subagentSpawns: [SubagentSpawnInfo]
+
+    /// Subagent completion events keyed by subagent session ID
+    var subagentCompletions: [String: SubagentCompletionInfo]
+
+    /// Subagent failure events keyed by subagent session ID
+    var subagentFailures: [String: SubagentFailureInfo]
+
     // MARK: - Initialization
 
     init() {
@@ -77,6 +86,9 @@ struct ReconstructedState {
         self.sessionInfo = SessionInfo()
         self.tags = []
         self.subagentResults = []
+        self.subagentSpawns = []
+        self.subagentCompletions = [:]
+        self.subagentFailures = [:]
     }
 }
 
@@ -241,5 +253,31 @@ extension ReconstructedState {
         let totalTurns: Int
         let duration: Int?
         let tokenUsage: TokenUsage?
+    }
+
+    /// Information extracted from subagent.spawned events
+    struct SubagentSpawnInfo {
+        let subagentSessionId: String
+        let task: String
+        let model: String
+        let toolCallId: String?
+    }
+
+    /// Information extracted from subagent.completed events
+    struct SubagentCompletionInfo {
+        let subagentSessionId: String
+        let resultSummary: String
+        let totalTurns: Int
+        let duration: Int
+        let tokenUsage: TokenUsage?
+        let fullOutput: String?
+        let model: String?
+    }
+
+    /// Information extracted from subagent.failed events
+    struct SubagentFailureInfo {
+        let subagentSessionId: String
+        let error: String
+        let duration: Int?
     }
 }

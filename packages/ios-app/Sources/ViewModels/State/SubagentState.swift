@@ -472,6 +472,14 @@ final class SubagentState {
             return
         }
 
+        // Don't overwrite live events for a running subagent
+        if let subagent = subagents[subagentSessionId],
+           subagent.status == .running,
+           let existing = subagentEvents[subagentSessionId],
+           !existing.isEmpty {
+            return
+        }
+
         do {
             let rawEvents = try eventDB.events.getBySession(subagentSessionId)
             let messages = UnifiedEventTransformer.transformPersistedEvents(rawEvents)

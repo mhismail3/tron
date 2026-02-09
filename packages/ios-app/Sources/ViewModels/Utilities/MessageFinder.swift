@@ -40,8 +40,9 @@ enum MessageFinder {
         })
     }
 
-    /// Check if a message with this toolCallId already exists (toolUse OR toolResult).
+    /// Check if a message with this toolCallId already exists (toolUse, toolResult, or subagent).
     /// Used to prevent duplicate tool messages during catch-up + streaming.
+    /// Includes `.subagent` because reconstruction converts SpawnSubagent `.toolUse` → `.subagent`.
     static func hasToolMessage(toolCallId: String, in messages: [ChatMessage]) -> Bool {
         messages.contains(where: { message in
             switch message.content {
@@ -49,6 +50,8 @@ enum MessageFinder {
                 return tool.toolCallId == toolCallId
             case .toolResult(let result):
                 return result.toolCallId == toolCallId
+            case .subagent(let data):
+                return data.toolCallId == toolCallId
             default:
                 return false
             }
