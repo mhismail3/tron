@@ -98,7 +98,7 @@ struct NotifyAppDetailSheet: View {
             }
 
             // Markdown content
-            Text(LocalizedStringKey(content))
+            Text(TextContentView.markdownAttributedString(from: content))
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
                 .foregroundStyle(.tronTextSecondary)
                 .textSelection(.enabled)
@@ -161,7 +161,7 @@ struct NotifyAppDetailSheetFallback: View {
                     // Sheet content (markdown)
                     if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
                         Divider()
-                        Text(LocalizedStringKey(sheetContent))
+                        Text(TextContentView.markdownAttributedString(from: sheetContent))
                             .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
                             .foregroundStyle(.tronTextSecondary)
                             .textSelection(.enabled)

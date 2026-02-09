@@ -70,10 +70,16 @@ extension ChatViewModel: MessagingContext {
 
         for sessionId in pendingIds {
             subagentState.markResultsDismissed(subagentSessionId: sessionId)
-            logger.debug("Dismissed pending subagent result: \(sessionId)", category: .chat)
         }
 
         if !pendingIds.isEmpty {
+            let pendingSet = Set(pendingIds)
+            messages.removeAll { msg in
+                if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
+                    return pendingSet.contains(sid)
+                }
+                return false
+            }
             logger.info("Dismissed \(pendingIds.count) pending subagent result(s) - user sent different message", category: .chat)
         }
     }

@@ -1,5 +1,35 @@
 import SwiftUI
 
+// MARK: - Text Selection Environment Key
+
+/// Environment key to disable text selection during navigation transitions.
+/// Prevents EXC_BREAKPOINT in SwiftUI.SDFStyle.distanceRange.getter when
+/// the LazyVStack is torn down during a NavigationSplitView pop animation.
+private struct TextSelectionDisabledKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var textSelectionDisabled: Bool {
+        get { self[TextSelectionDisabledKey.self] }
+        set { self[TextSelectionDisabledKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Conditionally enables text selection. When disabled, returns the view unmodified
+    /// (no SDF selection infrastructure created). Used to prevent EXC_BREAKPOINT in
+    /// SDFStyle.distanceRange.getter during navigation teardown.
+    @ViewBuilder
+    func selectableText(_ enabled: Bool) -> some View {
+        if enabled {
+            self.textSelection(.enabled)
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - Text Segment Types
 
 enum TextSegment {
@@ -24,8 +54,15 @@ enum TableAlignment {
 struct TextContentView: View {
     let text: String
     let role: MessageRole
+    @Environment(\.textSelectionDisabled) private var textSelectionDisabled
 
     private var isUser: Bool { role == .user }
+
+    /// Eagerly parse markdown into AttributedString.
+    /// Falls back to plain text if markdown parsing fails.
+    static func markdownAttributedString(from content: String) -> AttributedString {
+        (try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(content)
+    }
 
     /// Parse text into segments (tables and normal text)
     private var segments: [TextSegment] {
@@ -47,18 +84,17 @@ struct TextContentView: View {
                     switch segment {
                     case .text(let content):
                         if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            // Use styled text for user messages to highlight @skillname
                             if isUser {
                                 StyledSkillMentionText(text: content)
                                     .font(TronTypography.messageBody)
                                     .foregroundStyle(.tronEmerald)
-                                    .textSelection(.enabled)
+                                    .selectableText(!textSelectionDisabled)
                                     .lineSpacing(4)
                             } else {
-                                Text(LocalizedStringKey(content))
+                                Text(Self.markdownAttributedString(from: content))
                                     .font(TronTypography.messageBody)
                                     .foregroundStyle(.tronTextPrimary)
-                                    .textSelection(.enabled)
+                                    .selectableText(!textSelectionDisabled)
                                     .lineSpacing(4)
                             }
                         }

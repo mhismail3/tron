@@ -71,8 +71,8 @@ final class SubagentState {
     // MARK: - Subagent Lifecycle
 
     /// Track a newly spawned subagent
-    func trackSpawn(toolCallId: String, subagentSessionId: String, task: String, model: String?) {
-        let data = SubagentToolData(
+    func trackSpawn(toolCallId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false) {
+        var data = SubagentToolData(
             toolCallId: toolCallId,
             subagentSessionId: subagentSessionId,
             task: task,
@@ -85,6 +85,7 @@ final class SubagentState {
             error: nil,
             tokenUsage: nil
         )
+        data.blocking = blocking
         subagents[subagentSessionId] = data
     }
 

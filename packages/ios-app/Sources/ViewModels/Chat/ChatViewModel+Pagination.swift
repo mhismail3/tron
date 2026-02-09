@@ -201,7 +201,7 @@ extension ChatViewModel {
                     let failure = state.subagentFailures[sessionId]
                     let status: SubagentStatus = completion != nil ? .completed : (failure != nil ? .failed : .running)
 
-                    let subagentData = SubagentToolData(
+                    var subagentData = SubagentToolData(
                         toolCallId: tool.toolCallId,
                         subagentSessionId: sessionId,
                         task: spawn.task,
@@ -214,9 +214,21 @@ extension ChatViewModel {
                         error: failure?.error,
                         tokenUsage: completion?.tokenUsage
                     )
+                    subagentData.blocking = spawn.blocking
 
                     allReconstructedMessages[i].content = .subagent(subagentData)
                     subagentState.populateFromReconstruction(subagentData)
+                }
+
+                // Remove notification messages for blocking subagents (persisted before server fix)
+                let blockingSessionIds = Set(state.subagentSpawns.filter { $0.blocking }.map { $0.subagentSessionId })
+                if !blockingSessionIds.isEmpty {
+                    allReconstructedMessages.removeAll { msg in
+                        if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
+                            return blockingSessionIds.contains(sid)
+                        }
+                        return false
+                    }
                 }
             }
 
@@ -255,9 +267,13 @@ extension ChatViewModel {
                         }
                     }
 
-                    // System events: skip subagent result notifications (already reconstructed from DB)
-                    if case .systemEvent(let event) = catchUpMsg.content {
-                        if case .subagentResultAvailable = event {
+                    // System events: deduplicate against history (persisted events reconstruct from DB)
+                    // Only keep transient system events that don't exist in history
+                    if case .systemEvent(let catchUpEvent) = catchUpMsg.content {
+                        return !messages.contains { msg in
+                            if case .systemEvent(let historyEvent) = msg.content {
+                                return catchUpEvent == historyEvent
+                            }
                             return false
                         }
                     }

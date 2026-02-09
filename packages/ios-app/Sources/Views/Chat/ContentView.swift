@@ -123,6 +123,7 @@ struct ContentView: View {
             onNewSession: { showNewSessionSheet = true },
             onNewSessionLongPress: { createQuickSession() },
             onVoiceNote: { showVoiceNotesRecording = true },
+            onSettings: { showSettings = true },
             onNavigationModeChange: { mode in
                 navigationMode = mode
             }
@@ -259,6 +260,7 @@ struct ContentView: View {
                 onNewSession: { showNewSessionSheet = true },
                 onNewSessionLongPress: { createQuickSession() },
                 onVoiceNote: { showVoiceNotesRecording = true },
+                onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
                 }
@@ -492,6 +494,7 @@ struct WelcomePage: View {
     let onNewSession: () -> Void
     var onNewSessionLongPress: (() -> Void)? = nil
     let onVoiceNote: () -> Void
+    let onSettings: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
 
     var body: some View {
@@ -559,6 +562,13 @@ struct WelcomePage: View {
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
                         .foregroundStyle(.tronEmerald)
                         .tracking(2)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronEmerald)
+                    }
                 }
             }
         }

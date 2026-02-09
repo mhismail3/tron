@@ -313,6 +313,8 @@ Returns (when mode=inProcess and blocking=true):
         workingDirectory: workingDirectory ?? this.config.workingDirectory,
         maxTurns: maxTurns ?? (mode === 'tmux' ? 100 : 50),
         sessionName,
+        blocking: isBlocking,
+        timeout,
       };
 
       // Spawn the agent (starts async execution)

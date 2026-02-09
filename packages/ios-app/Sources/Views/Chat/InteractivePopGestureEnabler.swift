@@ -21,3 +21,38 @@ struct InteractivePopGestureEnabler: UIViewControllerRepresentable {
         }
     }
 }
+
+// MARK: - Navigation Lifecycle Observer
+
+/// Observes UIKit `viewWillDisappear` to fire a callback before the navigation
+/// pop animation starts. Used to disable .textSelection(.enabled) before SwiftUI's
+/// SDF text renderer is torn down, preventing EXC_BREAKPOINT in
+/// SDFStyle.distanceRange.getter.
+struct NavigationWillDisappearObserver: UIViewControllerRepresentable {
+    let onWillDisappear: () -> Void
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        WillDisappearController(onWillDisappear: onWillDisappear)
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+
+    private class WillDisappearController: UIViewController {
+        let onWillDisappear: () -> Void
+
+        init(onWillDisappear: @escaping () -> Void) {
+            self.onWillDisappear = onWillDisappear
+            super.init(nibName: nil, bundle: nil)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            // Only fire when being popped (isMovingFromParent), not when a sheet is presented
+            if isMovingFromParent {
+                onWillDisappear()
+            }
+        }
+    }
+}

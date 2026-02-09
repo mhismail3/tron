@@ -255,7 +255,7 @@ struct SkillDetailSheet: View {
                 }
 
                 // Markdown content
-                Text(LocalizedStringKey(metadata.content))
+                Text(TextContentView.markdownAttributedString(from: metadata.content))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineSpacing(4)

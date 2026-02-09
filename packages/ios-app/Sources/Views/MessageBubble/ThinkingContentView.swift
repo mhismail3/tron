@@ -61,8 +61,9 @@ struct ThinkingContentView: View {
                 }
 
                 // Content: preview or full (compact, smaller text)
-                // Use LocalizedStringKey for markdown rendering (bold, italic, etc.)
-                Text(LocalizedStringKey(expanded ? content : previewText))
+                // Use eagerly-parsed AttributedString (not LocalizedStringKey) to avoid
+                // SDF renderer crash during navigation teardown
+                Text(TextContentView.markdownAttributedString(from: expanded ? content : previewText))
                     .font(TronTypography.mono(size: 10, weight: .regular))
                     .foregroundStyle(Color.secondary.opacity(0.6))
                     .italic()

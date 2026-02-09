@@ -460,7 +460,8 @@ extension ChatViewModel {
             toolCallId: result.toolCallId ?? result.subagentSessionId,
             subagentSessionId: result.subagentSessionId,
             task: result.task,
-            model: result.model
+            model: result.model,
+            blocking: result.blocking
         )
 
         // Find and update the SpawnSubagent tool call message to show as subagent chip
@@ -524,6 +525,14 @@ extension ChatViewModel {
 
     func handleSubagentResultAvailableResult(_ result: SubagentResultAvailablePlugin.Result) {
         logger.info("Subagent result available: sessionId=\(result.subagentSessionId), success=\(result.success), task=\(result.task.prefix(50))", category: .chat)
+
+        // Blocking subagents deliver results directly via tool result — no notification needed.
+        // Server no longer emits these, but guard for backward compat / race conditions.
+        if let subagent = subagentState.getSubagent(sessionId: result.subagentSessionId),
+           subagent.blocking {
+            logger.debug("Skipping notification for blocking subagent: \(result.subagentSessionId)", category: .chat)
+            return
+        }
 
         // Mark as pending user action
         subagentState.markResultsPending(subagentSessionId: result.subagentSessionId)

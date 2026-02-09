@@ -261,6 +261,7 @@ extension ReconstructedState {
         let task: String
         let model: String
         let toolCallId: String?
+        let blocking: Bool
     }
 
     /// Information extracted from subagent.completed events

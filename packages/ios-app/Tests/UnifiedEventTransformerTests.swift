@@ -1310,6 +1310,37 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(state.subagentCompletions.count, 1)
     }
 
+    func testSubagentSpawnedBlockingFieldExtracted() {
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_1"),
+                "task": AnyCodable("Blocking task"),
+                "model": AnyCodable("claude-opus-4-6"),
+                "toolCallId": AnyCodable("tc_1"),
+                "blocking": AnyCodable(true)
+            ], sequence: 2)
+        ]
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+        XCTAssertEqual(state.subagentSpawns.count, 1)
+        XCTAssertTrue(state.subagentSpawns[0].blocking)
+    }
+
+    func testSubagentSpawnedBlockingDefaultsFalse() {
+        // Old events without blocking field should default to false
+        let events = [
+            sessionEvent(type: "session.start", payload: [:], sequence: 1),
+            sessionEvent(type: "subagent.spawned", payload: [
+                "subagentSessionId": AnyCodable("sub_old"),
+                "task": AnyCodable("Old task"),
+                "model": AnyCodable("claude-opus-4-6")
+            ], sequence: 2)
+        ]
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
+        XCTAssertEqual(state.subagentSpawns.count, 1)
+        XCTAssertFalse(state.subagentSpawns[0].blocking)
+    }
+
     func testReconstructionSkipsDeletedEvents() {
         // Events targeted by message.deleted should be skipped in reconstruction
         let userEventId = UUID().uuidString

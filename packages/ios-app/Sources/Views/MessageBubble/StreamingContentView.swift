@@ -6,6 +6,7 @@ import SwiftUI
 /// Optimized for efficient rendering during rapid text updates
 struct StreamingContentView: View {
     let text: String
+    @Environment(\.textSelectionDisabled) private var textSelectionDisabled
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -42,7 +43,7 @@ struct StreamingContentView: View {
                     .font(TronTypography.messageBody)
                     .foregroundStyle(.tronTextPrimary)
                     .lineSpacing(4)
-                    .textSelection(.enabled)
+                    .selectableText(!textSelectionDisabled)
             }
         }
     }

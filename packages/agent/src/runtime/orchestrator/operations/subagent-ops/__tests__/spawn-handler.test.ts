@@ -247,6 +247,202 @@ describe('SpawnHandler', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('Creation failed');
     });
+
+    it('should include blocking flag in persisted subagent.spawned event', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+        blocking: true,
+      }, 'tc_1');
+
+      expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123',
+        'subagent.spawned',
+        expect.objectContaining({ blocking: true })
+      );
+    });
+
+    it('should default blocking to false in persisted subagent.spawned event', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+      }, 'tc_2');
+
+      expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123',
+        'subagent.spawned',
+        expect.objectContaining({ blocking: false })
+      );
+    });
+
+    it('should include blocking flag in WebSocket spawned event', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+        blocking: true,
+      }, 'tc_1');
+
+      expect(emit).toHaveBeenCalledWith(
+        'agent_event',
+        expect.objectContaining({
+          type: 'agent.subagent_spawned',
+          data: expect.objectContaining({
+            blocking: true,
+          }),
+        })
+      );
+    });
+  });
+
+  describe('notification emission based on blocking mode', () => {
+    let trackerGet: Mock;
+    let trackerComplete: Mock;
+    let trackerFail: Mock;
+    let trackerIsTerminated: Mock;
+
+    beforeEach(() => {
+      trackerGet = vi.fn().mockReturnValue({ task: 'Test task' });
+      trackerComplete = vi.fn();
+      trackerFail = vi.fn();
+      trackerIsTerminated = vi.fn().mockReturnValue(false);
+
+      // Override the parent session with richer tracker for async tests
+      mockParentSession = {
+        workingDirectory: '/parent/dir',
+        model: 'claude-3-sonnet',
+        subagentTracker: {
+          spawn: trackerSpawn,
+          updateStatus: vi.fn(),
+          complete: trackerComplete,
+          fail: trackerFail,
+          get: trackerGet,
+          isTerminated: trackerIsTerminated,
+          waitFor: vi.fn().mockResolvedValue({
+            success: true,
+            output: 'Result',
+            summary: 'Done',
+            tokenUsage: { inputTokens: 100, outputTokens: 50 },
+          }),
+        },
+      } as unknown as ActiveSession;
+
+      getActiveSession.mockReturnValue(mockParentSession);
+
+      // runAgent resolves with a basic result
+      runAgent.mockResolvedValue([{ stoppedReason: 'end_turn' }]);
+
+      // getSession returns session with a headEventId
+      getSession.mockResolvedValue({
+        headEventId: 'evt_1',
+        totalInputTokens: 100,
+        totalOutputTokens: 50,
+      });
+
+      // getAncestors returns a minimal assistant message
+      getAncestors.mockResolvedValue([{
+        type: 'message.assistant',
+        payload: { content: [{ type: 'text', text: 'Done' }], turn: 1 },
+      }]);
+    });
+
+    it('should NOT emit notification.subagent_result for blocking subagent', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+        blocking: true,
+        timeout: 10000,
+      }, 'tc_1');
+
+      // Blocking mode awaits tracker.waitFor(), so by the time spawnSubsession returns,
+      // the async runSubagentAsync has already completed
+
+      // Wait for any remaining microtasks
+      await vi.waitFor(() => expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123', 'subagent.completed', expect.anything()
+      ));
+
+      const notifCalls = appendEventLinearized.mock.calls.filter(
+        ([, type]: [unknown, string]) => type === 'notification.subagent_result'
+      );
+      expect(notifCalls).toHaveLength(0);
+
+      const wsCalls = emit.mock.calls.filter(
+        ([, evt]: [unknown, { type?: string }]) => evt?.type === 'agent.subagent_result_available'
+      );
+      expect(wsCalls).toHaveLength(0);
+    });
+
+    it('should emit notification.subagent_result for non-blocking subagent', async () => {
+      await handler.spawnSubsession('parent_123', {
+        task: 'Test task',
+        blocking: false,
+      }, 'tc_2');
+
+      // Non-blocking returns immediately; wait for async completion
+      await vi.waitFor(() => expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123', 'subagent.completed', expect.anything()
+      ));
+
+      const notifCalls = appendEventLinearized.mock.calls.filter(
+        ([, type]: [unknown, string]) => type === 'notification.subagent_result'
+      );
+      expect(notifCalls).toHaveLength(1);
+
+      const wsCalls = emit.mock.calls.filter(
+        ([, evt]: [unknown, { type?: string }]) => evt?.type === 'agent.subagent_result_available'
+      );
+      expect(wsCalls).toHaveLength(1);
+    });
+
+    it('should NOT emit notification for blocking subagent that fails', async () => {
+      runAgent.mockRejectedValueOnce(new Error('test failure'));
+
+      await handler.spawnSubsession('parent_123', {
+        task: 'Failing task',
+        blocking: true,
+        timeout: 10000,
+      }, 'tc_3');
+
+      await vi.waitFor(() => expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123', 'subagent.failed', expect.anything()
+      ));
+
+      const notifCalls = appendEventLinearized.mock.calls.filter(
+        ([, type]: [unknown, string]) => type === 'notification.subagent_result'
+      );
+      expect(notifCalls).toHaveLength(0);
+    });
+
+    it('should emit notification for non-blocking subagent that fails', async () => {
+      runAgent.mockRejectedValueOnce(new Error('test failure'));
+
+      await handler.spawnSubsession('parent_123', {
+        task: 'Failing task',
+        blocking: false,
+      }, 'tc_4');
+
+      await vi.waitFor(() => expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123', 'subagent.failed', expect.anything()
+      ));
+
+      const notifCalls = appendEventLinearized.mock.calls.filter(
+        ([, type]: [unknown, string]) => type === 'notification.subagent_result'
+      );
+      expect(notifCalls).toHaveLength(1);
+    });
+
+    it('should NOT emit notification for subagent without toolCallId regardless of blocking', async () => {
+      // Background subagent: no toolCallId
+      await handler.spawnSubsession('parent_123', {
+        task: 'Background task',
+        blocking: false,
+      });
+
+      await vi.waitFor(() => expect(appendEventLinearized).toHaveBeenCalledWith(
+        'parent_123', 'subagent.completed', expect.anything()
+      ));
+
+      const notifCalls = appendEventLinearized.mock.calls.filter(
+        ([, type]: [unknown, string]) => type === 'notification.subagent_result'
+      );
+      expect(notifCalls).toHaveLength(0);
+    });
   });
 
   describe('spawnTmuxAgent', () => {

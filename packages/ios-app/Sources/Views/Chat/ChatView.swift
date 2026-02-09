@@ -28,6 +28,11 @@ struct ChatView: View {
     @State private var isInteractionEnabled: Bool
     @State private var interactionDebounceTask: Task<Void, Never>?
 
+    // MARK: - Navigation Lifecycle (SDF crash workaround)
+    // Disables .textSelection(.enabled) before navigation pop animation starts,
+    // preventing EXC_BREAKPOINT in SwiftUI.SDFStyle.distanceRange.getter
+    @State private var isDisappearing = false
+
     // MARK: - Scroll State (internal for extension access)
     @State var scrollProxy: ScrollViewProxy?
 
@@ -60,6 +65,13 @@ struct ChatView: View {
     var body: some View {
         // Main content
         messagesScrollView
+            .environment(\.textSelectionDisabled, isDisappearing)
+            .background(
+                NavigationWillDisappearObserver {
+                    isDisappearing = true
+                }
+                .frame(width: 0, height: 0)
+            )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // Floating input area - iOS 26 liquid glass, no backgrounds
                 VStack(spacing: 8) {

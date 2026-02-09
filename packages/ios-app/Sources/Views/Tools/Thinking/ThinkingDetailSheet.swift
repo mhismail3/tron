@@ -10,7 +10,7 @@ struct ThinkingDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(LocalizedStringKey(content))
+                Text(TextContentView.markdownAttributedString(from: content))
                     .font(TronTypography.messageBody)
                     .foregroundStyle(.tronTextPrimary)
                     .textSelection(.enabled)
@@ -44,7 +44,7 @@ struct ThinkingDetailSheetFallback: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(LocalizedStringKey(content))
+                Text(TextContentView.markdownAttributedString(from: content))
                     .font(TronTypography.messageBody)
                     .foregroundStyle(.tronTextPrimary)
                     .textSelection(.enabled)

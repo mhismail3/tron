@@ -345,7 +345,8 @@ extension UnifiedEventTransformer {
                         subagentSessionId: sessionId,
                         task: event.payload["task"]?.value as? String ?? "",
                         model: event.payload["model"]?.value as? String ?? "unknown",
-                        toolCallId: event.payload["toolCallId"]?.value as? String
+                        toolCallId: event.payload["toolCallId"]?.value as? String,
+                        blocking: event.payload["blocking"]?.value as? Bool ?? false
                     ))
                 }
 

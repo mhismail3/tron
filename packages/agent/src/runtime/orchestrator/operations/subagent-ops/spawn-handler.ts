@@ -114,6 +114,7 @@ export class SpawnHandler {
           workingDirectory: params.workingDirectory ?? parent.workingDirectory,
           maxTurns: params.maxTurns ?? 50,
           toolCallId,
+          blocking: params.blocking ?? false,
         }
       );
 
@@ -128,6 +129,7 @@ export class SpawnHandler {
           task: params.task,
           model: params.model ?? parent.model,
           workingDirectory: params.workingDirectory ?? parent.workingDirectory,
+          blocking: params.blocking ?? false,
         },
       });
 
@@ -150,7 +152,8 @@ export class SpawnHandler {
         params.task,
         params.maxTurns ?? 50,
         params.guardrailTimeout ?? DEFAULT_GUARDRAIL_TIMEOUT_MS,
-        toolCallId
+        toolCallId,
+        params.blocking ?? false
       ).catch((error) => {
         const structured = categorizeError(error, { parentSessionId, subagentSessionId: subSession.sessionId, operation: 'subagent_execution' });
         logger.error('Subagent execution failed (escaped try-finally)', {
@@ -393,7 +396,8 @@ export class SpawnHandler {
     task: string,
     _maxTurns: number,
     guardrailTimeoutMs: number = DEFAULT_GUARDRAIL_TIMEOUT_MS,
-    toolCallId?: string
+    toolCallId?: string,
+    blocking: boolean = false
   ): Promise<void> {
     const startTime = Date.now();
     let resultDelivered = false;
@@ -541,11 +545,10 @@ export class SpawnHandler {
         );
         resultDelivered = true;
 
-        // Emit notification for explicitly invoked subagents (has a toolCallId).
+        // Emit notification for non-blocking, explicitly invoked subagents.
         // Background subagents (LedgerWriter, LLMSummarizer) don't have toolCallIds.
-        // We emit regardless of parent processing state — fast subagents may complete
-        // before the parent finishes its turn, and the iOS client handles display timing.
-        if (toolCallId) {
+        // Blocking subagents deliver results directly via tracker.waitFor() — no notification needed.
+        if (toolCallId && !blocking) {
           const notificationData = {
             parentSessionId,
             subagentSessionId: sessionId,
@@ -659,9 +662,10 @@ export class SpawnHandler {
         });
         resultDelivered = true;
 
-        // Emit notification for explicitly invoked subagents only (has toolCallId).
+        // Emit notification for non-blocking, explicitly invoked subagents only.
         // Background subagents should not show result chips to the user.
-        if (toolCallId) {
+        // Blocking subagents deliver results directly via tracker.waitFor() — no notification needed.
+        if (toolCallId && !blocking) {
           const notificationData = {
             parentSessionId,
             subagentSessionId: sessionId,

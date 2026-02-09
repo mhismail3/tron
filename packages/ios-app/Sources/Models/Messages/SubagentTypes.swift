@@ -46,6 +46,8 @@ struct SubagentToolData: Equatable {
     var error: String?
     /// Token usage (when completed)
     var tokenUsage: TokenUsage?
+    /// Whether this subagent was spawned in blocking mode (parent waits for result via tool result)
+    var blocking: Bool = false
     /// Tracks whether results need user action (for non-blocking subagents that complete while parent idle)
     var resultDeliveryStatus: SubagentResultDeliveryStatus = .notApplicable
 
