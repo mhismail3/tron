@@ -80,6 +80,8 @@ export interface ListSessionsOptions {
   workspaceId?: WorkspaceId;
   /** Filter by ended state (derived from ended_at) */
   ended?: boolean;
+  /** Exclude subagent sessions (spawning_session_id IS NULL) */
+  excludeSubagents?: boolean;
   limit?: number;
   offset?: number;
   orderBy?: 'createdAt' | 'lastActivityAt';
@@ -226,6 +228,10 @@ export class SessionRepository extends BaseRepository {
       } else {
         sql += ' AND ended_at IS NULL';
       }
+    }
+
+    if (options.excludeSubagents) {
+      sql += ' AND spawning_session_id IS NULL';
     }
 
     const orderBy = options.orderBy === 'createdAt' ? 'created_at' : 'last_activity_at';

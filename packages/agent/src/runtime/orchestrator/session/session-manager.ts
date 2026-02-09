@@ -598,7 +598,7 @@ export class SessionManager {
       const sessions: SessionInfo[] = [];
       for (const [_, a] of active) {
         const session = sessionsMap.get(a.sessionId);
-        if (session) {
+        if (session && !session.spawningSessionId) {
           sessions.push(this.sessionRowToInfo(session, true, a.workingDir, previews.get(a.sessionId)));
         }
       }
@@ -607,6 +607,7 @@ export class SessionManager {
 
     const sessionRows = await this.eventStore.listSessions({
       limit: options.limit,
+      excludeSubagents: true,
     });
 
     // Filter by working directory if specified

@@ -185,6 +185,76 @@ describe('SQLiteEventStore', () => {
       expect(updated?.isEnded).toBe(true);
     });
 
+    it('should exclude subagent sessions when excludeSubagents is true', async () => {
+      const normal = await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+      });
+      await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+        spawningSessionId: normal.id, spawnType: 'subsession', spawnTask: 'do stuff',
+      });
+
+      const sessions = await backend.listSessions({ excludeSubagents: true });
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe(normal.id);
+    });
+
+    it('should include subagent sessions by default', async () => {
+      const normal = await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+      });
+      await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+        spawningSessionId: normal.id, spawnType: 'subsession', spawnTask: 'do stuff',
+      });
+
+      const sessions = await backend.listSessions({});
+      expect(sessions).toHaveLength(2);
+    });
+
+    it('should exclude subagent sessions with other filters combined', async () => {
+      const normal = await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+      });
+      await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+        spawningSessionId: normal.id, spawnType: 'subsession', spawnTask: 'do stuff',
+      });
+
+      const sessions = await backend.listSessions({
+        workspaceId,
+        excludeSubagents: true,
+      });
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe(normal.id);
+    });
+
+    it('should NOT exclude forked sessions when excludeSubagents is true', async () => {
+      const original = await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+      });
+      await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+        parentSessionId: original.id,
+      });
+
+      const sessions = await backend.listSessions({ excludeSubagents: true });
+      expect(sessions).toHaveLength(2);
+    });
+
+    it('should exclude tmux-spawned subagent sessions', async () => {
+      const normal = await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+      });
+      await backend.createSession({
+        workspaceId, workingDirectory: '/test', model: 'claude-sonnet-4-20250514',
+        spawningSessionId: normal.id, spawnType: 'tmux', spawnTask: 'background task',
+      });
+
+      const sessions = await backend.listSessions({ excludeSubagents: true });
+      expect(sessions).toHaveLength(1);
+    });
+
     it('should increment session counters', async () => {
       const session = await backend.createSession({
         workspaceId,

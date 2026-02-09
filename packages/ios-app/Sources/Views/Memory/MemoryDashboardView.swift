@@ -65,7 +65,7 @@ struct MemoryDashboardView: View {
                         }
                     }
                 } label: {
-                    Image("TronLogo")
+                    Image("TronLogoVector")
                         .renderingMode(.template)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
