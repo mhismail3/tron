@@ -132,7 +132,7 @@ describe('Voice Notes Handlers', () => {
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('VOICE_NOTE_SAVE_FAILED');
+      expect(response.error?.code).toBe('VOICE_NOTE_ERROR');
       expect(response.error?.message).toBe('Transcription service unavailable');
     });
   });
@@ -245,7 +245,7 @@ Hola, esto es una prueba.
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('VOICE_NOTES_LIST_FAILED');
+      expect(response.error?.code).toBe('VOICE_NOTE_ERROR');
     });
 
     it('should skip files that cannot be read', async () => {
@@ -351,7 +351,7 @@ Content`);
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('VOICE_NOTE_DELETE_FAILED');
+      expect(response.error?.code).toBe('VOICE_NOTE_ERROR');
     });
   });
 

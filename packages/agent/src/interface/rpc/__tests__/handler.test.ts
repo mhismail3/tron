@@ -448,7 +448,7 @@ describe('RpcHandler', () => {
       const response = await handler.handle(request);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('PARENT_NOT_FOUND');
+      expect(response.error?.code).toBe('FILE_NOT_FOUND');
     });
 
     it('should create directory successfully', async () => {

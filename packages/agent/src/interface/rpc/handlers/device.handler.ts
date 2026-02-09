@@ -30,22 +30,6 @@ interface DeviceUnregisterParams {
 }
 
 // =============================================================================
-// Error Types
-// =============================================================================
-
-class RegistrationFailedError extends RpcError {
-  constructor(message: string) {
-    super('REGISTRATION_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class UnregistrationFailedError extends RpcError {
-  constructor(message: string) {
-    super('UNREGISTRATION_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-// =============================================================================
 // Handler Factory
 // =============================================================================
 
@@ -72,7 +56,7 @@ export function getDeviceHandlers(): MethodRegistration[] {
         retryable: structured.retryable,
       });
       if (error instanceof Error) {
-        throw new RegistrationFailedError(error.message);
+        throw new RpcError(RpcErrorCode.REGISTRATION_ERROR, error.message);
       }
       throw error;
     }
@@ -92,7 +76,7 @@ export function getDeviceHandlers(): MethodRegistration[] {
         retryable: structured.retryable,
       });
       if (error instanceof Error) {
-        throw new UnregistrationFailedError(error.message);
+        throw new RpcError(RpcErrorCode.REGISTRATION_ERROR, error.message);
       }
       throw error;
     }

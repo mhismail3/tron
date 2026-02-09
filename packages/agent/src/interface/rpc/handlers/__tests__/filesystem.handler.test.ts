@@ -267,7 +267,7 @@ describe('Filesystem Handlers', () => {
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('PARENT_NOT_FOUND');
+      expect(response.error?.code).toBe('FILE_NOT_FOUND');
     });
   });
 

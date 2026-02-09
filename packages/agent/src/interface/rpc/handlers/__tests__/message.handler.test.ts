@@ -150,7 +150,7 @@ describe('Message Handlers', () => {
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('MESSAGE_DELETE_FAILED');
+      expect(response.error?.code).toBe('MESSAGE_ERROR');
     });
   });
 

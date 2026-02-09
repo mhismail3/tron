@@ -25,34 +25,6 @@ const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const GITHUB_URL_PATTERN = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/i;
 
 // =============================================================================
-// Error Types
-// =============================================================================
-
-class InvalidUrlError extends RpcError {
-  constructor(message: string) {
-    super('INVALID_URL' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class AlreadyExistsError extends RpcError {
-  constructor(message: string) {
-    super('ALREADY_EXISTS' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class ParentNotFoundError extends RpcError {
-  constructor(message: string) {
-    super('PARENT_NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class CloneFailedError extends RpcError {
-  constructor(message: string) {
-    super('CLONE_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-// =============================================================================
 // Helper Functions
 // =============================================================================
 
@@ -144,7 +116,7 @@ export function createGitHandlers(): MethodRegistration[] {
     // Parse and validate GitHub URL
     const parsed = parseGitHubUrl(params.url);
     if (!parsed) {
-      throw new InvalidUrlError('Enter a valid GitHub URL (e.g., github.com/owner/repo)');
+      throw new RpcError(RpcErrorCode.INVALID_PARAMS, 'Enter a valid GitHub URL (e.g., github.com/owner/repo)');
     }
 
     const { normalizedUrl, repoName } = parsed;
@@ -158,7 +130,7 @@ export function createGitHandlers(): MethodRegistration[] {
     // Check if target already exists
     try {
       await fs.access(targetPath);
-      throw new AlreadyExistsError('Folder already exists. Choose a different name.');
+      throw new RpcError(RpcErrorCode.ALREADY_EXISTS, 'Folder already exists. Choose a different name.');
     } catch (error) {
       // Re-throw our typed errors
       if (error instanceof RpcError) {
@@ -176,7 +148,7 @@ export function createGitHandlers(): MethodRegistration[] {
       try {
         await fs.mkdir(parentDir, { recursive: true });
       } catch {
-        throw new ParentNotFoundError(`Parent directory does not exist and could not be created: ${parentDir}`);
+        throw new RpcError(RpcErrorCode.FILE_NOT_FOUND, `Parent directory does not exist and could not be created: ${parentDir}`);
       }
     }
 
@@ -195,7 +167,7 @@ export function createGitHandlers(): MethodRegistration[] {
         errorMessage = 'Authentication failed. This may be a private repository.';
       }
 
-      throw new CloneFailedError(errorMessage);
+      throw new RpcError(RpcErrorCode.GIT_ERROR, errorMessage);
     }
 
     const result: GitCloneResult = {

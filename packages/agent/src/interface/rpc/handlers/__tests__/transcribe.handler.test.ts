@@ -112,7 +112,7 @@ describe('Transcribe Handlers', () => {
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('TRANSCRIPTION_FAILED');
+      expect(response.error?.code).toBe('TRANSCRIPTION_ERROR');
       expect(response.error?.message).toBe('Audio format not supported');
     });
 
@@ -179,7 +179,7 @@ describe('Transcribe Handlers', () => {
       const response = await registry.dispatch(request, mockContext);
 
       expect(response.success).toBe(false);
-      expect(response.error?.code).toBe('TRANSCRIPTION_FAILED');
+      expect(response.error?.code).toBe('TRANSCRIPTION_ERROR');
       expect(response.error?.message).toBe('Service unavailable');
     });
   });

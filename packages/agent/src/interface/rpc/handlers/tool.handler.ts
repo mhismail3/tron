@@ -11,24 +11,6 @@ import type { ToolResultParams } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
 import { RpcError, RpcErrorCode } from './base.js';
 
-/**
- * Tool call not found error
- */
-class ToolCallNotFoundError extends RpcError {
-  constructor(toolCallId: string) {
-    super('NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], `No pending tool call found with ID: ${toolCallId}`);
-  }
-}
-
-/**
- * Tool result failed error
- */
-class ToolResultFailedError extends RpcError {
-  constructor() {
-    super('TOOL_RESULT_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], 'Failed to resolve tool call');
-  }
-}
-
 // =============================================================================
 // Handler Factory
 // =============================================================================
@@ -44,14 +26,14 @@ export function createToolHandlers(): MethodRegistration[] {
 
     // Check if the tool call is pending
     if (!context.toolCallTracker!.hasPending(params.toolCallId)) {
-      throw new ToolCallNotFoundError(params.toolCallId);
+      throw new RpcError(RpcErrorCode.NOT_FOUND, `No pending tool call found with ID: ${params.toolCallId}`);
     }
 
     // Resolve the pending tool call
     const resolved = context.toolCallTracker!.resolve(params.toolCallId, params.result);
 
     if (!resolved) {
-      throw new ToolResultFailedError();
+      throw new RpcError(RpcErrorCode.TOOL_RESULT_FAILED, 'Failed to resolve tool call');
     }
 
     return {

@@ -11,15 +11,6 @@ import type { CanvasGetParams } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
 import { RpcError, RpcErrorCode } from './base.js';
 
-/**
- * Canvas error
- */
-class CanvasError extends RpcError {
-  constructor(message: string) {
-    super('CANVAS_ERROR' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
 // =============================================================================
 // Handler Factory
 // =============================================================================
@@ -37,7 +28,7 @@ export function createCanvasHandlers(): MethodRegistration[] {
       return await context.canvasManager!.getCanvas(params.canvasId);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to get canvas';
-      throw new CanvasError(message);
+      throw new RpcError(RpcErrorCode.CANVAS_ERROR, message);
     }
   };
 

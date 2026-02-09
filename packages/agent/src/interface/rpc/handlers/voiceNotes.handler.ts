@@ -28,28 +28,6 @@ import { RpcError, RpcErrorCode, InvalidParamsError, FileNotFoundError } from '.
 const logger = createLogger('rpc:voiceNotes');
 
 // =============================================================================
-// Error Types
-// =============================================================================
-
-class VoiceNoteSaveError extends RpcError {
-  constructor(message: string) {
-    super('VOICE_NOTE_SAVE_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class VoiceNotesListError extends RpcError {
-  constructor(message: string) {
-    super('VOICE_NOTES_LIST_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class VoiceNoteDeleteError extends RpcError {
-  constructor(message: string) {
-    super('VOICE_NOTE_DELETE_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-// =============================================================================
 // Helper Functions
 // =============================================================================
 
@@ -175,7 +153,7 @@ ${transcribeResult.text}
         retryable: structured.retryable,
       });
       const message = error instanceof Error ? error.message : 'Failed to save voice note';
-      throw new VoiceNoteSaveError(message);
+      throw new RpcError(RpcErrorCode.VOICE_NOTE_ERROR, message);
     }
   };
 
@@ -232,7 +210,7 @@ ${transcribeResult.text}
         retryable: structured.retryable,
       });
       const message = error instanceof Error ? error.message : 'Failed to list voice notes';
-      throw new VoiceNotesListError(message);
+      throw new RpcError(RpcErrorCode.VOICE_NOTE_ERROR, message);
     }
   };
 
@@ -279,7 +257,7 @@ ${transcribeResult.text}
         retryable: structured.retryable,
       });
       const message = error instanceof Error ? error.message : 'Failed to delete voice note';
-      throw new VoiceNoteDeleteError(message);
+      throw new RpcError(RpcErrorCode.VOICE_NOTE_ERROR, message);
     }
   };
 

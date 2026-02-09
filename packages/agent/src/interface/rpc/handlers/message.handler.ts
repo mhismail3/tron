@@ -15,27 +15,6 @@ import type { MethodRegistration, MethodHandler } from '../registry.js';
 import { RpcError, RpcErrorCode } from './base.js';
 import { hasErrorCode } from '@core/utils/errors.js';
 
-/**
- * Message operation errors
- */
-class MessageNotFoundError extends RpcError {
-  constructor(message: string) {
-    super('NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class InvalidOperationError extends RpcError {
-  constructor(message: string) {
-    super('INVALID_OPERATION' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class MessageDeleteError extends RpcError {
-  constructor(message: string) {
-    super('MESSAGE_DELETE_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
 // =============================================================================
 // Handler Factory
 // =============================================================================
@@ -64,13 +43,13 @@ export function createMessageHandlers(): MethodRegistration[] {
       return result;
     } catch (error) {
       if (hasErrorCode(error, 'EVENT_NOT_FOUND') || hasErrorCode(error, 'SESSION_NOT_FOUND')) {
-        throw new MessageNotFoundError((error as Error).message);
+        throw new RpcError(RpcErrorCode.NOT_FOUND, (error as Error).message);
       }
       if (hasErrorCode(error, 'INVALID_OPERATION')) {
-        throw new InvalidOperationError((error as Error).message);
+        throw new RpcError(RpcErrorCode.INVALID_OPERATION, (error as Error).message);
       }
       const message = error instanceof Error ? error.message : 'Failed to delete message';
-      throw new MessageDeleteError(message);
+      throw new RpcError(RpcErrorCode.MESSAGE_ERROR, message);
     }
   };
 

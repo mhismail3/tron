@@ -26,34 +26,6 @@ import { RpcError, RpcErrorCode, InvalidParamsError, PermissionDeniedError } fro
 const logger = createLogger('rpc:filesystem');
 
 // =============================================================================
-// Error Types
-// =============================================================================
-
-class FilesystemError extends RpcError {
-  constructor(message: string) {
-    super('FILESYSTEM_ERROR' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class AlreadyExistsError extends RpcError {
-  constructor(message: string) {
-    super('ALREADY_EXISTS' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class InvalidPathError extends RpcError {
-  constructor(message: string) {
-    super('INVALID_PATH' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-class ParentNotFoundError extends RpcError {
-  constructor(message: string) {
-    super('PARENT_NOT_FOUND' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-// =============================================================================
 // Handler Factory
 // =============================================================================
 
@@ -143,7 +115,7 @@ export function createFilesystemHandlers(): MethodRegistration[] {
         retryable: structured.retryable,
       });
       const message = error instanceof Error ? error.message : 'Failed to list directory';
-      throw new FilesystemError(message);
+      throw new RpcError(RpcErrorCode.FILESYSTEM_ERROR, message);
     }
   };
 
@@ -228,9 +200,9 @@ export function createFilesystemHandlers(): MethodRegistration[] {
       try {
         const stat = await fs.stat(resolvedPath);
         if (stat.isDirectory()) {
-          throw new AlreadyExistsError('Directory already exists');
+          throw new RpcError(RpcErrorCode.ALREADY_EXISTS, 'Directory already exists');
         } else {
-          throw new InvalidPathError('Path exists but is not a directory');
+          throw new RpcError(RpcErrorCode.INVALID_PATH, 'Path exists but is not a directory');
         }
       } catch (error) {
         // Re-throw our typed errors
@@ -262,10 +234,10 @@ export function createFilesystemHandlers(): MethodRegistration[] {
           throw new PermissionDeniedError('Permission denied');
         }
         if (code === 'ENOENT') {
-          throw new ParentNotFoundError('Parent directory does not exist');
+          throw new RpcError(RpcErrorCode.FILE_NOT_FOUND, 'Parent directory does not exist');
         }
         if (code === 'EEXIST') {
-          throw new AlreadyExistsError('Directory already exists');
+          throw new RpcError(RpcErrorCode.ALREADY_EXISTS, 'Directory already exists');
         }
       }
 
@@ -278,7 +250,7 @@ export function createFilesystemHandlers(): MethodRegistration[] {
         error: structured.message,
         retryable: structured.retryable,
       });
-      throw new FilesystemError(message);
+      throw new RpcError(RpcErrorCode.FILESYSTEM_ERROR, message);
     }
   };
 

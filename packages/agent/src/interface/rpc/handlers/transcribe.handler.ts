@@ -16,15 +16,6 @@ import { RpcError, RpcErrorCode } from './base.js';
 const logger = createLogger('rpc:transcribe');
 
 /**
- * Transcription error
- */
-class TranscriptionError extends RpcError {
-  constructor(message: string) {
-    super('TRANSCRIPTION_FAILED' as typeof RpcErrorCode[keyof typeof RpcErrorCode], message);
-  }
-}
-
-/**
  * Wrap transcription operations with consistent error handling
  */
 async function withTranscriptionErrorHandling<T>(
@@ -42,7 +33,7 @@ async function withTranscriptionErrorHandling<T>(
       retryable: structured.retryable,
     });
     const message = error instanceof Error ? error.message : `${operation} failed`;
-    throw new TranscriptionError(message);
+    throw new RpcError(RpcErrorCode.TRANSCRIPTION_ERROR, message);
   }
 }
 
