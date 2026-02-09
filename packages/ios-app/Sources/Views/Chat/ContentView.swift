@@ -262,7 +262,10 @@ struct ContentView: View {
                 onNewSession: { showNewSessionSheet = true },
                 onNewSessionLongPress: { createQuickSession() },
                 onSettings: { showSettings = true },
-                onVoiceNote: { showVoiceNotesRecording = true }
+                onVoiceNote: { showVoiceNotesRecording = true },
+                onNavigationModeChange: { mode in
+                    navigationMode = mode
+                }
             )
         } else {
             selectSessionPrompt
@@ -568,6 +571,25 @@ struct WelcomePage: View {
                             ForEach(NavigationMode.allCases, id: \.self) { mode in
                                 Button {
                                     onNavigationModeChange?(mode)
+                                } label: {
+                                    Label(mode.rawValue, systemImage: mode.icon)
+                                }
+                            }
+                        } label: {
+                            Image("TronLogo")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(height: 24)
+                        }
+                    }
+                }
+                // iPad - Tron logo menu for navigation mode switching (alongside sidebar toggle)
+                if onToggleSidebar != nil, let onNavigationModeChange {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            ForEach(NavigationMode.allCases, id: \.self) { mode in
+                                Button {
+                                    onNavigationModeChange(mode)
                                 } label: {
                                     Label(mode.rawValue, systemImage: mode.icon)
                                 }
