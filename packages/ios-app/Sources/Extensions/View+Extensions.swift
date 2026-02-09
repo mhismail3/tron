@@ -89,7 +89,7 @@ struct ShimmerModifier: ViewModifier {
                     LinearGradient(
                         gradient: Gradient(colors: [
                             .clear,
-                            .white.opacity(0.1),
+                            Color.tronOverlay(0.1),
                             .clear
                         ]),
                         startPoint: .leading,

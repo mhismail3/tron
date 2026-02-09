@@ -37,7 +37,7 @@ struct AttachmentBubble: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
+                .strokeBorder(Color.tronOverlay(0.1), lineWidth: 0.5)
         )
     }
 

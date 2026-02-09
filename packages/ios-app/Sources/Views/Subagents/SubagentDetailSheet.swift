@@ -131,7 +131,6 @@ struct SubagentDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
-        .preferredColorScheme(.dark)
         .task {
             if data.status == .running {
                 // Running: load activity events for live streaming
@@ -233,13 +232,13 @@ struct SubagentDetailSheet: View {
             // Section header
             Text("Task")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             // Card content
             VStack(alignment: .leading, spacing: 8) {
                 Text(data.task)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(.tronTextPrimary)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -261,18 +260,18 @@ struct SubagentDetailSheet: View {
             HStack {
                 Text("Activity")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 // Event count badge
                 if !allEvents.isEmpty {
                     Text("\(allEvents.count)")
                         .font(TronTypography.codeSM)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             Capsule()
-                                .fill(.white.opacity(0.1))
+                                .fill(Color.tronOverlay(0.1))
                         )
                 }
 
@@ -297,25 +296,25 @@ struct SubagentDetailSheet: View {
                                 .progressViewStyle(.circular)
                                 .scaleEffect(0.7)
                                 .frame(width: 14, height: 14)
-                                .tint(.white.opacity(0.4))
+                                .tint(.tronTextMuted)
                             Text("Loading activity...")
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                         } else if data.status == .running {
                             Image(systemName: "ellipsis")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                                 .symbolEffect(.variableColor.iterative, options: .repeating)
                             Text("Waiting for activity...")
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                         } else {
                             Image(systemName: "tray")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                             Text("No activity recorded")
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -354,15 +353,15 @@ struct SubagentDetailSheet: View {
             HStack {
                 Text("Chat")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 if !chatMessages.isEmpty {
                     Text("\(chatMessages.count)")
                         .font(TronTypography.codeSM)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(.white.opacity(0.1)))
+                        .background(Capsule().fill(Color.tronOverlay(0.1)))
                 }
 
                 Spacer()
@@ -387,10 +386,10 @@ struct SubagentDetailSheet: View {
                 .progressViewStyle(.circular)
                 .scaleEffect(0.7)
                 .frame(width: 14, height: 14)
-                .tint(.white.opacity(0.4))
+                .tint(.tronTextMuted)
             Text("Loading chat history...")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
@@ -410,11 +409,11 @@ struct SubagentDetailSheet: View {
                     .foregroundStyle(.tronError.opacity(0.8))
                 Text("Failed to load chat history")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
             Text(error)
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.white.opacity(0.3))
+                .foregroundStyle(.tronTextDisabled)
             Button("Retry") {
                 Task { await loadChatHistory() }
             }
@@ -435,10 +434,10 @@ struct SubagentDetailSheet: View {
         HStack(spacing: 8) {
             Image(systemName: "tray")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
             Text("No chat history")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
@@ -473,7 +472,7 @@ struct SubagentDetailSheet: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
                 Text("(\(hiddenEventCount) hidden)")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
             }
             .foregroundStyle(titleColor)
             .frame(maxWidth: .infinity)
@@ -522,7 +521,7 @@ struct SubagentDetailSheet: View {
             HStack {
                 Text("Summary")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
 
@@ -540,7 +539,7 @@ struct SubagentDetailSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(displayContent)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -561,7 +560,7 @@ struct SubagentDetailSheet: View {
                             if !isSummaryExpanded {
                                 Text("(\(content.count - Self.summaryCharacterLimit) more chars)")
                                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.white.opacity(0.4))
+                                    .foregroundStyle(.tronTextMuted)
                             }
                         }
                         .foregroundStyle(.tronSuccess)
@@ -591,7 +590,7 @@ struct SubagentDetailSheet: View {
             // Section header
             Text("Error")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             // Card content
             VStack(alignment: .leading, spacing: 8) {
@@ -607,7 +606,7 @@ struct SubagentDetailSheet: View {
 
                 Text(error)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(4)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)

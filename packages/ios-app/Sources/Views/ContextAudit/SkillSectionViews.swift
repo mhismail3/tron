@@ -33,7 +33,7 @@ struct SkillReferencesSection: View {
                 // Count badge
                 Text("\(skills.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.tronCyan.opacity(0.6))
@@ -44,11 +44,11 @@ struct SkillReferencesSection: View {
                 // Token count
                 Text(TokenFormatter.format(estimatedTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -130,13 +130,13 @@ struct SkillReferenceRow: View {
                 if let tags = skill.tags, !tags.isEmpty {
                     Text(tags.prefix(2).joined(separator: ", "))
                         .font(TronTypography.pill)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                 }
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.tronTextDisabled)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -152,7 +152,7 @@ struct SkillReferenceRow: View {
             if isExpanded {
                 Text(skill.description)
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
             }
@@ -203,7 +203,7 @@ struct AddedSkillRow: View {
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.tronTextDisabled)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -232,7 +232,7 @@ struct AddedSkillRow: View {
                                 .tint(.tronCyan)
                             Text("Loading content...")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(12)
@@ -240,19 +240,19 @@ struct AddedSkillRow: View {
                         ScrollView {
                             Text(content)
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(.tronTextSecondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .background(Color.black.opacity(0.2))
+                        .background(Color.tronSurfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .padding(.horizontal, 8)
                     } else {
                         Text("Content not available")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.tronTextMuted)
                             .padding(8)
                     }
                 }

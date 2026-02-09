@@ -58,7 +58,6 @@ struct SkillDetailSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accentColor)
-        .preferredColorScheme(.dark)
         .task {
             await loadSkillContent()
         }
@@ -134,7 +133,7 @@ struct SkillDetailSheet: View {
             // Section header (outside the card, like Context Manager)
             Text("Description")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             // Card content
             VStack(spacing: 12) {
@@ -226,7 +225,7 @@ struct SkillDetailSheet: View {
             HStack {
                 Text("SKILL.md")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
 
@@ -257,7 +256,7 @@ struct SkillDetailSheet: View {
                 // Markdown content
                 Text(TextContentView.markdownAttributedString(from: metadata.content))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(4)
                     .textSelection(.enabled)
             }
@@ -275,13 +274,13 @@ struct SkillDetailSheet: View {
             // Section header
             Text("Other Files")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             if metadata.additionalFiles.isEmpty {
                 // Empty state
                 Text("No other files")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.tronTextDisabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 // Card content with files
@@ -294,7 +293,7 @@ struct SkillDetailSheet: View {
 
                             Text(file)
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.tronTextSecondary)
 
                             Spacer()
                         }
@@ -369,5 +368,4 @@ struct SkillDetailSheet: View {
         ),
         skillStore: SkillStore()
     )
-    .preferredColorScheme(.dark)
 }

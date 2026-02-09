@@ -195,7 +195,7 @@ struct InlineReasoningControl: View {
             }
             .disabled(currentIndex == levels.count - 1)
         }
-        .foregroundStyle(.white.opacity(0.8))
+        .foregroundStyle(.tronTextSecondary)
     }
 }
 
@@ -233,7 +233,7 @@ struct InlineReasoningControl: View {
             levels: ["low", "medium", "high", "xhigh"]
         )
         .padding()
-        .background(Color.black.opacity(0.3))
+        .background(Color.tronSurfaceElevated)
         .clipShape(Capsule())
 
         // Show all level colors
@@ -250,5 +250,4 @@ struct InlineReasoningControl: View {
         }
     }
     .padding()
-    .preferredColorScheme(.dark)
 }

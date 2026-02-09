@@ -271,5 +271,4 @@ struct WebFetchMetadata {
     }
     .padding()
     .background(Color.tronBackground)
-    .preferredColorScheme(.dark)
 }

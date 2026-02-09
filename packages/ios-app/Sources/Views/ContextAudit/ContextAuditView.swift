@@ -182,7 +182,6 @@ struct ContextAuditView: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     /// Get session token usage from cached values (populated during loadContext)

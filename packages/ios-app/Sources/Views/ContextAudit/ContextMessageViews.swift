@@ -61,7 +61,7 @@ struct DetailedMessageRow: View {
                     // Summary fades out when expanded
                     Text(message.summary)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                         .opacity(isExpanded ? 0 : 1)
                         .frame(height: isExpanded ? 0 : nil, alignment: .top)
@@ -72,12 +72,12 @@ struct DetailedMessageRow: View {
 
                 Text(TokenFormatter.format(message.tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
                     .padding(.top, 2)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
                     .padding(.top, 4)
@@ -108,12 +108,12 @@ struct DetailedMessageRow: View {
                                     Spacer()
                                     Text(TokenFormatter.format(toolCall.tokens))
                                         .font(TronTypography.pill)
-                                        .foregroundStyle(.white.opacity(0.4))
+                                        .foregroundStyle(.tronTextMuted)
                                 }
 
                                 Text(toolCall.arguments)
                                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                    .foregroundStyle(.white.opacity(0.6))
+                                    .foregroundStyle(.tronTextSecondary)
                                     .lineLimit(5)
                             }
                             .padding(8)
@@ -135,7 +135,7 @@ struct DetailedMessageRow: View {
                             lineNumFontSize: 9,
                             maxCollapsedHeight: 200
                         )
-                        .background(Color.black.opacity(0.2))
+                        .background(Color.tronSurfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
@@ -179,7 +179,7 @@ struct MessagesContainer: View {
                 // Count badge
                 Text("\(totalMessages)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.tronEmerald.opacity(0.7))
@@ -189,11 +189,11 @@ struct MessagesContainer: View {
 
                 Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -211,7 +211,7 @@ struct MessagesContainer: View {
                     if totalMessages == 0 {
                         Text("No messages in context")
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.tronTextMuted)
                             .frame(maxWidth: .infinity)
                             .padding(12)
                     } else {
@@ -294,7 +294,7 @@ struct AddedSkillsContainer: View {
                 // Count badge
                 Text("\(skills.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.tronCyan.opacity(0.7))
@@ -304,11 +304,11 @@ struct AddedSkillsContainer: View {
 
                 Text("~\(TokenFormatter.format(estimatedTokens))")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }

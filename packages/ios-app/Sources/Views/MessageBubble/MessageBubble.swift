@@ -342,5 +342,4 @@ struct AnsweredQuestionsChipView: View {
         .padding()
     }
     .background(Color.tronBackground)
-    .preferredColorScheme(.dark)
 }

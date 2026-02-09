@@ -34,11 +34,11 @@ struct SubagentResultNotificationView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(titleText)
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.tronTextPrimary)
 
                     Text(taskPreview)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
                 }
 

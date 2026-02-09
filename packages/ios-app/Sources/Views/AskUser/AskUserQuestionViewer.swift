@@ -244,6 +244,5 @@ struct AskUserQuestionToolViewer: View {
     }
     .padding()
     .background(Color.tronBackground)
-    .preferredColorScheme(.dark)
 }
 #endif

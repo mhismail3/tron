@@ -22,10 +22,10 @@ struct SystemPromptSection: View {
                 Spacer()
                 Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -42,13 +42,13 @@ struct SystemPromptSection: View {
                 ScrollView {
                     Text(content)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.black.opacity(0.2))
+                .background(Color.tronSurfaceElevated)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)

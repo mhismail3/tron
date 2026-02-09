@@ -23,7 +23,7 @@ struct RulesSection: View {
                 // Count badge
                 Text("\(rules.totalFiles)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.tronTerracotta.opacity(0.7))
@@ -33,11 +33,11 @@ struct RulesSection: View {
 
                 Text(TokenFormatter.format(rules.tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -95,19 +95,19 @@ struct RulesFileRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(file.displayPath)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
 
                     Text(file.label)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.tronTextDisabled)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -135,7 +135,7 @@ struct RulesFileRow: View {
                                 .tint(.tronTerracotta)
                             Text("Loading content...")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(12)
@@ -151,10 +151,10 @@ struct RulesFileRow: View {
                             }
                             Text(error)
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                             Text("Path: \(file.path)")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.3))
+                                .foregroundStyle(.tronTextDisabled)
                                 .lineLimit(2)
                         }
                         .padding(10)
@@ -165,18 +165,18 @@ struct RulesFileRow: View {
                         ScrollView {
                             Text(displayContent)
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(.tronTextSecondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .background(Color.black.opacity(0.2))
+                        .background(Color.tronSurfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else {
                         Text("Content not available")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.tronTextMuted)
                             .padding(8)
                     }
                 }

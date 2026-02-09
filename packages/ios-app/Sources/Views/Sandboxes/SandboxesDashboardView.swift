@@ -156,7 +156,7 @@ struct SandboxesDashboardView: View {
                         containerRow(container, dimmed: true)
                     }
                 } header: {
-                    sectionHeader("Stopped", color: .white.opacity(0.4))
+                    sectionHeader("Stopped", color: .tronTextMuted)
                 }
             }
         }
@@ -251,16 +251,16 @@ struct SandboxesDashboardView: View {
         VStack(spacing: 20) {
             Image(systemName: "shippingbox")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
 
             VStack(spacing: 6) {
                 Text("No Containers")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.tronTextPrimary)
 
                 Text("Containers created by agents will appear here")
                     .font(TronTypography.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
                     .multilineTextAlignment(.center)
             }
         }
@@ -276,7 +276,7 @@ struct SandboxesDashboardView: View {
 
             Text(error)
                 .font(TronTypography.subheadline)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
 
             Button("Retry") {

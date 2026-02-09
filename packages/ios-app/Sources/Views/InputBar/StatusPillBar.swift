@@ -217,7 +217,7 @@ struct StatusPillsColumn: View {
             HStack(spacing: 8) {
                 // Context usage bar - use overlay + clipShape to prevent overflow
                 Capsule()
-                    .fill(Color.white.opacity(0.2))
+                    .fill(Color.tronOverlay(0.2))
                     .frame(width: 40, height: 6)
                     .overlay(alignment: .leading) {
                         // Fill rectangle that gets clipped by parent Capsule shape
@@ -291,7 +291,7 @@ struct TokenStatsPill: View {
             HStack(spacing: 8) {
                 // Context usage bar
                 Capsule()
-                    .fill(Color.white.opacity(0.2))
+                    .fill(Color.tronOverlay(0.2))
                     .frame(width: 40, height: 6)
                     .overlay(alignment: .leading) {
                         Rectangle()

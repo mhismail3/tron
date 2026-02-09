@@ -47,7 +47,6 @@ struct UICanvasSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Content View
@@ -242,7 +241,6 @@ struct UICanvasSheetFallback: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
         .tint(.tronEmerald)
     }
 

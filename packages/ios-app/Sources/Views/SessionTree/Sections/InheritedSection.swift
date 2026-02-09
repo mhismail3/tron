@@ -76,7 +76,7 @@ struct InheritedSection: View {
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, 4)
-                .background(Color.white.opacity(0.03))
+                .background(Color.tronOverlay(0.03))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .padding(.top, 8)
                 .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))

@@ -39,7 +39,6 @@ struct NotifyAppDetailSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Content View
@@ -189,7 +188,7 @@ struct NotifyAppDetailSheetFallback: View {
                 }
                 .padding()
             }
-            .background(Color.black)
+            .background(Color.tronBackground)
             .navigationTitle("Notification")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -200,7 +199,6 @@ struct NotifyAppDetailSheetFallback: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 

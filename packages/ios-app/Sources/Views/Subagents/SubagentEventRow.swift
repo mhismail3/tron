@@ -26,7 +26,7 @@ struct SubagentEventRow: View {
                 HStack(spacing: 6) {
                     Text(event.title)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.tronTextPrimary)
 
                     if event.isRunning {
                         Text("•")
@@ -38,7 +38,7 @@ struct SubagentEventRow: View {
                 if let detail = event.detail, !detail.isEmpty {
                     Text(detail)
                         .font(TronTypography.mono(size: TronTypography.sizeBody2))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineLimit(6)
                         .lineSpacing(2)
                         .textSelection(.enabled)
@@ -51,7 +51,7 @@ struct SubagentEventRow: View {
             if !event.isRunning {
                 Text(formatTime(event.timestamp))
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.tronTextDisabled)
             }
         }
         .padding(.vertical, 8)

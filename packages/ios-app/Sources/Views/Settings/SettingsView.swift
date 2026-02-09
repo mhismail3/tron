@@ -88,6 +88,8 @@ struct SettingsView: View {
                     }
                 )
 
+                AppearanceSection()
+
                 if #available(iOS 26.0, *) {
                     QuickSessionSection(
                         displayWorkspace: settingsState.displayQuickSessionWorkspace,
@@ -226,7 +228,6 @@ struct SettingsView: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Computed Properties

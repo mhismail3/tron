@@ -47,13 +47,13 @@ struct CameraCaptureSheet: View {
                                     VStack(spacing: 12) {
                                         Image(systemName: "camera.fill")
                                             .font(TronTypography.sans(size: TronTypography.sizeDisplay))
-                                            .foregroundStyle(.white.opacity(0.4))
+                                            .foregroundStyle(.tronTextMuted)
                                         Text("Camera Access Required")
                                             .font(TronTypography.subheadline)
-                                            .foregroundStyle(.white.opacity(0.7))
+                                            .foregroundStyle(.tronTextSecondary)
                                         Text("Enable in Settings")
                                             .font(TronTypography.caption)
-                                            .foregroundStyle(.white.opacity(0.4))
+                                            .foregroundStyle(.tronTextMuted)
                                     }
                                 } else {
                                     ProgressView()
@@ -64,7 +64,7 @@ struct CameraCaptureSheet: View {
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        .strokeBorder(Color.tronOverlay(0.1), lineWidth: 1)
                         .frame(width: viewportSize, height: viewportSize)
                 )
 
@@ -79,7 +79,6 @@ struct CameraCaptureSheet: View {
         .padding(.horizontal, 24)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
         .task {
             await cameraModel.requestPermissionAndSetup()
         }
@@ -97,10 +96,10 @@ struct CameraCaptureSheet: View {
                 Button(action: retake) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronOverlay(0.25)).interactive(), in: .circle)
 
                 // Use Photo - primary action
                 Button(action: usePhoto) {
@@ -122,11 +121,11 @@ struct CameraCaptureSheet: View {
                 Button(action: { cameraModel.toggleTorch() }) {
                     Image(systemName: cameraModel.isTorchOn ? "moon.fill" : "moon")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(cameraModel.isTorchOn ? .tronEmerald : .white.opacity(0.9))
+                        .foregroundStyle(cameraModel.isTorchOn ? .tronEmerald : .tronTextPrimary)
                         .frame(width: 52, height: 52)
                 }
                 .glassEffect(
-                    .regular.tint(cameraModel.isTorchOn ? Color.tronEmerald.opacity(0.4) : Color.white.opacity(0.25)).interactive(),
+                    .regular.tint(cameraModel.isTorchOn ? Color.tronEmerald.opacity(0.4) : Color.tronOverlay(0.25)).interactive(),
                     in: .circle
                 )
                 .disabled(!cameraModel.isAuthorized || !cameraModel.hasTorch)
@@ -150,10 +149,10 @@ struct CameraCaptureSheet: View {
                 Button(action: flipCamera) {
                     Image(systemName: "arrow.triangle.2.circlepath.camera")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronOverlay(0.25)).interactive(), in: .circle)
                 .disabled(!cameraModel.isAuthorized)
                 .opacity(cameraModel.isAuthorized ? 1 : 0.3)
             }

@@ -73,7 +73,7 @@ struct NewSessionFlow: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Workspace")
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
 
                         Button {
                             showWorkspaceSelector = true
@@ -103,14 +103,14 @@ struct NewSessionFlow: View {
 
                         Text("The directory where the agent will operate")
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.tronTextMuted)
                     }
 
                     // Clone from GitHub option
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Or clone a repository")
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
 
                         Button {
                             showCloneSheet = true
@@ -132,7 +132,7 @@ struct NewSessionFlow: View {
 
                         Text("Clone a GitHub repo and start a session")
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.tronTextMuted)
                     }
 
                     // Model section - dynamically loaded from server
@@ -140,7 +140,7 @@ struct NewSessionFlow: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Model")
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
 
                         Button {
                             showModelPicker = true
@@ -170,7 +170,7 @@ struct NewSessionFlow: View {
 
                         Text(modelDescription)
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(.tronTextMuted)
                     }
                     .padding(.top, 8)
 
@@ -220,7 +220,7 @@ struct NewSessionFlow: View {
                         } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(canCreate ? .tronEmerald : .white.opacity(0.3))
+                                .foregroundStyle(canCreate ? .tronEmerald : .tronTextDisabled)
                         }
                         .disabled(!canCreate)
                     }
@@ -303,7 +303,6 @@ struct NewSessionFlow: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Computed Properties
@@ -467,7 +466,7 @@ struct NewSessionFlow: View {
             HStack {
                 Text("Recent Sessions")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
 
@@ -486,7 +485,7 @@ struct NewSessionFlow: View {
                         .tint(.tronEmerald)
                     Text("Loading sessions...")
                         .font(TronTypography.caption)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.tronTextMuted)
                     Spacer()
                 }
                 .padding(.vertical, 20)
@@ -506,12 +505,12 @@ struct NewSessionFlow: View {
                 VStack(spacing: 8) {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(TronTypography.sans(size: TronTypography.sizeXXL))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(.tronTextDisabled)
                     Text(workingDirectory.isEmpty
                         ? "No sessions found"
                         : "No sessions in this workspace")
                         .font(TronTypography.caption)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 32)

@@ -19,7 +19,7 @@ struct RecentSessionRow: View {
                     Spacer()
                     Text(session.formattedDate)
                         .font(TronTypography.pill)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                 }
 
                 // Last user prompt (right-aligned)
@@ -30,7 +30,7 @@ struct RecentSessionRow: View {
                         HStack(alignment: .top, spacing: 6) {
                             Text(prompt)
                                 .font(TronTypography.codeCaption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.tronTextSecondary)
                                 .lineLimit(2)
                                 .truncationMode(.tail)
                                 .multilineTextAlignment(.trailing)
@@ -43,7 +43,7 @@ struct RecentSessionRow: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.03))
+                        .background(Color.tronOverlay(0.03))
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
@@ -59,13 +59,13 @@ struct RecentSessionRow: View {
 
                         Text(response)
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
                             .lineLimit(2)
                             .truncationMode(.tail)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.03))
+                    .background(Color.tronOverlay(0.03))
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
 
@@ -103,7 +103,7 @@ struct RecentSessionRow: View {
                     .font(TronTypography.labelSM)
                 Text((session.inputTokens ?? 0).formattedTokenCount)
             }
-            .foregroundStyle(.white.opacity(0.45))
+            .foregroundStyle(.tronTextMuted)
 
             // Output tokens
             HStack(spacing: 2) {
@@ -111,7 +111,7 @@ struct RecentSessionRow: View {
                     .font(TronTypography.labelSM)
                 Text((session.outputTokens ?? 0).formattedTokenCount)
             }
-            .foregroundStyle(.white.opacity(0.45))
+            .foregroundStyle(.tronTextMuted)
 
             // Cache read (if non-zero)
             if let cacheRead = session.cacheReadTokens, cacheRead > 0 {

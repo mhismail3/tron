@@ -63,7 +63,7 @@ struct WorkspaceSelector: View {
                             .font(TronTypography.buttonSM)
                     }
                     .disabled(currentPath.isEmpty)
-                    .foregroundStyle(currentPath.isEmpty ? .white.opacity(0.3) : .tronEmerald)
+                    .foregroundStyle(currentPath.isEmpty ? Color.tronOverlay(0.3) : .tronEmerald)
                 }
             }
             .task {
@@ -82,7 +82,6 @@ struct WorkspaceSelector: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
     }
 
     private func connectionErrorView(_ error: String) -> some View {
@@ -288,7 +287,7 @@ struct WorkspaceSelector: View {
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
-                                    .foregroundStyle(.white.opacity(0.4))
+                                    .foregroundStyle(.tronTextMuted)
                             }
 
                             Button {
@@ -296,7 +295,7 @@ struct WorkspaceSelector: View {
                             } label: {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
-                                    .foregroundStyle(canSubmitFolder ? .tronEmerald : .white.opacity(0.2))
+                                    .foregroundStyle(canSubmitFolder ? .tronEmerald : .tronTextDisabled)
                             }
                             .disabled(!canSubmitFolder)
                         }

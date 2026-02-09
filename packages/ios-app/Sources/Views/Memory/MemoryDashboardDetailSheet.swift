@@ -60,7 +60,6 @@ struct MemoryDashboardDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(.purple)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Metadata Header
@@ -74,7 +73,7 @@ struct MemoryDashboardDetailSheet: View {
                     Text(formatModelDisplayName(model))
                         .font(TronTypography.codeSM)
                 }
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
             }
 
             if let cost = entry.tokenCost,
@@ -86,7 +85,7 @@ struct MemoryDashboardDetailSheet: View {
                     Text("\(formatTokens(input)) in / \(formatTokens(output)) out")
                         .font(TronTypography.codeSM)
                 }
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
             }
 
             if let entryType = entry.entryType {
@@ -110,7 +109,7 @@ struct MemoryDashboardDetailSheet: View {
             if let input = entry.input {
                 Text(input)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.tronTextPrimary)
                     .lineSpacing(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -127,7 +126,7 @@ struct MemoryDashboardDetailSheet: View {
                             .padding(.top, 2)
                         Text(action)
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .foregroundStyle(.tronTextSecondary)
                             .lineSpacing(3)
                     }
                 }
@@ -159,11 +158,11 @@ struct MemoryDashboardDetailSheet: View {
                             .padding(.top, 2)
                         Text(decision.choice)
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(.tronTextPrimary)
                     }
                     Text(decision.reason)
                         .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .padding(.leading, 24)
                 }
             }
@@ -193,7 +192,7 @@ struct MemoryDashboardDetailSheet: View {
                         .padding(.top, 2)
                     Text(lesson)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineSpacing(3)
                 }
             }
@@ -223,7 +222,7 @@ struct MemoryDashboardDetailSheet: View {
                         .padding(.top, 2)
                     Text(insight)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineSpacing(3)
                 }
             }
@@ -254,7 +253,7 @@ struct MemoryDashboardDetailSheet: View {
 
                     Text(file.path)
                         .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
 
@@ -262,7 +261,7 @@ struct MemoryDashboardDetailSheet: View {
 
                     Text(file.why)
                         .font(TronTypography.mono(size: TronTypography.sizeSM))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                 }
             }
@@ -300,12 +299,12 @@ struct MemoryDashboardDetailSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ledger Entry")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(prettyPrintEntry(entry))
                     .font(TronTypography.mono(size: 11))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(3)
                     .textSelection(.enabled)
             }
@@ -347,7 +346,7 @@ struct MemoryDashboardDetailSheet: View {
         case "config": .orange
         case "research": .yellow
         case "conversation": .purple
-        default: .white.opacity(0.6)
+        default: .tronTextSecondary
         }
     }
 
@@ -356,7 +355,7 @@ struct MemoryDashboardDetailSheet: View {
         case "C": .green
         case "M": .yellow
         case "D": .red
-        default: .white.opacity(0.5)
+        default: .tronTextMuted
         }
     }
 }

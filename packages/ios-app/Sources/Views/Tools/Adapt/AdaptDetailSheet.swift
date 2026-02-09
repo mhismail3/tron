@@ -39,7 +39,6 @@ struct AdaptDetailSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Content View
@@ -237,7 +236,7 @@ struct AdaptDetailSheetFallback: View {
                 }
                 .padding()
             }
-            .background(Color.black)
+            .background(Color.tronBackground)
             .navigationTitle(actionTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -248,7 +247,6 @@ struct AdaptDetailSheetFallback: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var actionTitle: String {

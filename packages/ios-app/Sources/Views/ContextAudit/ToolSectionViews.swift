@@ -23,7 +23,7 @@ struct ToolsSection: View {
                 // Count badge
                 Text("\(toolsContent.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.tronClay.opacity(0.7))
@@ -32,10 +32,10 @@ struct ToolsSection: View {
                 Spacer()
                 Text(TokenFormatter.format(tokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -55,14 +55,14 @@ struct ToolsSection: View {
                             ToolItemView(tool: tool)
                             if index < toolsContent.count - 1 {
                                 Divider()
-                                    .background(Color.white.opacity(0.1))
+                                    .background(Color.tronOverlay(0.1))
                             }
                         }
                     }
                     .padding(.vertical, 4)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.black.opacity(0.2))
+                .background(Color.tronSurfaceElevated)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
@@ -106,7 +106,7 @@ struct ToolItemView: View {
             if !toolDescription.isEmpty {
                 Text(toolDescription)
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
                     .lineLimit(3)
             }
         }
@@ -136,14 +136,14 @@ struct ExpandableContentSection: View {
                     .foregroundStyle(iconColor.opacity(0.8))
                 Text(title)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                 Spacer()
                 Text(TokenFormatter.format(tokens))
                     .font(TronTypography.codeCaption)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -160,13 +160,13 @@ struct ExpandableContentSection: View {
                 ScrollView {
                     Text(content)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.black.opacity(0.2))
+                .background(Color.tronSurfaceElevated)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }

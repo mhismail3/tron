@@ -9,6 +9,9 @@ struct TronMobileApp: App {
     // Central dependency container - manages all services
     @State private var container = DependencyContainer()
 
+    // Appearance mode (Light / Dark / Auto)
+    @State private var appearanceSettings = AppearanceSettings.shared
+
     // Whether container is ready (database initialized, etc.)
     @State private var isReady = false
 
@@ -44,11 +47,11 @@ struct TronMobileApp: App {
                 } else {
                     // Fallback for older iOS versions
                     Text("This app requires iOS 26 or later")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.tronTextPrimary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(appearanceSettings.mode.colorScheme)
             .task {
                 // Initialize container on app launch
                 do {

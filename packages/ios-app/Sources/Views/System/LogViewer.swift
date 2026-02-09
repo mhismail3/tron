@@ -70,7 +70,6 @@ struct LogViewer: View {
         .presentationSizing(.page)
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Filter Bar

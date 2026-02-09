@@ -551,5 +551,4 @@ extension Notification.Name {
     .onAppear {
         previewState.text = "Hello world"
     }
-    .preferredColorScheme(.dark)
 }

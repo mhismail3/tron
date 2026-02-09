@@ -50,7 +50,6 @@ struct ModelPickerSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
         .onAppear {
             // Initialize expanded families to latest ones
             for provider in providerGroups {
@@ -139,12 +138,12 @@ private struct FamilySection: View {
             HStack(spacing: 8) {
                 Text(family.id)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.tronTextSecondary)
 
                 // Model count badge
                 Text("\(family.models.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(providerColor.opacity(0.5))
@@ -164,7 +163,7 @@ private struct FamilySection: View {
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
             }
             .padding(10)
@@ -200,7 +199,7 @@ private struct FamilySection: View {
         .clipped()
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.black.opacity(0.15))
+                .fill(Color.tronSurfaceElevated)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
@@ -279,7 +278,7 @@ private struct ModelCard: View {
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                         .rotationEffect(.degrees(isDetailExpanded ? -180 : 0))
                         .frame(width: 28, height: 28)
                         .contentShape(Rectangle())
@@ -297,7 +296,7 @@ private struct ModelCard: View {
                     if let desc = model.modelDescription, !desc.isEmpty {
                         Text(desc)
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
                     }
 
                     // Capability badges

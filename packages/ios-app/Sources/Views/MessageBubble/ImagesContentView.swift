@@ -68,14 +68,14 @@ struct AttachmentThumbnail: View {
                     if let fileName = attachment.fileName {
                         Text(fileName)
                             .font(TronTypography.labelSM)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.tronTextSecondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
 
                     Text(attachment.formattedSize)
                         .font(TronTypography.sans(size: TronTypography.sizeXXS))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.tronTextMuted)
                 }
                 .frame(width: 56, height: 56)
                 .background(Color.tronSurfaceElevated)

@@ -23,10 +23,10 @@ struct AnalyticsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Analytics")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
                 Text("Session performance and cost breakdown")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(.tronTextDisabled)
             }
 
             // Session ID (tappable to copy)
@@ -79,7 +79,7 @@ struct SessionIdRow: View {
         .padding(12)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(Color.tronOverlay(0.05))
         }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {

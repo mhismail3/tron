@@ -27,14 +27,14 @@ struct LedgerEntryRow: View {
 
                 Text(relativeDate(entry.timestamp))
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
 
             // Row 2: Input text
             if let input = entry.input, !input.isEmpty {
                 Text(input)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
             }
 
@@ -64,7 +64,7 @@ struct LedgerEntryRow: View {
                         Text(formatModelDisplayName(model))
                             .font(TronTypography.codeSM)
                     }
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                 }
 
                 if !entry.actions.isEmpty {
@@ -74,7 +74,7 @@ struct LedgerEntryRow: View {
                         Text("\(entry.actions.count) action\(entry.actions.count == 1 ? "" : "s")")
                             .font(TronTypography.codeSM)
                     }
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                 }
 
                 if !entry.files.isEmpty {
@@ -84,7 +84,7 @@ struct LedgerEntryRow: View {
                         Text("\(entry.files.count) file\(entry.files.count == 1 ? "" : "s")")
                             .font(TronTypography.codeSM)
                     }
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                 }
 
                 Spacer()
@@ -111,7 +111,7 @@ struct LedgerEntryRow: View {
         case "config": .orange
         case "research": .yellow
         case "conversation": .purple
-        default: .white.opacity(0.6)
+        default: .tronTextSecondary
         }
     }
 

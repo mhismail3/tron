@@ -55,10 +55,10 @@ struct ContextUsageGaugeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Context Window")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
                 Text("What's being sent to the model this turn")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(.tronTextDisabled)
             }
 
             // Main content card
@@ -83,7 +83,7 @@ struct ContextUsageGaugeView: View {
                 // Progress bar - use overlay + clipShape to prevent thin-line artifact at low fill
                 GeometryReader { geometry in
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.white.opacity(0.1))
+                        .fill(Color.tronOverlay(0.1))
                         .overlay(alignment: .leading) {
                             Rectangle()
                                 .fill(usageColor.opacity(0.8))
@@ -97,13 +97,13 @@ struct ContextUsageGaugeView: View {
                 HStack {
                     Text("\(formattedTokens) / \(formattedLimit)")
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
 
                     Spacer()
 
                     Text("\(formatTokenCount(contextLimit - currentTokens)) remaining")
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                 }
             }
             .padding(14)
@@ -124,10 +124,10 @@ struct TokenBreakdownHeader: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Window Breakdown")
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
             Text("Components that make up the Context Window above")
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.tronTextDisabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)

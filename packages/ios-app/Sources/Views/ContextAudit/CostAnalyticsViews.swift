@@ -70,10 +70,10 @@ struct CostStatItem: View {
         VStack(spacing: 2) {
             Text(value)
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(isError ? .tronError : .white.opacity(0.8))
+                .foregroundStyle(isError ? .tronError : .tronTextSecondary)
             Text(label)
                 .font(TronTypography.pill)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity)
     }

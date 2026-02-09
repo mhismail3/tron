@@ -11,7 +11,7 @@ struct FloatingVoiceNotesButton: View {
         Button(action: action) {
             Image(systemName: audioMonitor.isRecordingAvailable ? "mic.fill" : "mic.slash.fill")
                 .font(TronTypography.button)
-                .foregroundStyle(audioMonitor.isRecordingAvailable ? .tronTeal : .white.opacity(0.3))
+                .foregroundStyle(audioMonitor.isRecordingAvailable ? .tronTeal : .tronTextDisabled)
                 .frame(width: 48, height: 48)
                 .contentShape(Circle())
         }
@@ -19,7 +19,7 @@ struct FloatingVoiceNotesButton: View {
         .glassEffect(
             .regular.tint(audioMonitor.isRecordingAvailable
                 ? Color.tronTeal.opacity(0.4)
-                : Color.white.opacity(0.1)
+                : Color.tronOverlay(0.1)
             ).interactive(),
             in: .circle
         )

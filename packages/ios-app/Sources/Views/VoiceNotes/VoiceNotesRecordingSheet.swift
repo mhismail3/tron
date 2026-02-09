@@ -20,7 +20,7 @@ struct VoiceNotesRecordingSheet: View {
                 // Duration display
                 Text(formattedDuration)
                     .font(TronTypography.timerDisplay)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
 
                 // Sine wave visualization
                 SineWaveView(audioLevel: recorder.audioLevel, color: .tronEmerald)
@@ -34,16 +34,16 @@ struct VoiceNotesRecordingSheet: View {
                             ProgressView().tint(.tronEmerald)
                             Text("Transcribing...")
                         }
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.tronTextSecondary)
                     } else if recorder.isRecording {
                         Text("Recording...")
                             .foregroundStyle(.tronEmerald)
                     } else if recorder.hasStopped {
                         Text("Ready to save")
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.tronTextSecondary)
                     } else {
                         Text("Tap mic to start")
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.tronTextMuted)
                     }
                 }
                 .font(TronTypography.messageBody)
@@ -52,7 +52,7 @@ struct VoiceNotesRecordingSheet: View {
                 if recorder.isRecording {
                     Text("Max: 5 minutes")
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(.tronTextDisabled)
                 }
 
                 Spacer()
@@ -75,7 +75,6 @@ struct VoiceNotesRecordingSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
         .onAppear {
             // Auto-start recording when sheet appears
             Task {
@@ -107,10 +106,10 @@ struct VoiceNotesRecordingSheet: View {
                 Button(action: onCancel) {
                     Image(systemName: "xmark")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronOverlay(0.25)).interactive(), in: .circle)
                 .disabled(isSaving)
 
                 // Save - larger primary button, vertically centered with others
@@ -132,10 +131,10 @@ struct VoiceNotesRecordingSheet: View {
                 Button(action: handleReRecord) {
                     Image(systemName: "arrow.counterclockwise")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronOverlay(0.25)).interactive(), in: .circle)
                 .disabled(isSaving)
             }
         } else {
@@ -145,10 +144,10 @@ struct VoiceNotesRecordingSheet: View {
                 Button(action: onCancel) {
                     Image(systemName: "xmark")
                         .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                         .frame(width: 52, height: 52)
                 }
-                .glassEffect(.regular.tint(Color.white.opacity(0.25)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronOverlay(0.25)).interactive(), in: .circle)
 
                 // Record/Stop
                 Button(action: handleRecordTap) {

@@ -19,13 +19,13 @@ struct ContainerRow: View {
 
                 Text(relativeDate(container.createdAt))
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
 
             // Row 2: Image name
             Text(container.image)
                 .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
                 .lineLimit(1)
 
             // Row 3: Ports + purpose
@@ -44,7 +44,7 @@ struct ContainerRow: View {
                     if let purpose = container.purpose {
                         Text(purpose)
                             .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.tronTextMuted)
                             .lineLimit(1)
                     }
 
@@ -79,7 +79,7 @@ struct ContainerRow: View {
         case "running": .green
         case "stopped": .gray
         case "gone": .red
-        default: .white.opacity(0.5)
+        default: .tronTextMuted
         }
     }
 

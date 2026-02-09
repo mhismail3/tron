@@ -25,7 +25,7 @@ struct SessionPreviewSheetWrapper: View {
                         .tint(.tronEmerald)
                     Text("Checking workspace...")
                         .font(TronTypography.subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !workspaceExists {
@@ -36,10 +36,10 @@ struct SessionPreviewSheetWrapper: View {
                         .foregroundStyle(.tronError)
                     Text("Workspace Deleted")
                         .font(TronTypography.headline)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                     Text("The workspace folder for this session no longer exists.")
                         .font(TronTypography.subheadline)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                     Button("Dismiss") {
@@ -67,7 +67,6 @@ struct SessionPreviewSheetWrapper: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
     }
 
     private func validateWorkspace() async {

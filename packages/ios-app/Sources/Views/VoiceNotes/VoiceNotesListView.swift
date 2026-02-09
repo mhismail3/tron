@@ -133,16 +133,16 @@ struct VoiceNotesListView: View {
         VStack(spacing: 20) {
             Image(systemName: "waveform")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
 
             VStack(spacing: 6) {
                 Text("No Voice Notes")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.tronTextPrimary)
 
                 Text("Tap the mic button to record")
                     .font(TronTypography.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -156,7 +156,7 @@ struct VoiceNotesListView: View {
 
             Text(error)
                 .font(TronTypography.subheadline)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
 
             Button("Retry") {
@@ -207,13 +207,13 @@ struct VoiceNoteRow: View {
 
                 Text(note.formattedDuration)
                     .font(TronTypography.mono(size: TronTypography.sizeBody2))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
 
             if !note.preview.isEmpty {
                 Text(note.preview)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
             }
         }

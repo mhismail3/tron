@@ -31,7 +31,6 @@ struct ThinkingDetailSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
     }
 }
 

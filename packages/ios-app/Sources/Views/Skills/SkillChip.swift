@@ -30,7 +30,7 @@ struct SkillChip: View {
             // Skill/spell name
             Text(skill.name)
                 .font(TronTypography.filePath)
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.tronTextPrimary)
                 .lineLimit(1)
 
             // Source indicator (subtle) - only for skills
@@ -47,7 +47,7 @@ struct SkillChip: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                 }
                 .buttonStyle(.plain)
                 .contentShape(Circle())
@@ -224,7 +224,7 @@ struct SkillChipFallback: View {
 
                 Text(skill.name)
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.tronTextPrimary)
                     .lineLimit(1)
 
                 if skill.source == .project {
@@ -239,7 +239,7 @@ struct SkillChipFallback: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.tronTextMuted)
                     }
                     .buttonStyle(.plain)
                 }
@@ -249,7 +249,7 @@ struct SkillChipFallback: View {
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(
                 Capsule()
-                    .strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
+                    .strokeBorder(Color.tronOverlay(0.2), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -306,6 +306,5 @@ struct SkillChipFallback: View {
         )
     }
     .padding()
-    .background(Color.black)
-    .preferredColorScheme(.dark)
+    .background(Color.tronBackground)
 }

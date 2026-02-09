@@ -57,7 +57,6 @@ struct SessionHistorySheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronPurple)
-        .preferredColorScheme(.dark)
         .task {
             await viewModel.loadEvents()
         }
@@ -192,7 +191,6 @@ struct ForkConfirmationSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronPurple)
-        .preferredColorScheme(.dark)
     }
 
     private func performFork() async {

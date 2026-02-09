@@ -48,7 +48,6 @@ struct TodoDetailSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Content Views
@@ -346,7 +345,7 @@ struct TodoDetailSheetLegacy: View {
                             .foregroundStyle(.gray)
                         Text("No Tasks")
                             .font(.headline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.tronTextPrimary)
                     }
                 } else {
                     List {
@@ -383,7 +382,6 @@ struct TodoDetailSheetLegacy: View {
                 await loadTodos()
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private func loadTodos() async {

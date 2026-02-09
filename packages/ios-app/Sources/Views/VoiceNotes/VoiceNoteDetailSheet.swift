@@ -23,7 +23,7 @@ struct VoiceNoteDetailSheet: View {
 
                         Text(note.formattedDuration)
                             .font(TronTypography.caption)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
                     }
                     .padding()
                     .glassEffect(
@@ -34,7 +34,7 @@ struct VoiceNoteDetailSheet: View {
                     // Transcription content
                     Text(note.transcript)
                         .font(TronTypography.mono(size: TronTypography.sizeBodyLG))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
                         .textSelection(.enabled)
                 }
                 .padding()
@@ -66,6 +66,5 @@ struct VoiceNoteDetailSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
     }
 }

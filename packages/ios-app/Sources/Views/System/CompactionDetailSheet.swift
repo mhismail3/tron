@@ -43,7 +43,6 @@ struct CompactionDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(.cyan)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Token Visualization
@@ -53,7 +52,7 @@ struct CompactionDetailSheet: View {
             // Section header
             Text("Compression")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             // Card content
             VStack(spacing: 16) {
@@ -62,7 +61,7 @@ struct CompactionDetailSheet: View {
                     CompactionTokenBox(label: "Before", tokens: tokensBefore, color: .cyan)
                     Image(systemName: "arrow.right")
                         .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                     CompactionTokenBox(label: "After", tokens: tokensAfter, color: .cyan)
                 }
 
@@ -90,7 +89,7 @@ struct CompactionDetailSheet: View {
             HStack {
                 Text("Summary")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Spacer()
 
@@ -124,14 +123,14 @@ struct CompactionDetailSheet: View {
                 if let summary = summary, !summary.isEmpty {
                     Text(summary)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text("No summary available")
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(.tronTextDisabled)
                         .italic()
                 }
             }
@@ -163,7 +162,7 @@ private struct CompactionTokenBox: View {
         VStack(spacing: 6) {
             Text(label)
                 .font(TronTypography.codeSM)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
             Text(TokenFormatter.format(tokens))
                 .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                 .foregroundStyle(color)

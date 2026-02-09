@@ -114,7 +114,7 @@ struct MemoryDashboardView: View {
                 HStack {
                     Text("\(entries.count) of \(totalCount)")
                         .font(TronTypography.codeSM)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                     Spacer()
                 }
                 .padding(.leading, 4)
@@ -188,16 +188,16 @@ struct MemoryDashboardView: View {
         VStack(spacing: 20) {
             Image(systemName: "brain.fill")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
 
             VStack(spacing: 6) {
                 Text("No Memory Entries")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.tronTextPrimary)
 
                 Text("Ledger entries will appear here as sessions complete")
                     .font(TronTypography.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
                     .multilineTextAlignment(.center)
             }
         }
@@ -213,7 +213,7 @@ struct MemoryDashboardView: View {
 
             Text(error)
                 .font(TronTypography.subheadline)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.tronTextSecondary)
                 .multilineTextAlignment(.center)
 
             Button("Retry") {

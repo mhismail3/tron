@@ -46,7 +46,7 @@ struct EventRow: View {
                 if isHead {
                     Text("HEAD")
                         .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.tronTextPrimary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.tronPurple)

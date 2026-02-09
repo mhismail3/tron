@@ -26,7 +26,7 @@ struct TurnBreakdownContainer: View {
                 // Count badge
                 Text("\(turns.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.tronEmerald.opacity(0.7))
@@ -36,11 +36,11 @@ struct TurnBreakdownContainer: View {
 
                 Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -57,7 +57,7 @@ struct TurnBreakdownContainer: View {
                 if turns.isEmpty {
                     Text("No turns recorded")
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.tronTextMuted)
                         .frame(maxWidth: .infinity)
                         .padding(12)
                 } else {
@@ -121,7 +121,7 @@ struct TurnRow: View {
                         // Tokens
                         Text("\(TokenFormatter.format(turn.totalTokens)) tokens")
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.tronTextSecondary)
 
                         // Cost
                         Text(formatCost(turn.cost))
@@ -132,7 +132,7 @@ struct TurnRow: View {
                         if turn.latency > 0 {
                             Text(formatLatency(turn.latency))
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.white.opacity(0.5))
+                                .foregroundStyle(.tronTextMuted)
                         }
                     }
 
@@ -161,7 +161,7 @@ struct TurnRow: View {
                         if let model = turn.model {
                             Text(model)
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                         }
                     }
                 }
@@ -170,7 +170,7 @@ struct TurnRow: View {
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.tronTextDisabled)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -190,7 +190,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Input")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                             Text(TokenFormatter.format(turn.inputTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronOrange)
@@ -199,7 +199,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Output")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
                             Text(TokenFormatter.format(turn.outputTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronRed)
@@ -210,7 +210,7 @@ struct TurnRow: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Cache")
                                     .font(TronTypography.pill)
-                                    .foregroundStyle(.white.opacity(0.4))
+                                    .foregroundStyle(.tronTextMuted)
                                 HStack(spacing: 4) {
                                     if turn.cacheReadTokens > 0 {
                                         Text("↓\(TokenFormatter.format(turn.cacheReadTokens))")
@@ -234,7 +234,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Tools")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
 
                             FlowLayout(spacing: 4) {
                                 ForEach(turn.tools, id: \.self) { tool in
@@ -255,7 +255,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Errors")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.white.opacity(0.4))
+                                .foregroundStyle(.tronTextMuted)
 
                             ForEach(turn.errors, id: \.self) { error in
                                 Text(error)

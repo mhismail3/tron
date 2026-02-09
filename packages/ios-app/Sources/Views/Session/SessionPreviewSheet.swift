@@ -26,7 +26,7 @@ struct SessionPreviewSheet: View {
                             .tint(.tronEmerald)
                         Text("Loading session history...")
                             .font(TronTypography.subheadline)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
                     }
                 } else if let error = loadError {
                     VStack(spacing: 16) {
@@ -35,10 +35,10 @@ struct SessionPreviewSheet: View {
                             .foregroundStyle(.tronError)
                         Text("Failed to load history")
                             .font(TronTypography.headline)
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(.tronTextPrimary)
                         Text(error)
                             .font(TronTypography.subheadline)
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(.tronTextSecondary)
                             .multilineTextAlignment(.center)
                         Button("Retry") {
                             Task { await loadHistory() }
@@ -67,7 +67,7 @@ struct SessionPreviewSheet: View {
                             .foregroundStyle(.tronEmerald)
                         Text("\(session.messageCount) messages")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.tronTextMuted)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -91,7 +91,6 @@ struct SessionPreviewSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - History Content
@@ -122,7 +121,7 @@ struct SessionPreviewSheet: View {
                         .foregroundStyle(.tronEmerald.opacity(0.7))
                     Text(dir.replacingOccurrences(of: "/Users/[^/]+/", with: "~/", options: .regularExpression))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -139,7 +138,7 @@ struct SessionPreviewSheet: View {
 
                 Text(session.formattedDate)
                     .font(TronTypography.codeCaption)
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
 
                 if session.isActive {
                     Text("ACTIVE")
@@ -152,10 +151,10 @@ struct SessionPreviewSheet: View {
                 } else {
                     Text("ENDED")
                         .font(TronTypography.badge)
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.tronTextMuted)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.1))
+                        .background(Color.tronOverlay(0.1))
                         .clipShape(Capsule())
                 }
             }

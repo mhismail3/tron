@@ -43,7 +43,7 @@ struct SessionSidebar: View {
                     VStack(spacing: 8) {
                         Text("No active sessions")
                             .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -193,13 +193,13 @@ struct CachedSessionSidebarRow: View {
                     Text("\(session.messageCount)")
                         .font(TronTypography.codeSM)
                 }
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
 
                 Spacer()
 
                 Text(session.formattedDate)
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
 
             // Recent prompt (user's last message, right-aligned)
@@ -210,7 +210,7 @@ struct CachedSessionSidebarRow: View {
                     HStack(alignment: .top, spacing: 6) {
                         Text(prompt)
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.tronTextSecondary)
                             .lineLimit(2)
                             .truncationMode(.tail)
                             .multilineTextAlignment(.trailing)
@@ -223,7 +223,7 @@ struct CachedSessionSidebarRow: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.03))
+                    .background(Color.tronOverlay(0.03))
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
             }
@@ -242,7 +242,7 @@ struct CachedSessionSidebarRow: View {
 
                     Text(response)
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                         .lineLimit(2)
                         .truncationMode(.tail)
 
@@ -257,7 +257,7 @@ struct CachedSessionSidebarRow: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(Color.white.opacity(0.03))
+                .background(Color.tronOverlay(0.03))
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
 
@@ -265,7 +265,7 @@ struct CachedSessionSidebarRow: View {
             HStack(spacing: 6) {
                 Text(session.displayDirectory)
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
                     .truncationMode(.head)
 
@@ -301,7 +301,7 @@ struct CachedSessionSidebarRow: View {
                     .font(TronTypography.labelSM)
                 Text(session.inputTokens.formattedTokenCount)
             }
-            .foregroundStyle(.white.opacity(0.35))
+            .foregroundStyle(.tronTextDisabled)
 
             // Output tokens
             HStack(spacing: 2) {
@@ -309,7 +309,7 @@ struct CachedSessionSidebarRow: View {
                     .font(TronTypography.labelSM)
                 Text(session.outputTokens.formattedTokenCount)
             }
-            .foregroundStyle(.white.opacity(0.35))
+            .foregroundStyle(.tronTextDisabled)
 
             // Cache read (if non-zero)
             if session.cacheReadTokens > 0 {
@@ -395,16 +395,16 @@ struct EmptySessionsView: View {
         VStack(spacing: 20) {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .font(TronTypography.sans(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
 
             VStack(spacing: 6) {
                 Text("No Sessions")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.tronTextPrimary)
 
                 Text("Create a new session to start")
                     .font(TronTypography.subheadline)
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
             }
 
             Button(action: onNewSession) {
@@ -441,6 +441,5 @@ struct EmptySessionsView: View {
         )
         .environment(\.dependencies, DependencyContainer())
     }
-    .preferredColorScheme(.dark)
 }
 */

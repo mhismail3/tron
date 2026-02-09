@@ -47,7 +47,6 @@ struct MemoryDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(.purple)
-        .preferredColorScheme(.dark)
         .task {
             await loadLedgerEntry()
         }
@@ -105,7 +104,7 @@ struct MemoryDetailSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(input)
                 .font(TronTypography.mono(size: TronTypography.sizeBody3))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(.tronTextPrimary)
                 .lineSpacing(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -121,7 +120,7 @@ struct MemoryDetailSheet: View {
                             .padding(.top, 2)
                         Text(action)
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.white.opacity(0.75))
+                            .foregroundStyle(.tronTextSecondary)
                             .lineSpacing(3)
                     }
                 }
@@ -141,12 +140,12 @@ struct MemoryDetailSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ledger Entry")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(prettyPrintPayload(payload))
                     .font(TronTypography.mono(size: 11))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(3)
                     .textSelection(.enabled)
             }
@@ -171,7 +170,7 @@ struct MemoryDetailSheet: View {
                     Text(formatModelDisplayName(model))
                         .font(TronTypography.codeSM)
                 }
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
             }
 
             if let cost = tokenCost,
@@ -183,7 +182,7 @@ struct MemoryDetailSheet: View {
                     Text("\(formatTokens(input)) in / \(formatTokens(output)) out")
                         .font(TronTypography.codeSM)
                 }
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
             }
 
             Spacer()
@@ -200,7 +199,7 @@ struct MemoryDetailSheet: View {
                 .tint(.purple)
             Text("Loading ledger entry...")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 24)
@@ -213,7 +212,7 @@ struct MemoryDetailSheet: View {
                 .foregroundStyle(.purple.opacity(0.5))
             Text("Could not load ledger entry")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 24)
@@ -227,7 +226,7 @@ struct MemoryDetailSheet: View {
                     .foregroundStyle(.purple)
                 Text(title)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.tronTextPrimary)
                 Spacer()
             }
         }

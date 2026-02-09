@@ -65,7 +65,6 @@ struct CommandToolDetailSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(data.iconColor)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Content View

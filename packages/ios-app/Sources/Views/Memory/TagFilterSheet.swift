@@ -21,7 +21,7 @@ struct TagFilterSheet: View {
                             HStack {
                                 Text(tag)
                                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                                    .foregroundStyle(selectedTags.contains(tag) ? .purple : .white.opacity(0.7))
+                                    .foregroundStyle(selectedTags.contains(tag) ? .purple : Color.tronOverlay(0.7))
 
                                 Spacer()
 
@@ -30,7 +30,7 @@ struct TagFilterSheet: View {
                                         .foregroundStyle(.purple)
                                 } else {
                                     Image(systemName: "circle")
-                                        .foregroundStyle(.white.opacity(0.3))
+                                        .foregroundStyle(.tronTextDisabled)
                                 }
                             }
                             .padding(.vertical, 10)
@@ -38,7 +38,7 @@ struct TagFilterSheet: View {
                             .glassEffect(
                                 selectedTags.contains(tag)
                                     ? .regular.tint(Color.purple.opacity(0.2)).interactive()
-                                    : .regular.tint(Color.white.opacity(0.05)).interactive(),
+                                    : .regular.tint(Color.tronOverlay(0.05)).interactive(),
                                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                             )
                         }
@@ -69,6 +69,5 @@ struct TagFilterSheet: View {
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
         .tint(.purple)
-        .preferredColorScheme(.dark)
     }
 }

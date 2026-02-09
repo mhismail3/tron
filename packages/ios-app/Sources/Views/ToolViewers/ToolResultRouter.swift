@@ -195,5 +195,4 @@ struct ToolResultRouter: View {
         .padding()
     }
     .background(Color.tronBackground)
-    .preferredColorScheme(.dark)
 }

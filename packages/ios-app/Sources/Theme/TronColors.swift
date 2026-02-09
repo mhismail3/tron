@@ -1,9 +1,20 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Tron Color Palette
 
-/// Refined dark color palette with green accents
 extension Color {
+    // MARK: - Adaptive Color Helper
+
+    /// Creates a color that adapts to light/dark mode using UIColor dynamic provider
+    init(lightHex: String, darkHex: String) {
+        self.init(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(hex: darkHex)
+                : UIColor(hex: lightHex)
+        })
+    }
+
     // MARK: - Accent Colors
 
     /// Primary accent - refined emerald
@@ -42,62 +53,73 @@ extension Color {
     static let tronPurple = Color(hex: "#8B5CF6")
     static let tronBlue = Color(hex: "#3B82F6")
     static let tronCyan = Color(hex: "#06B6D4")
-    static let tronIndigo = Color(hex: "#818CF8")     // Indigo-400 for sandbox
-    static let tronTeal = Color(hex: "#2DD4BF")        // Teal-400 for voice notes
-    static let tronPink = Color(hex: "#EC4899")      // Pink-500 for spells
-    static let tronPinkLight = Color(hex: "#F472B6") // Pink-400 for spell highlights
+    static let tronIndigo = Color(hex: "#818CF8")
+    static let tronTeal = Color(hex: "#2DD4BF")
+    static let tronPink = Color(hex: "#EC4899")
+    static let tronPinkLight = Color(hex: "#F472B6")
 
     // Warm colors (Tokens theme) - Earthy/muted palette
-    static let tronAmberLight = Color(hex: "#D97706")   // Warm honey amber for Total tokens
-    static let tronOrange = Color(hex: "#C2410C")       // Burnt orange for Input tokens
-    static let tronRed = Color(hex: "#B45309")          // Terracotta/rust for Output tokens
-    static let tronBronze = Color(hex: "#78350F")       // Dark earth brown container tint
+    static let tronAmberLight = Color(hex: "#D97706")
+    static let tronOrange = Color(hex: "#C2410C")
+    static let tronRed = Color(hex: "#B45309")
+    static let tronBronze = Color(hex: "#78350F")
 
     // Earthy accent colors
-    static let tronTerracotta = Color(hex: "#9A3412")   // Terracotta for Rules
-    static let tronClay = Color(hex: "#A16207")         // Clay/ochre for Tools
-    static let tronSienna = Color(hex: "#B45309")       // Burnt sienna accent
+    static let tronTerracotta = Color(hex: "#9A3412")
+    static let tronClay = Color(hex: "#A16207")
+    static let tronSienna = Color(hex: "#B45309")
 
     // Cool neutral (Compact/Window theme)
-    static let tronSlate = Color(hex: "#64748B")        // Slate blue-gray
-    static let tronSlateDark = Color(hex: "#334155")    // Dark slate for containers
+    static let tronSlate = Color(hex: "#64748B")
+    static let tronSlateDark = Color(lightHex: "#CBD5E1", darkHex: "#334155")
 
     // Neutral gray
-    static let tronGray = Color(hex: "#6B7280")         // De-emphasized elements
+    static let tronGray = Color(hex: "#6B7280")
 
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
-    static let tronPhthaloGreen = Color(hex: "#123524")
+    static let tronPhthaloGreen = Color(lightHex: "#D1FAE5", darkHex: "#123524")
 
-    // MARK: - Backgrounds (neutral dark grays)
+    // MARK: - Backgrounds (adaptive)
 
-    /// Deepest background - near black
-    static let tronBackground = Color(hex: "#09090B")
+    /// Deepest background
+    static let tronBackground = Color(lightHex: "#FAFAFA", darkHex: "#09090B")
 
-    /// Surface background (cards, etc) - dark gray
-    static let tronSurface = Color(hex: "#18181B")
+    /// Surface background (cards, etc)
+    static let tronSurface = Color(lightHex: "#FFFFFF", darkHex: "#18181B")
 
     /// Elevated surface background
-    static let tronSurfaceElevated = Color(hex: "#27272A")
+    static let tronSurfaceElevated = Color(lightHex: "#F4F4F5", darkHex: "#27272A")
 
     /// Subtle separator/border color
-    static let tronBorder = Color(hex: "#3F3F46")
+    static let tronBorder = Color(lightHex: "#D4D4D8", darkHex: "#3F3F46")
 
-    // MARK: - Text Colors
+    // MARK: - Text Colors (adaptive)
 
-    static let tronTextPrimary = Color(hex: "#FAFAFA")
-    static let tronTextSecondary = Color(hex: "#A1A1AA")
+    static let tronTextPrimary = Color(lightHex: "#18181B", darkHex: "#FAFAFA")
+    static let tronTextSecondary = Color(lightHex: "#52525B", darkHex: "#A1A1AA")
     static let tronTextMuted = Color(hex: "#71717A")
-    static let tronTextDisabled = Color(hex: "#52525B")
+    static let tronTextDisabled = Color(lightHex: "#A1A1AA", darkHex: "#52525B")
 
-    // MARK: - Role Colors
+    // MARK: - Role Colors (adaptive)
 
     static let userBubble = Color(hex: "#10B981")
-    static let assistantBubble = Color(hex: "#27272A")
-    static let systemBubble = Color(hex: "#3F3F46")
-    static let toolBubble = Color(hex: "#1E3A5F")
-    static let errorBubble = Color(hex: "#7F1D1D")
+    static let assistantBubble = Color(lightHex: "#F4F4F5", darkHex: "#27272A")
+    static let systemBubble = Color(lightHex: "#E4E4E7", darkHex: "#3F3F46")
+    static let toolBubble = Color(lightHex: "#DBEAFE", darkHex: "#1E3A5F")
+    static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
+
+    // MARK: - Overlay Colors
+
+    /// Adaptive overlay: white in dark mode, black in light mode.
+    /// Use with `.opacity()` for subtle background overlays that brighten/darken relative to the surface.
+    static let tronOverlay = Color(lightHex: "#000000", darkHex: "#FFFFFF")
+
+    /// Convenience: returns tronOverlay at the given opacity
+    static func tronOverlay(_ opacity: Double) -> Color {
+        tronOverlay.opacity(opacity)
+    }
 
     // MARK: - Hex Initializer
 
@@ -123,6 +145,30 @@ extension Color {
             blue: Double(b) / 255,
             opacity: Double(a) / 255
         )
+    }
+}
+
+// MARK: - UIColor Hex Helper
+
+extension UIColor {
+    convenience init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r, g, b: CGFloat
+        switch hex.count {
+        case 3:
+            r = CGFloat((int >> 8) * 17) / 255
+            g = CGFloat((int >> 4 & 0xF) * 17) / 255
+            b = CGFloat((int & 0xF) * 17) / 255
+        case 6:
+            r = CGFloat(int >> 16) / 255
+            g = CGFloat(int >> 8 & 0xFF) / 255
+            b = CGFloat(int & 0xFF) / 255
+        default:
+            r = 0; g = 0; b = 0
+        }
+        self.init(red: r, green: g, blue: b, alpha: 1)
     }
 }
 
@@ -155,7 +201,7 @@ extension View {
         self
             .background(Color.tronSurfaceElevated)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+            .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
     }
 
     /// Applies Tron message bubble styling
@@ -194,9 +240,9 @@ extension LinearGradient {
         endPoint: .bottom
     )
 
-    /// Background gradient
+    /// Background gradient (adaptive)
     static let tronBackgroundGradient = LinearGradient(
-        colors: [Color(hex: "#09090B"), Color(hex: "#000000")],
+        colors: [Color.tronBackground, Color(lightHex: "#F4F4F5", darkHex: "#000000")],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -216,7 +262,7 @@ extension Animation {
 
     // MARK: - Specialized Animations
 
-    /// Pill morph animation (context → model → reasoning)
+    /// Pill morph animation (context -> model -> reasoning)
     static let tronPillMorph = Animation.spring(response: 0.32, dampingFraction: 0.86)
 
     /// Model pill appearance animation
@@ -339,4 +385,7 @@ extension ShapeStyle where Self == Color {
 
     // Special Colors
     static var tronPhthaloGreen: Color { .tronPhthaloGreen }
+
+    // Overlay
+    static var tronOverlay: Color { .tronOverlay }
 }

@@ -69,7 +69,6 @@ struct AskUserQuestionSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronAmber)
-        .preferredColorScheme(.dark)
         .onAppear {
             answers = toolData.answers
         }

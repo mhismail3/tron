@@ -72,7 +72,6 @@ struct ContainerDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(.tronIndigo)
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Status Header
@@ -95,14 +94,14 @@ struct ContainerDetailSheet: View {
                 Text(container.image)
                     .font(TronTypography.codeSM)
             }
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(.tronTextMuted)
 
             Spacer()
 
             // Created date
             Text(relativeDate(container.createdAt))
                 .font(TronTypography.codeSM)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
         }
     }
 
@@ -122,7 +121,7 @@ struct ContainerDetailSheet: View {
 
                     Text(port)
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tronTextPrimary)
 
                     if let ip = tailscaleIp {
                         let hostPort = port.split(separator: ":").first.map(String.init) ?? port
@@ -179,10 +178,10 @@ struct ContainerDetailSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
                     .font(TronTypography.mono(size: TronTypography.sizeSM))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.tronTextMuted)
                 Text(value)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineLimit(2)
                     .truncationMode(.middle)
             }
@@ -197,12 +196,12 @@ struct ContainerDetailSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Container Record")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(prettyPrintContainer())
                     .font(TronTypography.mono(size: 11))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.tronTextSecondary)
                     .lineSpacing(3)
                     .textSelection(.enabled)
             }
@@ -223,7 +222,7 @@ struct ContainerDetailSheet: View {
         case "running": .green
         case "stopped": .gray
         case "gone": .red
-        default: .white.opacity(0.5)
+        default: .tronTextMuted
         }
     }
 

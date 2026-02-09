@@ -28,7 +28,7 @@ struct GlassActionButton: View {
                 } else {
                     Image(systemName: "arrow.up")
                         .font(TronTypography.button)
-                        .foregroundStyle(canSend ? .white : .white.opacity(0.3))
+                        .foregroundStyle(canSend ? .white : .tronTextDisabled)
                 }
             }
             .frame(width: buttonSize, height: buttonSize)

@@ -593,7 +593,7 @@ struct ChatView: View {
                 if viewModel.isLoadingMoreMessages {
                     ProgressView()
                         .scaleEffect(0.8)
-                        .tint(.white.opacity(0.7))
+                        .tint(.tronTextMuted)
                 } else {
                     Image(systemName: "arrow.up.circle")
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -601,10 +601,10 @@ struct ChatView: View {
                 Text(viewModel.isLoadingMoreMessages ? "Loading..." : "Load Earlier Messages")
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
-            .foregroundStyle(.white.opacity(0.6))
+            .foregroundStyle(.tronTextSecondary)
             .padding(.vertical, 8)
             .padding(.horizontal, 16)
-            .background(.white.opacity(0.1), in: Capsule())
+            .background(Color.tronOverlay(0.1), in: Capsule())
         }
         .disabled(viewModel.isLoadingMoreMessages)
         .padding(.bottom, 8)

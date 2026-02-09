@@ -102,7 +102,6 @@ struct CloneRepoSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
-        .preferredColorScheme(.dark)
         .interactiveDismissDisabled(isCloning)
     }
 
@@ -112,7 +111,7 @@ struct CloneRepoSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("GitHub URL")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             VStack(alignment: .leading, spacing: 8) {
                 TextField("github.com/owner/repo", text: $repoURL)
@@ -176,7 +175,7 @@ struct CloneRepoSheet: View {
 
             Text("Paste a GitHub repository URL")
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
         }
     }
 
@@ -186,7 +185,7 @@ struct CloneRepoSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Destination")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.tronTextSecondary)
 
             Button {
                 showDestinationPicker = true
@@ -211,7 +210,7 @@ struct CloneRepoSheet: View {
 
             Text("The repository will be cloned to this folder")
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.tronTextMuted)
         }
     }
 
@@ -238,8 +237,8 @@ struct CloneRepoSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
-            .background(canClone ? Color.tronEmerald : Color.white.opacity(0.1))
-            .foregroundStyle(canClone ? .tronBackground : .white.opacity(0.3))
+            .background(canClone ? Color.tronEmerald : Color.tronOverlay(0.1))
+            .foregroundStyle(canClone ? .tronBackground : .tronTextDisabled)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .disabled(!canClone)
@@ -261,7 +260,7 @@ struct CloneRepoSheet: View {
                 } label: {
                     Text("Dismiss")
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.tronTextSecondary)
                 }
             }
         }

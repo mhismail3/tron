@@ -382,5 +382,4 @@ struct SearchResult {
         .padding()
     }
     .background(Color.tronBackground)
-    .preferredColorScheme(.dark)
 }
