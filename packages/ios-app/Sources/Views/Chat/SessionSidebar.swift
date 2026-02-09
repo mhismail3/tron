@@ -35,25 +35,9 @@ struct SessionSidebar: View {
     let onVoiceNote: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
 
-    /// Whether to show the toolbar (logo, title, settings)
-    /// On iPad, the dashboard has its own toolbar, so sidebar doesn't need one
-    /// On iPhone, sidebar is the main view and needs the toolbar
-    var showToolbar: Bool = true
-
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
-                // Title header (iPad only - iPhone has toolbar)
-                if !showToolbar {
-                    Text("SESSIONS")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                        .tracking(1.5)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 16)
-                        .padding(.bottom, 8)
-                }
-
                 if eventStoreManager.sortedSessions.isEmpty {
                     // Empty state placeholder
                     VStack(spacing: 8) {
@@ -117,36 +101,35 @@ struct SessionSidebar: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar(removing: .sidebarToggle)
         .toolbar {
-            // Only show toolbar when requested (iPhone needs it, iPad doesn't)
-            if showToolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        ForEach(NavigationMode.allCases, id: \.self) { mode in
-                            Button {
-                                onNavigationModeChange?(mode)
-                            } label: {
-                                Label(mode.rawValue, systemImage: mode.icon)
-                            }
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    ForEach(NavigationMode.allCases, id: \.self) { mode in
+                        Button {
+                            onNavigationModeChange?(mode)
+                        } label: {
+                            Label(mode.rawValue, systemImage: mode.icon)
                         }
-                    } label: {
-                        Image("TronLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 24)
                     }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("TRON")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                } label: {
+                    Image("TronLogo")
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 28)
                         .foregroundStyle(.tronEmerald)
-                        .tracking(2)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
+            }
+            ToolbarItem(placement: .principal) {
+                Text("SESSIONS")
+                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                    .foregroundStyle(.tronEmerald)
+                    .tracking(2)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: onSettings) {
+                    Image(systemName: "gearshape")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                        .foregroundStyle(.tronEmerald)
                 }
             }
         }

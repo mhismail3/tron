@@ -26,25 +26,6 @@ extension ChatView {
                 }
             }
         }
-        // iPad only - Tron logo menu for navigation mode switching
-        if onToggleSidebar != nil {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(NavigationMode.allCases, id: \.self) { mode in
-                        Button {
-                            NotificationCenter.default.post(name: .navigationModeAction, object: mode)
-                        } label: {
-                            Label(mode.rawValue, systemImage: mode.icon)
-                        }
-                    }
-                } label: {
-                    Image("TronLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 24)
-                }
-            }
-        }
     }
 
     /// Principal toolbar item (title)

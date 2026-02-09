@@ -122,7 +122,6 @@ struct ContentView: View {
         WelcomePage(
             onNewSession: { showNewSessionSheet = true },
             onNewSessionLongPress: { createQuickSession() },
-            onSettings: { showSettings = true },
             onVoiceNote: { showVoiceNotesRecording = true },
             onNavigationModeChange: { mode in
                 navigationMode = mode
@@ -214,9 +213,7 @@ struct ContentView: View {
                     onVoiceNote: { showVoiceNotesRecording = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    },
-                    // iPad (regular) has toolbar in detail view, iPhone (compact) needs it here
-                    showToolbar: horizontalSizeClass == .compact
+                    }
                 )
             } else if navigationMode == .memory {
                 MemoryDashboardView(
@@ -261,7 +258,6 @@ struct ContentView: View {
                 onToggleSidebar: toggleSidebar,
                 onNewSession: { showNewSessionSheet = true },
                 onNewSessionLongPress: { createQuickSession() },
-                onSettings: { showSettings = true },
                 onVoiceNote: { showVoiceNotesRecording = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
@@ -400,28 +396,10 @@ struct ContentView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    // Sidebar toggle
                     Button(action: toggleSidebar) {
                         Image(systemName: "sidebar.leading")
                             .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
-                    }
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    // Tron logo menu for navigation mode switching
-                    Menu {
-                        ForEach(NavigationMode.allCases, id: \.self) { mode in
-                            Button {
-                                navigationMode = mode
-                            } label: {
-                                Label(mode.rawValue, systemImage: mode.icon)
-                            }
-                        }
-                    } label: {
-                        Image("TronLogo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 24)
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -429,13 +407,6 @@ struct ContentView: View {
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
                         .foregroundStyle(.tronEmerald)
                         .tracking(2)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { showSettings = true }) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
                 }
             }
         }
@@ -520,7 +491,6 @@ struct WelcomePage: View {
     var onToggleSidebar: (() -> Void)?
     let onNewSession: () -> Void
     var onNewSessionLongPress: (() -> Void)? = nil
-    let onSettings: () -> Void
     let onVoiceNote: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
 
@@ -583,37 +553,11 @@ struct WelcomePage: View {
                         }
                     }
                 }
-                // iPad - Tron logo menu for navigation mode switching (alongside sidebar toggle)
-                if onToggleSidebar != nil, let onNavigationModeChange {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Menu {
-                            ForEach(NavigationMode.allCases, id: \.self) { mode in
-                                Button {
-                                    onNavigationModeChange(mode)
-                                } label: {
-                                    Label(mode.rawValue, systemImage: mode.icon)
-                                }
-                            }
-                        } label: {
-                            Image("TronLogo")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 24)
-                        }
-                    }
-                }
                 ToolbarItem(placement: .principal) {
                     Text("TRON")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
                         .foregroundStyle(.tronEmerald)
                         .tracking(2)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
                 }
             }
         }
