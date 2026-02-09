@@ -35,13 +35,17 @@ function createMockConfig(overrides: Partial<AgentFactoryConfig> = {}): AgentFac
       type: 'api_key',
       apiKey: 'test-anthropic-key',
     }),
-    spawnSubsession: vi.fn().mockResolvedValue({ sessionId: 'sub_test', success: true }),
-    querySubagent: vi.fn().mockResolvedValue({ success: true }),
-    waitForSubagents: vi.fn().mockResolvedValue({ success: true }),
+    subagents: {
+      spawn: vi.fn().mockResolvedValue({ sessionId: 'sub_test', success: true }),
+      query: vi.fn().mockResolvedValue({ success: true }),
+      wait: vi.fn().mockResolvedValue({ success: true }),
+      getTracker: vi.fn().mockReturnValue(undefined),
+    },
     forwardAgentEvent: vi.fn(),
-    getSubagentTrackerForSession: vi.fn().mockReturnValue(undefined),
-    onTodosUpdated: vi.fn().mockResolvedValue(undefined),
-    generateTodoId: () => 'todo_test123',
+    todos: {
+      onUpdated: vi.fn().mockResolvedValue(undefined),
+      generateId: () => 'todo_test123',
+    },
     dbPath: '/tmp/test.db',
     ...overrides,
   };
@@ -99,9 +103,8 @@ describe('AgentFactory Web Tools', () => {
         output: 'Summarized content',
       });
 
-      const configWithMock = createMockConfig({
-        spawnSubsession: spawnSubsessionMock,
-      });
+      const configWithMock = createMockConfig();
+      configWithMock.subagents.spawn = spawnSubsessionMock;
       const factoryWithMock = new AgentFactory(configWithMock);
 
       const agent = await factoryWithMock.createAgentForSession(
@@ -115,7 +118,7 @@ describe('AgentFactory Web Tools', () => {
       const webFetchTool = tools.find((t: any) => t.name === 'WebFetch') as WebFetchTool;
       expect(webFetchTool).toBeDefined();
 
-      // The onSpawnSubagent callback should be wired to spawnSubsession
+      // The onSpawnSubagent callback should be wired to subagents.spawn
       const toolConfig = (webFetchTool as any).config;
       expect(toolConfig.onSpawnSubagent).toBeDefined();
     });
@@ -287,9 +290,8 @@ describe('AgentFactory Web Tools', () => {
         output: 'Test answer',
       });
 
-      const configWithMock = createMockConfig({
-        spawnSubsession: spawnSubsessionMock,
-      });
+      const configWithMock = createMockConfig();
+      configWithMock.subagents.spawn = spawnSubsessionMock;
       const factoryWithMock = new AgentFactory(configWithMock);
 
       const agent = await factoryWithMock.createAgentForSession(

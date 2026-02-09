@@ -108,32 +108,26 @@ type SpawnSubsessionResult = SpawnSubagentResult & {
 export interface AgentFactoryConfig {
   /** Get authentication for a model (returns GoogleAuth for Google models) */
   getAuthForProvider: (model: string) => Promise<ServerAuth | GoogleAuth>;
-  /** Spawn subsession callback - toolCallId included for event correlation */
-  spawnSubsession: (
-    parentId: string,
-    params: SpawnSubagentParams,
-    toolCallId?: string
-  ) => Promise<SpawnSubsessionResult>;
-  /** Query subagent callback */
-  querySubagent: (
-    sessionId: string,
-    queryType: SubagentQueryType,
-    limit?: number
-  ) => Promise<QueryAgentResult>;
-  /** Wait for subagents callback */
-  waitForSubagents: (
-    sessionIds: string[],
-    mode: 'all' | 'any',
-    timeout: number
-  ) => Promise<WaitForAgentsResult>;
-  /** Forward agent event callback */
+  /** Subagent management callbacks */
+  subagents: {
+    /** Spawn subsession - toolCallId included for event correlation */
+    spawn: (parentId: string, params: SpawnSubagentParams, toolCallId?: string) => Promise<SpawnSubsessionResult>;
+    /** Query subagent status/events/output */
+    query: (sessionId: string, queryType: SubagentQueryType, limit?: number) => Promise<QueryAgentResult>;
+    /** Wait for subagent completion */
+    wait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) => Promise<WaitForAgentsResult>;
+    /** Get SubAgentTracker for a session (for blocking SpawnAgent) */
+    getTracker: (sessionId: string) => SubAgentTracker | undefined;
+  };
+  /** Forward agent event to orchestrator */
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
-  /** Get SubAgentTracker for a session (for blocking SpawnAgent) */
-  getSubagentTrackerForSession: (sessionId: string) => SubAgentTracker | undefined;
-  /** Callback when todos are updated via TodoWrite tool */
-  onTodosUpdated: (sessionId: string, todos: TodoItem[]) => Promise<void>;
-  /** Generate unique ID for todos */
-  generateTodoId: () => string;
+  /** Todo management callbacks */
+  todos: {
+    /** Callback when todos are updated via TodoWrite tool */
+    onUpdated: (sessionId: string, todos: TodoItem[]) => Promise<void>;
+    /** Generate unique ID for todos */
+    generateId: () => string;
+  };
   /** Path to shared SQLite database (for tmux mode agent spawning) */
   dbPath: string;
   /** Anthropic API key for WebFetch summarizer (optional - enables WebFetch if provided) */
@@ -231,7 +225,7 @@ function createBrowserDelegate(
  */
 function createWebFetchSummarizer(
   sessionId: SessionId,
-  spawnSubsession: AgentFactoryConfig['spawnSubsession'],
+  spawnSubsession: AgentFactoryConfig['subagents']['spawn'],
 ): WebFetchSubagentCallback {
   return async (params): Promise<WebFetchSubagentResult> => {
     try {
@@ -275,7 +269,7 @@ function wireMemoryLedger(
   workingDirectory: string,
   memCfg: NonNullable<AgentFactoryConfig['memoryConfig']>,
   compactorSettings: ReturnType<typeof getSettings>['context']['compactor'],
-  spawnSubsession: AgentFactoryConfig['spawnSubsession'],
+  spawnSubsession: AgentFactoryConfig['subagents']['spawn'],
 ): void {
   const compactionTrigger = new CompactionTrigger({
     triggerTokenThreshold: compactorSettings.triggerTokenThreshold,
@@ -387,8 +381,8 @@ export class AgentFactory {
       new OpenURLTool({ workingDirectory }),
       new RenderAppUITool({ workingDirectory }),
       new TodoWriteTool({
-        generateId: () => this.config.generateTodoId(),
-        onTodosUpdated: (todos) => this.config.onTodosUpdated(sessionId, todos),
+        generateId: () => this.config.todos.generateId(),
+        onTodosUpdated: (todos) => this.config.todos.onUpdated(sessionId, todos),
       }),
       new RememberTool({
         dbPath: this.config.dbPath,
@@ -427,7 +421,7 @@ export class AgentFactory {
     }
 
     // Add WebFetch tool - uses real Tron subagent for summarization
-    const webFetchSummarizer = createWebFetchSummarizer(sessionId, this.config.spawnSubsession);
+    const webFetchSummarizer = createWebFetchSummarizer(sessionId, this.config.subagents.spawn);
 
     tools.push(
       new WebFetchTool({
@@ -478,9 +472,9 @@ export class AgentFactory {
         model,
         dbPath: this.config.dbPath,
         onSpawn: (parentId: string, params: SpawnSubagentParams, toolCallId: string) =>
-          this.config.spawnSubsession(parentId, params, toolCallId),
+          this.config.subagents.spawn(parentId, params, toolCallId),
         getSubagentTracker: () => {
-          const tracker = this.config.getSubagentTrackerForSession(sessionId);
+          const tracker = this.config.subagents.getTracker(sessionId);
           if (!tracker) {
             throw new Error(`No subagent tracker for session ${sessionId}`);
           }
@@ -489,11 +483,11 @@ export class AgentFactory {
       }),
       new QueryAgentTool({
         onQuery: (sid: string, queryType: SubagentQueryType, limit?: number) =>
-          this.config.querySubagent(sid, queryType, limit),
+          this.config.subagents.query(sid, queryType, limit),
       }),
       new WaitForAgentsTool({
         onWait: (sessionIds: string[], mode: 'all' | 'any', timeout: number) =>
-          this.config.waitForSubagents(sessionIds, mode, timeout),
+          this.config.subagents.wait(sessionIds, mode, timeout),
       }),
     );
 
@@ -597,7 +591,7 @@ export class AgentFactory {
     // Wire LLM summarizer for non-subagent sessions (enables auto-compaction)
     if (!isSubagent) {
       const llmSummarizer = new LLMSummarizer({
-        spawnSubsession: (params) => this.config.spawnSubsession(sessionId, params),
+        spawnSubsession: (params) => this.config.subagents.spawn(sessionId, params),
       });
       agent.setSummarizer(llmSummarizer);
     }
@@ -607,7 +601,7 @@ export class AgentFactory {
       wireMemoryLedger(
         agent, sessionId, model, workingDirectory,
         this.config.memoryConfig, compactorSettings,
-        this.config.spawnSubsession,
+        this.config.subagents.spawn,
       );
     }
 

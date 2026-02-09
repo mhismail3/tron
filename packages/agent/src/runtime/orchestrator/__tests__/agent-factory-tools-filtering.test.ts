@@ -32,16 +32,20 @@ function createMockConfig(overrides: Partial<AgentFactoryConfig> = {}): AgentFac
       type: 'api_key',
       apiKey: 'test-key',
     }),
-    spawnSubsession: vi.fn().mockResolvedValue({ sessionId: 'sub_test', success: true }),
-    querySubagent: vi.fn().mockResolvedValue({ success: true }),
-    waitForSubagents: vi.fn().mockResolvedValue({ success: true }),
+    subagents: {
+      spawn: vi.fn().mockResolvedValue({ sessionId: 'sub_test', success: true }),
+      query: vi.fn().mockResolvedValue({ success: true }),
+      wait: vi.fn().mockResolvedValue({ success: true }),
+      getTracker: vi.fn().mockReturnValue({
+        spawn: vi.fn(),
+        has: vi.fn().mockReturnValue(false),
+      }),
+    },
     forwardAgentEvent: vi.fn(),
-    getSubagentTrackerForSession: vi.fn().mockReturnValue({
-      spawn: vi.fn(),
-      has: vi.fn().mockReturnValue(false),
-    }),
-    onTodosUpdated: vi.fn().mockResolvedValue(undefined),
-    generateTodoId: () => 'todo_test123',
+    todos: {
+      onUpdated: vi.fn().mockResolvedValue(undefined),
+      generateId: () => 'todo_test123',
+    },
     dbPath: '/tmp/test.db',
     ...overrides,
   };

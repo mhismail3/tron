@@ -330,13 +330,17 @@ export class EventStoreOrchestrator extends EventEmitter {
 
     this.agentFactory = createAgentFactory({
       getAuthForProvider: (model) => this.authProvider.getAuthForProvider(model),
-      spawnSubsession: (parentId, params, toolCallId) => this.subagents.spawnSubsession(parentId, params, toolCallId),
-      querySubagent: (sessionId, queryType, limit) => this.subagents.querySubagent(sessionId, queryType, limit),
-      waitForSubagents: (sessionIds, mode, timeout) => this.waitForSubagents(sessionIds, mode, timeout),
+      subagents: {
+        spawn: (parentId, params, toolCallId) => this.subagents.spawnSubsession(parentId, params, toolCallId),
+        query: (sessionId, queryType, limit) => this.subagents.querySubagent(sessionId, queryType, limit),
+        wait: (sessionIds, mode, timeout) => this.waitForSubagents(sessionIds, mode, timeout),
+        getTracker: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
+      },
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
-      getSubagentTrackerForSession: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
-      onTodosUpdated: async (sessionId, todos) => this.todos.handleTodosUpdated(sessionId, todos),
-      generateTodoId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      todos: {
+        onUpdated: async (sessionId, todos) => this.todos.handleTodosUpdated(sessionId, todos),
+        generateId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
+      },
       dbPath: this.eventStore.dbPath,
       get embeddingService() { return self.embeddings.getEmbeddingService() ?? undefined; },
       get vectorRepo() { return self.embeddings.getVectorRepo() ?? undefined; },
