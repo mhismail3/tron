@@ -22,7 +22,7 @@ import type {
   VoiceNoteMetadata,
 } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
-import { getNotesDir } from '@infrastructure/settings/loader.js';
+import { getNotesDir } from '@infrastructure/settings/index.js';
 import { RpcError, RpcErrorCode, InvalidParamsError, FileNotFoundError } from './base.js';
 
 const logger = createLogger('rpc:voiceNotes');

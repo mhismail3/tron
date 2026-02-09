@@ -231,7 +231,7 @@ export interface TurnConfig {
  */
 export interface TurnOptions {
   turn: number;
-  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  reasoningLevel?: import('./types.js').ReasoningLevel;
   skillContext?: string;
   /** Context about completed sub-agents and their results */
   subagentResultsContext?: string;

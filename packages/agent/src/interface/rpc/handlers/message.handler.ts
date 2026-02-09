@@ -13,6 +13,7 @@ import type {
 } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
 import { RpcError, RpcErrorCode } from './base.js';
+import { hasErrorCode } from '@core/utils/errors.js';
 
 /**
  * Message operation errors
@@ -62,13 +63,11 @@ export function createMessageHandlers(): MethodRegistration[] {
       };
       return result;
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message.includes('not found')) {
-          throw new MessageNotFoundError(error.message);
-        }
-        if (error.message.includes('Cannot delete')) {
-          throw new InvalidOperationError(error.message);
-        }
+      if (hasErrorCode(error, 'EVENT_NOT_FOUND') || hasErrorCode(error, 'SESSION_NOT_FOUND')) {
+        throw new MessageNotFoundError((error as Error).message);
+      }
+      if (hasErrorCode(error, 'INVALID_OPERATION')) {
+        throw new InvalidOperationError((error as Error).message);
       }
       const message = error instanceof Error ? error.message : 'Failed to delete message';
       throw new MessageDeleteError(message);

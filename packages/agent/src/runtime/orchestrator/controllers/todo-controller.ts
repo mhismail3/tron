@@ -149,7 +149,9 @@ export class TodoController {
   async restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<TodoItem[]> {
     const active = this.config.getActiveSession(sessionId);
     if (!active) {
-      throw new Error('Session not active');
+      const err = new Error('Session not active');
+      (err as any).code = 'SESSION_NOT_ACTIVE';
+      throw err;
     }
 
     // Generate IDs for restored tasks

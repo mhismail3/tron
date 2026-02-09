@@ -27,6 +27,7 @@ import type { TurnResult } from './types.js';
 import { calculateCost } from '@infrastructure/usage/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { categorizeError } from '@infrastructure/logging/error-codes.js';
+import { COMPACTION_BUFFER_TOKENS } from '../constants.js';
 
 const logger = createLogger('agent:turn');
 
@@ -303,7 +304,7 @@ export class AgentTurnRunner implements ITurnRunner {
     canProceed: boolean;
     error?: string;
   }> {
-    const validation = this.compactionHandler.validatePreTurn(4000);
+    const validation = this.compactionHandler.validatePreTurn(COMPACTION_BUFFER_TOKENS);
 
     if (!validation.canProceed) {
       if (validation.needsCompaction) {

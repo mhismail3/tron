@@ -15,6 +15,7 @@ import type { RulesTracker } from '@context/rules-tracker.js';
 import type { SubAgentTracker } from '@capabilities/tools/subagent/subagent-tracker.js';
 import type { TodoTracker } from '@capabilities/todos/todo-tracker.js';
 import type { SessionContext } from './session/session-context.js';
+import type { ReasoningLevel } from '../agent/types.js';
 
 // =============================================================================
 // Configuration
@@ -74,65 +75,72 @@ export interface WorktreeInfo {
 }
 
 // =============================================================================
-// Session Types
+// Session Types — Sub-interfaces
 // =============================================================================
 
-export interface ActiveSession {
+/**
+ * Immutable identity of an active session.
+ * Set at creation time, never changes during the session's lifetime.
+ */
+export interface SessionIdentity {
   sessionId: SessionId;
-  agent: TronAgent;
-  lastActivity: Date;
   workingDirectory: string;
   model: string;
   /** Parent session ID if this is a subagent session (for event forwarding) */
   parentSessionId?: SessionId;
+}
+
+/**
+ * Runtime execution dependencies for the session.
+ * Created at session start, destroyed at session end.
+ */
+export interface SessionRuntime {
+  agent: TronAgent;
+  sessionContext: SessionContext;
   /** WorkingDirectory abstraction (if worktree coordination is enabled) */
   workingDir?: WorkingDirectory;
-  /**
-   * Flag indicating if this session was interrupted by user.
-   * Used to inform clients that the session ended due to interruption.
-   */
-  wasInterrupted?: boolean;
-  /**
-   * Current reasoning level for extended thinking models.
-   * Tracked in-memory to detect changes and persist events.
-   */
-  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  /**
-   * Tracks skills explicitly added to this session's context.
-   * Reconstructed from events on session resume/fork.
-   * Cleared on context clear and compaction.
-   */
+}
+
+/**
+ * Tracker instances for session-scoped state.
+ * Each tracker is reconstructed from events on session resume/fork.
+ */
+export interface SessionTracking {
   skillTracker: SkillTracker;
-  /**
-   * Tracks rules files loaded for this session's context.
-   * Loaded once at session start, reconstructed from events on resume/fork.
-   * Rules are immutable for the session (no remove operation).
-   */
   rulesTracker: RulesTracker;
-  /**
-   * SessionContext for modular state management.
-   * Encapsulates EventPersister and TurnManager.
-   * All turn tracking and event persistence are managed here.
-   */
-  sessionContext: SessionContext;
-  /**
-   * Tracks sub-agents spawned by this session.
-   * Reconstructed from events on session resume/fork.
-   */
   subagentTracker: SubAgentTracker;
-  /**
-   * Tracks todos/tasks for this session.
-   * Reconstructed from events on session resume/fork.
-   * Cleared on context clear (incomplete tasks -> backlog).
-   */
   todoTracker: TodoTracker;
-  /**
-   * Current run ID for the active agent run.
-   * Set when a run starts, cleared when it completes.
-   * Used to correlate all events emitted during this run.
-   */
+}
+
+/**
+ * Mutable metadata that changes during the session's lifecycle.
+ */
+export interface SessionMetadata {
+  lastActivity: Date;
+  /** Flag indicating if this session was interrupted by user */
+  wasInterrupted?: boolean;
+  /** Current reasoning level for extended thinking models */
+  reasoningLevel?: ReasoningLevel;
+  /** Current run ID — set when a run starts, cleared when it completes */
   currentRunId?: string;
 }
+
+// =============================================================================
+// Session Types — Composed
+// =============================================================================
+
+/**
+ * Complete active session state.
+ *
+ * Composed from four focused sub-interfaces:
+ * - SessionIdentity:  immutable session identity (id, directory, model, parent)
+ * - SessionRuntime:   agent instance and persistence context
+ * - SessionTracking:  skill/rules/subagent/todo trackers
+ * - SessionMetadata:  mutable activity/interruption/reasoning state
+ *
+ * Consumers that only need a subset should accept the appropriate sub-interface.
+ */
+export type ActiveSession = SessionIdentity & SessionRuntime & SessionTracking & SessionMetadata;
 
 // =============================================================================
 // Agent Run Types
@@ -175,7 +183,7 @@ export interface AgentRunOptions {
   prompt: string;
   onEvent?: (event: AgentEvent) => void;
   /** Reasoning effort level for models with reasoning/effort support (Codex, Opus 4.6) */
-  reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  reasoningLevel?: ReasoningLevel;
   /** Optional image attachments (base64) - legacy, use attachments instead */
   images?: FileAttachment[];
   /** Optional file attachments (images and PDFs) */

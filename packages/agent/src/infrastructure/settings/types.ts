@@ -242,6 +242,8 @@ export interface CompactorSettings {
   preserveRecentCount: number;
   /** Characters per token estimate */
   charsPerToken: number;
+  /** Token buffer reserved for compaction overhead during pre-turn validation */
+  bufferTokens: number;
   /** Force compaction after every turn (testing/debug mode) */
   forceAlways?: boolean;
   /** Token ratio that forces compaction (0-1) */
@@ -401,6 +403,20 @@ export interface TmuxSettings {
   commandTimeoutMs: number;
   /** Polling interval in milliseconds */
   pollingIntervalMs: number;
+}
+
+// =============================================================================
+// Agent Settings
+// =============================================================================
+
+/**
+ * Agent runtime configuration
+ */
+export interface AgentRuntimeSettings {
+  /** Maximum agentic turns before the agent loop stops */
+  maxTurns: number;
+  /** Inactivity threshold (ms) before a session is eligible for cleanup */
+  inactiveSessionTimeoutMs: number;
 }
 
 // =============================================================================
@@ -653,6 +669,8 @@ export interface TronSettings {
   tools: ToolSettings;
   /** Context configuration */
   context: ContextSettings;
+  /** Agent runtime configuration */
+  agent: AgentRuntimeSettings;
   /** Logging configuration */
   logging: LoggingSettings;
   /** Hook configuration */

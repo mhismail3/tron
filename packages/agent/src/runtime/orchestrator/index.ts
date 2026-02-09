@@ -158,6 +158,13 @@ export {
   type TodoControllerConfig,
 } from './controllers/index.js';
 
+// Embedding and vector search
+export {
+  EmbeddingController,
+  createEmbeddingController,
+  type EmbeddingControllerConfig,
+} from './controllers/index.js';
+
 // =============================================================================
 // Domain Operations (organized in operations/ subfolder)
 // =============================================================================
@@ -204,6 +211,10 @@ export type {
   EventStoreOrchestratorConfig,
   BrowserConfig,
   WorktreeInfo,
+  SessionIdentity,
+  SessionRuntime,
+  SessionTracking,
+  SessionMetadata,
   ActiveSession,
   FileAttachment,
   PromptSkillRef,

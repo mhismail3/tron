@@ -24,7 +24,9 @@ import type {
   AssistantMessage,
   ToolResultMessage,
   AssistantContent,
+  ToolCall,
 } from '@core/types/messages.js';
+import { isToolCall } from '@core/types/messages.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('message-sanitizer');
@@ -191,12 +193,10 @@ function extractToolUseIds(msg: AssistantMessage): string[] {
   }
 
   return msg.content
-    .filter((block): block is AssistantContent & { type: 'tool_use'; id: string } =>
-      block &&
-      typeof block === 'object' &&
-      block.type === 'tool_use' &&
-      typeof (block as any).id === 'string' &&
-      (block as any).id.length > 0
+    .filter((block): block is ToolCall =>
+      block != null &&
+      isToolCall(block) &&
+      block.id.length > 0
     )
     .map(block => block.id);
 }
@@ -261,22 +261,19 @@ export function sanitizeMessages(messages: Message[]): SanitizationResult {
       const assistantMsg = cloned as AssistantMessage;
       const originalLength = assistantMsg.content.length;
       assistantMsg.content = assistantMsg.content.filter(block => {
-        if (block && typeof block === 'object' && (block as any).type === 'tool_use') {
-          const id = (block as any).id;
-          if (typeof id === 'string' && seenToolUseIds.has(id)) {
+        if (isToolCall(block)) {
+          if (seenToolUseIds.has(block.id)) {
             fixes.push({
               type: 'removed_duplicate_tool_use',
-              details: { toolUseId: id },
+              details: { toolUseId: block.id },
             });
-            logger.warn('Removed duplicate tool_use block', { toolUseId: id });
+            logger.warn('Removed duplicate tool_use block', { toolUseId: block.id });
             return false;
           }
-          if (typeof id === 'string') {
-            seenToolUseIds.add(id);
-          }
+          seenToolUseIds.add(block.id);
         }
         return true;
-      }) as AssistantMessage['content'];
+      });
 
       // If message became empty after dedup, skip it
       if (!isValidAssistantMessage(assistantMsg)) {

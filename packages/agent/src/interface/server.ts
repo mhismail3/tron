@@ -303,7 +303,7 @@ export class TronServer {
 // CLI Entry Point
 // =============================================================================
 
-import { getSettings } from '@infrastructure/settings/loader.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import { parseEnvInteger } from '@infrastructure/settings/env-parsing.js';
 import type { ServerSettings } from '@infrastructure/settings/types.js';
 

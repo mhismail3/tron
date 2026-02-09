@@ -23,6 +23,7 @@ import type {
 } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
 import { SessionNotFoundError } from './base.js';
+import { hasErrorCode } from '@core/utils/errors.js';
 
 // =============================================================================
 // Handler Factory
@@ -51,7 +52,7 @@ export function createSessionHandlers(): MethodRegistration[] {
       };
       return result;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('not found')) {
+      if (hasErrorCode(error, 'SESSION_NOT_FOUND')) {
         throw new SessionNotFoundError(params.sessionId);
       }
       throw error;

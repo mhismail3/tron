@@ -14,6 +14,7 @@ import type {
 import { DEFAULT_HTTP_API_CONFIG } from './types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { parseOptionalInteger } from '@infrastructure/settings/env-parsing.js';
+import { hasErrorCode } from '@core/utils/errors.js';
 
 const logger = createLogger('http-api');
 
@@ -188,7 +189,7 @@ export class HttpApi {
           body: state,
         };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('not found')) {
+        if (hasErrorCode(error, 'SESSION_NOT_FOUND')) {
           return {
             status: 404,
             body: {

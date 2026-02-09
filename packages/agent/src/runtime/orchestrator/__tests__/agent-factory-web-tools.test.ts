@@ -10,15 +10,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AgentFactory, createAgentFactory, type AgentFactoryConfig } from '../agent-factory.js';
 import { WebFetchTool, UnifiedSearchTool } from '@capabilities/tools/index.js';
-import { getSettings } from '@infrastructure/settings/loader.js';
-import { getSettings as getSettingsIndex } from '@infrastructure/settings/index.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import { DEFAULT_SETTINGS } from '@infrastructure/settings/defaults.js';
-
-// Mock settings — must mock both the barrel export and the loader since different
-// modules import from different paths
-vi.mock('@infrastructure/settings/loader.js', () => ({
-  getSettings: vi.fn(),
-}));
 
 vi.mock('@infrastructure/settings/index.js', () => ({
   getSettings: vi.fn(),
@@ -27,7 +20,6 @@ vi.mock('@infrastructure/settings/index.js', () => ({
 // Re-apply settings mock before every test (restoreMocks: true clears them)
 beforeEach(() => {
   vi.mocked(getSettings).mockReturnValue(DEFAULT_SETTINGS);
-  vi.mocked(getSettingsIndex).mockReturnValue(DEFAULT_SETTINGS);
 });
 
 // =============================================================================

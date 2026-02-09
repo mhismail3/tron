@@ -17,11 +17,11 @@ import { MethodRegistry } from '../../registry.js';
 vi.mock('fs/promises');
 
 // Mock getNotesDir
-vi.mock('@infrastructure/settings/loader.js', () => ({
+vi.mock('@infrastructure/settings/index.js', () => ({
   getNotesDir: vi.fn(() => '/mock/notes/dir'),
 }));
 
-import { getNotesDir } from '@infrastructure/settings/loader.js';
+import { getNotesDir } from '@infrastructure/settings/index.js';
 
 describe('Voice Notes Handlers', () => {
   let registry: MethodRegistry;

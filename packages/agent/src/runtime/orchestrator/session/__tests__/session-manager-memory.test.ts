@@ -19,10 +19,6 @@ vi.mock('@infrastructure/logging/index.js', () => ({
   LogErrorCategory: {},
 }));
 
-vi.mock('@infrastructure/settings/loader.js', () => ({
-  getSettings: vi.fn(),
-}));
-
 vi.mock('@infrastructure/settings/index.js', () => ({
   getSettings: vi.fn(),
 }));
@@ -65,8 +61,7 @@ vi.mock('@llm/providers/factory.js', () => ({
 
 import { SessionManager, type SessionManagerConfig } from '../session-manager.js';
 import { categorizeError } from '@infrastructure/logging/index.js';
-import { getSettings } from '@infrastructure/settings/loader.js';
-import { getSettings as getSettingsIndex } from '@infrastructure/settings/index.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import { ContextLoader } from '@context/loader.js';
 import { detectProviderFromModel } from '@llm/providers/factory.js';
 import { createRulesTracker } from '@context/rules-tracker.js';
@@ -80,7 +75,6 @@ import type { ActiveSession } from '../../types.js';
 import { DEFAULT_SETTINGS } from '@infrastructure/settings/defaults.js';
 
 const mockGetSettings = vi.mocked(getSettings);
-const mockGetSettingsIndex = vi.mocked(getSettingsIndex);
 
 // Helper to create settings with autoInject overrides
 function createSettingsWithAutoInject(overrides: { enabled?: boolean; count?: number } = {}) {
@@ -104,7 +98,7 @@ beforeEach(() => {
   // Default: autoInject disabled
   const settings = createSettingsWithAutoInject({ enabled: false });
   mockGetSettings.mockReturnValue(settings);
-  mockGetSettingsIndex.mockReturnValue(settings);
+  mockGetSettings.mockReturnValue(settings);
 
   (categorizeError as ReturnType<typeof vi.fn>).mockReturnValue({
     code: 'UNKNOWN',
@@ -272,7 +266,7 @@ describe('SessionManager - Memory Injection', () => {
     beforeEach(() => {
       const settings = createSettingsWithAutoInject({ enabled: true, count: 5 });
       mockGetSettings.mockReturnValue(settings);
-      mockGetSettingsIndex.mockReturnValue(settings);
+      mockGetSettings.mockReturnValue(settings);
     });
 
     it('should inject memory content when loadWorkspaceMemory returns content', async () => {
@@ -319,7 +313,7 @@ describe('SessionManager - Memory Injection', () => {
     it('should pass count from settings to loadWorkspaceMemory', async () => {
       const settings = createSettingsWithAutoInject({ enabled: true, count: 3 });
       mockGetSettings.mockReturnValue(settings);
-      mockGetSettingsIndex.mockReturnValue(settings);
+      mockGetSettings.mockReturnValue(settings);
 
       config.loadWorkspaceMemory = vi.fn().mockResolvedValue({
         content: '# Memory\n\n### S1\n- lesson',
@@ -407,7 +401,7 @@ describe('SessionManager - Memory Injection', () => {
     beforeEach(() => {
       const settings = createSettingsWithAutoInject({ enabled: true, count: 5 });
       mockGetSettings.mockReturnValue(settings);
-      mockGetSettingsIndex.mockReturnValue(settings);
+      mockGetSettings.mockReturnValue(settings);
     });
 
     it('should inject memory content on resume', async () => {

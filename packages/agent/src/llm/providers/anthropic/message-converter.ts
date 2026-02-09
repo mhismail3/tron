@@ -22,6 +22,7 @@ import type {
   AssistantContent,
   ToolResultContent,
 } from '@core/types/index.js';
+import { normalizeToolArguments } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { buildToolCallIdMapping, remapToolCallId } from '../base/index.js';
 
@@ -135,7 +136,7 @@ function convertAssistantMessage(
       if (c.type === 'text') return { type: 'text' as const, text: c.text };
       if (c.type === 'tool_use') {
         // Handle both 'arguments' (in-memory ToolCall type) and 'input' (persisted event format)
-        const input = c.arguments ?? (c as any).input ?? {};
+        const input = normalizeToolArguments(c);
         return {
           type: 'tool_use' as const,
           id: remapToolCallId(c.id, idMapping),

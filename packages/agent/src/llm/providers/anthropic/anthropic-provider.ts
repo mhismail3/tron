@@ -25,6 +25,7 @@ import { getSettings } from '@infrastructure/settings/index.js';
 import type { AnthropicConfig, StreamOptions, SystemPromptBlock, AnthropicProviderSettings } from './types.js';
 import { CLAUDE_MODELS } from './types.js';
 import { convertMessages, convertTools, convertResponse } from './message-converter.js';
+import { DEFAULT_MAX_OUTPUT_TOKENS } from '@runtime/constants.js';
 
 const logger = createLogger('anthropic');
 
@@ -165,7 +166,7 @@ export class AnthropicProvider {
 
     const model = this.config.model;
     const modelInfo = CLAUDE_MODELS[model];
-    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? modelInfo?.maxOutput ?? 16384;
+    const maxTokens = options.maxTokens ?? this.config.maxTokens ?? modelInfo?.maxOutput ?? DEFAULT_MAX_OUTPUT_TOKENS;
 
     logger.debug('Starting stream', {
       model,
@@ -200,7 +201,7 @@ export class AnthropicProvider {
       } else {
         params.thinking = {
           type: 'enabled',
-          budget_tokens: options.thinkingBudget ?? Math.floor((modelInfo?.maxOutput ?? 16384) / 4),
+          budget_tokens: options.thinkingBudget ?? Math.floor((modelInfo?.maxOutput ?? DEFAULT_MAX_OUTPUT_TOKENS) / 4),
         };
       }
 

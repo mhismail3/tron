@@ -11,6 +11,8 @@
 import * as path from 'path';
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
+import { SessionError } from '@core/utils/errors.js';
+import type { Message as CoreMessage } from '@core/types/messages.js';
 import { EventStore } from '@infrastructure/events/event-store.js';
 import { WorktreeCoordinator } from '@platform/session/worktree-coordinator.js';
 import { createSkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
@@ -31,7 +33,8 @@ import type { WorkingDirectory } from '@platform/session/working-directory.js';
 import { createSessionContext } from './session-context.js';
 import { buildWorktreeInfo } from '../operations/worktree-ops.js';
 import { detectProviderFromModel } from '@llm/providers/factory.js';
-import { getSettings } from '@infrastructure/settings/loader.js';
+import { getSettings } from '@infrastructure/settings/index.js';
+import { INACTIVE_SESSION_TIMEOUT_MS } from '../../constants.js';
 import type {
   ActiveSession,
   CreateSessionOptions,
@@ -308,7 +311,11 @@ export class SessionManager {
     // Load from EventStore
     const session = await this.eventStore.getSession(sessionId as SessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      throw new SessionError(`Session not found: ${sessionId}`, {
+        sessionId,
+        operation: 'resume',
+        code: 'SESSION_NOT_FOUND',
+      });
     }
 
     // Acquire working directory through coordinator
@@ -329,11 +336,12 @@ export class SessionManager {
       sessionState.systemPrompt // Restore system prompt from events
     );
     // Extract messages from unified messagesWithEventIds
+    // Event store messages are structurally compatible with core Message type
+    // (both have role, content, toolCallId, isError) — the sanitizer and message
+    // converter handle format variations like 'input' vs 'arguments' in tool_use blocks
     const messages = sessionState.messagesWithEventIds.map(m => m.message);
     for (const msg of messages) {
-      // Convert event store messages to agent message format
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      agent.addMessage(msg as any);
+      agent.addMessage(msg as CoreMessage);
     }
 
     // Restore reasoning level if persisted (for extended thinking models)
@@ -661,7 +669,11 @@ export class SessionManager {
   async forkSession(sessionId: string, fromEventId?: string): Promise<ForkResult> {
     const session = await this.eventStore.getSession(sessionId as SessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      throw new SessionError(`Session not found: ${sessionId}`, {
+        sessionId,
+        operation: 'fork',
+        code: 'SESSION_NOT_FOUND',
+      });
     }
 
     const eventIdToFork = fromEventId
@@ -722,7 +734,7 @@ export class SessionManager {
   // Cleanup
   // ===========================================================================
 
-  async cleanupInactiveSessions(inactiveThresholdMs: number = 30 * 60 * 1000): Promise<void> {
+  async cleanupInactiveSessions(inactiveThresholdMs: number = INACTIVE_SESSION_TIMEOUT_MS): Promise<void> {
     const now = Date.now();
 
     // Create snapshot to avoid modification during iteration

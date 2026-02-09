@@ -56,6 +56,7 @@ import { AgentToolExecutor, createToolExecutor } from './tool-executor.js';
 import { AgentStreamProcessor, createStreamProcessor } from './stream-processor.js';
 import { AgentCompactionHandler, createCompactionHandler } from './compaction-handler.js';
 import { AgentTurnRunner, createTurnRunner } from './turn-runner.js';
+import { MAX_TURNS_DEFAULT } from '../constants.js';
 
 const logger = createLogger('agent');
 
@@ -73,14 +74,8 @@ export class TronAgent {
   private abortController: AbortController | null;
   readonly workingDirectory: string;
 
-  /** Current reasoning level for models with reasoning/effort support (Codex, Opus 4.6) */
-  private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined;
-  /** Skill context to inject into system prompt for current run */
-  private currentSkillContext: string | undefined;
-  /** Subagent results context to inject for current run */
-  private currentSubagentResults: string | undefined;
-  /** Todo context to inject for current run */
-  private currentTodoContext: string | undefined;
+  /** Per-run context — set via setters or run(content, runContext), consumed during turns */
+  private currentRunContext: import('./types.js').RunContext = {};
 
   // Extracted modules
   private eventEmitter: AgentEventEmitter;
@@ -209,15 +204,15 @@ export class TronAgent {
    * Set reasoning level for models with reasoning/effort support (Codex, Opus 4.6).
    * Call this before run() to set the reasoning effort.
    */
-  setReasoningLevel(level: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined): void {
-    this.currentReasoningLevel = level;
+  setReasoningLevel(level: import('./types.js').ReasoningLevel | undefined): void {
+    this.currentRunContext.reasoningLevel = level;
   }
 
   /**
    * Get current reasoning level
    */
-  getReasoningLevel(): 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined {
-    return this.currentReasoningLevel;
+  getReasoningLevel(): import('./types.js').ReasoningLevel | undefined {
+    return this.currentRunContext.reasoningLevel;
   }
 
   /**
@@ -348,7 +343,7 @@ export class TronAgent {
    * Set skill context to inject into system prompt for the next run.
    */
   setSkillContext(skillContext: string | undefined): void {
-    this.currentSkillContext = skillContext;
+    this.currentRunContext.skillContext = skillContext;
   }
 
   /**
@@ -356,7 +351,7 @@ export class TronAgent {
    * This informs the agent about completed sub-agents and their results.
    */
   setSubagentResultsContext(resultsContext: string | undefined): void {
-    this.currentSubagentResults = resultsContext;
+    this.currentRunContext.subagentResults = resultsContext;
   }
 
   /**
@@ -364,7 +359,7 @@ export class TronAgent {
    * This shows the agent's current task list for tracking progress.
    */
   setTodoContext(todoContext: string | undefined): void {
-    this.currentTodoContext = todoContext;
+    this.currentRunContext.todoContext = todoContext;
   }
 
   /**
@@ -611,14 +606,14 @@ export class TronAgent {
 
     const result = await this.turnRunner.execute({
       turn: this.currentTurn,
-      reasoningLevel: this.currentReasoningLevel,
-      skillContext: this.currentSkillContext,
-      subagentResultsContext: this.currentSubagentResults,
-      todoContext: this.currentTodoContext,
+      reasoningLevel: this.currentRunContext.reasoningLevel,
+      skillContext: this.currentRunContext.skillContext,
+      subagentResultsContext: this.currentRunContext.subagentResults,
+      todoContext: this.currentRunContext.todoContext,
     });
 
     // Clear subagent results after consuming (one-time injection)
-    this.currentSubagentResults = undefined;
+    this.currentRunContext.subagentResults = undefined;
 
     // Update token usage
     if (result.tokenUsage) {
@@ -678,7 +673,7 @@ export class TronAgent {
       };
     }
 
-    const maxTurns = this.config.maxTurns ?? 100;
+    const maxTurns = this.config.maxTurns ?? MAX_TURNS_DEFAULT;
     let lastResult: TurnResult | undefined;
 
     while (this.currentTurn < maxTurns) {

@@ -15,8 +15,8 @@ import * as fsAsync from 'fs/promises';
 import * as path from 'path';
 import type { CanvasArtifact } from '../canvas-store.js';
 
-// Mock the settings loader
-vi.mock('@infrastructure/settings/loader.js', () => ({
+// Mock the settings module
+vi.mock('@infrastructure/settings/index.js', () => ({
   getTronDataDir: vi.fn(() => '/tmp/test-tron-data'),
 }));
 

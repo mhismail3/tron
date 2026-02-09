@@ -11,6 +11,7 @@
 import * as crypto from 'crypto';
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { DatabaseConnection } from '../database.js';
+import { EVENT_ID_LENGTH } from '@runtime/constants.js';
 
 /** Result of a run() query */
 interface RunResult {
@@ -43,7 +44,7 @@ export abstract class BaseRepository {
    * @param prefix - Prefix for the ID (e.g., 'sess', 'ws', 'evt')
    * @param length - Length of the random portion (default: 12)
    */
-  protected generateId(prefix: string, length = 12): string {
+  protected generateId(prefix: string, length = EVENT_ID_LENGTH): string {
     const random = crypto.randomUUID().replace(/-/g, '').slice(0, length);
     return `${prefix}_${random}`;
   }
@@ -116,7 +117,7 @@ export const idUtils = {
   /**
    * Generate a UUID-based ID
    */
-  generate(prefix: string, length = 12): string {
+  generate(prefix: string, length = EVENT_ID_LENGTH): string {
     const random = crypto.randomUUID().replace(/-/g, '').slice(0, length);
     return `${prefix}_${random}`;
   },

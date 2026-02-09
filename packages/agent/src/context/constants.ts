@@ -35,3 +35,13 @@ export const MAX_SYSTEM_PROMPT_FILE_SIZE = 100 * 1024;
 export const CHARS_PER_TOKEN = 4;
 export const MIN_IMAGE_TOKENS = 85;
 export const DEFAULT_URL_IMAGE_TOKENS = 1500;
+
+// =============================================================================
+// Compaction Engine
+// =============================================================================
+
+/** Prefix for the compacted summary user message */
+export const COMPACTION_SUMMARY_PREFIX = '[Context from earlier in this conversation]';
+
+/** Assistant acknowledgment text after compaction */
+export const COMPACTION_ACK_TEXT = 'I understand the previous context. Let me continue helping you.';

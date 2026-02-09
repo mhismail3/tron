@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as fsAsync from 'fs/promises';
 import * as path from 'path';
-import { getTronDataDir } from '@infrastructure/settings/loader.js';
+import { getTronDataDir } from '@infrastructure/settings/index.js';
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
 
 const logger = createLogger('canvas-store');

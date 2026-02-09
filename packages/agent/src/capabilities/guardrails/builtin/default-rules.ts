@@ -158,6 +158,12 @@ export const CORE_TRON_AUTH_PROTECTION: PathRule = {
 };
 
 /**
+ * Cloud storage base path (macOS CloudStorage directory)
+ */
+const CLOUD_STORAGE_DIR = path.join(os.homedir(), 'Library', 'CloudStorage');
+const SYNOLOGY_DRIVE_DIR = path.join(CLOUD_STORAGE_DIR, 'SynologyDrive-SynologyDrive');
+
+/**
  * Core rule: Protect Synology Drive cloud storage
  *
  * The agent cannot write, edit, or delete any files in Synology Drive.
@@ -176,8 +182,8 @@ export const CORE_SYNOLOGY_DRIVE_PROTECTION: PathRule = {
   tags: ['security', 'cloud-storage-protection'],
   pathArguments: ['file_path', 'path', 'command'],
   protectedPaths: [
-    '/Users/moose/Library/CloudStorage/SynologyDrive-SynologyDrive',
-    '/Users/moose/Library/CloudStorage/SynologyDrive-SynologyDrive/**',
+    SYNOLOGY_DRIVE_DIR,
+    `${SYNOLOGY_DRIVE_DIR}/**`,
   ],
 };
 

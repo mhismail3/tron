@@ -82,4 +82,5 @@ export {
   // Path resolution utilities
   resolveTronPath,
   getTronDataDir,
+  getNotesDir,
 } from './loader.js';

@@ -63,8 +63,8 @@ import { LedgerWriter, CompactionTrigger, MemoryManager } from '@capabilities/me
 import { LLMSummarizer } from '@context/llm-summarizer.js';
 import type { EventType } from '@infrastructure/events/types/index.js';
 import type { GoogleAuth } from '@infrastructure/auth/google-oauth.js';
-import { getSettings } from '@infrastructure/settings/loader.js';
-import { SUBAGENT_MAX_TOKENS_MULTIPLIER } from '../constants.js';
+import { getSettings } from '@infrastructure/settings/index.js';
+import { SUBAGENT_MAX_TOKENS_MULTIPLIER, SUBAGENT_EXCLUDED_TOOLS } from '../constants.js';
 
 const logger = createLogger('agent-factory');
 
@@ -199,6 +199,136 @@ export interface AgentFactoryConfig {
 }
 
 // =============================================================================
+// Extracted Helpers
+// =============================================================================
+
+/**
+ * Create a BrowserDelegate wiring to the browser service.
+ * Auto-starts screencast for iOS frame streaming on session creation.
+ */
+function createBrowserDelegate(
+  service: NonNullable<AgentFactoryConfig['browserService']>,
+): BrowserDelegate {
+  return {
+    execute: (sid, action, params) => service.execute(sid, action, params),
+    ensureSession: async (sid) => {
+      await service.createSession(sid);
+      await service.startScreencast(sid, {
+        format: 'jpeg',
+        quality: 60,
+        maxWidth: 1280,
+        maxHeight: 800,
+        everyNthFrame: 6,
+      });
+    },
+    hasSession: (sid) => service.hasSession(sid),
+  };
+}
+
+/**
+ * Create the WebFetch summarizer callback.
+ * Spawns a no-tools Haiku subagent session for web content summarization.
+ */
+function createWebFetchSummarizer(
+  sessionId: SessionId,
+  spawnSubsession: AgentFactoryConfig['spawnSubsession'],
+): WebFetchSubagentCallback {
+  return async (params): Promise<WebFetchSubagentResult> => {
+    try {
+      const result = await spawnSubsession(sessionId, {
+        task: params.task,
+        model: params.model,
+        systemPrompt: WEB_CONTENT_SUMMARIZER_PROMPT,
+        toolDenials: { denyAll: true },
+        maxTurns: params.maxTurns,
+        blocking: true,
+        timeout: params.timeout,
+      });
+
+      return {
+        sessionId: result.sessionId || `summarizer-${Date.now()}`,
+        success: result.success !== false,
+        output: result.output || result.summary || result.resultSummary,
+        error: result.error,
+        tokenUsage: result.tokenUsage,
+      };
+    } catch (error) {
+      const err = error as Error;
+      logger.error('WebFetch subagent spawn failed', { error: err.message });
+      return {
+        sessionId: `summarizer-error-${Date.now()}`,
+        success: false,
+        error: err.message,
+      };
+    }
+  };
+}
+
+/**
+ * Wire the memory ledger hook into an agent.
+ * Sets up CompactionTrigger → LedgerWriter → MemoryManager pipeline.
+ */
+function wireMemoryLedger(
+  agent: TronAgent,
+  sessionId: SessionId,
+  model: string,
+  workingDirectory: string,
+  memCfg: NonNullable<AgentFactoryConfig['memoryConfig']>,
+  compactorSettings: ReturnType<typeof getSettings>['context']['compactor'],
+  spawnSubsession: AgentFactoryConfig['spawnSubsession'],
+): void {
+  const compactionTrigger = new CompactionTrigger({
+    triggerTokenThreshold: compactorSettings.triggerTokenThreshold,
+    alertZoneThreshold: compactorSettings.alertZoneThreshold,
+    defaultTurnFallback: compactorSettings.defaultTurnFallback,
+    alertTurnFallback: compactorSettings.alertTurnFallback,
+  });
+  if (compactorSettings.forceAlways) {
+    compactionTrigger.setForceAlways(true);
+    logger.info('Compaction force-always enabled', { sessionId });
+  }
+
+  const ledgerWriter = new LedgerWriter({
+    spawnSubsession: (params) => spawnSubsession(sessionId, {
+      task: params.task,
+      model: params.model,
+      systemPrompt: params.systemPrompt,
+      toolDenials: params.toolDenials,
+      maxTurns: params.maxTurns,
+      blocking: params.blocking,
+      timeout: params.timeout,
+    }),
+    appendEvent: (params) => memCfg.appendEvent(sessionId, params.type, params.payload),
+    getEventsBySession: () => memCfg.getEventsBySession(sessionId),
+    sessionId,
+    workspaceId: '',
+  });
+
+  const workspaceId = memCfg.getWorkspaceId?.(sessionId) ?? '';
+  const memoryManager = new MemoryManager({
+    writeLedgerEntry: (opts) => ledgerWriter.writeLedgerEntry(opts),
+    shouldCompact: (input) => compactionTrigger.shouldCompact(input),
+    resetCompactionTrigger: () => compactionTrigger.reset(),
+    executeCompaction: () => memCfg.executeCompaction(sessionId),
+    emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
+    embedMemory: memCfg.embedMemory,
+    sessionId,
+    workspaceId,
+  });
+
+  agent.registerHook(createMemoryLedgerHook({
+    onCycleComplete: (info) => memoryManager.onCycleComplete(info),
+    getModel: () => model,
+    getWorkingDirectory: () => workingDirectory,
+    getTokenRatio: () => memCfg.getTokenRatio(sessionId),
+    getRecentEventTypes: () => memCfg.getRecentEventTypes(sessionId),
+    getRecentToolCalls: () => memCfg.getRecentToolCalls(sessionId),
+  }));
+
+  logger.debug('Memory ledger hook registered', { sessionId });
+}
+
+// =============================================================================
 // AgentFactory Class
 // =============================================================================
 
@@ -238,26 +368,9 @@ export class AgentFactory {
     const webSettings = settings.tools.web;
 
     // Create BrowserDelegate for BrowserTool
-    let browserDelegate: BrowserDelegate | undefined;
-    if (this.config.browserService) {
-      const service = this.config.browserService;
-      browserDelegate = {
-        execute: (sid, action, params) => service.execute(sid, action, params),
-        ensureSession: async (sid) => {
-          await service.createSession(sid);
-          // Auto-start streaming so frames flow to iOS immediately
-          // everyNthFrame: 6 means ~10 FPS (60Hz / 6 = 10 FPS)
-          await service.startScreencast(sid, {
-            format: 'jpeg',
-            quality: 60,
-            maxWidth: 1280,
-            maxHeight: 800,
-            everyNthFrame: 6,
-          });
-        },
-        hasSession: (sid) => service.hasSession(sid),
-      };
-    }
+    const browserDelegate = this.config.browserService
+      ? createBrowserDelegate(this.config.browserService)
+      : undefined;
 
     // AskUserQuestion uses async mode - no delegate needed
     // Questions are presented immediately, user answers as a new prompt
@@ -314,36 +427,7 @@ export class AgentFactory {
     }
 
     // Add WebFetch tool - uses real Tron subagent for summarization
-    // The subagent spawner creates a no-tools Haiku session that persists to the database
-    const webFetchSummarizer: WebFetchSubagentCallback = async (params): Promise<WebFetchSubagentResult> => {
-      try {
-        const result = await this.config.spawnSubsession(sessionId, {
-          task: params.task,
-          model: params.model,
-          systemPrompt: WEB_CONTENT_SUMMARIZER_PROMPT,
-          toolDenials: { denyAll: true }, // No tools - text generation only
-          maxTurns: params.maxTurns,
-          blocking: true,
-          timeout: params.timeout,
-        });
-
-        return {
-          sessionId: result.sessionId || `summarizer-${Date.now()}`,
-          success: result.success !== false,
-          output: result.output || result.summary || result.resultSummary,
-          error: result.error,
-          tokenUsage: result.tokenUsage,
-        };
-      } catch (error) {
-        const err = error as Error;
-        logger.error('WebFetch subagent spawn failed', { error: err.message });
-        return {
-          sessionId: `summarizer-error-${Date.now()}`,
-          success: false,
-          error: err.message,
-        };
-      }
-    };
+    const webFetchSummarizer = createWebFetchSummarizer(sessionId, this.config.spawnSubsession);
 
     tools.push(
       new WebFetchTool({
@@ -419,7 +503,7 @@ export class AgentFactory {
     let effectiveDenials = toolDenials;
     if (isSubagent) {
       const subagentToolsDenial: ToolDenialConfig = {
-        tools: ['SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'Adapt', 'Sandbox'],
+        tools: [...SUBAGENT_EXCLUDED_TOOLS],
       };
       // Merge with any existing denials
       if (effectiveDenials) {
@@ -520,56 +604,11 @@ export class AgentFactory {
 
     // Register memory ledger hook for non-subagent sessions
     if (!isSubagent && this.config.memoryConfig) {
-      const memCfg = this.config.memoryConfig;
-      const compactionTrigger = new CompactionTrigger({
-        triggerTokenThreshold: compactorSettings.triggerTokenThreshold,
-        alertZoneThreshold: compactorSettings.alertZoneThreshold,
-        defaultTurnFallback: compactorSettings.defaultTurnFallback,
-        alertTurnFallback: compactorSettings.alertTurnFallback,
-      });
-      if (compactorSettings.forceAlways) {
-        compactionTrigger.setForceAlways(true);
-        logger.info('Compaction force-always enabled', { sessionId });
-      }
-
-      const ledgerWriter = new LedgerWriter({
-        spawnSubsession: (params) => this.config.spawnSubsession(sessionId, {
-          task: params.task,
-          model: params.model,
-          systemPrompt: params.systemPrompt,
-          toolDenials: params.toolDenials,
-          maxTurns: params.maxTurns,
-          blocking: params.blocking,
-          timeout: params.timeout,
-        }),
-        appendEvent: (params) => memCfg.appendEvent(sessionId, params.type, params.payload),
-        getEventsBySession: () => memCfg.getEventsBySession(sessionId),
-        sessionId,
-        workspaceId: '', // Not needed for ledger writing
-      });
-
-      const workspaceId = memCfg.getWorkspaceId?.(sessionId) ?? '';
-      const memoryManager = new MemoryManager({
-        writeLedgerEntry: (opts) => ledgerWriter.writeLedgerEntry(opts),
-        shouldCompact: (input) => compactionTrigger.shouldCompact(input),
-        resetCompactionTrigger: () => compactionTrigger.reset(),
-        executeCompaction: () => memCfg.executeCompaction(sessionId),
-        emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
-        embedMemory: memCfg.embedMemory,
-        sessionId,
-        workspaceId,
-      });
-
-      agent.registerHook(createMemoryLedgerHook({
-        onCycleComplete: (info) => memoryManager.onCycleComplete(info),
-        getModel: () => model,
-        getWorkingDirectory: () => workingDirectory,
-        getTokenRatio: () => memCfg.getTokenRatio(sessionId),
-        getRecentEventTypes: () => memCfg.getRecentEventTypes(sessionId),
-        getRecentToolCalls: () => memCfg.getRecentToolCalls(sessionId),
-      }));
-
-      logger.debug('Memory ledger hook registered', { sessionId });
+      wireMemoryLedger(
+        agent, sessionId, model, workingDirectory,
+        this.config.memoryConfig, compactorSettings,
+        this.config.spawnSubsession,
+      );
     }
 
     return agent;

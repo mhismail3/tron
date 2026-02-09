@@ -9,6 +9,11 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { TronSettings } from './types.js';
 import { DEFAULT_API_MODEL, DEFAULT_SERVER_MODEL } from '@llm/providers/model-ids.js';
+import {
+  MAX_TURNS_DEFAULT,
+  INACTIVE_SESSION_TIMEOUT_MS,
+  COMPACTION_BUFFER_TOKENS,
+} from '@runtime/constants.js';
 
 /**
  * Default dangerous command patterns for bash tool
@@ -179,6 +184,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
       targetTokens: 10000,
       preserveRecentCount: 5,
       charsPerToken: 4,
+      bufferTokens: COMPACTION_BUFFER_TOKENS,
       forceAlways: false,
       triggerTokenThreshold: 0.70,
       alertZoneThreshold: 0.50,
@@ -202,6 +208,12 @@ export const DEFAULT_SETTINGS: TronSettings = {
         count: 5,
       },
     },
+  },
+
+  // Agent Runtime Configuration
+  agent: {
+    maxTurns: MAX_TURNS_DEFAULT,
+    inactiveSessionTimeoutMs: INACTIVE_SESSION_TIMEOUT_MS,
   },
 
   // Logging Configuration

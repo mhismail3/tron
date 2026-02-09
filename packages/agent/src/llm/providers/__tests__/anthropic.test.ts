@@ -49,6 +49,7 @@ import { shouldRefreshTokens } from '@infrastructure/auth/oauth.js';
 import { convertMessages, convertTools, convertResponse } from '../anthropic/message-converter.js';
 import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
 import { AnthropicProvider } from '../anthropic/anthropic-provider.js';
+import { DEFAULT_MAX_OUTPUT_TOKENS } from '@runtime/constants.js';
 
 describe('Anthropic Provider', () => {
   const mockSettings = {
@@ -317,10 +318,10 @@ describe('Anthropic Provider', () => {
       expect(lastStreamParams.thinking).toEqual({ type: 'enabled', budget_tokens: 5000 });
     });
 
-    it('falls back to 16384 for unknown models', async () => {
+    it('falls back to DEFAULT_MAX_OUTPUT_TOKENS for unknown models', async () => {
       const provider = createApiKeyProvider('claude-unknown-model');
       await collectStream(provider, ctx, {});
-      expect(lastStreamParams.max_tokens).toBe(16384);
+      expect(lastStreamParams.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
     });
   });
 

@@ -25,6 +25,7 @@ import { createEventFactory } from './event-factory.js';
 import { reconstructFromEvents } from './message-reconstructor.js';
 import { calculateCost } from '../usage/index.js';
 import { createLogger } from '../logging/index.js';
+import { EVENT_ID_LENGTH } from '@runtime/constants.js';
 
 const logger = createLogger('event-store');
 
@@ -514,19 +515,25 @@ export class EventStore {
     // Validate target exists and is a message
     const targetEvent = await this.backend.getEvent(targetEventId);
     if (!targetEvent) {
-      throw new Error(`Event not found: ${targetEventId}`);
+      const err = new Error(`Event not found: ${targetEventId}`);
+      (err as any).code = 'EVENT_NOT_FOUND';
+      throw err;
     }
 
     // Only allow deleting message and tool result events
     const deletableTypes = ['message.user', 'message.assistant', 'tool.result'];
     if (!deletableTypes.includes(targetEvent.type)) {
-      throw new Error(`Cannot delete event of type: ${targetEvent.type}`);
+      const err = new Error(`Cannot delete event of type: ${targetEvent.type}`);
+      (err as any).code = 'INVALID_OPERATION';
+      throw err;
     }
 
     // Validate target belongs to the session (or is in its ancestry for forks)
     const session = await this.backend.getSession(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      const err = new Error(`Session not found: ${sessionId}`);
+      (err as any).code = 'SESSION_NOT_FOUND';
+      throw err;
     }
 
     // Get turn number from the target message if available
@@ -668,7 +675,7 @@ export class EventStore {
   // Utilities
   // ===========================================================================
 
-  private generateId(length = 12): string {
+  private generateId(length = EVENT_ID_LENGTH): string {
     return crypto.randomUUID().replace(/-/g, '').slice(0, length);
   }
 }

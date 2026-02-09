@@ -11,7 +11,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { ContainerRegistry } from '@capabilities/tools/sandbox/container-registry.js';
 import { ContainerRunner } from '@capabilities/tools/sandbox/container-runner.js';
-import { getSettings } from '@infrastructure/settings/loader.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import type { SandboxRpcManager } from '../../../rpc/index.js';
 
 const STATUS_ORDER: Record<string, number> = { running: 0, stopped: 1, gone: 2, unknown: 3 };

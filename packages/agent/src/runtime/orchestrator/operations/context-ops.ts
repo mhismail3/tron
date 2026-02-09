@@ -187,7 +187,9 @@ export class ContextOps {
   async previewCompaction(sessionId: string): Promise<CompactionPreview> {
     const active = this.config.getActiveSession(sessionId);
     if (!active) {
-      throw new Error('Session not active');
+      const err = new Error('Session not active');
+      (err as any).code = 'SESSION_NOT_ACTIVE';
+      throw err;
     }
 
     const summarizer = this.getSummarizer(sessionId);
@@ -204,7 +206,9 @@ export class ContextOps {
   ): Promise<CompactionResult> {
     const active = this.config.getActiveSession(sessionId);
     if (!active) {
-      throw new Error('Session not active');
+      const err = new Error('Session not active');
+      (err as any).code = 'SESSION_NOT_ACTIVE';
+      throw err;
     }
 
     const cm = active.agent.getContextManager();
@@ -309,7 +313,9 @@ export class ContextOps {
   }> {
     const active = this.config.getActiveSession(sessionId);
     if (!active) {
-      throw new Error('Session not active');
+      const err = new Error('Session not active');
+      (err as any).code = 'SESSION_NOT_ACTIVE';
+      throw err;
     }
 
     const cm = active.agent.getContextManager();

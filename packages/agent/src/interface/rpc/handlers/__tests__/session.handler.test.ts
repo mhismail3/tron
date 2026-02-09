@@ -182,7 +182,14 @@ describe('Session Handlers', () => {
     });
 
     it('should return SESSION_NOT_FOUND for non-existent session', async () => {
-      mockResumeSession.mockRejectedValueOnce(new Error('Session not found'));
+      const { SessionError } = await import('@core/utils/errors.js');
+      mockResumeSession.mockRejectedValueOnce(
+        new SessionError('Session not found: nonexistent', {
+          sessionId: 'nonexistent',
+          operation: 'resume',
+          code: 'SESSION_NOT_FOUND',
+        })
+      );
 
       const request: RpcRequest = {
         id: '1',

@@ -67,6 +67,31 @@ export interface AgentOptions {
 }
 
 // =============================================================================
+// Per-Run Context
+// =============================================================================
+
+/** Reasoning effort level for models that support it */
+export type ReasoningLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/**
+ * Per-run context injected before each agent.run() call.
+ *
+ * Guarantees run isolation — no stale state leaks between runs.
+ * The caller (AgentRunner) builds this from ActiveSession trackers,
+ * and the agent consumes it during the run.
+ */
+export interface RunContext {
+  /** Skill content to inject into system prompt */
+  skillContext?: string;
+  /** Pending subagent results to inject (consumed once, cleared after first turn) */
+  subagentResults?: string;
+  /** Todo list to inject into system prompt */
+  todoContext?: string;
+  /** Reasoning effort level for extended thinking models */
+  reasoningLevel?: ReasoningLevel;
+}
+
+// =============================================================================
 // Execution Results
 // =============================================================================
 

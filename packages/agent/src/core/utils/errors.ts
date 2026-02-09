@@ -763,3 +763,12 @@ export class RpcHandlerError extends TronError {
     );
   }
 }
+
+/**
+ * Check if an error has a specific error code.
+ * Works with TronError (typed), or any error with a `code` property.
+ */
+export function hasErrorCode(error: unknown, code: string): boolean {
+  if (error instanceof TronError) return error.code === code;
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === code;
+}

@@ -12,6 +12,7 @@
  */
 
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
+import { hasErrorCode } from '@core/utils/errors.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
 import { SessionNotActiveError, InvalidParamsError } from './base.js';
 
@@ -55,7 +56,7 @@ async function withSessionActiveCheck<T>(
   try {
     return await fn();
   } catch (error) {
-    if (error instanceof Error && error.message.includes('not active')) {
+    if (hasErrorCode(error, 'SESSION_NOT_ACTIVE')) {
       throw new SessionNotActiveError(sessionId);
     }
     const structured = categorizeError(error, { sessionId, operation });

@@ -50,7 +50,19 @@ import {
   SUBAGENT_MAX_TOKENS_MULTIPLIER,
   DEFAULT_GUARDRAIL_TIMEOUT_MS,
   TMUX_STARTUP_TIMEOUT_MS,
+  MAX_TURNS_DEFAULT,
+  COMPACTION_BUFFER_TOKENS,
+  INACTIVE_SESSION_TIMEOUT_MS,
+  EVENT_ID_LENGTH,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  SUBAGENT_EXCLUDED_TOOLS,
 } from '@runtime/constants.js';
+
+// Context compaction constants
+import {
+  COMPACTION_SUMMARY_PREFIX,
+  COMPACTION_ACK_TEXT,
+} from '@context/constants.js';
 
 // Turn constants
 import {
@@ -160,6 +172,31 @@ describe('constants snapshot', () => {
     it('spawn handler values', () => {
       expect(DEFAULT_GUARDRAIL_TIMEOUT_MS).toBe(60 * 60 * 1000);
       expect(TMUX_STARTUP_TIMEOUT_MS).toBe(10_000);
+    });
+
+    it('agent runtime values', () => {
+      expect(MAX_TURNS_DEFAULT).toBe(100);
+      expect(COMPACTION_BUFFER_TOKENS).toBe(4_000);
+      expect(INACTIVE_SESSION_TIMEOUT_MS).toBe(30 * 60 * 1000);
+      expect(EVENT_ID_LENGTH).toBe(12);
+      expect(DEFAULT_MAX_OUTPUT_TOKENS).toBe(16_384);
+    });
+
+    it('subagent excluded tools', () => {
+      expect(SUBAGENT_EXCLUDED_TOOLS).toEqual([
+        'SpawnSubagent',
+        'QueryAgent',
+        'WaitForAgents',
+        'Adapt',
+        'Sandbox',
+      ]);
+    });
+  });
+
+  describe('compaction constants', () => {
+    it('compaction engine values', () => {
+      expect(COMPACTION_SUMMARY_PREFIX).toBe('[Context from earlier in this conversation]');
+      expect(COMPACTION_ACK_TEXT).toBe('I understand the previous context. Let me continue helping you.');
     });
   });
 

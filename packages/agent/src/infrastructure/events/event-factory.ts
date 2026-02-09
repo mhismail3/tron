@@ -16,6 +16,7 @@ import {
   type SessionForkEvent,
   type SessionEvent,
 } from './types.js';
+import { EVENT_ID_LENGTH } from '@runtime/constants.js';
 
 // =============================================================================
 // Types
@@ -89,7 +90,7 @@ export interface EventFactory {
 /**
  * Default ID generator using crypto.randomUUID
  */
-function defaultIdGenerator(length = 12): string {
+function defaultIdGenerator(length = EVENT_ID_LENGTH): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, length);
 }
 

@@ -16,13 +16,13 @@ vi.mock('@capabilities/tools/sandbox/container-runner.js', () => ({
   ContainerRunner: vi.fn(),
 }));
 
-vi.mock('@infrastructure/settings/loader.js', () => ({
+vi.mock('@infrastructure/settings/index.js', () => ({
   getSettings: vi.fn(),
 }));
 
 import { ContainerRegistry } from '@capabilities/tools/sandbox/container-registry.js';
 import { ContainerRunner } from '@capabilities/tools/sandbox/container-runner.js';
-import { getSettings } from '@infrastructure/settings/loader.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import { createSandboxAdapter } from '../sandbox.adapter.js';
 
 describe('SandboxAdapter', () => {

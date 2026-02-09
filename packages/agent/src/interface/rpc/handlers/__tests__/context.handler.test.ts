@@ -121,7 +121,9 @@ describe('Context Handlers', () => {
 
     it('should return SESSION_NOT_ACTIVE for inactive session', async () => {
       mockGetContextSnapshot.mockImplementationOnce(() => {
-        throw new Error('Session not active');
+        const err = new Error('Session not active');
+        (err as any).code = 'SESSION_NOT_ACTIVE';
+        throw err;
       });
 
       const request: RpcRequest = {

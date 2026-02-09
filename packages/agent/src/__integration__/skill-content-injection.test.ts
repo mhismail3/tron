@@ -194,7 +194,7 @@ describe('Skill Content Injection', () => {
       expect(active).toBeDefined();
 
       // Access private method via prototype for testing
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Regular prompt with no skills',
       });
@@ -212,7 +212,7 @@ describe('Skill Content Injection', () => {
         mockSkills['old-timey-english'],
       ]);
 
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test prompt',
         skills: [{ name: 'old-timey-english', source: 'global' }],
@@ -235,7 +235,7 @@ describe('Skill Content Injection', () => {
         mockSkills['typescript-rules'],
       ]);
 
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Help me with @typescript-rules please',
         // No explicit skills - only @mention in text
@@ -258,7 +258,7 @@ describe('Skill Content Injection', () => {
         mockSkills['old-timey-english'],
       ]);
 
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Help with @api-design', // This @mention is IGNORED
         skills: [{ name: 'old-timey-english', source: 'global' }], // Only this is used
@@ -282,7 +282,7 @@ describe('Skill Content Injection', () => {
         mockSkills['api-design'],
       ]);
 
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Help me build an API',
         skills: [
@@ -305,7 +305,7 @@ describe('Skill Content Injection', () => {
       });
       const active = orchestrator.getActiveSession(session.sessionId);
 
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test prompt',
         skills: [{ name: 'test-skill', source: 'global' }],
@@ -323,7 +323,7 @@ describe('Skill Content Injection', () => {
 
       const skillLoaderMock = vi.fn().mockResolvedValue([]);
 
-      const result = await (orchestrator as any).loadSkillContextForPrompt(active, {
+      const result = await orchestrator.loadSkillContextForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test prompt',
         skills: [{ name: 'non-existent-skill', source: 'global' }],
@@ -344,7 +344,7 @@ describe('Skill Content Injection', () => {
       expect(active).toBeDefined();
 
       // Track skills for prompt (this creates events)
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [{ name: 'test-skill', source: 'global' }],
@@ -364,7 +364,7 @@ describe('Skill Content Injection', () => {
       const active = orchestrator.getActiveSession(session.sessionId);
 
       // Add skill first time
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [{ name: 'test-skill', source: 'global' }],
@@ -373,7 +373,7 @@ describe('Skill Content Injection', () => {
       const skillCountAfterFirst = active!.skillTracker.getAddedSkills().length;
 
       // Add same skill again
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test again',
         skills: [{ name: 'test-skill', source: 'global' }],
@@ -395,7 +395,7 @@ describe('Skill Content Injection', () => {
       expect(active).toBeDefined();
 
       // First add a skill
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [{ name: 'removable-skill', source: 'global' }],
@@ -429,7 +429,7 @@ describe('Skill Content Injection', () => {
       const active = orchestrator.getActiveSession(session.sessionId);
 
       // Add multiple skills
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [
@@ -458,7 +458,7 @@ describe('Skill Content Injection', () => {
       const active = orchestrator.getActiveSession(session.sessionId);
 
       // Add multiple skills
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [
@@ -487,7 +487,7 @@ describe('Skill Content Injection', () => {
       const active = orchestrator.getActiveSession(session.sessionId);
 
       // Add skills
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [{ name: 'snapshot-skill', source: 'global' }],
@@ -509,7 +509,7 @@ describe('Skill Content Injection', () => {
       const active = orchestrator.getActiveSession(session.sessionId);
 
       // Add skill
-      await (orchestrator as any).trackSkillsForPrompt(active, {
+      await orchestrator.trackSkillsForPrompt(active, {
         sessionId: session.sessionId,
         prompt: 'Test',
         skills: [{ name: 'to-remove', source: 'global' }],

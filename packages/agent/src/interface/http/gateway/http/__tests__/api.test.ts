@@ -132,9 +132,9 @@ describe('HttpApi', () => {
     });
 
     it('should return 404 for non-existent session', async () => {
-      mockContext.getSessionState = vi.fn().mockRejectedValue(
-        new Error('Session not found')
-      );
+      const err = new Error('Session not found');
+      (err as any).code = 'SESSION_NOT_FOUND';
+      mockContext.getSessionState = vi.fn().mockRejectedValue(err);
 
       const response = await api.handleRequest(
         'GET',

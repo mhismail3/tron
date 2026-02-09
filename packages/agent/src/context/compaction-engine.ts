@@ -13,6 +13,7 @@ import type { Message } from '@core/types/index.js';
 import type { Summarizer, ExtractedData } from './summarizer.js';
 import type { CompactionPreview, CompactionResult } from './types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { COMPACTION_SUMMARY_PREFIX, COMPACTION_ACK_TEXT } from './constants.js';
 
 const logger = createLogger('compaction-engine');
 
@@ -189,14 +190,14 @@ export class CompactionEngine {
     const newMessages: Message[] = [
       {
         role: 'user',
-        content: `[Context from earlier in this conversation]\n\n${summary}`,
+        content: `${COMPACTION_SUMMARY_PREFIX}\n\n${summary}`,
       },
       {
         role: 'assistant',
         content: [
           {
             type: 'text',
-            text: 'I understand the previous context. Let me continue helping you.',
+            text: COMPACTION_ACK_TEXT,
           },
         ],
       },

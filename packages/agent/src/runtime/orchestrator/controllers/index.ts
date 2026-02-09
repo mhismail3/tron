@@ -70,3 +70,10 @@ export {
   createTodoController,
   type TodoControllerConfig,
 } from './todo-controller.js';
+
+// Embedding and vector search
+export {
+  EmbeddingController,
+  createEmbeddingController,
+  type EmbeddingControllerConfig,
+} from './embedding-controller.js';

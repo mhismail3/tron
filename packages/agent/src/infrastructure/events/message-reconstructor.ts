@@ -12,6 +12,7 @@
  */
 
 import type { EventId, SessionEvent, Message, MessageWithEventId, TokenUsage } from './types.js';
+import { COMPACTION_SUMMARY_PREFIX, COMPACTION_ACK_TEXT } from '@context/constants.js';
 
 // =============================================================================
 // Types
@@ -165,7 +166,7 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
       combined.push({
         message: {
           role: 'user',
-          content: `[Context from earlier in this conversation]\n\n${payload.summary}`,
+          content: `${COMPACTION_SUMMARY_PREFIX}\n\n${payload.summary}`,
         },
         eventIds: [undefined],
       });
@@ -175,7 +176,7 @@ export function reconstructFromEvents(ancestors: SessionEvent[]): Reconstruction
           content: [
             {
               type: 'text',
-              text: 'I understand the previous context. Let me continue helping you.',
+              text: COMPACTION_ACK_TEXT,
             },
           ],
         },

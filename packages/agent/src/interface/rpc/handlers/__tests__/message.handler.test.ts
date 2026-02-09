@@ -109,9 +109,9 @@ describe('Message Handlers', () => {
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
       };
 
-      vi.mocked(mockContext.eventStore!.deleteMessage).mockRejectedValue(
-        new Error('Event not found')
-      );
+      const err = new Error('Event not found');
+      (err as any).code = 'EVENT_NOT_FOUND';
+      vi.mocked(mockContext.eventStore!.deleteMessage).mockRejectedValue(err);
 
       const response = await registry.dispatch(request, mockContext);
 
@@ -126,9 +126,9 @@ describe('Message Handlers', () => {
         params: { sessionId: 'session-123', targetEventId: 'event-123' },
       };
 
-      vi.mocked(mockContext.eventStore!.deleteMessage).mockRejectedValue(
-        new Error('Cannot delete this message')
-      );
+      const err = new Error('Cannot delete this message');
+      (err as any).code = 'INVALID_OPERATION';
+      vi.mocked(mockContext.eventStore!.deleteMessage).mockRejectedValue(err);
 
       const response = await registry.dispatch(request, mockContext);
 
