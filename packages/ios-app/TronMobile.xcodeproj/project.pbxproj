@@ -125,7 +125,6 @@
 		3C69ADE0EE80669C6BB15291 /* InputHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6964BC2C78A1224344F88458 /* InputHistoryStore.swift */; };
 		3CD4946EAE2CAEE0CC90E37B /* TurnContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58B654CAC83AF8E4FA816EFF /* TurnContentCache.swift */; };
 		3D7FCD4E71F3784FF152347C /* TodoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 463001C0D20507A73DE057C1 /* TodoState.swift */; };
-		3D90F36A41F441A76B96B406 /* CrimsonText-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6302B61C129EEB11381E3AC2 /* CrimsonText-SemiBold.ttf */; };
 		3DCA57E6CB7A8340CEFA123B /* FloatingVoiceNotesButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5436D45890922947458785 /* FloatingVoiceNotesButton.swift */; };
 		3F8D7A923D0785D4217D6732 /* AgentClientProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A086125114604546F6343DA /* AgentClientProtocol.swift */; };
 		3FF108401784F98C1F26A6A4 /* ConfigHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6AFA332997143C504C733B /* ConfigHandlers.swift */; };
@@ -381,7 +380,6 @@
 		CEF6FC8B0A7300D03FE2985A /* NewSessionFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF881DA76CF64054893335E0 /* NewSessionFlow.swift */; };
 		CF457096D2D3949E635362EE /* SendMessageUseCaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0A74579921C78A4D7B5060 /* SendMessageUseCaseTests.swift */; };
 		CF9017BF1956D00C024FB622 /* AskUserQuestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52A3C00972EDE3F2158000B3 /* AskUserQuestionTests.swift */; };
-		D00075C210EF730B84CE4A3D /* CrimsonText-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 2AC13F412851CDEACB491476 /* CrimsonText-Bold.ttf */; };
 		D09CCAC45099299C4011D21A /* SessionStateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C007FE3CED8DE514E5200279 /* SessionStateChecker.swift */; };
 		D1209116CCAE12E56D2D726F /* WaitForAgentsTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12C06691E5608858E6401FBA /* WaitForAgentsTypes.swift */; };
 		D1FF05B10FA026434547CD83 /* AppConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573786916D189526D1A7C795 /* AppConstantsTests.swift */; };
@@ -434,7 +432,6 @@
 		EF29A0EBE44A38D2CF21E5A4 /* TodosUpdatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B493E756658902348DF82E /* TodosUpdatedPlugin.swift */; };
 		EF47C54CC9157CB4BC957C67 /* SyncRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C9B14E52315013A746D7375 /* SyncRepository.swift */; };
 		EF6AD2F7E3EB8DCF607670CD /* ChatViewModel+AskUserQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86BAA5A3FA745A6568A4E81 /* ChatViewModel+AskUserQuestion.swift */; };
-		EF91E8D08CE43FFC882F3F00 /* CrimsonText-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DAA18D273AA2159CD5C9DF07 /* CrimsonText-Regular.ttf */; };
 		EF9A5E2E418095614FE6841C /* UIRenderCompletePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D852CC9B6B86088E87C5E1 /* UIRenderCompletePlugin.swift */; };
 		F151C70F8C1F7F750511A1C9 /* CompletePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778EBE6FA27F00677570A951 /* CompletePlugin.swift */; };
 		F2AF817FC04D5E7A67A18827 /* ToolResultRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7170BDE82B7EED1E313977D /* ToolResultRouter.swift */; };
@@ -558,7 +555,6 @@
 		2629E94DAAED42278A045D53 /* RulesSectionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesSectionViews.swift; sourceTree = "<group>"; };
 		26F524E553392BAE6663A6DC /* UICanvasCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasCoordinatorTests.swift; sourceTree = "<group>"; };
 		277426277E34E49215DB26CE /* SettingsState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsState.swift; sourceTree = "<group>"; };
-		2AC13F412851CDEACB491476 /* CrimsonText-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "CrimsonText-Bold.ttf"; sourceTree = "<group>"; };
 		2AE4180AAF04B767A3F222D6 /* AskUserQuestionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionCoordinatorTests.swift; sourceTree = "<group>"; };
 		2B1BA093BE42A0EE7FD7F2EE /* AskUserQuestionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionSheet.swift; sourceTree = "<group>"; };
 		2B917936C7757726E703B855 /* ChatView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ChatView+Toolbar.swift"; sourceTree = "<group>"; };
@@ -652,7 +648,6 @@
 		60C8C974432CC696B2359C0D /* AskUserQuestionTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionTransformer.swift; sourceTree = "<group>"; };
 		62545C1C1369818CCB057447 /* TodoWriteTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodoWriteTypes.swift; sourceTree = "<group>"; };
 		62B46CB291EF3701672EE4B9 /* ConnectedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedPlugin.swift; sourceTree = "<group>"; };
-		6302B61C129EEB11381E3AC2 /* CrimsonText-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "CrimsonText-SemiBold.ttf"; sourceTree = "<group>"; };
 		637D018D17FB22BE188D582B /* AskUserQuestionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserQuestionState.swift; sourceTree = "<group>"; };
 		6385427D7DFA2EBA2CFB72DF /* WrappingHStackLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappingHStackLayout.swift; sourceTree = "<group>"; };
 		64A7D28E3375D78943565750 /* MessageMetadataBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageMetadataBadge.swift; sourceTree = "<group>"; };
@@ -870,7 +865,6 @@
 		D5CD5F330539097040C10CAC /* TronSpacing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronSpacing.swift; sourceTree = "<group>"; };
 		D7EDD80984A35BD5A2D64E22 /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformer.swift; sourceTree = "<group>"; };
-		DAA18D273AA2159CD5C9DF07 /* CrimsonText-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "CrimsonText-Regular.ttf"; sourceTree = "<group>"; };
 		DAB63A06F10DECB64865B025 /* SineWaveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SineWaveView.swift; sourceTree = "<group>"; };
 		DAC187E5AD31DD3F3462F060 /* ConsolidatedAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsolidatedAnalytics.swift; sourceTree = "<group>"; };
 		DAD87CBC58F65286C1220FEE /* TurnEndPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnEndPluginTests.swift; sourceTree = "<group>"; };
@@ -1525,9 +1519,6 @@
 			children = (
 				4665FD394D5F63951D8B2012 /* AlanSans-Variable.ttf */,
 				2BFF5606F19446978F9B9BF5 /* Comme-Variable.ttf */,
-				2AC13F412851CDEACB491476 /* CrimsonText-Bold.ttf */,
-				DAA18D273AA2159CD5C9DF07 /* CrimsonText-Regular.ttf */,
-				6302B61C129EEB11381E3AC2 /* CrimsonText-SemiBold.ttf */,
 				2B9F68C73E01D0089F4DE39E /* IBMPlexSerif-Bold.ttf */,
 				68C53AD3FC00E6F11E3CD04E /* IBMPlexSerif-Light.ttf */,
 				2ED3322DDABB60F27852BE4C /* IBMPlexSerif-Medium.ttf */,
@@ -2393,9 +2384,6 @@
 				671C4CACBB0DF7C3AEA59A0D /* AlanSans-Variable.ttf in Resources */,
 				FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */,
 				5FEA34E3EB5AB89D977A8404 /* Comme-Variable.ttf in Resources */,
-				D00075C210EF730B84CE4A3D /* CrimsonText-Bold.ttf in Resources */,
-				EF91E8D08CE43FFC882F3F00 /* CrimsonText-Regular.ttf in Resources */,
-				3D90F36A41F441A76B96B406 /* CrimsonText-SemiBold.ttf in Resources */,
 				B88F6EEB81F285616AFE665B /* Fonts in Resources */,
 				52DA57119FDA87709008C206 /* IBMPlexSerif-Bold.ttf in Resources */,
 				0720BB45CADD07E225F5692A /* IBMPlexSerif-Light.ttf in Resources */,

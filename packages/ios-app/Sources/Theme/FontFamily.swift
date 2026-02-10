@@ -5,7 +5,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     case recursive
     case alanSans
     case comme
-    case crimsonText
     case ibmPlexSerif
     case vollkorn
 
@@ -16,7 +15,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Recursive"
         case .alanSans: "Alan Sans"
         case .comme: "Comme"
-        case .crimsonText: "Crimson Text"
         case .ibmPlexSerif: "IBM Plex Serif"
         case .vollkorn: "Vollkorn"
         }
@@ -27,7 +25,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Variable casual sans"
         case .alanSans: "Clean geometric sans"
         case .comme: "Minimal geometric sans"
-        case .crimsonText: "Garamond-inspired serif"
         case .ibmPlexSerif: "Contemporary slab serif"
         case .vollkorn: "Warm book serif"
         }
@@ -39,7 +36,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Recursive"
         case .alanSans: "AlanSans-Light"
         case .comme: "Comme-Regular"
-        case .crimsonText: "CrimsonText-Regular"
         case .ibmPlexSerif: "IBMPlexSerif-Regular"
         case .vollkorn: "Vollkorn-Regular"
         }
@@ -52,7 +48,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var isVariable: Bool {
         switch self {
         case .recursive, .alanSans, .comme, .vollkorn: true
-        case .crimsonText, .ibmPlexSerif: false
+        case .ibmPlexSerif: false
         }
     }
 
@@ -60,7 +56,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var customAxes: [FontAxis] {
         switch self {
         case .recursive: [.casual]
-        case .alanSans, .comme, .crimsonText, .ibmPlexSerif, .vollkorn: []
+        case .alanSans, .comme, .ibmPlexSerif, .vollkorn: []
         }
     }
 
@@ -70,7 +66,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: 300...1000
         case .alanSans: 300...900
         case .comme: 100...900
-        case .crimsonText: 400...700
         case .ibmPlexSerif: 300...700
         case .vollkorn: 400...900
         }

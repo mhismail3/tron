@@ -135,8 +135,8 @@ enum TronFontLoader {
         case .alanSans, .comme, .vollkorn:
             break // weight-only
 
-        case .crimsonText, .ibmPlexSerif:
-            break // static fonts — buildVariations should never be called for these
+        case .ibmPlexSerif:
+            break // static font — buildVariations should never be called for this
         }
 
         return variations
