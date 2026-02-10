@@ -239,8 +239,6 @@ final class TurnLifecycleCoordinator {
         context.flushUIUpdateQueue()
         context.flushPendingTextUpdates()
 
-        context.isProcessing = false
-
         // Remove catching-up notification if still present
         if let catchUpId = context.catchingUpMessageId {
             context.messages.removeAll { $0.id == catchUpId }

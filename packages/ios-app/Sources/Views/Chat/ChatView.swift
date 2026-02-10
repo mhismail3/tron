@@ -445,16 +445,14 @@ struct ChatView: View {
                         }
                         .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
-                        // Height collapses to 0 before shouldShowProcessingIndicator
-                        // flips false, so removal from layout is imperceptible.
-                        if viewModel.shouldShowProcessingIndicator {
-                            BreathingLineIndicator()
-                                .frame(height: viewModel.shouldShowBreathingLine ? nil : 0, alignment: .top)
-                                .clipped()
-                                .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
-                                .animation(viewModel.shouldShowBreathingLine ? .easeInOut(duration: 0.3) : nil, value: viewModel.shouldShowBreathingLine)
-                                .id("processing")
-                        }
+                        // Always present in view tree to avoid layout shifts.
+                        // Zero height + clipped + zero opacity = invisible with no layout impact.
+                        BreathingLineIndicator()
+                            .frame(height: viewModel.shouldShowBreathingLine ? nil : 0, alignment: .top)
+                            .clipped()
+                            .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
+                            .animation(viewModel.shouldShowBreathingLine ? .easeInOut(duration: 0.3) : nil, value: viewModel.shouldShowBreathingLine)
+                            .id("processing")
 
                         // Show workspace deleted notification when workspace folder no longer exists
                         if workspaceDeleted {

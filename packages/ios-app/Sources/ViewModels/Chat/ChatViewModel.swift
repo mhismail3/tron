@@ -607,8 +607,44 @@ final class ChatViewModel: ChatEventContext {
 
     // MARK: - Computed Properties
 
-    var shouldShowActivityArc: Bool {
+    var shouldShowProcessingIndicator: Bool {
         agentPhase != .idle
+    }
+
+    /// Show "Processing..." only when the model is thinking and no other
+    /// visual feedback is active (streaming text, thinking block, tool
+    /// spinner, or subagent chip).
+    ///
+    /// Every property read here must be on an @Observable object so SwiftUI
+    /// re-evaluates when state changes. StreamingManager is NOT @Observable,
+    /// so we check `messages` (which is tracked) instead.
+    var shouldShowBreathingLine: Bool {
+        guard agentPhase == .processing else { return false }
+        if messages.last?.isStreaming == true { return false }
+        if isThinkingActivelyStreaming { return false }
+        if hasRunningTools { return false }
+        if subagentState.hasRunningSubagents { return false }
+        return true
+    }
+
+    private var isThinkingActivelyStreaming: Bool {
+        guard let id = thinkingMessageId,
+              let index = MessageFinder.indexById(id, in: messages),
+              case .thinking(_, _, let isStreaming) = messages[index].content else {
+            return false
+        }
+        return isStreaming
+    }
+
+    private var hasRunningTools: Bool {
+        for (id, _) in currentToolMessages {
+            if let index = MessageFinder.indexById(id, in: messages),
+               case .toolUse(let tool) = messages[index].content,
+               tool.status == .running {
+                return true
+            }
+        }
+        return false
     }
 
     var canSend: Bool {

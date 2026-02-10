@@ -356,15 +356,17 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.streamingManagerResetCalled)
     }
 
-    func testCompleteSetsIsProcessingFalse() {
-        // Given
-        mockContext.isProcessing = true
+    func testCompleteDoesNotSetAgentPhaseDirectly() {
+        // The coordinator should NOT modify agentPhase — the caller
+        // (ChatViewModel+Events.handleComplete) sets .postProcessing after
+        // the coordinator returns. Previously the coordinator set
+        // isProcessing = false (→ .idle), causing a transient .idle flash.
+        mockContext.agentPhase = .processing
 
-        // When
         coordinator.handleComplete(streamingText: "", context: mockContext)
 
-        // Then
-        XCTAssertFalse(mockContext.isProcessing)
+        // agentPhase must remain unchanged by the coordinator
+        XCTAssertEqual(mockContext.agentPhase, .processing)
     }
 
     func testCompleteRemovesCatchingUpMessage() {
