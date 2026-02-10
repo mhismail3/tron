@@ -199,7 +199,7 @@ WaitForAgents({ sessionIds: ["sess_abc", "sess_xyz"], mode: "any" })
 
         if (r.output) {
           const outputPreview = r.output.length > 1000
-            ? r.output.slice(0, 1000) + '\n\n... (truncated, use QuerySubagent for full output)'
+            ? r.output.slice(0, 1000) + '\n\n... (truncated, use QueryAgent for full output)'
             : r.output;
           content += `\n**Output**:\n${outputPreview}\n`;
         }

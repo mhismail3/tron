@@ -103,7 +103,7 @@ describe('buildSubagentResultsContext', () => {
     const result = buildSubagentResultsContext(mockSession);
 
     expect(result).toBeDefined();
-    expect(result).toContain('[Output truncated. Use QuerySubagent for full output]');
+    expect(result).toContain('[Output truncated. Use QueryAgent for full output]');
     expect(result!.length).toBeLessThan(longOutput.length);
   });
 

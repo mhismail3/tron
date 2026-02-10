@@ -29,6 +29,7 @@ export interface AskUserQuestionConfig {
 export class AskUserQuestionTool implements TronTool<AskUserQuestionParams> {
   readonly name = 'AskUserQuestion';
   readonly executionContract = 'options' as const;
+  readonly interactive = true;
   readonly description = `Ask the user interactive questions with multiple choice options.
 
 Use this tool when you need to:

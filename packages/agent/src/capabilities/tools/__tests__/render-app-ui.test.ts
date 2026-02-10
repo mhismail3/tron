@@ -30,6 +30,10 @@ describe('RenderAppUITool', () => {
       expect(tool.label).toBe('Render App UI');
       expect(tool.category).toBe('custom');
     });
+
+    it('should be marked as interactive', () => {
+      expect(tool.interactive).toBe(true);
+    });
   });
 
   describe('canvasId auto-generation', () => {

@@ -160,6 +160,12 @@ export interface TronTool<
    * Tool category for grouping
    */
   category?: 'filesystem' | 'shell' | 'search' | 'network' | 'custom';
+
+  /**
+   * Whether this tool requires user interaction (e.g., presenting UI, opening browser).
+   * Interactive tools are automatically excluded from subagent sessions.
+   */
+  interactive?: boolean;
 }
 
 // =============================================================================

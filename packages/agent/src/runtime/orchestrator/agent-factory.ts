@@ -512,6 +512,9 @@ export class AgentFactory {
       } else {
         effectiveDenials = subagentToolsDenial;
       }
+
+      // Remove interactive tools (require user interaction)
+      tools = tools.filter(t => !t.interactive);
     }
 
     // Apply tool denial filtering

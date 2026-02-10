@@ -32,6 +32,10 @@ describe('OpenURLTool', () => {
     it('should have custom category', () => {
       expect(openBrowserTool.category).toBe('custom');
     });
+
+    it('should be marked as interactive', () => {
+      expect(openBrowserTool.interactive).toBe(true);
+    });
   });
 
   describe('execute - URL validation', () => {

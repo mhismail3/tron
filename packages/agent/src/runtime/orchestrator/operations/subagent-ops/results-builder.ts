@@ -32,7 +32,9 @@ export function buildSubagentResultsContext(
   context +=
     'The following sub-agent(s) have completed since your last turn. ';
   context +=
-    'Review their results and incorporate them into your response as appropriate.\n\n';
+    'Review their results and incorporate them into your response as appropriate. ';
+  context +=
+    'To investigate further, use Remember with the session ID to query events and logs.\n\n';
 
   for (const result of results) {
     const statusIcon = result.success ? '✅' : '❌';
@@ -52,7 +54,7 @@ export function buildSubagentResultsContext(
       const truncatedOutput =
         result.output.length > maxOutputLength
           ? result.output.slice(0, maxOutputLength) +
-            '\n\n... [Output truncated. Use QuerySubagent for full output]'
+            '\n\n... [Output truncated. Use QueryAgent for full output]'
           : result.output;
       context += `\n**Output**:\n\`\`\`\n${truncatedOutput}\n\`\`\`\n`;
     }

@@ -313,3 +313,5 @@ Key behaviors:
 - Default limit: 20, max: 500. Use `offset` for pagination.
 
 Debugging workflow: `sessions` to find it, `session` for overview, `events` with `type: "error"` for errors, `logs` with `level: "error"` for log-level errors, `events` with specific `turn` to examine a turn. When tool results reference a `blob_id`, use `read_blob` to retrieve full content.
+
+iOS app logs are at `~/.tron/artifacts/ios-logs/`. Check these when investigating iOS-side issues — they contain client-side logs that complement the server-side event history.

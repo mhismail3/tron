@@ -55,6 +55,7 @@ export interface RenderAppUIConfig {
 export class RenderAppUITool implements TronTool<RenderAppUIParams> {
   readonly name = 'RenderAppUI';
   readonly executionContract = 'options' as const;
+  readonly interactive = true;
 
   /**
    * Retry tracking per canvasId to prevent infinite loops on validation failure.

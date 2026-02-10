@@ -204,6 +204,11 @@ describe('AgentFactory - Tool Denial System', () => {
       expect(toolNames).not.toContain('QueryAgent');
       expect(toolNames).not.toContain('WaitForAgents');
 
+      // Interactive tools should be excluded for subagents
+      expect(toolNames).not.toContain('AskUserQuestion');
+      expect(toolNames).not.toContain('RenderAppUI');
+      expect(toolNames).not.toContain('OpenURL');
+
       // But other tools should be available
       expect(toolNames).toContain('Read');
       expect(toolNames).toContain('Write');
@@ -235,6 +240,11 @@ describe('AgentFactory - Tool Denial System', () => {
       expect(toolNames).not.toContain('SpawnSubagent');
       expect(toolNames).not.toContain('QueryAgent');
       expect(toolNames).not.toContain('WaitForAgents');
+
+      // Interactive tools also excluded
+      expect(toolNames).not.toContain('AskUserQuestion');
+      expect(toolNames).not.toContain('RenderAppUI');
+      expect(toolNames).not.toContain('OpenURL');
 
       // Should still have
       expect(toolNames).toContain('Read');
@@ -280,6 +290,10 @@ describe('AgentFactory - Tool Denial System', () => {
       expect(toolNames).toContain('SpawnSubagent');
       expect(toolNames).toContain('QueryAgent');
       expect(toolNames).toContain('WaitForAgents');
+      // Interactive tools available for top-level agents
+      expect(toolNames).toContain('AskUserQuestion');
+      expect(toolNames).toContain('RenderAppUI');
+      expect(toolNames).toContain('OpenURL');
     });
   });
 });

@@ -237,8 +237,8 @@ Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAge
           break;
         case 'output':
           content = result.output
-            ? `**Sub-agent Output**:\n\n${result.output}`
-            : 'Sub-agent has no output yet (may still be running or has no response).';
+            ? `**Sub-agent Output** (session: \`${sessionId}\`):\n\n${result.output}`
+            : `Sub-agent \`${sessionId}\` has no output yet (may still be running or has no response).`;
           break;
         default:
           content = 'Unknown query type';

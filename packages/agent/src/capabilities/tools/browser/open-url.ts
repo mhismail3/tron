@@ -45,6 +45,7 @@ Examples:
   readonly label = 'Open Browser';
   readonly category = 'custom' as const;
   readonly executionContract = 'options' as const;
+  readonly interactive = true;
 
   constructor(_config: OpenURLConfig = {}) {
     // Config accepted for API compatibility
