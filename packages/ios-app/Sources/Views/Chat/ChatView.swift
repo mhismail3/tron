@@ -164,14 +164,6 @@ struct ChatView: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
-        .overlay(alignment: .top) {
-            if viewModel.shouldShowActivityArc {
-                DynamicIslandActivityIndicator()
-                    .ignoresSafeArea(.all)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.3)))
-            }
-        }
-        .animation(.easeInOut(duration: 0.4), value: viewModel.shouldShowActivityArc)
         .toolbar {
             leadingToolbarItem
             principalToolbarItem
@@ -453,10 +445,15 @@ struct ChatView: View {
                         }
                         .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
-                        // Invisible anchor for auto-scroll when processing
-                        // (visible indicator is the Dynamic Island overlay)
-                        if viewModel.shouldShowActivityArc {
-                            Color.clear.frame(height: 1).id("processing")
+                        // Height collapses to 0 before shouldShowProcessingIndicator
+                        // flips false, so removal from layout is imperceptible.
+                        if viewModel.shouldShowProcessingIndicator {
+                            BreathingLineIndicator()
+                                .frame(height: viewModel.shouldShowBreathingLine ? nil : 0, alignment: .top)
+                                .clipped()
+                                .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
+                                .animation(viewModel.shouldShowBreathingLine ? .easeInOut(duration: 0.3) : nil, value: viewModel.shouldShowBreathingLine)
+                                .id("processing")
                         }
 
                         // Show workspace deleted notification when workspace folder no longer exists
@@ -528,7 +525,7 @@ struct ChatView: View {
                         }
                     }
                 }
-                // Auto-scroll when ProcessingIndicator appears/disappears
+                // Auto-scroll when processing state changes
                 .onChange(of: viewModel.isProcessing) { _, _ in
                     guard initialLoadComplete else { return }
                     guard scrollCoordinator.shouldAutoScroll else { return }
