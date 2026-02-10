@@ -262,21 +262,38 @@ struct CachedSessionSidebarRow: View {
             }
 
             // Bottom row: Working directory + tokens/cost
-            HStack(spacing: 6) {
-                Text(session.displayDirectory)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
-                    .lineLimit(1)
-                    .truncationMode(.head)
+            ViewThatFits(in: .horizontal) {
+                // Full layout: directory + stats + cost
+                HStack(spacing: 6) {
+                    Text(session.displayDirectory)
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.head)
 
-                Spacer()
+                    Spacer(minLength: 4)
 
-                // Token stats with SF Symbols (matching chat view style)
-                sessionTokenStats
+                    sessionTokenStats
+                        .fixedSize()
 
-                Text(session.formattedCost)
-                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                    Text(session.formattedCost)
+                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                        .foregroundStyle(.tronEmerald.opacity(0.5))
+                        .fixedSize()
+                }
+
+                // Compact fallback: stats + cost only (drop directory)
+                HStack(spacing: 6) {
+                    sessionTokenStats
+                        .fixedSize()
+
+                    Spacer(minLength: 0)
+
+                    Text(session.formattedCost)
+                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                        .foregroundStyle(.tronEmerald.opacity(0.5))
+                        .fixedSize()
+                }
             }
         }
         .padding(.vertical, 10)
