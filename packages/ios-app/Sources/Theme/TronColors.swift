@@ -277,9 +277,13 @@ private struct CountBadgeModifier: ViewModifier {
         colorScheme == .dark ? 0.7 : 0.18
     }
 
+    private var textColor: Color {
+        colorScheme == .dark ? .white : color
+    }
+
     func body(content: Content) -> some View {
         content
-            .foregroundStyle(color)
+            .foregroundStyle(textColor)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(color.opacity(bgOpacity))
