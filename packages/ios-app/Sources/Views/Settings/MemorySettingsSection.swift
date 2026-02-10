@@ -28,10 +28,7 @@ struct MemorySettingsSection: View {
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                         .frame(minWidth: 20)
-                    Stepper("", value: $memoryAutoInjectCount, in: 1...10)
-                        .labelsHidden()
-                        .fixedSize()
-                        .controlSize(.small)
+                    TronStepper(value: $memoryAutoInjectCount, range: 1...10)
                 }
                 .onChange(of: memoryAutoInjectCount) { _, newValue in
                     updateServerSetting {

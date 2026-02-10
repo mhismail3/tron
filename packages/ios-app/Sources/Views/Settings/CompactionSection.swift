@@ -53,10 +53,7 @@ struct CompactionSection: View {
                     .foregroundStyle(.tronEmerald)
                     .monospacedDigit()
                     .frame(minWidth: 20)
-                Stepper("", value: $defaultTurnFallback, in: 3...20)
-                    .labelsHidden()
-                    .fixedSize()
-                    .controlSize(.small)
+                TronStepper(value: $defaultTurnFallback, range: 3...20)
             }
             .onChange(of: defaultTurnFallback) { _, newValue in
                 updateServerSetting {
@@ -81,10 +78,7 @@ struct CompactionSection: View {
                     .foregroundStyle(.tronEmerald)
                     .monospacedDigit()
                     .frame(minWidth: 20)
-                Stepper("", value: $preserveRecentTurns, in: 0...10)
-                    .labelsHidden()
-                    .fixedSize()
-                    .controlSize(.small)
+                TronStepper(value: $preserveRecentTurns, range: 0...10)
             }
             .onChange(of: preserveRecentTurns) { _, newValue in
                 updateServerSetting {

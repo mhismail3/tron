@@ -59,10 +59,7 @@ struct WebSettingsSection: View {
                     .foregroundStyle(.tronEmerald)
                     .monospacedDigit()
                     .frame(minWidth: 30)
-                Stepper("", value: $webCacheMaxEntries, in: 25...500, step: 25)
-                    .labelsHidden()
-                    .fixedSize()
-                    .controlSize(.small)
+                TronStepper(value: $webCacheMaxEntries, range: 25...500, step: 25)
             }
             .onChange(of: webCacheMaxEntries) { _, newValue in
                 updateServerSetting {
