@@ -162,10 +162,4 @@ export type RpcMethod =
   | 'communication.send'
   | 'communication.receive'
   | 'communication.subscribe'
-  | 'communication.unsubscribe'
-  // Self-deployment operations
-  | 'deployment.trigger'
-  | 'deployment.status'
-  | 'deployment.approve'
-  | 'deployment.rollback'
-  | 'deployment.healthCheck';
+  | 'communication.unsubscribe';

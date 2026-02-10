@@ -10,8 +10,7 @@
  * - ui/            - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
  * - web/           - Web fetching and searching (web-fetch, web-search)
  * - communication/ - Inter-agent messaging (send-message, receive-messages)
- * - deployment/    - Self-deployment (Adapt)
- * - sandbox/       - Container management (Sandbox)
+ * - sandbox/       - Container runner utilities (used by RPC adapter)
  */
 
 // Filesystem tools
@@ -199,23 +198,6 @@ export {
   type ReceiveMessagesResult,
   type ReceivedMessage,
 } from './communication/index.js';
-
-// Deployment tools
-export {
-  AdaptTool,
-  type AdaptToolConfig,
-  type AdaptParams,
-  type DeploymentRecord,
-} from './deployment/index.js';
-
-// Sandbox tools
-export {
-  SandboxTool,
-  type SandboxToolConfig,
-  type SandboxParams,
-  type SandboxAction,
-  type ContainerRecord,
-} from './sandbox/index.js';
 
 // Utility functions for token estimation and output truncation
 export {

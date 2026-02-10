@@ -132,11 +132,6 @@ final class SheetCoordinator {
         present(.commandToolDetail(data))
     }
 
-    /// Show adapt (deployment) detail sheet
-    func showAdaptDetail(_ data: AdaptChipData) {
-        present(.adaptDetail(data))
-    }
-
     /// Show model picker sheet
     func showModelPicker() {
         present(.modelPicker)

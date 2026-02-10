@@ -35,8 +35,7 @@ enum ToolRegistry {
         "browsetheweb", "openurl",
         "webfetch", "websearch",
         "task",
-        "remember",
-        "sandbox"
+        "remember"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -45,8 +44,7 @@ enum ToolRegistry {
         "spawnsubagent", "queryagent", "waitforagents",
         "renderappui",
         "todowrite",
-        "notifyapp",
-        "adapt"
+        "notifyapp"
     ]
 
     /// Check if a tool should be rendered as a command-tool chip.
@@ -279,24 +277,6 @@ enum ToolRegistry {
             },
             viewerFactory: nil
         ),
-        "sandbox": ToolDescriptor(
-            icon: "shippingbox",
-            iconColor: .tronIndigo,
-            displayName: "Sandbox",
-            summaryExtractor: { args in
-                let action = ToolArgumentParser.action(from: args)
-                guard !action.isEmpty else { return "" }
-                let name = ToolArgumentParser.string("name", from: args) ?? ""
-                let command = ToolArgumentParser.command(from: args)
-                if action == "exec" && !command.isEmpty {
-                    let label = name.isEmpty ? "" : "\(name): "
-                    return "\(label)\(ToolArgumentParser.truncate(command))"
-                }
-                if !name.isEmpty { return "\(action): \(name)" }
-                return action
-            },
-            viewerFactory: nil
-        )
     ]
 
     private static func defaultDescriptor(for toolName: String) -> ToolDescriptor {

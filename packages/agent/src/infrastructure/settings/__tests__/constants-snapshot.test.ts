@@ -187,8 +187,6 @@ describe('constants snapshot', () => {
         'SpawnSubagent',
         'QueryAgent',
         'WaitForAgents',
-        'Adapt',
-        'Sandbox',
       ]);
     });
   });

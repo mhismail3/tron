@@ -295,41 +295,6 @@ struct ToolResultParser {
         )
     }
 
-    // MARK: - Adapt Parsing
-
-    /// Parse Adapt tool to create AdaptChipData for chip display
-    static func parseAdapt(from tool: ToolUseData) -> AdaptChipData? {
-        let action: AdaptAction
-        if let actionStr = ToolArgumentParser.string("action", from: tool.arguments) {
-            switch actionStr {
-            case "deploy": action = .deploy
-            case "status": action = .status
-            case "rollback": action = .rollback
-            default: action = .deploy
-            }
-        } else {
-            action = .deploy
-        }
-
-        let status: AdaptStatus
-        switch tool.status {
-        case .running:
-            status = .running
-        case .success:
-            status = .success
-        case .error:
-            status = .failed
-        }
-
-        return AdaptChipData(
-            toolCallId: tool.toolCallId,
-            action: action,
-            status: status,
-            resultContent: tool.result,
-            isError: tool.status == .error
-        )
-    }
-
     // MARK: - Private Result Extraction Helpers
     // These parse free-text result strings (not JSON arguments), so regex is appropriate.
 

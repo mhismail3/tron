@@ -31,6 +31,4 @@ export const SUBAGENT_EXCLUDED_TOOLS = [
   'SpawnSubagent',
   'QueryAgent',
   'WaitForAgents',
-  'Adapt',
-  'Sandbox',
 ] as const;

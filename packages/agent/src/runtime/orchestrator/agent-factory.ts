@@ -9,8 +9,6 @@
  * Phase 7 of orchestrator refactoring.
  */
 // Direct imports to avoid circular dependencies through index.js
-import { homedir } from 'os';
-import { join } from 'path';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { TronAgent } from '../agent/tron-agent.js';
 import type { AgentConfig } from '../agent/types.js';
@@ -35,8 +33,6 @@ import {
   BraveProvider,
   ExaProvider,
   RememberTool,
-  AdaptTool,
-  SandboxTool,
   filterToolsByDenial,
   type BrowserDelegate,
   type SpawnSubagentParams,
@@ -390,25 +386,6 @@ export class AgentFactory {
         vectorRepo: this.config.vectorRepo,
       }),
     ];
-
-    // Add Adapt tool if TRON_REPO_ROOT is set and this is not a subagent
-    const repoRoot = process.env.TRON_REPO_ROOT;
-    if (!isSubagent && repoRoot) {
-      tools.push(new AdaptTool({
-        repoRoot,
-        tronHome: process.env.TRON_DATA_DIR ?? join(homedir(), '.tron'),
-      }));
-    }
-
-    // Add Sandbox tool for container management
-    if (!isSubagent) {
-      const tronHome = process.env.TRON_DATA_DIR ?? join(homedir(), '.tron');
-      tools.push(new SandboxTool({
-        sessionId,
-        workingDirectory,
-        tronHome,
-      }));
-    }
 
     // Add NotifyApp tool if push notifications are configured
     if (this.config.onNotify) {

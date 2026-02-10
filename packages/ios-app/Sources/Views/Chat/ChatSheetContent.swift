@@ -100,9 +100,6 @@ struct ChatSheetContent: View {
                 }
             })
 
-        case .adaptDetail(let data):
-            AdaptDetailSheet(data: data)
-
         case .modelPicker:
             ModelPickerSheet(
                 models: viewModel.modelPickerState.cachedModels,

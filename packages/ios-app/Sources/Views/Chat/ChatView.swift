@@ -404,9 +404,6 @@ struct ChatView: View {
                                 onCommandToolTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showCommandToolDetail(data)
                                 },
-                                onAdaptTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showAdaptDetail(data)
-                                },
                                 onQueryAgentTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showCommandToolDetail(CommandToolChipData(
                                         id: data.toolCallId,
