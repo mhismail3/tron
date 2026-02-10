@@ -53,6 +53,15 @@
 		<string>Fonts/Recursive-Variable.ttf</string>
 		<string>Fonts/AlanSans-Variable.ttf</string>
 		<string>Fonts/Comme-Variable.ttf</string>
+		<string>Fonts/Vollkorn-Variable.ttf</string>
+		<string>Fonts/CrimsonText-Regular.ttf</string>
+		<string>Fonts/CrimsonText-SemiBold.ttf</string>
+		<string>Fonts/CrimsonText-Bold.ttf</string>
+		<string>Fonts/IBMPlexSerif-Light.ttf</string>
+		<string>Fonts/IBMPlexSerif-Regular.ttf</string>
+		<string>Fonts/IBMPlexSerif-Medium.ttf</string>
+		<string>Fonts/IBMPlexSerif-SemiBold.ttf</string>
+		<string>Fonts/IBMPlexSerif-Bold.ttf</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

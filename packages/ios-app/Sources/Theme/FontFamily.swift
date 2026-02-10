@@ -1,10 +1,13 @@
 import Foundation
 
-/// Available font families for the app's proportional/sans UI text
+/// Available font families for the app's UI text
 enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     case recursive
     case alanSans
     case comme
+    case crimsonText
+    case ibmPlexSerif
+    case vollkorn
 
     var id: String { rawValue }
 
@@ -13,6 +16,9 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Recursive"
         case .alanSans: "Alan Sans"
         case .comme: "Comme"
+        case .crimsonText: "Crimson Text"
+        case .ibmPlexSerif: "IBM Plex Serif"
+        case .vollkorn: "Vollkorn"
         }
     }
 
@@ -21,35 +27,52 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Variable casual sans"
         case .alanSans: "Clean geometric sans"
         case .comme: "Minimal geometric sans"
+        case .crimsonText: "Garamond-inspired serif"
+        case .ibmPlexSerif: "Contemporary slab serif"
+        case .vollkorn: "Warm book serif"
         }
     }
 
-    /// CoreText font name used in UIFontDescriptor `.name` attribute
+    /// PostScript name used for CGFont registration verification
     var fontName: String {
         switch self {
         case .recursive: "Recursive"
         case .alanSans: "AlanSans-Light"
         case .comme: "Comme-Regular"
+        case .crimsonText: "CrimsonText-Regular"
+        case .ibmPlexSerif: "IBMPlexSerif-Regular"
+        case .vollkorn: "Vollkorn-Regular"
         }
     }
 
     /// Whether this family has a monospace axis (only Recursive)
     var supportsMono: Bool { self == .recursive }
 
+    /// Whether this font is a variable font (vs static weight files)
+    var isVariable: Bool {
+        switch self {
+        case .recursive, .alanSans, .comme, .vollkorn: true
+        case .crimsonText, .ibmPlexSerif: false
+        }
+    }
+
     /// Custom axes available for this family (excludes weight — handled separately)
     var customAxes: [FontAxis] {
         switch self {
         case .recursive: [.casual]
-        case .alanSans, .comme: []
+        case .alanSans, .comme, .crimsonText, .ibmPlexSerif, .vollkorn: []
         }
     }
 
-    /// Weight range for the variable font
+    /// Weight range for the font
     var weightRange: ClosedRange<CGFloat> {
         switch self {
         case .recursive: 300...1000
         case .alanSans: 300...900
         case .comme: 100...900
+        case .crimsonText: 400...700
+        case .ibmPlexSerif: 300...700
+        case .vollkorn: 400...900
         }
     }
 }

@@ -55,7 +55,6 @@ enum TronFontLoader {
 
     // MARK: - Variable Font Creation
 
-    /// Create a UIFont with specific variable font axis values
     @MainActor
     static func createUIFont(
         size: CGFloat,
@@ -68,19 +67,24 @@ enum TronFontLoader {
         let resolvedFamily = mono ? .recursive : (family ?? FontSettings.shared.selectedFamily)
         let clampedWeight = clampWeight(weight.rawValue, for: resolvedFamily)
 
-        let variations = buildVariations(
-            family: resolvedFamily,
-            weight: clampedWeight,
-            mono: mono,
-            casual: casual
-        )
+        let descriptor: UIFontDescriptor
+        if resolvedFamily.isVariable {
+            let variations = buildVariations(
+                family: resolvedFamily,
+                weight: clampedWeight,
+                mono: mono,
+                casual: casual
+            )
+            descriptor = UIFontDescriptor(fontAttributes: [
+                .family: resolvedFamily.displayName,
+                UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): variations,
+            ])
+        } else {
+            // Static fonts: use traits for weight selection
+            descriptor = UIFontDescriptor(fontAttributes: [.family: resolvedFamily.displayName])
+                .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: uiFontWeight(from: weight)]])
+        }
 
-        let attributes: [UIFontDescriptor.AttributeName: Any] = [
-            .family: resolvedFamily.displayName,
-            UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): variations,
-        ]
-
-        let descriptor = UIFontDescriptor(fontAttributes: attributes)
         let font = UIFont(descriptor: descriptor, size: size)
 
         // Verify we got the right font (case-insensitive match on family or font name)
@@ -90,7 +94,7 @@ enum TronFontLoader {
             return font
         }
 
-        logger.warning("Variable font creation failed for \(resolvedFamily.displayName), using system fallback", category: .ui)
+        logger.warning("Font creation failed for \(resolvedFamily.displayName), using system fallback", category: .ui)
         return mono
             ? UIFont.monospacedSystemFont(ofSize: size, weight: uiFontWeight(from: weight))
             : UIFont.systemFont(ofSize: size, weight: uiFontWeight(from: weight))
@@ -128,8 +132,11 @@ enum TronFontLoader {
             variations[AxisTag.slant] = 0.0
             variations[AxisTag.cursive] = 0.0
 
-        case .alanSans, .comme:
+        case .alanSans, .comme, .vollkorn:
             break // weight-only
+
+        case .crimsonText, .ibmPlexSerif:
+            break // static fonts — buildVariations should never be called for these
         }
 
         return variations
