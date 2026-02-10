@@ -18,6 +18,16 @@ enum ToolArgumentParser {
         return value
     }
 
+    /// Extract a string array for a given key from JSON arguments.
+    static func stringArray(_ key: String, from args: String) -> [String]? {
+        guard let data = args.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = json[key] as? [String] else {
+            return nil
+        }
+        return value
+    }
+
     // MARK: - Typed Extractors
 
     /// Extract file path: tries "file_path" first, falls back to "path".

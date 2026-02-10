@@ -15,6 +15,8 @@ struct MessageBubble: View {
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
     var onAdaptTap: ((AdaptChipData) -> Void)?
+    var onQueryAgentTap: ((QueryAgentChipData) -> Void)?
+    var onWaitForAgentsTap: ((WaitForAgentsChipData) -> Void)?
     var onMemoryUpdatedTap: ((String, String) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
 
@@ -204,6 +206,34 @@ struct MessageBubble: View {
                     }
                 } else {
                     // Fallback to regular tool view if parsing fails
+                    ToolResultRouter(tool: tool)
+                }
+            case "queryagent":
+                if let chipData = ToolResultParser.parseQueryAgent(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        QueryAgentChip(data: chipData) {
+                            onQueryAgentTap?(chipData)
+                        }
+                    } else {
+                        QueryAgentChipFallback(data: chipData) {
+                            onQueryAgentTap?(chipData)
+                        }
+                    }
+                } else {
+                    ToolResultRouter(tool: tool)
+                }
+            case "waitforagents":
+                if let chipData = ToolResultParser.parseWaitForAgents(from: tool) {
+                    if #available(iOS 26.0, *) {
+                        WaitForAgentsChip(data: chipData) {
+                            onWaitForAgentsTap?(chipData)
+                        }
+                    } else {
+                        WaitForAgentsChipFallback(data: chipData) {
+                            onWaitForAgentsTap?(chipData)
+                        }
+                    }
+                } else {
                     ToolResultRouter(tool: tool)
                 }
             case "askuserquestion":

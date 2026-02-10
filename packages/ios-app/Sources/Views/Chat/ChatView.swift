@@ -164,6 +164,13 @@ struct ChatView: View {
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
+        .overlay(alignment: .top) {
+            if shouldShowProcessingAnimation {
+                DynamicIslandActivityIndicator()
+                    .ignoresSafeArea(.all)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.3)))
+            }
+        }
         .toolbar {
             leadingToolbarItem
             principalToolbarItem
@@ -400,6 +407,38 @@ struct ChatView: View {
                                 onAdaptTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showAdaptDetail(data)
                                 },
+                                onQueryAgentTap: { [sheetCoordinator] data in
+                                    sheetCoordinator.showCommandToolDetail(CommandToolChipData(
+                                        id: data.toolCallId,
+                                        toolName: "QueryAgent",
+                                        normalizedName: "queryagent",
+                                        icon: data.queryType.icon,
+                                        iconColor: .tronIndigo,
+                                        displayName: "Query Agent (\(data.queryType.displayName))",
+                                        summary: data.resultPreview ?? "",
+                                        status: data.status == .error ? .error : .success,
+                                        durationMs: data.durationMs,
+                                        arguments: "",
+                                        result: data.fullResult,
+                                        isResultTruncated: false
+                                    ))
+                                },
+                                onWaitForAgentsTap: { [sheetCoordinator] data in
+                                    sheetCoordinator.showCommandToolDetail(CommandToolChipData(
+                                        id: data.toolCallId,
+                                        toolName: "WaitForAgents",
+                                        normalizedName: "waitforagents",
+                                        icon: "hourglass",
+                                        iconColor: .tronTeal,
+                                        displayName: "Wait For Agents",
+                                        summary: data.resultPreview ?? "",
+                                        status: data.status == .error ? .error : .success,
+                                        durationMs: data.durationMs,
+                                        arguments: "",
+                                        result: data.fullResult,
+                                        isResultTruncated: false
+                                    ))
+                                },
                                 onMemoryUpdatedTap: { [sheetCoordinator, sessionId] title, entryType in
                                     sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId)
                                 },
@@ -416,14 +455,10 @@ struct ChatView: View {
                         }
                         .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
 
-                        // Show processing indicator only when:
-                        // 1. Processing is happening
-                        // 2. Last message is not streaming text
-                        // 3. No subagent is blocking (subagent chip shows its own spinner)
-                        // 4. No thinking message is active (thinking message has its own visual)
-                        if viewModel.isProcessing && viewModel.messages.last?.isStreaming != true && !viewModel.subagentState.hasRunningSubagents && viewModel.thinkingMessageId == nil {
-                            ProcessingIndicator()
-                                .id("processing")
+                        // Invisible anchor for auto-scroll when processing
+                        // (visible indicator is the Dynamic Island overlay)
+                        if shouldShowProcessingAnimation {
+                            Color.clear.frame(height: 1).id("processing")
                         }
 
                         // Show workspace deleted notification when workspace folder no longer exists

@@ -193,6 +193,108 @@ struct ToolResultParser {
         )
     }
 
+    // MARK: - QueryAgent Parsing
+
+    /// Parse QueryAgent tool to create QueryAgentChipData for chip display
+    static func parseQueryAgent(from tool: ToolUseData) -> QueryAgentChipData? {
+        let sessionId = ToolArgumentParser.string("sessionId", from: tool.arguments) ?? "unknown"
+
+        let queryType: QueryType
+        if let qt = ToolArgumentParser.string("queryType", from: tool.arguments) {
+            queryType = QueryType(rawValue: qt) ?? .unknown
+        } else {
+            queryType = .unknown
+        }
+
+        let status: QueryAgentStatus
+        switch tool.status {
+        case .running:
+            status = .querying
+        case .success:
+            status = .success
+        case .error:
+            status = .error
+        }
+
+        let resultPreview: String?
+        if let result = tool.result {
+            let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
+            resultPreview = lines.first.map { $0.count > 80 ? String($0.prefix(80)) + "..." : $0 }
+        } else {
+            resultPreview = nil
+        }
+
+        return QueryAgentChipData(
+            toolCallId: tool.toolCallId,
+            sessionId: sessionId,
+            queryType: queryType,
+            status: status,
+            durationMs: tool.durationMs,
+            resultPreview: resultPreview,
+            fullResult: tool.result,
+            errorMessage: tool.status == .error ? tool.result : nil
+        )
+    }
+
+    // MARK: - WaitForAgents Parsing
+
+    /// Parse WaitForAgents tool to create WaitForAgentsChipData for chip display
+    static func parseWaitForAgents(from tool: ToolUseData) -> WaitForAgentsChipData? {
+        let sessionIds = ToolArgumentParser.stringArray("sessionIds", from: tool.arguments) ?? []
+
+        let mode: WaitMode
+        if let m = ToolArgumentParser.string("mode", from: tool.arguments) {
+            mode = WaitMode(rawValue: m) ?? .all
+        } else {
+            mode = .all
+        }
+
+        let status: WaitForAgentsStatus
+        switch tool.status {
+        case .running:
+            status = .waiting
+        case .success:
+            if let result = tool.result, result.lowercased().contains("timeout") {
+                status = .timedOut
+            } else {
+                status = .completed
+            }
+        case .error:
+            if let result = tool.result, result.lowercased().contains("timeout") {
+                status = .timedOut
+            } else {
+                status = .error
+            }
+        }
+
+        // Count completed agents from result
+        var completedCount = 0
+        if let result = tool.result {
+            let matches = result.matches(of: /Session:\s*`sess_/)
+            completedCount = matches.count
+        }
+
+        let resultPreview: String?
+        if let result = tool.result {
+            let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
+            resultPreview = lines.first.map { $0.count > 80 ? String($0.prefix(80)) + "..." : $0 }
+        } else {
+            resultPreview = nil
+        }
+
+        return WaitForAgentsChipData(
+            toolCallId: tool.toolCallId,
+            sessionIds: sessionIds,
+            mode: mode,
+            status: status,
+            completedCount: completedCount,
+            durationMs: tool.durationMs,
+            resultPreview: resultPreview,
+            fullResult: tool.result,
+            errorMessage: tool.status == .error ? tool.result : nil
+        )
+    }
+
     // MARK: - Adapt Parsing
 
     /// Parse Adapt tool to create AdaptChipData for chip display
