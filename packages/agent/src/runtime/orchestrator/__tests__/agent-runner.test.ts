@@ -83,7 +83,7 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
  */
 function createMockConfig(overrides: Partial<AgentRunnerConfig> = {}): AgentRunnerConfig {
   const mockSkillLoader = {
-    loadSkillContextForPrompt: vi.fn().mockResolvedValue(undefined),
+    loadSkillContextForPrompt: vi.fn().mockResolvedValue({ skillContext: '', subagentSkills: [] }),
     transformContentForLLM: vi.fn().mockImplementation((content) => content),
   };
 
@@ -91,6 +91,7 @@ function createMockConfig(overrides: Partial<AgentRunnerConfig> = {}): AgentRunn
     skillLoader: mockSkillLoader as any,
     emit: vi.fn(),
     buildSubagentResultsContext: vi.fn().mockReturnValue(undefined),
+    spawnSkillSubagent: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -216,9 +217,10 @@ describe('AgentRunner', () => {
     });
 
     it('passes skill context to agent.run via RunContext', async () => {
-      (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue(
-        '<skills><skill>Test skill content</skill></skills>'
-      );
+      (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue({
+        skillContext: '<skills><skill>Test skill content</skill></skills>',
+        subagentSkills: [],
+      });
       const options = createRunOptions();
 
       await runner.run(active, options);
@@ -232,7 +234,10 @@ describe('AgentRunner', () => {
     });
 
     it('passes undefined skillContext when none available', async () => {
-      (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue(undefined);
+      (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue({
+        skillContext: '',
+        subagentSkills: [],
+      });
       const options = createRunOptions();
 
       await runner.run(active, options);
@@ -243,6 +248,40 @@ describe('AgentRunner', () => {
           skillContext: undefined,
         })
       );
+    });
+
+    it('calls spawnSkillSubagent for subagent skills', async () => {
+      const subagentSkill = {
+        name: 'test-sub-skill',
+        content: 'subagent content',
+        toolDenials: { tools: ['Bash'] },
+        model: 'claude-haiku-4-5-20251001',
+      };
+      (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue({
+        skillContext: '',
+        subagentSkills: [subagentSkill],
+      });
+      const options = createRunOptions({ prompt: 'do stuff' });
+
+      await runner.run(active, options);
+
+      expect(config.spawnSkillSubagent).toHaveBeenCalledWith(
+        'sess_test123',
+        subagentSkill,
+        'do stuff',
+      );
+    });
+
+    it('does not call spawnSkillSubagent when no subagent skills', async () => {
+      (config.skillLoader.loadSkillContextForPrompt as Mock).mockResolvedValue({
+        skillContext: '<skills>inline</skills>',
+        subagentSkills: [],
+      });
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      expect(config.spawnSkillSubagent).not.toHaveBeenCalled();
     });
 
     it('passes subagent results via RunContext', async () => {

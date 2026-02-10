@@ -77,7 +77,7 @@ function createMockActiveSession(): ActiveSession {
 
 function createMockConfig(): AgentRunnerConfig {
   const mockSkillLoader = {
-    loadSkillContextForPrompt: vi.fn().mockResolvedValue(undefined),
+    loadSkillContextForPrompt: vi.fn().mockResolvedValue({ skillContext: '', subagentSkills: [] }),
     transformContentForLLM: vi.fn().mockImplementation((content) => content),
   };
 
@@ -85,6 +85,7 @@ function createMockConfig(): AgentRunnerConfig {
     skillLoader: mockSkillLoader as any,
     emit: vi.fn(),
     buildSubagentResultsContext: vi.fn().mockReturnValue(undefined),
+    spawnSkillSubagent: vi.fn().mockResolvedValue(undefined),
   };
 }
 

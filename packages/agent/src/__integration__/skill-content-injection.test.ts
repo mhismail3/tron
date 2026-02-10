@@ -199,7 +199,7 @@ describe('Skill Content Injection', () => {
         prompt: 'Regular prompt with no skills',
       });
 
-      expect(result).toBe('');
+      expect(result.skillContext).toBe('');
     });
 
     it('loads skill content from explicit skills array', async () => {
@@ -220,8 +220,8 @@ describe('Skill Content Injection', () => {
       });
 
       expect(skillLoaderMock).toHaveBeenCalledWith(['old-timey-english']);
-      expect(result).toContain('old-timey-english');
-      expect(result).toContain('Shakespearean');
+      expect(result.skillContext).toContain('old-timey-english');
+      expect(result.skillContext).toContain('Shakespearean');
     });
 
     it('ignores @mentions in prompt (client-side responsibility)', async () => {
@@ -244,7 +244,7 @@ describe('Skill Content Injection', () => {
 
       // Should NOT call skillLoader since no explicit skills provided
       expect(skillLoaderMock).not.toHaveBeenCalled();
-      expect(result).toBe('');
+      expect(result.skillContext).toBe('');
     });
 
     it('only uses explicit skills array, ignoring @mentions in prompt', async () => {
@@ -267,8 +267,8 @@ describe('Skill Content Injection', () => {
 
       // Should only have the explicit skill, not the @mention
       expect(skillLoaderMock).toHaveBeenCalledWith(['old-timey-english']);
-      expect(result).toContain('old-timey-english');
-      expect(result).not.toContain('api-design');
+      expect(result.skillContext).toContain('old-timey-english');
+      expect(result.skillContext).not.toContain('api-design');
     });
 
     it('loads multiple explicit skills', async () => {
@@ -295,8 +295,8 @@ describe('Skill Content Injection', () => {
       expect(skillLoaderMock).toHaveBeenCalledWith(
         expect.arrayContaining(['typescript-rules', 'api-design'])
       );
-      expect(result).toContain('typescript-rules');
-      expect(result).toContain('api-design');
+      expect(result.skillContext).toContain('typescript-rules');
+      expect(result.skillContext).toContain('api-design');
     });
 
     it('returns empty string when skillLoader not provided but skills are', async () => {
@@ -312,7 +312,7 @@ describe('Skill Content Injection', () => {
         // No skillLoader provided
       });
 
-      expect(result).toBe('');
+      expect(result.skillContext).toBe('');
     });
 
     it('returns empty string when skillLoader returns empty array', async () => {
@@ -331,7 +331,7 @@ describe('Skill Content Injection', () => {
       });
 
       expect(skillLoaderMock).toHaveBeenCalledWith(['non-existent-skill']);
-      expect(result).toBe('');
+      expect(result.skillContext).toBe('');
     });
   });
 

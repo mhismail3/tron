@@ -16,6 +16,7 @@ import type { SubAgentTracker } from '@capabilities/tools/subagent/subagent-trac
 import type { TodoTracker } from '@capabilities/todos/todo-tracker.js';
 import type { SessionContext } from './session/session-context.js';
 import type { ReasoningLevel } from '../agent/types.js';
+import type { SkillFrontmatter } from '@capabilities/extensions/skills/types.js';
 
 // =============================================================================
 // Configuration
@@ -168,11 +169,7 @@ export interface LoadedSkillContent {
   /** Full SKILL.md content */
   content: string;
   /** Parsed frontmatter (optional, for tool preferences) */
-  frontmatter?: {
-    allowedTools?: string[];
-    tools?: string[];
-    [key: string]: unknown;
-  };
+  frontmatter?: SkillFrontmatter;
 }
 
 export interface AgentRunOptions {

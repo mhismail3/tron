@@ -34,7 +34,7 @@ import { normalizeContentBlocks } from '@core/utils/content-normalizer.js';
 import { PersistenceError } from '@core/utils/errors.js';
 import type { RunResult, RunContext } from '../agent/types.js';
 import type { UserContent } from '@core/types/messages.js';
-import type { SkillLoader } from './operations/skill-loader.js';
+import type { SkillLoader, SubagentSkillRequest } from './operations/skill-loader.js';
 import type {
   ActiveSession,
   AgentRunOptions,
@@ -60,6 +60,13 @@ export interface AgentRunnerConfig {
 
   /** Build context string from pending subagent results */
   buildSubagentResultsContext: (active: ActiveSession) => string | undefined;
+
+  /** Spawn a skill-triggered subagent */
+  spawnSkillSubagent: (
+    parentSessionId: string,
+    skill: SubagentSkillRequest,
+    userPrompt: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -213,8 +220,8 @@ export class AgentRunner {
    * All per-run context is gathered here and passed to agent.run() as a single parameter.
    */
   private async buildRunContext(active: ActiveSession, options: AgentRunOptions): Promise<RunContext> {
-    // Skill context
-    const skillContext = await this.config.skillLoader.loadSkillContextForPrompt(
+    // Skill context (returns both inline context and subagent skill requests)
+    const { skillContext, subagentSkills } = await this.config.skillLoader.loadSkillContextForPrompt(
       {
         sessionId: active.sessionId,
         skillTracker: active.skillTracker,
@@ -230,6 +237,11 @@ export class AgentRunner {
         contextType: isRemovedInstruction ? 'removed-skills-instruction' : 'skill-content',
         preview: skillContext.substring(0, 150),
       });
+    }
+
+    // Spawn subagent skills (fire-and-forget — subagent runs concurrently)
+    for (const skill of subagentSkills) {
+      await this.config.spawnSkillSubagent(active.sessionId, skill, options.prompt);
     }
 
     // Subagent results
@@ -257,7 +269,7 @@ export class AgentRunner {
     const reasoningLevel = options.reasoningLevel ?? active.sessionContext.getReasoningLevel();
 
     return {
-      skillContext: skillContext ?? undefined,
+      skillContext: skillContext || undefined,
       subagentResults: subagentResults ?? undefined,
       todoContext: todoContext ?? undefined,
       reasoningLevel: reasoningLevel as RunContext['reasoningLevel'],

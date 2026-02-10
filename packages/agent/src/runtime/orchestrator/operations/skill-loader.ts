@@ -5,21 +5,25 @@
  * - Skill context building for prompts
  * - Skill tracking/event persistence
  * - Content transformation for LLM consumption
+ * - Subagent mode routing (no/ask/yes)
  *
  * Phase 3 of orchestrator refactoring - skill/context loading logic.
  */
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger } from '@infrastructure/logging/index.js';
 import { buildSkillContext } from '@capabilities/extensions/skills/skill-injector.js';
+import { getSkillSubagentMode, skillFrontmatterToDenials } from '@capabilities/extensions/skills/skill-to-denials.js';
 import type {
   SkillSource,
   SkillAddMethod,
   SkillMetadata,
 } from '@capabilities/extensions/skills/types.js';
+import type { ToolDenialConfig } from '@capabilities/tools/subagent/tool-denial.js';
 import type { SkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
 import type { UserContent } from '@core/types/messages.js';
 import type { SessionContext } from '../session/session-context.js';
 import type { AgentRunOptions } from '../types.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 
 const logger = createLogger('skill-loader');
 
@@ -36,6 +40,37 @@ export interface SkillLoadContext {
   skillTracker: SkillTracker;
   sessionContext: SessionContext;
 }
+
+/** Result of loading skills for a prompt. */
+export interface SkillLoadResult {
+  /** Skill context for prompt injection ('no' and 'ask' mode skills) */
+  skillContext: string;
+  /** Skills that need subagent spawning ('yes' mode) */
+  subagentSkills: SubagentSkillRequest[];
+}
+
+/** A skill that should be executed via a spawned subagent. */
+export interface SubagentSkillRequest {
+  name: string;
+  content: string;
+  toolDenials?: ToolDenialConfig;
+  model: string;
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * All available tool names for allow-list inversion.
+ * When a skill specifies allowedTools, everything NOT in the list is denied.
+ */
+const AVAILABLE_TOOL_NAMES = [
+  'Read', 'Write', 'Edit', 'Bash', 'Search', 'Find',
+  'BrowseTheWeb', 'AskUserQuestion', 'OpenURL', 'RenderAppUI',
+  'SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'TodoWrite',
+  'NotifyApp', 'WebFetch', 'WebSearch', 'Remember',
+];
 
 // =============================================================================
 // SkillLoader Class
@@ -55,17 +90,15 @@ export class SkillLoader {
    * 3. Tracking new skills (creates events) - but NOT spells
    * 4. Building removed skills/spells instruction
    * 5. Loading skill/spell content via skillLoader callback
-   * 6. Building final skill context string with tool preferences
-   *
-   * Note: Tool restrictions (allowedTools) are now handled as suggestions in
-   * the skill context, not via plan mode. Enforcement only happens when skills
-   * spawn subagents with subagent: 'yes'.
+   * 6. Routing by subagent mode (no/ask/yes)
+   * 7. Building final skill context string with tool preferences
    */
   async loadSkillContextForPrompt(
     context: SkillLoadContext,
     options: AgentRunOptions
-  ): Promise<string> {
+  ): Promise<SkillLoadResult> {
     const { sessionId, skillTracker } = context;
+    const empty: SkillLoadResult = { skillContext: '', subagentSkills: [] };
 
     // Get session skills already tracked (persistent across turns)
     const sessionSkills = skillTracker.getAddedSkills();
@@ -177,7 +210,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       logger.info('[SKILL] No skills to load - returning removed skills instruction only', {
         hasRemovedInstruction: removedSkillsInstruction.length > 0,
       });
-      return removedSkillsInstruction;
+      return { skillContext: removedSkillsInstruction, subagentSkills: [] };
     }
 
     // If no skill loader provided, we can't load content
@@ -187,7 +220,7 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         skillCount: skillNames.size,
         skillNames: Array.from(skillNames),
       });
-      return '';
+      return empty;
     }
 
     // Load skill content
@@ -207,19 +240,16 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
         sessionId,
         requestedSkills: Array.from(skillNames),
       });
-      return '';
+      return empty;
     }
 
-    // Build skill context using buildSkillContext
-    // Note: Tool preferences from allowedTools are included as suggestions
-    // (enforced only in subagent mode)
-    // Convert LoadedSkillContent to SkillMetadata format for buildSkillContext
+    // Convert LoadedSkillContent to SkillMetadata format
     const skillMetadata: SkillMetadata[] = loadedSkills.map((s) => ({
       name: s.name,
       displayName: s.name,
       content: s.content,
       description: '',
-      frontmatter: {},
+      frontmatter: s.frontmatter ?? {},
       source: 'global' as const,
       path: '',
       skillMdPath: '',
@@ -227,20 +257,45 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       lastModified: Date.now(),
     }));
 
-    const skillContext = buildSkillContext(skillMetadata);
+    // Partition skills by subagent mode
+    const inlineSkills: SkillMetadata[] = [];
+    const subagentSkills: SubagentSkillRequest[] = [];
+    const defaultSubagentModel = getSettings().models.subagent;
+
+    for (const skill of skillMetadata) {
+      const mode = getSkillSubagentMode(skill.frontmatter);
+      if (mode === 'yes') {
+        subagentSkills.push({
+          name: skill.name,
+          content: skill.content,
+          toolDenials: skillFrontmatterToDenials(skill.frontmatter, AVAILABLE_TOOL_NAMES),
+          model: skill.frontmatter.subagentModel ?? defaultSubagentModel,
+        });
+      } else {
+        // 'no' and 'ask' — inject into current agent
+        if (mode === 'ask') {
+          skill.content = wrapWithAskInstruction(skill.name, skill.content);
+        }
+        inlineSkills.push(skill);
+      }
+    }
+
+    const skillContext = buildSkillContext(inlineSkills);
 
     logger.info('[SKILL] Built skill context successfully', {
       sessionId,
-      skillCount: loadedSkills.length,
+      inlineCount: inlineSkills.length,
+      subagentCount: subagentSkills.length,
       contextLength: skillContext.length,
       contextPreview: skillContext.substring(0, 200) + '...',
     });
 
     // Combine removed skills instruction with skill context
-    if (removedSkillsInstruction) {
-      return `${removedSkillsInstruction}\n\n${skillContext}`;
-    }
-    return skillContext;
+    const combinedContext = removedSkillsInstruction
+      ? `${removedSkillsInstruction}\n\n${skillContext}`
+      : skillContext;
+
+    return { skillContext: combinedContext, subagentSkills };
   }
 
   /**
@@ -354,6 +409,24 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
       return block;
     });
   }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Wrap skill content with an ask-for-confirmation instruction.
+ * The agent must call AskUserQuestion before following the skill.
+ */
+function wrapWithAskInstruction(skillName: string, content: string): string {
+  return `<skill-requires-confirmation>
+IMPORTANT: Before following this skill's instructions, you MUST use the AskUserQuestion tool to ask the user:
+"The @${skillName} skill wants to run. Proceed?"
+Only follow this skill's instructions if the user confirms. If declined, ignore this skill entirely.
+</skill-requires-confirmation>
+
+${content}`;
 }
 
 // =============================================================================

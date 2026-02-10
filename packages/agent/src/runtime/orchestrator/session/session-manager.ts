@@ -70,6 +70,7 @@ export interface SessionManagerConfig {
     model: string,
     systemPrompt?: string,
     isSubagent?: boolean,
+    toolDenials?: import('../../../capabilities/tools/subagent/tool-denial.js').ToolDenialConfig,
   ) => Promise<TronAgent>;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
@@ -140,6 +141,7 @@ export class SessionManager {
       model,
       options.systemPrompt,
       isSubagent,
+      options.toolDenials,
     );
 
     // Load rules files for the session

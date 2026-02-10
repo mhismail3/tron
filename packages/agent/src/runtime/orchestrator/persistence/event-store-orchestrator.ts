@@ -295,8 +295,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       defaultProvider: config.defaultProvider,
       maxConcurrentSessions: config.maxConcurrentSessions,
       sessionStore: this.activeSessions,
-      createAgentForSession: (sessionId, workingDirectory, model, systemPrompt, isSubagent) =>
-        this.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent),
+      createAgentForSession: (sessionId, workingDirectory, model, systemPrompt, isSubagent, toolDenials) =>
+        this.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent, toolDenials),
       emit: (event, data) => this.emit(event, data),
       estimateTokens: (text) => this.estimateTokens(text),
       hasBrowserSession: (sessionId) => this.browserService?.hasSession(sessionId) ?? false,
@@ -433,6 +433,16 @@ export class EventStoreOrchestrator extends EventEmitter {
       skillLoader: this.skillLoader,
       emit: (event, data) => this.emit(event, data),
       buildSubagentResultsContext: (active) => this.subagents.buildSubagentResultsContext(active),
+      spawnSkillSubagent: async (parentSessionId, skill, userPrompt) => {
+        await this.subagents.spawnSubsession(parentSessionId, {
+          task: userPrompt,
+          model: skill.model,
+          systemPrompt: skill.content,
+          toolDenials: skill.toolDenials,
+          skills: [skill.name],
+          blocking: false,
+        });
+      },
     });
 
     // Initialize ModelController (extracted model switching coordinator)
@@ -586,7 +596,7 @@ export class EventStoreOrchestrator extends EventEmitter {
   async loadSkillContextForPrompt(
     active: ActiveSession,
     options: AgentRunOptions
-  ): Promise<string> {
+  ): Promise<import('../operations/skill-loader.js').SkillLoadResult> {
     return this.skillLoader.loadSkillContextForPrompt(
       {
         sessionId: active.sessionId,
@@ -624,8 +634,9 @@ export class EventStoreOrchestrator extends EventEmitter {
     model: string,
     systemPrompt?: string,
     isSubagent?: boolean,
+    toolDenials?: import('../../../capabilities/tools/subagent/tool-denial.js').ToolDenialConfig,
   ): Promise<TronAgent> {
-    return this.agentFactory.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent);
+    return this.agentFactory.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent, toolDenials);
   }
 
   // ===========================================================================
