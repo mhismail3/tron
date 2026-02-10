@@ -14,7 +14,6 @@ struct AppearanceSection: View {
                 }
             }
             .pickerStyle(.segmented)
-            .listRowBackground(Color.tronSurface)
         } header: {
             Text("Appearance")
                 .font(TronTypography.caption)

@@ -353,7 +353,7 @@ struct TodoDetailSheetLegacy: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(todo.status == .inProgress ? todo.activeForm : todo.content)
                                     .font(.body)
-                                    .foregroundStyle(todo.status == .completed ? .gray : .white)
+                                    .foregroundStyle(todo.status == .completed ? .gray : .tronTextPrimary)
                                 HStack {
                                     Text(todo.source.displayName)
                                         .font(.caption)

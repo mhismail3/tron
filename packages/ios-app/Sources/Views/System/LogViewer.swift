@@ -302,7 +302,7 @@ struct FilterChip: View {
                 .fontWeight(isSelected ? .semibold : .regular)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(isSelected ? color.opacity(0.3) : Color(white: 0.2))
+                .background(isSelected ? color.opacity(0.3) : Color.tronSurfaceElevated)
                 .foregroundStyle(isSelected ? color : .gray)
                 .clipShape(Capsule())
                 .overlay(

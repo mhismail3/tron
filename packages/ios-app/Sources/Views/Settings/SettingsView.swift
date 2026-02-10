@@ -147,7 +147,6 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 40)
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
