@@ -90,7 +90,7 @@ extension ChatViewModel {
         // (Extract screenshot before coordinator - needs access to BrowserScreenshotService)
         if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: messages) {
             if case .toolUse(let tool) = messages[index].content {
-                if tool.toolName.lowercased() == "browsetheweb" {
+                if ToolKind(toolName: tool.toolName) == .browseTheWeb {
                     // Pass plugin result for screenshot extraction (needs result.details)
                     extractAndDisplayBrowserScreenshot(from: pluginResult)
                 }
@@ -112,7 +112,7 @@ extension ChatViewModel {
         browserState.browserFrame = extractionResult.image
 
         // Only auto-show if user hasn't manually dismissed this turn
-        if !browserState.userDismissedBrowserThisTurn && !browserState.showBrowserWindow {
+        if browserState.dismissal != .userDismissed && !browserState.showBrowserWindow {
             browserState.showBrowserWindow = true
         }
     }
@@ -151,7 +151,7 @@ extension ChatViewModel {
 
         // Auto-dismiss browser sheet when agent completes
         if browserState.showBrowserWindow {
-            browserState.autoDismissedBrowserThisTurn = true
+            browserState.dismissal = .autoDismissed
             browserState.showBrowserWindow = false
         }
 
@@ -161,9 +161,22 @@ extension ChatViewModel {
         // Enter post-processing state: text field enabled, send button disabled.
         // Cleared by agent_ready event when background hooks finish.
         agentPhase = .postProcessing
+
+        // Defensive timeout: if agent.ready never arrives, recover the send button
+        postProcessingTimeoutTask?.cancel()
+        postProcessingTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard let self, !Task.isCancelled else { return }
+            if self.agentPhase == .postProcessing {
+                self.logWarning("Post-processing timeout — agent.ready never arrived, recovering")
+                self.agentPhase = .idle
+            }
+        }
     }
 
     func handleAgentReady() {
+        postProcessingTimeoutTask?.cancel()
+        postProcessingTimeoutTask = nil
         agentPhase = .idle
         logInfo("Agent ready - post-processing complete")
     }

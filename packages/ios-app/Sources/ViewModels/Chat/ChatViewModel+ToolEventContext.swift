@@ -47,7 +47,7 @@ extension ChatViewModel: ToolEventContext {
     /// Also auto-shows the browser window when a browser tool is detected.
     @discardableResult
     func updateBrowserStatusIfNeeded() -> Bool {
-        let shouldShow = !browserState.userDismissedBrowserThisTurn
+        let shouldShow = browserState.dismissal != .userDismissed
         if browserState.browserStatus == nil {
             browserState.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
         }
@@ -63,7 +63,7 @@ extension ChatViewModel: ToolEventContext {
 
     /// Start browser stream if not already streaming (ToolEventContext)
     func startBrowserStreamIfNeeded() {
-        if browserState.browserStatus?.isStreaming == true || browserState.userDismissedBrowserThisTurn {
+        if browserState.browserStatus?.isStreaming == true || browserState.dismissal == .userDismissed {
             return
         }
         Task {

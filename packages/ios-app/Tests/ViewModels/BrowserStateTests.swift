@@ -14,12 +14,15 @@ final class BrowserStateTests: XCTestCase {
         XCTAssertNotNil(state.browserFrame)
     }
 
-    func testUserDismissedBrowserThisTurn() {
+    func testBrowserDismissalEnum() {
         let state = BrowserState()
-        XCTAssertFalse(state.userDismissedBrowserThisTurn)
+        XCTAssertEqual(state.dismissal, .none)
 
-        state.userDismissedBrowserThisTurn = true
-        XCTAssertTrue(state.userDismissedBrowserThisTurn)
+        state.dismissal = .userDismissed
+        XCTAssertEqual(state.dismissal, .userDismissed)
+
+        state.dismissal = .autoDismissed
+        XCTAssertEqual(state.dismissal, .autoDismissed)
     }
 
     func testBrowserStatusTracking() {
@@ -66,9 +69,9 @@ final class BrowserStateTests: XCTestCase {
 
     func testResetForNewTurn() {
         let state = BrowserState()
-        state.userDismissedBrowserThisTurn = true
+        state.dismissal = .userDismissed
         state.resetForNewTurn()
-        XCTAssertFalse(state.userDismissedBrowserThisTurn)
+        XCTAssertEqual(state.dismissal, .none)
     }
 
     func testClearAll() {
@@ -77,7 +80,7 @@ final class BrowserStateTests: XCTestCase {
         state.browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: true, currentUrl: nil)
         state.showBrowserWindow = true
         state.safariURL = URL(string: "https://example.com")
-        state.userDismissedBrowserThisTurn = true
+        state.dismissal = .userDismissed
 
         state.clearAll()
 
@@ -85,6 +88,6 @@ final class BrowserStateTests: XCTestCase {
         XCTAssertNil(state.browserStatus)
         XCTAssertFalse(state.showBrowserWindow)
         XCTAssertNil(state.safariURL)
-        XCTAssertFalse(state.userDismissedBrowserThisTurn)
+        XCTAssertEqual(state.dismissal, .none)
     }
 }

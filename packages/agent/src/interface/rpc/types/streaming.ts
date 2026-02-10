@@ -104,6 +104,8 @@ export interface AgentToolEndEvent {
   success: boolean;
   output?: string;
   error?: string;
+  /** Structured result details from the tool (tool-specific shape) */
+  details?: Record<string, unknown>;
 }
 
 /**

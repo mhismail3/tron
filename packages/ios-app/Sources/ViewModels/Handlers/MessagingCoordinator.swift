@@ -28,11 +28,11 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Current turn number
     var currentTurn: Int { get set }
 
-    /// Whether the user dismissed the browser this turn
-    var userDismissedBrowserThisTurn: Bool { get set }
+    /// How the browser sheet was dismissed this turn (if at all)
+    var browserDismissal: BrowserDismissal { get set }
 
-    /// Whether the browser sheet was auto-dismissed this turn
-    var autoDismissedBrowserThisTurn: Bool { get set }
+    /// Number of questions from the last AskUserQuestion answer submission
+    var lastAnsweredQuestionCount: Int { get }
 
     /// Send prompt to the server
     func sendPromptToServer(
@@ -127,9 +127,8 @@ final class MessagingCoordinator {
             context.dismissPendingSubagentResults()
         }
 
-        // Reset browser dismissal flags for new prompt - browser can auto-open again
-        context.userDismissedBrowserThisTurn = false
-        context.autoDismissedBrowserThisTurn = false
+        // Reset browser dismissal for new prompt - browser can auto-open again
+        context.browserDismissal = .none
 
         // Create user message with attachments, skills, and spells displayed above text
         let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments
@@ -138,11 +137,11 @@ final class MessagingCoordinator {
 
         if !text.isEmpty {
             if isAnswerPrompt {
-                // Show "Answered agent's questions" chip instead of full text
-                let questionCount = text.components(separatedBy: "\n**").count - 1
+                // Use tracked count from AskUserQuestionState (set during answer submission)
+                let questionCount = max(1, context.lastAnsweredQuestionCount)
                 let answerChip = ChatMessage(
                     role: .user,
-                    content: .answeredQuestions(questionCount: max(1, questionCount))
+                    content: .answeredQuestions(questionCount: questionCount)
                 )
                 context.appendMessage(answerChip)
                 context.logDebug("Added answered questions chip")

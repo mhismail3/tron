@@ -112,8 +112,11 @@ final class TurnLifecycleCoordinator {
             context.logDebug("Marked thinking message as no longer streaming")
         }
 
-        // Find the message to update with metadata
-        // Priority: streaming message > first text message of turn > fallback search
+        // Find the message to update with metadata.
+        // Three-layer strategy:
+        //   1. Streaming message ID (normal path — message is actively streaming)
+        //   2. First text message of turn (streaming finalized before turn_end, e.g. before tool call)
+        //   3. Brute-force search from turn start (both IDs lost — should not happen in normal flow)
         var targetIndex: Int?
 
         if let id = context.streamingMessageId,
@@ -122,17 +125,17 @@ final class TurnLifecycleCoordinator {
             context.logDebug("Using streaming message for turn metadata at index \(index)")
         } else if let firstTextId = context.firstTextMessageIdForTurn,
                   let index = MessageFinder.indexById(firstTextId, in: context.messages) {
-            // Streaming message was finalized (e.g., before tool call) but we tracked the first text
             targetIndex = index
             context.logDebug("Using tracked first text message for turn metadata at index \(index)")
         } else if let startIndex = context.turnStartMessageIndex,
                   startIndex < context.messages.count {
-            // Fallback: find first assistant text message from turn start
+            // Fallback: both streamingMessageId and firstTextMessageIdForTurn unavailable.
+            // This indicates a state tracking gap — log at info level for observability.
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant,
                    case .text = context.messages[i].content {
                     targetIndex = i
-                    context.logDebug("Found first assistant text message at index \(i) for turn metadata")
+                    context.logInfo("Turn metadata: fell through to brute-force search, found at index \(i) (turn=\(result.turnNumber))")
                     break
                 }
             }
@@ -247,8 +250,8 @@ final class TurnLifecycleCoordinator {
 
         context.finalizeStreamingMessage()
 
-        // Reset browser dismiss flag for next turn
-        context.userDismissedBrowserThisTurn = false
+        // Reset browser dismissal for next turn
+        context.browserDismissal = .none
 
         // Update dashboard with final response and tool count
         context.setSessionProcessing(false)

@@ -57,6 +57,8 @@ final class UIUpdateQueue {
         let success: Bool
         let result: String
         let durationMs: Int?
+        /// Structured result details from server (tool-specific shape)
+        let details: [String: AnyCodable]?
     }
 
     struct MessageAppendData {

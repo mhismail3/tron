@@ -4,6 +4,8 @@
  * Types for agent interaction methods.
  */
 
+import type { ContentSequenceItem } from '@runtime/orchestrator/turn/content-block-builder.js';
+
 // =============================================================================
 // Agent Methods
 // =============================================================================
@@ -102,6 +104,8 @@ export interface AgentGetStateResult {
   currentTurnText?: string;
   /** Tool calls from current in-progress turn (for resume) */
   currentTurnToolCalls?: CurrentTurnToolCall[];
+  /** Structured content sequence for catch-up (interleaved text/thinking/tool_ref) */
+  contentSequence?: ContentSequenceItem[];
   /** Whether the session was interrupted */
   wasInterrupted: boolean;
 }

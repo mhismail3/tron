@@ -33,10 +33,10 @@ extension ChatViewModel: TurnLifecycleContext {
         streamingManager.streamingMessageId != nil && !streamingManager.streamingText.isEmpty
     }
 
-    /// Whether user dismissed browser this turn (TurnLifecycleContext)
-    var userDismissedBrowserThisTurn: Bool {
-        get { browserState.userDismissedBrowserThisTurn }
-        set { browserState.userDismissedBrowserThisTurn = newValue }
+    /// How the browser sheet was dismissed this turn (TurnLifecycleContext)
+    var browserDismissal: BrowserDismissal {
+        get { browserState.dismissal }
+        set { browserState.dismissal = newValue }
     }
 
     // MARK: - Streaming Management (Protocol Methods)

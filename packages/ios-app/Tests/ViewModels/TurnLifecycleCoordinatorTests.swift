@@ -386,15 +386,15 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.catchingUpMessageId)
     }
 
-    func testCompleteResetsBrowserDismissFlag() {
+    func testCompleteResetsBrowserDismissal() {
         // Given
-        mockContext.userDismissedBrowserThisTurn = true
+        mockContext.browserDismissal = .userDismissed
 
         // When
         coordinator.handleComplete(streamingText: "", context: mockContext)
 
         // Then
-        XCTAssertFalse(mockContext.userDismissedBrowserThisTurn)
+        XCTAssertEqual(mockContext.browserDismissal, .none)
     }
 
     func testCompleteClearsToolTracking() {
@@ -498,7 +498,7 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     var currentModel: String = "claude-3-sonnet"
     var agentPhase: AgentPhase = .idle
     var catchingUpMessageId: UUID?
-    var userDismissedBrowserThisTurn: Bool = false
+    var browserDismissal: BrowserDismissal = .none
     var sessionId: String = "test-session"
     var browserStatus: BrowserGetStatusResult?
 

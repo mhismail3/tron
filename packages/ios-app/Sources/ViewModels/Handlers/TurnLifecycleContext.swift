@@ -46,8 +46,8 @@ protocol TurnLifecycleContext: LoggingContext, ProcessingTrackable, StreamingMan
     /// ID of the catching-up notification message
     var catchingUpMessageId: UUID? { get set }
 
-    /// Whether user dismissed browser this turn
-    var userDismissedBrowserThisTurn: Bool { get set }
+    /// How the browser sheet was dismissed this turn (if at all)
+    var browserDismissal: BrowserDismissal { get set }
 
     // MARK: - Thinking State
 

@@ -194,6 +194,9 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         currentTurnToolCalls: isRunning
           ? active!.sessionContext.getAccumulatedContent().toolCalls
           : undefined,
+        contentSequence: isRunning
+          ? active!.sessionContext.getAccumulatedContent().sequence
+          : undefined,
         wasInterrupted,
       };
     },

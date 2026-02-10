@@ -40,8 +40,8 @@ extension ChatViewModel: ConnectionContext {
         return catchingUpMessage.id
     }
 
-    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async {
-        await processCatchUpContentInternal(accumulatedText: accumulatedText, toolCalls: toolCalls)
+    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall], contentSequence: [ContentSequenceItem]?) async {
+        await processCatchUpContentInternal(accumulatedText: accumulatedText, toolCalls: toolCalls, contentSequence: contentSequence)
     }
 
     func removeCatchingUpMessage() {
@@ -86,76 +86,96 @@ extension ChatViewModel {
     // MARK: - Internal Catch-Up Processing
 
     /// Process accumulated content when resuming into an in-progress session
-    private func processCatchUpContentInternal(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async {
+    private func processCatchUpContentInternal(accumulatedText: String, toolCalls: [CurrentTurnToolCall], contentSequence: [ContentSequenceItem]?) async {
         // Initialize turn tracking for catch-up content
         // This ensures turn_end can find the correct messages to update
         turnStartMessageIndex = messages.count
         firstTextMessageIdForTurn = nil
 
-        // Split accumulated text by turn boundaries
-        let textSegments = accumulatedText.components(separatedBy: "\n")
-        logger.debug("Resume catch-up: split into \(textSegments.count) text segments, turn starts at index \(turnStartMessageIndex ?? -1)", category: .session)
+        // Prefer structured contentSequence when available (server >= v3a)
+        if let sequence = contentSequence, !sequence.isEmpty {
+            await processCatchUpFromSequence(sequence, toolCalls: toolCalls)
+            return
+        }
 
-        // Process tool calls with interleaved text
+        // Fallback: legacy newline-splitting for older servers
+        await processCatchUpFromLegacyText(accumulatedText, toolCalls: toolCalls)
+    }
+
+    /// Process catch-up using structured content sequence items
+    private func processCatchUpFromSequence(_ sequence: [ContentSequenceItem], toolCalls: [CurrentTurnToolCall]) async {
+        let toolCallMap = Dictionary(uniqueKeysWithValues: toolCalls.map { ($0.toolCallId, $0) })
+        let lastTextIndex = sequence.lastIndex(where: { if case .text = $0 { return true }; return false })
+
+        for (index, item) in sequence.enumerated() {
+            switch item {
+            case .text(let text):
+                guard !text.isEmpty else { continue }
+                let isLastText = index == lastTextIndex
+                let allToolsDone = toolCalls.allSatisfy { $0.status == "completed" || $0.status == "error" }
+
+                if isLastText && !allToolsDone {
+                    // Last text block with running tools → streaming
+                    let streamingMessage = ChatMessage.streaming()
+                    messages.append(streamingMessage)
+                    streamingManager.catchUpToInProgress(existingText: text, messageId: streamingMessage.id)
+                    if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = streamingMessage.id }
+                } else {
+                    let textMessage = ChatMessage(role: .assistant, content: .text(text))
+                    messages.append(textMessage)
+                    if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = textMessage.id }
+                }
+
+            case .thinking:
+                // Thinking is shown via ThinkingState, not as catch-up messages
+                continue
+
+            case .toolRef(let toolCallId):
+                if let toolCall = toolCallMap[toolCallId] {
+                    await processCatchUpToolCall(toolCall)
+                }
+            }
+        }
+        logger.debug("Resume catch-up: processed \(sequence.count) sequence items", category: .session)
+    }
+
+    /// Fallback: process catch-up using legacy newline-split text + tool calls
+    private func processCatchUpFromLegacyText(_ accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async {
+        let textSegments = accumulatedText.components(separatedBy: "\n")
+        logger.debug("Resume catch-up (legacy): split into \(textSegments.count) text segments", category: .session)
+
         for (index, toolCall) in toolCalls.enumerated() {
-            // Add text segment BEFORE this tool if available
             if index < textSegments.count && !textSegments[index].isEmpty {
                 let segmentText = textSegments[index]
-
                 if toolCall.status == "completed" || toolCall.status == "error" {
                     let textMessage = ChatMessage(role: .assistant, content: .text(segmentText))
                     messages.append(textMessage)
-                    // Track first text message for turn metadata assignment
-                    if firstTextMessageIdForTurn == nil {
-                        firstTextMessageIdForTurn = textMessage.id
-                    }
-                    logger.debug("Resume catch-up: created finalized text message for turn \(index + 1)", category: .session)
+                    if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = textMessage.id }
                 } else {
                     let streamingMessage = ChatMessage.streaming()
                     messages.append(streamingMessage)
-                    // Use StreamingManager to track both ID and text (triggers onTextUpdate callback)
                     streamingManager.catchUpToInProgress(existingText: segmentText, messageId: streamingMessage.id)
-                    // Track first text message for turn metadata assignment
-                    if firstTextMessageIdForTurn == nil {
-                        firstTextMessageIdForTurn = streamingMessage.id
-                    }
-                    logger.debug("Resume catch-up: created streaming message for current turn", category: .session)
+                    if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = streamingMessage.id }
                 }
             }
-
-            // Process the tool call
             await processCatchUpToolCall(toolCall)
         }
 
-        // Handle remaining text after all tools
         if textSegments.count > toolCalls.count {
-            let remainingSegments = Array(textSegments[toolCalls.count...])
-            let remainingText = remainingSegments.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-
+            let remainingText = Array(textSegments[toolCalls.count...]).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !remainingText.isEmpty && streamingManager.streamingMessageId == nil {
                 let streamingMessage = ChatMessage.streaming()
                 messages.append(streamingMessage)
-                // Use StreamingManager to track both ID and text (triggers onTextUpdate callback)
                 streamingManager.catchUpToInProgress(existingText: remainingText, messageId: streamingMessage.id)
-                // Track first text message for turn metadata assignment
-                if firstTextMessageIdForTurn == nil {
-                    firstTextMessageIdForTurn = streamingMessage.id
-                }
-                logger.debug("Resume catch-up: created streaming message for remaining text", category: .session)
+                if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = streamingMessage.id }
             }
         }
 
-        // If no tool calls but there is text, create streaming message
         if toolCalls.isEmpty && !accumulatedText.isEmpty && streamingManager.streamingMessageId == nil {
             let streamingMessage = ChatMessage.streaming()
             messages.append(streamingMessage)
-            // Use StreamingManager to track both ID and text (triggers onTextUpdate callback)
             streamingManager.catchUpToInProgress(existingText: accumulatedText, messageId: streamingMessage.id)
-            // Track first text message for turn metadata assignment
-            if firstTextMessageIdForTurn == nil {
-                firstTextMessageIdForTurn = streamingMessage.id
-            }
-            logger.debug("Resume catch-up: created streaming message for text-only catch-up", category: .session)
+            if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = streamingMessage.id }
         }
     }
 

@@ -85,7 +85,8 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             result: "file contents",
             error: nil,
             durationMs: 150,
-            details: nil
+            details: nil,
+            rawDetails: nil
         )
 
         // When: Dispatching

@@ -333,14 +333,13 @@ final class SubagentState {
 
     private func formatToolTitle(_ toolName: String?) -> String {
         guard let name = toolName else { return "Tool" }
-        // Make tool names more readable
-        switch name.lowercased() {
-        case "bash": return "🖥 Bash"
-        case "read": return "📄 Read"
-        case "write": return "✏️ Write"
-        case "edit": return "📝 Edit"
-        case "search": return "🔍 Search"
-        case "glob", "find": return "📂 Find"
+        switch ToolKind(toolName: name) {
+        case .bash: return "🖥 Bash"
+        case .read: return "📄 Read"
+        case .write: return "✏️ Write"
+        case .edit: return "📝 Edit"
+        case .search: return "🔍 Search"
+        case .glob: return "📂 Find"
         default: return name
         }
     }
@@ -353,14 +352,15 @@ final class SubagentState {
         }
 
         // Tool-specific formatting
-        switch toolName?.lowercased() {
-        case "bash":
+        let kind = toolName.map { ToolKind(toolName: $0) }
+        switch kind {
+        case .bash:
             return formatBashResult(cleaned)
-        case "read":
+        case .read:
             return formatReadResult(cleaned)
-        case "search":
+        case .search:
             return formatSearchResult(cleaned)
-        case "write", "edit":
+        case .write, .edit:
             return formatWriteResult(cleaned)
         default:
             return String(cleaned.prefix(150))

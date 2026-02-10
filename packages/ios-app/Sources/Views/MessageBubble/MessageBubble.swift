@@ -110,8 +110,8 @@ struct MessageBubble: View {
 
         case .toolUse(let tool):
             // Handle subagent tools specially using ToolResultParser
-            switch tool.toolName.lowercased() {
-            case "spawnsubagent":
+            switch ToolKind(toolName: tool.toolName) {
+            case .spawnSubagent:
                 // Convert SpawnSubagent tool to SubagentChip
                 if let chipData = ToolResultParser.parseSpawnSubagent(from: tool) {
                     if #available(iOS 26.0, *) {
@@ -127,7 +127,7 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            case "waitforsubagent":
+            case .waitForSubagent:
                 // Show WaitForSubagent as completion chip with result
                 if let chipData = ToolResultParser.parseWaitForSubagent(from: tool) {
                     if #available(iOS 26.0, *) {
@@ -143,7 +143,7 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            case "renderappui":
+            case .renderAppUI:
                 // Show RenderAppUI as chip with canvas status
                 if let chipData = ToolResultParser.parseRenderAppUI(from: tool) {
                     if #available(iOS 26.0, *) {
@@ -159,7 +159,7 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            case "todowrite":
+            case .todoWrite:
                 // Show TodoWrite as compact chip with task counts
                 if let chipData = ToolResultParser.parseTodoWrite(from: tool) {
                     if #available(iOS 26.0, *) {
@@ -175,7 +175,7 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            case "notifyapp":
+            case .notifyApp:
                 // Show NotifyApp as compact chip with notification status
                 if let chipData = ToolResultParser.parseNotifyApp(from: tool) {
                     if #available(iOS 26.0, *) {
@@ -191,7 +191,7 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            case "queryagent":
+            case .queryAgent:
                 if let chipData = ToolResultParser.parseQueryAgent(from: tool) {
                     if #available(iOS 26.0, *) {
                         QueryAgentChip(data: chipData) {
@@ -205,7 +205,7 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case "waitforagents":
+            case .waitForAgents:
                 if let chipData = ToolResultParser.parseWaitForAgents(from: tool) {
                     if #available(iOS 26.0, *) {
                         WaitForAgentsChip(data: chipData) {
@@ -219,7 +219,7 @@ struct MessageBubble: View {
                 } else {
                     ToolResultRouter(tool: tool)
                 }
-            case "askuserquestion":
+            case .askUserQuestion:
                 // AskUserQuestion is handled in its own case
                 ToolResultRouter(tool: tool)
             default:

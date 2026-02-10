@@ -17,6 +17,9 @@ final class AskUserQuestionState {
     /// Whether AskUserQuestion was called in the current turn (to suppress subsequent text)
     var calledInTurn = false
 
+    /// Number of questions in the last submitted answer (set by AskUserQuestionCoordinator)
+    var lastAnsweredQuestionCount: Int = 0
+
     init() {}
 
     /// Reset turn-specific state (called at turn start)

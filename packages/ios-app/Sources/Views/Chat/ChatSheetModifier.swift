@@ -74,8 +74,8 @@ struct ChatSheetModifier: ViewModifier {
 
     private func onDismiss() {
         if sheetCoordinator.lastActiveSheet == .browser {
-            if viewModel.browserState.autoDismissedBrowserThisTurn {
-                viewModel.browserState.autoDismissedBrowserThisTurn = false
+            if viewModel.browserState.dismissal == .autoDismissed {
+                viewModel.browserState.dismissal = .none
             } else {
                 viewModel.userDismissedBrowser()
             }

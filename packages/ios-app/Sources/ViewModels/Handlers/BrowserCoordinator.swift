@@ -86,7 +86,7 @@ final class BrowserCoordinator {
         // Auto-show browser window only on the FIRST frame, and only if user hasn't
         // manually dismissed it during this prompt/response cycle
         if wasFirstFrame && !context.browserState.showBrowserWindow &&
-           !context.browserState.userDismissedBrowserThisTurn {
+           context.browserState.dismissal != .userDismissed {
             context.browserState.showBrowserWindow = true
             context.logInfo("Browser window auto-shown on first frame")
         }
@@ -98,7 +98,7 @@ final class BrowserCoordinator {
     ///
     /// - Parameter context: The context providing access to state
     func userDismissedBrowser(context: BrowserEventContext) {
-        context.browserState.userDismissedBrowserThisTurn = true
+        context.browserState.dismissal = .userDismissed
         context.browserState.showBrowserWindow = false
         context.logInfo("User dismissed browser sheet - won't auto-reopen this turn")
     }
@@ -181,7 +181,7 @@ final class BrowserCoordinator {
                     currentUrl: nil
                 )
                 // Only auto-show if user hasn't manually dismissed this turn
-                if !context.browserState.userDismissedBrowserThisTurn {
+                if context.browserState.dismissal != .userDismissed {
                     context.browserState.showBrowserWindow = true
                 }
                 context.logInfo("Browser stream started")

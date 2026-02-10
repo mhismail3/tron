@@ -109,16 +109,16 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.isProcessing)
     }
 
-    func testSendMessageResetsBrowserDismissFlag() async {
-        // Given: Browser was dismissed
+    func testSendMessageResetsBrowserDismissal() async {
+        // Given: Browser was dismissed by user
         mockContext.inputText = "Test"
-        mockContext.userDismissedBrowserThisTurn = true
+        mockContext.browserDismissal = .userDismissed
 
         // When: Sending message
         await coordinator.sendMessage(context: mockContext)
 
-        // Then: Dismiss flag should be reset
-        XCTAssertFalse(mockContext.userDismissedBrowserThisTurn)
+        // Then: Dismissal should be reset
+        XCTAssertEqual(mockContext.browserDismissal, .none)
     }
 
     func testSendMessageResetsStreamingState() async {
@@ -403,8 +403,8 @@ final class MockMessagingContext: MessagingContext {
     var agentPhase: AgentPhase = .idle
     var currentTurn: Int = 0
     var sessionId: String = "test-session"
-    var userDismissedBrowserThisTurn: Bool = false
-    var autoDismissedBrowserThisTurn: Bool = false
+    var browserDismissal: BrowserDismissal = .none
+    var lastAnsweredQuestionCount: Int = 0
 
     // MARK: - Tracking for Assertions
     var sendPromptCalled = false

@@ -147,7 +147,8 @@ final class ChatEventHandlerTests: XCTestCase {
             result: "Success!",
             error: nil,
             durationMs: 150,
-            details: nil
+            details: nil,
+            rawDetails: nil
         )
 
         // When: handling tool end
@@ -168,7 +169,8 @@ final class ChatEventHandlerTests: XCTestCase {
             result: nil,
             error: "Command failed",
             durationMs: 50,
-            details: nil
+            details: nil,
+            rawDetails: nil
         )
 
         // When: handling tool end

@@ -202,12 +202,12 @@ final class ChatEventHandler {
     ///   - context: The event context
     /// - Returns: Result with tool data and classification
     func handleToolStart(_ pluginResult: ToolStartPlugin.Result, context: ChatEventContext) -> ToolStartResult {
-        let toolNameLower = pluginResult.toolName.lowercased()
+        let kind = ToolKind(toolName: pluginResult.toolName)
 
         // Detect tool types
-        let isAskUserQuestion = toolNameLower == "askuserquestion"
-        let isBrowserTool = toolNameLower == "browsetheweb"
-        let isOpenURL = toolNameLower == "openurl"
+        let isAskUserQuestion = kind == .askUserQuestion
+        let isBrowserTool = kind == .browseTheWeb
+        let isOpenURL = kind == .openURL
 
         // Parse AskUserQuestion params if applicable
         var askUserQuestionParams: AskUserQuestionParams?

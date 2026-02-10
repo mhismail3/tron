@@ -27,8 +27,8 @@ final class ToolEventCoordinator {
         context: ToolEventContext
     ) {
         // Skip tools with custom UI flows or side-effects that require full ToolStartResult
-        let toolNameLower = pluginResult.toolName.lowercased()
-        if toolNameLower == "askuserquestion" || toolNameLower == "renderappui" || toolNameLower == "openurl" { return }
+        let kind = ToolKind(toolName: pluginResult.toolName)
+        if kind == .askUserQuestion || kind == .renderAppUI || kind == .openURL { return }
 
         // Finalize any active thinking message before tool chip appears
         context.finalizeThinkingMessageIfNeeded()
@@ -141,7 +141,7 @@ final class ToolEventCoordinator {
         var message = ChatMessage(role: .assistant, content: .toolUse(result.tool))
 
         // Special handling for RenderAppUI
-        if pluginResult.toolName.lowercased() == "renderappui" {
+        if ToolKind(toolName: pluginResult.toolName) == .renderAppUI {
             let handled = handleRenderAppUIToolStart(pluginResult, message: &message, context: context)
             if handled {
                 // Existing chip was updated, don't create new message
@@ -242,7 +242,7 @@ final class ToolEventCoordinator {
         // Check if this is a browser tool result with screenshot data
         if let index = MessageFinder.lastIndexOfToolUse(toolCallId: result.toolCallId, in: context.messages) {
             if case .toolUse(let tool) = context.messages[index].content {
-                if tool.toolName.lowercased() == "browsetheweb" {
+                if ToolKind(toolName: tool.toolName) == .browseTheWeb {
                     // Browser screenshot extraction is handled by ChatViewModel
                     // (requires access to BrowserScreenshotService and browserState.browserFrame)
                     // We just log here that it would be extracted
@@ -262,7 +262,8 @@ final class ToolEventCoordinator {
             toolCallId: result.toolCallId,
             success: (result.status == .success),
             result: result.result,
-            durationMs: result.durationMs
+            durationMs: result.durationMs,
+            details: pluginResult.rawDetails
         )
         context.enqueueToolEnd(toolEndData)
     }

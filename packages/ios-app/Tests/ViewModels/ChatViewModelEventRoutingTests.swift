@@ -53,7 +53,8 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             result: result,
             error: success ? nil : result,
             durationMs: durationMs,
-            details: nil
+            details: nil,
+            rawDetails: nil
         )
     }
 
@@ -505,14 +506,14 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertTrue(viewModel.browserState.showBrowserWindow)
 
         // Given - user dismissed in this turn (should reset on complete)
-        viewModel.browserState.userDismissedBrowserThisTurn = true
+        viewModel.browserState.dismissal = .userDismissed
 
         // When - agent completes
         viewModel.handleComplete()
 
         // Then - browser sheet auto-dismissed and dismissal reset
         XCTAssertFalse(viewModel.browserState.showBrowserWindow)
-        XCTAssertFalse(viewModel.browserState.userDismissedBrowserThisTurn)
+        XCTAssertEqual(viewModel.browserState.dismissal, .none)
 
         // When - next tool start arrives
         let secondToolStart = makeToolStartResult(toolName: "BrowseTheWeb", toolCallId: "browser_2")

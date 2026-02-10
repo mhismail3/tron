@@ -638,7 +638,7 @@ final class ToolEventCoordinatorTests: XCTestCase {
 
     func testBrowserToolStartRespectsUserDismissal() async throws {
         // Given: User has dismissed browser this turn
-        mockContext.userDismissedBrowserThisTurn = true
+        mockContext.browserDismissal = .userDismissed
 
         // Given: A browser tool start
         let event = ToolStartPlugin.Result(
@@ -1053,7 +1053,7 @@ final class MockToolEventContext: ToolEventContext {
     var safariURL: URL?
     let renderAppUIChipTracker = RenderAppUIChipTracker()
     var showBrowserWindow: Bool = false
-    var userDismissedBrowserThisTurn: Bool = false
+    var browserDismissal: BrowserDismissal = .none
 
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false
@@ -1106,7 +1106,7 @@ final class MockToolEventContext: ToolEventContext {
 
     @discardableResult
     func updateBrowserStatusIfNeeded() -> Bool {
-        let shouldShow = !userDismissedBrowserThisTurn
+        let shouldShow = browserDismissal != .userDismissed
         if browserStatus == nil {
             browserStatus = BrowserGetStatusResult(hasBrowser: true, isStreaming: false, currentUrl: nil)
         }
@@ -1164,7 +1164,8 @@ extension ToolEndPlugin.Result {
             result: success ? displayResult : nil,
             error: success ? nil : displayResult,
             durationMs: durationMs,
-            details: details
+            details: details,
+            rawDetails: nil
         )
     }
 }

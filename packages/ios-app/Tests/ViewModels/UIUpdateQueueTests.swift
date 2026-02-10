@@ -22,7 +22,7 @@ struct UIUpdateQueueTests {
         ))
         // End B before A — should still be processed immediately
         queue.enqueueToolEnd(.init(
-            toolCallId: "B", success: true, result: "ok", durationMs: 10
+            toolCallId: "B", success: true, result: "ok", durationMs: 10, details: nil
         ))
         queue.flush()
 
@@ -50,9 +50,9 @@ struct UIUpdateQueueTests {
         ))
 
         // End in reverse order
-        queue.enqueueToolEnd(.init(toolCallId: "C", success: true, result: "c", durationMs: nil))
-        queue.enqueueToolEnd(.init(toolCallId: "B", success: true, result: "b", durationMs: nil))
-        queue.enqueueToolEnd(.init(toolCallId: "A", success: true, result: "a", durationMs: nil))
+        queue.enqueueToolEnd(.init(toolCallId: "C", success: true, result: "c", durationMs: nil, details: nil))
+        queue.enqueueToolEnd(.init(toolCallId: "B", success: true, result: "b", durationMs: nil, details: nil))
+        queue.enqueueToolEnd(.init(toolCallId: "A", success: true, result: "a", durationMs: nil, details: nil))
         queue.flush()
 
         // All tool ends should be present — they share the same priority so
@@ -73,7 +73,7 @@ struct UIUpdateQueueTests {
 
         // No tool start — just end
         queue.enqueueToolEnd(.init(
-            toolCallId: "unknown", success: true, result: "ok", durationMs: nil
+            toolCallId: "unknown", success: true, result: "ok", durationMs: nil, details: nil
         ))
         queue.flush()
 
@@ -95,7 +95,7 @@ struct UIUpdateQueueTests {
             toolCallId: "X", toolName: "Read", arguments: "{}", timestamp: Date()
         ))
         queue.enqueueToolEnd(.init(
-            toolCallId: "X", success: true, result: "ok", durationMs: 5
+            toolCallId: "X", success: true, result: "ok", durationMs: 5, details: nil
         ))
         queue.flush()
 

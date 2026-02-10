@@ -514,7 +514,7 @@ final class MockConnectionContext: ConnectionContext {
         return UUID()
     }
 
-    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async {
+    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall], contentSequence: [ContentSequenceItem]?) async {
         processCatchUpContentCalled = true
         lastCatchUpText = accumulatedText
         lastCatchUpToolCalls = toolCalls

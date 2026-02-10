@@ -9,6 +9,17 @@ struct ToolUseData: Equatable {
     var status: ToolStatus
     var result: String?
     var durationMs: Int?
+    /// Structured result details from server (tool-specific shape)
+    var details: [String: AnyCodable]?
+
+    static func == (lhs: ToolUseData, rhs: ToolUseData) -> Bool {
+        lhs.toolName == rhs.toolName &&
+        lhs.toolCallId == rhs.toolCallId &&
+        lhs.arguments == rhs.arguments &&
+        lhs.status == rhs.status &&
+        lhs.result == rhs.result &&
+        lhs.durationMs == rhs.durationMs
+    }
 
     var displayName: String {
         switch toolName.lowercased() {

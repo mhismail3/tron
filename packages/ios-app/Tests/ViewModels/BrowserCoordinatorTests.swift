@@ -105,7 +105,7 @@ final class BrowserCoordinatorTests: XCTestCase {
 
     func testHandleBrowserFrameDoesNotAutoShowIfUserDismissed() {
         // Given: User dismissed browser this turn
-        mockContext.browserState.userDismissedBrowserThisTurn = true
+        mockContext.browserState.dismissal = .userDismissed
 
         // Given: A valid frame
         let testImageData = createTestJPEGImage()
@@ -143,8 +143,8 @@ final class BrowserCoordinatorTests: XCTestCase {
         // When: User dismisses browser
         coordinator.userDismissedBrowser(context: mockContext)
 
-        // Then: Flag should be set
-        XCTAssertTrue(mockContext.browserState.userDismissedBrowserThisTurn)
+        // Then: Dismissal should be user-initiated
+        XCTAssertEqual(mockContext.browserState.dismissal, .userDismissed)
     }
 
     func testUserDismissedBrowserHidesWindow() {
@@ -167,7 +167,7 @@ final class BrowserCoordinatorTests: XCTestCase {
 
         // Then: Should hide (like dismiss)
         XCTAssertFalse(mockContext.browserState.showBrowserWindow)
-        XCTAssertTrue(mockContext.browserState.userDismissedBrowserThisTurn)
+        XCTAssertEqual(mockContext.browserState.dismissal, .userDismissed)
     }
 
     func testToggleBrowserWindowShowsWhenHasBrowserSession() {
@@ -282,7 +282,7 @@ final class BrowserCoordinatorTests: XCTestCase {
 
     func testStartBrowserStreamDoesNotAutoShowIfUserDismissed() async {
         // Given: User dismissed this turn
-        mockContext.browserState.userDismissedBrowserThisTurn = true
+        mockContext.browserState.dismissal = .userDismissed
         mockContext.startBrowserStreamSuccess = true
 
         // When: Starting stream

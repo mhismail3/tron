@@ -96,6 +96,32 @@ struct CurrentTurnToolCall: Decodable {
     let completedAt: String?
 }
 
+/// Structured content sequence item (interleaved text/thinking/tool_ref)
+enum ContentSequenceItem: Decodable {
+    case text(String)
+    case thinking(String)
+    case toolRef(toolCallId: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text, thinking, toolCallId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "text":
+            self = .text(try container.decode(String.self, forKey: .text))
+        case "thinking":
+            self = .thinking(try container.decode(String.self, forKey: .thinking))
+        case "tool_ref":
+            self = .toolRef(toolCallId: try container.decode(String.self, forKey: .toolCallId))
+        default:
+            self = .text("")
+        }
+    }
+}
+
 struct AgentStateResult: Decodable {
     let isRunning: Bool
     let currentTurn: Int
@@ -107,6 +133,8 @@ struct AgentStateResult: Decodable {
     let currentTurnText: String?
     /// Tool calls from current in-progress turn (for resume)
     let currentTurnToolCalls: [CurrentTurnToolCall]?
+    /// Structured content sequence for catch-up (interleaved text/thinking/tool_ref)
+    let contentSequence: [ContentSequenceItem]?
     /// Whether the session was interrupted (last assistant message has interrupted flag)
     let wasInterrupted: Bool?
 }

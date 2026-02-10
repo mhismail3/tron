@@ -25,6 +25,8 @@ enum ToolEndPlugin: DispatchableEventPlugin {
             let durationMs: Int?
             let duration: Int?
             let details: ToolDetails?
+            /// Raw details dictionary for tool-specific structured results
+            let rawDetails: [String: AnyCodable]?
 
             enum CodingKeys: String, CodingKey {
                 case toolCallId, toolName, success, result, output, error, durationMs, duration, details
@@ -40,6 +42,7 @@ enum ToolEndPlugin: DispatchableEventPlugin {
                 durationMs = try container.decodeIfPresent(Int.self, forKey: .durationMs)
                 duration = try container.decodeIfPresent(Int.self, forKey: .duration)
                 details = try container.decodeIfPresent(ToolDetails.self, forKey: .details)
+                rawDetails = try container.decodeIfPresent([String: AnyCodable].self, forKey: .details)
 
                 // Handle output as either String or [ContentBlock] array
                 if let outputString = try? container.decodeIfPresent(String.self, forKey: .output) {
@@ -75,6 +78,8 @@ enum ToolEndPlugin: DispatchableEventPlugin {
         let error: String?
         let durationMs: Int?
         let details: EventData.ToolDetails?
+        /// Raw details dictionary for tool-specific structured results
+        let rawDetails: [String: AnyCodable]?
 
         /// Display-friendly result text.
         var displayResult: String {
@@ -96,7 +101,8 @@ enum ToolEndPlugin: DispatchableEventPlugin {
             result: event.data.result ?? event.data.output,
             error: event.data.error,
             durationMs: event.data.durationMs ?? event.data.duration,
-            details: event.data.details
+            details: event.data.details,
+            rawDetails: event.data.rawDetails
         )
     }
 

@@ -39,7 +39,7 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     func appendCatchingUpMessage() -> UUID
 
     /// Process catch-up content from resumed session
-    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall]) async
+    func processCatchUpContent(accumulatedText: String, toolCalls: [CurrentTurnToolCall], contentSequence: [ContentSequenceItem]?) async
 
     /// Remove the catching-up notification message after processing is complete
     func removeCatchingUpMessage()
@@ -96,8 +96,15 @@ final class ConnectionCoordinator {
             context.logError("Failed to resume session: \(error.localizedDescription)")
 
             // Check if session doesn't exist on server - signal to dismiss
-            let errorString = error.localizedDescription.lowercased()
-            if errorString.contains("not found") || errorString.contains("does not exist") {
+            let isNotFound: Bool
+            if let rpcError = error as? RPCError {
+                isNotFound = rpcError.errorCode == .sessionNotFound
+            } else {
+                // Fallback: string matching for non-RPC errors
+                let errorString = error.localizedDescription.lowercased()
+                isNotFound = errorString.contains("not found") || errorString.contains("does not exist")
+            }
+            if isNotFound {
                 context.logWarning("Session \(context.sessionId) not found on server - dismissing view")
                 context.shouldDismiss = true
                 context.showError("Session not found on server")
@@ -194,11 +201,12 @@ final class ConnectionCoordinator {
                 // Use accumulated content from server if available (catch-up content)
                 let accumulatedText = agentState.currentTurnText ?? ""
                 let toolCalls = agentState.currentTurnToolCalls ?? []
+                let contentSequence = agentState.contentSequence
 
-                context.logInfo("Resume catch-up: \(accumulatedText.count) chars text, \(toolCalls.count) tool calls")
+                context.logInfo("Resume catch-up: \(accumulatedText.count) chars text, \(toolCalls.count) tool calls, sequence=\(contentSequence?.count ?? 0)")
 
                 // Process catch-up content
-                await context.processCatchUpContent(accumulatedText: accumulatedText, toolCalls: toolCalls)
+                await context.processCatchUpContent(accumulatedText: accumulatedText, toolCalls: toolCalls, contentSequence: contentSequence)
 
                 // Remove the catching-up notification now that content has been processed.
                 // This provides immediate feedback that catch-up is complete, rather than

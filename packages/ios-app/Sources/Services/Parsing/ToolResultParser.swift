@@ -14,8 +14,27 @@ struct ToolResultParser {
             ?? "Sub-agent task"
         let model = ToolArgumentParser.string("model", from: tool.arguments)
 
-        let sessionId = extractSessionId(from: tool.result) ?? tool.toolCallId
-        let resultStatus = extractSubagentStatus(from: tool.result)
+        // Prefer structured details for sessionId and status
+        let sessionId: String
+        let resultStatus: SubagentStatus?
+        let resultSummary: String?
+        let turns: Int
+
+        if let details = tool.details {
+            sessionId = (details["sessionId"]?.value as? String) ?? extractSessionId(from: tool.result) ?? tool.toolCallId
+            if let success = details["success"]?.value as? Bool {
+                resultStatus = success ? .completed : .failed
+            } else {
+                resultStatus = extractSubagentStatus(from: tool.result)
+            }
+            resultSummary = (details["summary"]?.value as? String) ?? extractResultSummary(from: tool.result)
+            turns = (details["totalTurns"]?.value as? Int) ?? extractTurns(from: tool.result)
+        } else {
+            sessionId = extractSessionId(from: tool.result) ?? tool.toolCallId
+            resultStatus = extractSubagentStatus(from: tool.result)
+            resultSummary = extractResultSummary(from: tool.result)
+            turns = extractTurns(from: tool.result)
+        }
 
         let status: SubagentStatus
         switch tool.status {
@@ -27,8 +46,6 @@ struct ToolResultParser {
             status = .failed
         }
 
-        let resultSummary = extractResultSummary(from: tool.result)
-        let turns = extractTurns(from: tool.result)
         let error = tool.status == .error ? tool.result : nil
 
         return SubagentToolData(
@@ -112,7 +129,7 @@ struct ToolResultParser {
 
     /// Parse TodoWrite tool to create TodoWriteChipData for chip display
     static func parseTodoWrite(from tool: ToolUseData) -> TodoWriteChipData? {
-        guard let result = tool.result else {
+        guard tool.result != nil else {
             return TodoWriteChipData(
                 toolCallId: tool.toolCallId,
                 newCount: 0,
@@ -126,7 +143,17 @@ struct ToolResultParser {
         var inProgress = 0
         var pending = 0
 
-        if let match = result.firstMatch(of: /(\d+)\s+completed,\s+(\d+)\s+in\s+progress,\s+(\d+)\s+pending/) {
+        // Prefer structured details from server
+        if let details = tool.details,
+           let c = details["completedCount"]?.value as? Int,
+           let ip = details["inProgressCount"]?.value as? Int,
+           let p = details["pendingCount"]?.value as? Int {
+            completed = c
+            inProgress = ip
+            pending = p
+        } else if let result = tool.result,
+                  let match = result.firstMatch(of: /(\d+)\s+completed,\s+(\d+)\s+in\s+progress,\s+(\d+)\s+pending/) {
+            // Fallback: regex on freetext result
             completed = Int(match.1) ?? 0
             inProgress = Int(match.2) ?? 0
             pending = Int(match.3) ?? 0
@@ -169,16 +196,23 @@ struct ToolResultParser {
         var failureCount: Int?
         var errorMessage: String?
 
-        if let result = tool.result {
+        // Prefer structured details from server
+        if let details = tool.details,
+           let sc = details["successCount"]?.value as? Int {
+            successCount = sc
+            failureCount = (details["failureCount"]?.value as? Int) ?? 0
+        } else if let result = tool.result {
+            // Fallback: regex on freetext result
             if let match = result.firstMatch(of: /to\s+(\d+)\s+device/) {
                 successCount = Int(match.1)
             }
             if let match = result.firstMatch(of: /failed\s+for\s+(\d+)/) {
                 failureCount = Int(match.1)
             }
-            if status == .failed {
-                errorMessage = result
-            }
+        }
+
+        if status == .failed, let result = tool.result {
+            errorMessage = result
         }
 
         return NotifyAppChipData(
@@ -250,26 +284,32 @@ struct ToolResultParser {
         }
 
         let status: WaitForAgentsStatus
+        // Prefer structured details for timeout detection
+        let timedOut: Bool
+        if let details = tool.details, let to = details["timedOut"]?.value as? Bool {
+            timedOut = to
+        } else if let result = tool.result {
+            timedOut = result.lowercased().contains("timeout")
+        } else {
+            timedOut = false
+        }
+
         switch tool.status {
         case .running:
             status = .waiting
         case .success:
-            if let result = tool.result, result.lowercased().contains("timeout") {
-                status = .timedOut
-            } else {
-                status = .completed
-            }
+            status = timedOut ? .timedOut : .completed
         case .error:
-            if let result = tool.result, result.lowercased().contains("timeout") {
-                status = .timedOut
-            } else {
-                status = .error
-            }
+            status = timedOut ? .timedOut : .error
         }
 
-        // Count completed agents from result
+        // Count completed agents - prefer structured details
         var completedCount = 0
-        if let result = tool.result {
+        if let details = tool.details,
+           let results = details["results"]?.value as? [[String: Any]] {
+            completedCount = results.count
+        } else if let result = tool.result {
+            // Fallback: regex on freetext result
             let matches = result.matches(of: /Session:\s*`sess_/)
             completedCount = matches.count
         }

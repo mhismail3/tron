@@ -110,6 +110,9 @@ final class AskUserQuestionCoordinator {
         // Format answers as a user prompt
         let answerPrompt = formatAnswersAsPrompt(data: data, answers: answers)
 
+        // Store question count so MessagingCoordinator doesn't need to re-parse
+        context.askUserQuestionState.lastAnsweredQuestionCount = data.params.questions.count
+
         // Clear state before sending
         context.askUserQuestionState.showSheet = false
         context.askUserQuestionState.currentData = nil

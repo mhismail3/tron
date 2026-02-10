@@ -4,9 +4,10 @@ import PhotosUI
 // MARK: - MessagingContext Conformance
 
 extension ChatViewModel: MessagingContext {
-    var autoDismissedBrowserThisTurn: Bool {
-        get { browserState.autoDismissedBrowserThisTurn }
-        set { browserState.autoDismissedBrowserThisTurn = newValue }
+    // browserDismissal is provided by ChatViewModel+TurnLifecycleContext.swift
+
+    var lastAnsweredQuestionCount: Int {
+        askUserQuestionState.lastAnsweredQuestionCount
     }
 
     func sendPromptToServer(

@@ -251,20 +251,20 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
 
     /// Helper to extract key argument for tool display
     private func extractKeyArgument(toolName: String, from args: [String: Any]) -> String {
-        switch toolName.lowercased() {
-        case "read", "write", "edit":
+        switch ToolKind(toolName: toolName) {
+        case .read, .write, .edit:
             if let path = args["file_path"] as? String ?? args["path"] as? String {
                 return URL(fileURLWithPath: path).lastPathComponent
             }
-        case "bash":
+        case .bash:
             if let cmd = args["command"] as? String {
                 return String(cmd.prefix(25))
             }
-        case "search":
+        case .search:
             if let pattern = args["pattern"] as? String {
                 return "\"\(String(pattern.prefix(20)))\""
             }
-        case "glob", "find":
+        case .glob:
             if let pattern = args["pattern"] as? String {
                 return pattern
             }

@@ -79,7 +79,7 @@ enum MessageFinder {
             case .renderAppUI(let chipData):
                 return chipData.toolCallId == toolCallId
             case .toolUse(let tool):
-                return tool.toolCallId == toolCallId && tool.toolName.lowercased() == "renderappui"
+                return tool.toolCallId == toolCallId && ToolKind(toolName: tool.toolName) == .renderAppUI
             default:
                 return false
             }

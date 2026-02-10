@@ -19,6 +19,8 @@ final class ChatViewModel: ChatEventContext {
     var agentPhase: AgentPhase = .idle
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
+    /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
+    /// because the memory-manager triggers it asynchronously. A turn_start resets it.
     var isCompacting = false
     var connectionState: ConnectionState = .disconnected
     var showSettings = false
@@ -137,6 +139,9 @@ final class ChatViewModel: ChatEventContext {
     var catchingUpMessageId: UUID?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
+    /// Defensive timeout: if agent.ready never arrives after agent.complete, recover after 10s
+    @ObservationIgnored
+    var postProcessingTimeoutTask: Task<Void, Never>?
 
     // MARK: - Sub-Managers
 
@@ -392,6 +397,7 @@ final class ChatViewModel: ChatEventContext {
                 tool.status = data.success ? .success : .error
                 tool.result = data.result
                 tool.durationMs = data.durationMs
+                tool.details = data.details
                 messages[index].content = .toolUse(tool)
 
                 // Sync to MessageWindowManager
