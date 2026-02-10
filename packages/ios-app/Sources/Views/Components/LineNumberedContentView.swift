@@ -32,7 +32,7 @@ struct LineNumberedContentView: View {
                         HStack(spacing: 0) {
                             // Line number gutter
                             Text("\(line.lineNum)")
-                                .font(TronTypography.mono(size: lineNumFontSize))
+                                .font(TronTypography.code(size: lineNumFontSize))
                                 .foregroundStyle(.tronTextMuted.opacity(0.4))
                                 .frame(width: lineNumWidth, alignment: .trailing)
                                 .padding(.leading, 4)
@@ -40,7 +40,7 @@ struct LineNumberedContentView: View {
 
                             // Content
                             Text(line.content.isEmpty ? " " : line.content)
-                                .font(TronTypography.mono(size: fontSize))
+                                .font(TronTypography.code(size: fontSize))
                                 .foregroundStyle(.tronTextSecondary)
                         }
                         .frame(minHeight: lineHeight)

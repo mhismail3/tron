@@ -17,69 +17,149 @@ struct AppearanceSection: View {
             }
             .pickerStyle(.segmented)
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    Text("Aa")
-                        .font(TronTypography.mono(size: 28, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
+            fontPickerRow
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Recursive")
-                            .font(TronTypography.headline)
-                            .foregroundStyle(.tronTextPrimary)
-                        Text(casualLabel)
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.tronTextSecondary)
-                            .contentTransition(.numericText())
-                    }
-
-                    Spacer()
-
-                    Text(String(format: "%.2f", fontSettings.casualAxis))
-                        .font(TronTypography.subheadline)
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                }
-
-                Spacer()
-                    .frame(height: 2)
-                Slider(
-                    value: Binding(
-                        get: { fontSettings.casualAxis },
-                        set: { fontSettings.casualAxis = $0 }
-                    ),
-                    in: 0...1
-                ) {
-                    Text("Font Style")
-                } minimumValueLabel: {
-                    Text("Linear")
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(.tronTextMuted)
-                } maximumValueLabel: {
-                    Text("Casual")
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .tint(.tronEmerald)
-            }
-            .padding(.vertical, 4)
+            axisSliders
         } header: {
             Text("Appearance")
                 .font(TronTypography.caption)
         } footer: {
-            Text("Auto follows your system appearance setting. Font style adjusts the casual axis — Linear is precise, Casual is playful.")
-                .font(TronTypography.caption2)
+            footerText
         }
         .listSectionSpacing(16)
     }
 
-    private var casualLabel: String {
-        let value = fontSettings.casualAxis
-        if value < 0.2 { return "Linear" }
-        if value < 0.4 { return "Semi-Linear" }
-        if value < 0.6 { return "Balanced" }
-        if value < 0.8 { return "Semi-Casual" }
-        return "Casual"
+    // MARK: - Font Picker
+
+    private var fontPickerRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Text("Aa")
+                    .font(TronFontLoader.createFont(
+                        size: 28,
+                        weight: .medium,
+                        family: fontSettings.selectedFamily
+                    ))
+                    .foregroundStyle(.tronEmerald)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fontSettings.selectedFamily.displayName)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(.tronTextPrimary)
+                    Text(fontSettings.selectedFamily.shortDescription)
+                        .font(TronTypography.caption)
+                        .foregroundStyle(.tronTextSecondary)
+                }
+
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(FontFamily.allCases) { family in
+                        fontChip(family)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func fontChip(_ family: FontFamily) -> some View {
+        let isSelected = fontSettings.selectedFamily == family
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                fontSettings.selectedFamily = family
+            }
+        } label: {
+            Text(family.displayName)
+                .font(TronTypography.caption)
+                .foregroundStyle(isSelected ? .tronSurface : .tronTextPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(isSelected ? Color.tronEmerald : Color.tronSurfaceElevated)
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isSelected ? Color.clear : Color.tronBorder, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Axis Sliders
+
+    @ViewBuilder
+    private var axisSliders: some View {
+        let axes = fontSettings.selectedFamily.customAxes
+        if !axes.isEmpty {
+            ForEach(axes) { axis in
+                axisSlider(axis)
+            }
+        }
+    }
+
+    private func axisSlider(_ axis: FontAxis) -> some View {
+        let family = fontSettings.selectedFamily
+        let range = axis.range(for: family)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(axis.displayName)
+                    .font(TronTypography.caption)
+                    .foregroundStyle(.tronTextSecondary)
+
+                Spacer()
+
+                Text(axisValueLabel(axis, family: family))
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+
+            Slider(
+                value: Binding(
+                    get: { fontSettings.axisValue(for: family, axis: axis) },
+                    set: { fontSettings.setAxisValue(for: family, axis: axis, value: $0) }
+                ),
+                in: range.lowerBound...range.upperBound
+            ) {
+                Text(axis.displayName)
+            } minimumValueLabel: {
+                Text(axis.minLabel)
+                    .font(TronTypography.caption2)
+                    .foregroundStyle(.tronTextMuted)
+            } maximumValueLabel: {
+                Text(axis.maxLabel)
+                    .font(TronTypography.caption2)
+                    .foregroundStyle(.tronTextMuted)
+            }
+            .tint(.tronEmerald)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func axisValueLabel(_ axis: FontAxis, family: FontFamily) -> String {
+        let value = fontSettings.axisValue(for: family, axis: axis)
+        switch axis {
+        case .casual:
+            return String(format: "%.2f", value)
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footerText: some View {
+        Group {
+            if fontSettings.selectedFamily == .recursive {
+                Text("Auto follows your system appearance setting. Font style adjusts the casual axis — Linear is precise, Casual is playful.")
+            } else {
+                Text("Auto follows your system appearance setting. Code and file paths always use Recursive mono.")
+            }
+        }
+        .font(TronTypography.caption2)
     }
 }

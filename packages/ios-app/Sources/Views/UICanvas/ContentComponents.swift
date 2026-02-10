@@ -30,7 +30,7 @@ struct CanvasText: View {
         case "subheadline": return TronTypography.mono(size: TronTypography.sizeBody)
         case "caption": return TronTypography.mono(size: TronTypography.sizeBodySM)
         case "footnote": return TronTypography.mono(size: TronTypography.sizeBody2)
-        default: return TronTypography.code
+        default: return TronTypography.codeBlock
         }
     }
 

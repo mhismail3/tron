@@ -39,7 +39,7 @@ struct CanvasList: View {
             UIComponentView(component: templates[0], state: state)
         case .text(let template):
             Text(template)
-                .font(TronTypography.code)
+                .font(TronTypography.codeBlock)
                 .foregroundStyle(.tronTextPrimary)
         default:
             // Fallback: display item value
@@ -54,7 +54,7 @@ struct CanvasList: View {
                     Text("Item \(index + 1)")
                 }
             }
-            .font(TronTypography.code)
+            .font(TronTypography.codeBlock)
             .foregroundStyle(.tronTextPrimary)
         }
     }

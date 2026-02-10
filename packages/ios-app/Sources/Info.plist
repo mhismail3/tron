@@ -51,6 +51,8 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Fonts/Recursive-Variable.ttf</string>
+		<string>Fonts/AlanSans-Variable.ttf</string>
+		<string>Fonts/Comme-Variable.ttf</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

@@ -73,7 +73,7 @@ struct CanvasToggle: View {
     var body: some View {
         Toggle(isOn: binding) {
             Text(component.props.label ?? "")
-                .font(TronTypography.code)
+                .font(TronTypography.codeBlock)
                 .foregroundStyle(.tronTextPrimary)
         }
         .tint(.tronEmerald)
@@ -106,7 +106,7 @@ struct CanvasSlider: View {
             if let label = component.props.label {
                 HStack {
                     Text(label)
-                        .font(TronTypography.code)
+                        .font(TronTypography.codeBlock)
                         .foregroundStyle(.tronTextPrimary)
                     Spacer()
                     if component.props.showValue != false {
@@ -169,7 +169,7 @@ struct CanvasTextField: View {
                 }
             }
             .textFieldStyle(.plain)
-            .font(TronTypography.code)
+            .font(TronTypography.codeBlock)
             .foregroundStyle(.tronEmerald)
             .padding(.horizontal, 14)
             .padding(.vertical, 12)

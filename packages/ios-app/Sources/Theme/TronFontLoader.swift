@@ -2,26 +2,19 @@ import SwiftUI
 import UIKit
 import CoreText
 
-/// Utility to create variable Recursive fonts with custom axis values
+/// Utility to create variable fonts with custom axis values
 enum TronFontLoader {
     // MARK: - Variable Font Axis Tags
 
-    /// Recursive variable font axis tags (4-character codes as UInt32)
-    /// See: https://recursive.design
-    enum Axis {
-        /// Weight axis: 300 (Light) to 1000 (Black)
-        static let weight: UInt32 = 0x77676874 // 'wght'
-        /// Casual axis: 0 (Linear) to 1 (Casual)
-        static let casual: UInt32 = 0x4341534C // 'CASL'
-        /// Monospace axis: 0 (Sans/Proportional) to 1 (Mono)
-        static let mono: UInt32 = 0x4D4F4E4F // 'MONO'
-        /// Slant axis: 0 to -15 degrees
-        static let slant: UInt32 = 0x736C6E74 // 'slnt'
-        /// Cursive axis: 0 (Roman) to 1 (Cursive) - auto-applied with slant
-        static let cursive: UInt32 = 0x43525356 // 'CRSV'
+    enum AxisTag {
+        static let weight: UInt32 = 0x77676874   // 'wght'
+        static let casual: UInt32 = 0x4341534C   // 'CASL'
+        static let mono: UInt32 = 0x4D4F4E4F     // 'MONO'
+        static let slant: UInt32 = 0x736C6E74    // 'slnt'
+        static let cursive: UInt32 = 0x43525356   // 'CRSV'
     }
 
-    /// Weight values for the variable font
+    /// Weight values for variable fonts
     enum Weight: CGFloat {
         case light = 300
         case regular = 400
@@ -32,34 +25,30 @@ enum TronFontLoader {
         case black = 900
     }
 
-    // MARK: - Font Name
-
-    /// PostScript name of the Recursive variable font
-    private static let variableFontName = "Recursive"
-
     // MARK: - Font Registration
 
-    /// Register and verify the variable font at app startup
+    /// Register and verify all variable fonts at app startup
     static func registerFonts() {
-        if let _ = CGFont(variableFontName as CFString) {
-            logger.info("Recursive variable font loaded successfully", category: .ui)
-        } else {
-            logger.error("Failed to load Recursive variable font", category: .ui)
-            #if DEBUG
-            printAvailableFonts()
-            #endif
+        for family in FontFamily.allCases {
+            if let _ = CGFont(family.fontName as CFString) {
+                logger.info("\(family.displayName) variable font loaded", category: .ui)
+            } else {
+                logger.error("Failed to load \(family.displayName) variable font", category: .ui)
+                #if DEBUG
+                printAvailableFonts(matching: family.displayName.lowercased())
+                #endif
+            }
         }
     }
 
-    /// Print all available font families (for debugging)
-    static func printAvailableFonts() {
+    /// Print matching font families (for debugging)
+    static func printAvailableFonts(matching query: String? = nil) {
         logger.debug("=== Available Font Families ===", category: .ui)
-        for family in UIFont.familyNames.sorted() {
-            if family.lowercased().contains("recur") {
-                logger.debug("Family: \(family)", category: .ui)
-                for name in UIFont.fontNames(forFamilyName: family) {
-                    logger.debug("  - \(name)", category: .ui)
-                }
+        for familyName in UIFont.familyNames.sorted() {
+            if let query, !familyName.lowercased().contains(query) { continue }
+            logger.debug("Family: \(familyName)", category: .ui)
+            for name in UIFont.fontNames(forFamilyName: familyName) {
+                logger.debug("  - \(name)", category: .ui)
             }
         }
     }
@@ -67,45 +56,41 @@ enum TronFontLoader {
     // MARK: - Variable Font Creation
 
     /// Create a UIFont with specific variable font axis values
-    /// - Parameters:
-    ///   - size: Font size in points
-    ///   - weight: Weight value (300-1000)
-    ///   - mono: Monospace axis (0 = proportional, 1 = monospace)
-    ///   - casual: Casual axis (0 = linear, 1 = casual)
-    /// - Returns: Configured UIFont, or system font fallback
     @MainActor
     static func createUIFont(
         size: CGFloat,
         weight: Weight = .regular,
         mono: Bool = false,
-        casual: CGFloat? = nil
+        casual: CGFloat? = nil,
+        family: FontFamily? = nil
     ) -> UIFont {
-        let actualCasual = casual ?? FontSettings.shared.casualAxis
+        // Mono text always uses Recursive
+        let resolvedFamily = mono ? .recursive : (family ?? FontSettings.shared.selectedFamily)
+        let clampedWeight = clampWeight(weight.rawValue, for: resolvedFamily)
 
-        // Create font descriptor with variation axes
-        let variations: [UIFontDescriptor.AttributeName: Any] = [
-            .name: variableFontName,
-            UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): [
-                Axis.weight: weight.rawValue,
-                Axis.mono: mono ? 1.0 : 0.0,
-                Axis.casual: actualCasual,
-                Axis.slant: 0.0,
-                Axis.cursive: 0.0,
-            ]
+        let variations = buildVariations(
+            family: resolvedFamily,
+            weight: clampedWeight,
+            mono: mono,
+            casual: casual
+        )
+
+        let attributes: [UIFontDescriptor.AttributeName: Any] = [
+            .family: resolvedFamily.displayName,
+            UIFontDescriptor.AttributeName(rawValue: kCTFontVariationAttribute as String): variations,
         ]
 
-        let descriptor = UIFontDescriptor(fontAttributes: variations)
-
-        // Try to create the variable font
+        let descriptor = UIFontDescriptor(fontAttributes: attributes)
         let font = UIFont(descriptor: descriptor, size: size)
 
-        // Verify we got the right font (not a fallback)
-        if font.fontName.contains("Recursive") || font.familyName.contains("Recursive") {
+        // Verify we got the right font (case-insensitive match on family or font name)
+        let expectedName = resolvedFamily.displayName.lowercased()
+        if font.fontName.lowercased().contains(expectedName.replacingOccurrences(of: " ", with: ""))
+            || font.familyName.lowercased().contains(expectedName) {
             return font
         }
 
-        // Fallback to system font if variable font failed
-        logger.warning("Variable font creation failed, using system fallback", category: .ui)
+        logger.warning("Variable font creation failed for \(resolvedFamily.displayName), using system fallback", category: .ui)
         return mono
             ? UIFont.monospacedSystemFont(ofSize: size, weight: uiFontWeight(from: weight))
             : UIFont.systemFont(ofSize: size, weight: uiFontWeight(from: weight))
@@ -117,15 +102,47 @@ enum TronFontLoader {
         size: CGFloat,
         weight: Weight = .regular,
         mono: Bool = false,
-        casual: CGFloat? = nil
+        casual: CGFloat? = nil,
+        family: FontFamily? = nil
     ) -> Font {
-        let uiFont = createUIFont(size: size, weight: weight, mono: mono, casual: casual)
+        let uiFont = createUIFont(size: size, weight: weight, mono: mono, casual: casual, family: family)
         return Font(uiFont)
+    }
+
+    // MARK: - Variation Builder
+
+    @MainActor
+    private static func buildVariations(
+        family: FontFamily,
+        weight: CGFloat,
+        mono: Bool,
+        casual: CGFloat?
+    ) -> [UInt32: CGFloat] {
+        var variations: [UInt32: CGFloat] = [AxisTag.weight: weight]
+
+        switch family {
+        case .recursive:
+            let actualCasual = casual ?? FontSettings.shared.axisValue(for: .recursive, axis: .casual)
+            variations[AxisTag.mono] = mono ? 1.0 : 0.0
+            variations[AxisTag.casual] = actualCasual
+            variations[AxisTag.slant] = 0.0
+            variations[AxisTag.cursive] = 0.0
+
+        case .alanSans, .comme:
+            break // weight-only
+        }
+
+        return variations
+    }
+
+    /// Clamp weight to the family's supported range
+    private static func clampWeight(_ weight: CGFloat, for family: FontFamily) -> CGFloat {
+        let range = family.weightRange
+        return min(max(weight, range.lowerBound), range.upperBound)
     }
 
     // MARK: - Weight Conversion
 
-    /// Convert our Weight enum to UIFont.Weight
     private static func uiFontWeight(from weight: Weight) -> UIFont.Weight {
         switch weight {
         case .light: return .light
@@ -138,7 +155,6 @@ enum TronFontLoader {
         }
     }
 
-    /// Convert SwiftUI Font.Weight to our Weight enum
     static func weight(from fontWeight: Font.Weight) -> Weight {
         switch fontWeight {
         case .light, .ultraLight, .thin:
@@ -160,7 +176,6 @@ enum TronFontLoader {
         }
     }
 
-    /// Convert UIFont.Weight to our Weight enum
     static func weight(from uiFontWeight: UIFont.Weight) -> Weight {
         switch uiFontWeight {
         case .ultraLight, .thin, .light:
