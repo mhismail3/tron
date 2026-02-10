@@ -161,7 +161,7 @@ struct SessionPreviewSheet: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.45)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Display Messages

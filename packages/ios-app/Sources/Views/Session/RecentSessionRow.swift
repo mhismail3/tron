@@ -90,7 +90,7 @@ struct RecentSessionRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.45)).interactive(), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     /// Token stats with SF Symbols (matching chat view MessageMetadataBadge style)

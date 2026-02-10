@@ -130,7 +130,7 @@ struct CloneRepoSheet: View {
                                 .regular.tint(
                                     urlValidationError != nil
                                         ? Color.tronError.opacity(0.2)
-                                        : Color.tronPhthaloGreen.opacity(0.35)
+                                        : Color.tronPhthaloGreen.opacity(0.45)
                                 ),
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                             )
@@ -205,7 +205,7 @@ struct CloneRepoSheet: View {
                 .padding(.vertical, 14)
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.35)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.45)).interactive(), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .disabled(isCloning)
 
             Text("The repository will be cloned to this folder")
