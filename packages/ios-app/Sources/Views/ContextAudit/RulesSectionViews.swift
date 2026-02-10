@@ -23,11 +23,7 @@ struct RulesSection: View {
                 // Count badge
                 Text("\(rules.totalFiles)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronTerracotta.opacity(0.7))
-                    .clipShape(Capsule())
+                    .countBadge(.tronTerracotta)
 
                 Spacer()
 

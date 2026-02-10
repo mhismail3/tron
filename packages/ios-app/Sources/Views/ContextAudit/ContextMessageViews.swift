@@ -171,11 +171,7 @@ struct MessagesContainer: View {
                 // Count badge
                 Text("\(totalMessages)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronEmerald.opacity(0.7))
-                    .clipShape(Capsule())
+                    .countBadge(.tronEmerald)
 
                 Spacer()
 
@@ -283,11 +279,7 @@ struct AddedSkillsContainer: View {
                 // Count badge
                 Text("\(skills.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronCyan.opacity(0.7))
-                    .clipShape(Capsule())
+                    .countBadge(.tronCyan)
 
                 Spacer()
 

@@ -25,11 +25,7 @@ struct MemorySection: View {
                 // Count badge
                 Text("\(memory.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.purple.opacity(0.7))
-                    .clipShape(Capsule())
+                    .countBadge(.purple)
 
                 Spacer()
 

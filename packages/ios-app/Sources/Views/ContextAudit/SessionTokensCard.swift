@@ -33,17 +33,17 @@ struct SessionTokensCard: View {
             HStack {
                 Image(systemName: "arrow.up.arrow.down")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronAmber)
 
                 Text("Session Tokens")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronAmber)
 
                 Spacer()
 
                 Text(formatTokenCount(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(.tronAmberLight)
+                    .foregroundStyle(.tronAmber)
             }
 
             // Token breakdown row
@@ -64,11 +64,7 @@ struct SessionTokensCard: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronOrange.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
+                .sectionFill(.tronOrange, cornerRadius: 8, subtle: true)
 
                 // Output tokens
                 VStack(alignment: .leading, spacing: 4) {
@@ -86,11 +82,7 @@ struct SessionTokensCard: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .background {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(.regular.tint(Color.tronRed.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
+                .sectionFill(.tronRed, cornerRadius: 8, subtle: true)
             }
 
             // Cache tokens row (only shown if cache tokens exist)
@@ -112,33 +104,25 @@ struct SessionTokensCard: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronAmber.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
+                    .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
 
                     // Cache creation tokens
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 4) {
                             Image(systemName: "memorychip.fill")
                                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronAmberLight)
+                                .foregroundStyle(.tronAmber)
                             Text("Cache Write")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
                         Text(formatTokenCount(cacheCreationTokens))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.tronAmberLight)
+                            .foregroundStyle(.tronAmber)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.clear)
-                            .glassEffect(.regular.tint(Color.tronAmberLight.opacity(0.3)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
+                    .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
                 }
             }
 
@@ -149,10 +133,6 @@ struct SessionTokensCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular.tint(Color.tronBronze.opacity(0.2)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
+        .sectionFill(.tronAmber)
     }
 }

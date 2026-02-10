@@ -140,11 +140,7 @@ private struct FamilySection: View {
                 // Model count badge
                 Text("\(family.models.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(providerColor.opacity(0.5))
-                    .clipShape(Capsule())
+                    .countBadge(providerColor)
 
                 if family.isLatest {
                     Text("Latest")

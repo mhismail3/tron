@@ -79,7 +79,7 @@ extension Color {
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
-    static let tronPhthaloGreen = Color(lightHex: "#D1FAE5", darkHex: "#123524")
+    static let tronPhthaloGreen = Color(lightHex: "#A7F3D0", darkHex: "#123524")
 
     // MARK: - Backgrounds (adaptive)
 
@@ -257,6 +257,33 @@ extension View {
     /// Adaptive chip fill + stroke for capsule-shaped tool chips.
     func chipFill(_ color: Color, strokeOpacity: Double = 0.4) -> some View {
         self.modifier(ChipFillModifier(color: color, strokeOpacity: strokeOpacity))
+    }
+}
+
+// MARK: - Adaptive Count Badge
+
+private struct CountBadgeModifier: ViewModifier {
+    let color: Color
+    @Environment(\.colorScheme) var colorScheme
+
+    private var bgOpacity: Double {
+        colorScheme == .dark ? 0.7 : 0.18
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(bgOpacity))
+            .clipShape(Capsule())
+    }
+}
+
+extension View {
+    /// Adaptive count badge — color-matched text with adaptive background opacity.
+    func countBadge(_ color: Color) -> some View {
+        self.modifier(CountBadgeModifier(color: color))
     }
 }
 

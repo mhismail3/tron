@@ -33,11 +33,7 @@ struct SkillReferencesSection: View {
                 // Count badge
                 Text("\(skills.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronCyan.opacity(0.6))
-                    .clipShape(Capsule())
+                    .countBadge(.tronCyan)
 
                 Spacer()
 

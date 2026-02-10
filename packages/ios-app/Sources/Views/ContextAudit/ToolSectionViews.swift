@@ -23,11 +23,7 @@ struct ToolsSection: View {
                 // Count badge
                 Text("\(toolsContent.count)")
                     .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronTextPrimary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.tronClay.opacity(0.7))
-                    .clipShape(Capsule())
+                    .countBadge(.tronClay)
 
                 Spacer()
                 Text(TokenFormatter.format(tokens))
