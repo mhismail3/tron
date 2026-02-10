@@ -19,19 +19,19 @@ struct TronStepper: View {
             }
 
             Divider()
-                .frame(height: 18)
+                .frame(height: 20)
 
             stepperButton(systemName: "plus", enabled: canIncrement) {
                 value = min(range.upperBound, value + step)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            Capsule(style: .continuous)
                 .fill(Color.tronEmerald.opacity(colorScheme == .dark ? 0.12 : 0.08))
         )
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(Capsule(style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            Capsule(style: .continuous)
                 .strokeBorder(Color.tronEmerald.opacity(0.25), lineWidth: 0.5)
         )
         .fixedSize()
@@ -45,10 +45,22 @@ struct TronStepper: View {
             Image(systemName: systemName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(enabled ? .tronEmerald : .tronTextDisabled)
-                .frame(width: 32, height: 30)
+                .frame(width: 44, height: 30)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StepperButtonStyle(enabled: enabled))
         .disabled(!enabled)
+    }
+}
+
+/// Button style that provides a subtle scale + opacity press feedback.
+private struct StepperButtonStyle: ButtonStyle {
+    let enabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed && enabled ? 0.5 : 1)
+            .scaleEffect(configuration.isPressed && enabled ? 0.88 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }

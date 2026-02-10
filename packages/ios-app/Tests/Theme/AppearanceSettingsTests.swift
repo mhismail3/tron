@@ -68,4 +68,5 @@ struct AppearanceSettingsTests {
         // Restore
         settings.mode = originalMode
     }
+
 }

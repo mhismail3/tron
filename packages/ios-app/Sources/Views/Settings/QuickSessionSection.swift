@@ -14,8 +14,8 @@ struct QuickSessionSection: View {
                     .font(TronTypography.subheadline)
                 Spacer()
                 Text(displayWorkspace)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextSecondary)
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
             }
             .contentShape(Rectangle())
@@ -26,8 +26,8 @@ struct QuickSessionSection: View {
                     .font(TronTypography.subheadline)
                 Spacer()
                 Text(selectedModelDisplayName)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextSecondary)
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
             }
             .contentShape(Rectangle())
             .onTapGesture { onModelTap() }

@@ -88,8 +88,6 @@ struct SettingsView: View {
                     }
                 )
 
-                AppearanceSection()
-
                 if #available(iOS 26.0, *) {
                     QuickSessionSection(
                         displayWorkspace: settingsState.displayQuickSessionWorkspace,
@@ -113,15 +111,8 @@ struct SettingsView: View {
                     updateServerSetting: updateServerSetting
                 )
 
-                WebSettingsSection(
-                    webFetchTimeoutMs: Bindable(settingsState).webFetchTimeoutMs,
-                    webCacheTtlMs: Bindable(settingsState).webCacheTtlMs,
-                    webCacheMaxEntries: Bindable(settingsState).webCacheMaxEntries,
-                    updateServerSetting: updateServerSetting
-                )
-
                 if #available(iOS 26.0, *) {
-                    FontStyleSection()
+                    AppearanceSection()
                 }
 
                 DataSection(
@@ -273,81 +264,6 @@ struct ServerURLBuilder {
         let scheme = useTLS ? "wss" : "ws"
         let urlString = "\(scheme)://\(host):\(port)/ws"
         return URL(string: urlString)
-    }
-}
-
-// MARK: - Font Style Section
-
-@available(iOS 26.0, *)
-struct FontStyleSection: View {
-    @State private var fontSettings = FontSettings.shared
-
-    var body: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    Text("Aa")
-                        .font(TronTypography.mono(size: 28, weight: .medium))
-                        .foregroundStyle(.tronEmerald)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Recursive")
-                            .font(TronTypography.headline)
-                            .foregroundStyle(.tronTextPrimary)
-                        Text(casualLabel)
-                            .font(TronTypography.caption)
-                            .foregroundStyle(.tronTextSecondary)
-                            .contentTransition(.numericText())
-                    }
-
-                    Spacer()
-
-                    Text(String(format: "%.2f", fontSettings.casualAxis))
-                        .font(TronTypography.codeSM)
-                        .foregroundStyle(.tronTextMuted)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                }
-
-                Spacer()
-                    .frame(height: 2)
-                Slider(
-                    value: Binding(
-                        get: { fontSettings.casualAxis },
-                        set: { fontSettings.casualAxis = $0 }
-                    ),
-                    in: 0...1
-                ) {
-                    Text("Font Style")
-                } minimumValueLabel: {
-                    Text("Linear")
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(.tronTextMuted)
-                } maximumValueLabel: {
-                    Text("Casual")
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .tint(.tronEmerald)
-            }
-            .padding(.vertical, 4)
-        } header: {
-            Text("Font Style")
-                .font(TronTypography.caption)
-        } footer: {
-            Text("Adjust the casual axis of the Recursive font. Linear (0) is precise and geometric, Casual (1) is more playful and hand-drawn.")
-                .font(TronTypography.caption2)
-        }
-        .listSectionSpacing(16)
-    }
-
-    private var casualLabel: String {
-        let value = fontSettings.casualAxis
-        if value < 0.2 { return "Linear" }
-        if value < 0.4 { return "Semi-Linear" }
-        if value < 0.6 { return "Balanced" }
-        if value < 0.8 { return "Semi-Casual" }
-        return "Casual"
     }
 }
 

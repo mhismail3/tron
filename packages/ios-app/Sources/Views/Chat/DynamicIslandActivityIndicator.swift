@@ -70,10 +70,11 @@ struct DynamicIslandActivityIndicator: View {
                 // Ease-in curve: tail fades fast, head stays bright
                 let fade = t * t
 
-                let segStart = progress + segLen * CGFloat(i)
+                let rawStart = progress + segLen * CGFloat(i)
+                let segStart = rawStart.truncatingRemainder(dividingBy: 1)
                 let segEnd = segStart + segLen * 1.5 // slight overlap to avoid gaps
 
-                let seg = trimmedArc(from: pillPath, start: segStart, end: min(segEnd, segStart + segLen * 1.5))
+                let seg = trimmedArc(from: pillPath, start: segStart, end: segEnd)
 
                 let segGlowWidth = glowWidth * (0.2 + 0.8 * fade)
                 let segCoreWidth = coreWidth * (0.15 + 0.85 * fade)

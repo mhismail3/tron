@@ -30,7 +30,7 @@ struct DataSection: View {
             }
             .disabled(!hasActiveSessions || isArchivingAll)
         } header: {
-            Text("Data")
+            Text("Session Management")
                 .font(TronTypography.caption)
         } footer: {
             Text("Removes all sessions from your device. Session data on the server will remain.")

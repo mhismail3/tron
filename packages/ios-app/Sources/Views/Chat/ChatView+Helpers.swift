@@ -24,14 +24,6 @@ extension ChatView {
         viewModel.modelPickerState.isLoadingModels
     }
 
-    /// Whether to show the Dynamic Island orbiting arc instead of inline ProcessingIndicator
-    var shouldShowProcessingAnimation: Bool {
-        viewModel.isProcessing
-            && viewModel.messages.last?.isStreaming != true
-            && !viewModel.subagentState.hasRunningSubagents
-            && viewModel.thinkingMessageId == nil
-    }
-
     /// UserDefaults key for storing reasoning level per session
     var reasoningLevelKey: String { "tron.reasoningLevel.\(sessionId)" }
 

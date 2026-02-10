@@ -18,9 +18,6 @@ final class SettingsState {
     var defaultTurnFallback: Int = 8
     var memoryAutoInject: Bool = false
     var memoryAutoInjectCount: Int = 5
-    var webFetchTimeoutMs: Int = 30000
-    var webCacheTtlMs: Int = 900000
-    var webCacheMaxEntries: Int = 100
 
     // MARK: - Load State
 
@@ -51,9 +48,6 @@ final class SettingsState {
             defaultTurnFallback = settings.compaction.defaultTurnFallback
             memoryAutoInject = settings.memory.autoInject.enabled
             memoryAutoInjectCount = settings.memory.autoInject.count
-            webFetchTimeoutMs = settings.tools.web.fetch.timeoutMs
-            webCacheTtlMs = settings.tools.web.cache.ttlMs
-            webCacheMaxEntries = settings.tools.web.cache.maxEntries
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
@@ -82,9 +76,6 @@ final class SettingsState {
         defaultTurnFallback = 8
         memoryAutoInject = false
         memoryAutoInjectCount = 5
-        webFetchTimeoutMs = 30000
-        webCacheTtlMs = 900000
-        webCacheMaxEntries = 100
         quickSessionWorkspace = AppConstants.defaultWorkspace
     }
 

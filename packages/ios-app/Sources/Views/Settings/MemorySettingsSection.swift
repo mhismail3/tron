@@ -24,7 +24,7 @@ struct MemorySettingsSection: View {
                         .font(TronTypography.subheadline)
                     Spacer()
                     Text("\(memoryAutoInjectCount)")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
+                        .font(TronTypography.subheadline)
                         .foregroundStyle(.tronEmerald)
                         .monospacedDigit()
                         .frame(minWidth: 20)

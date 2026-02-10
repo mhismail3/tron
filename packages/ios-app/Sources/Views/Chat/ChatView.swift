@@ -165,12 +165,13 @@ struct ChatView: View {
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
         .overlay(alignment: .top) {
-            if shouldShowProcessingAnimation {
+            if viewModel.shouldShowActivityArc {
                 DynamicIslandActivityIndicator()
                     .ignoresSafeArea(.all)
                     .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             }
         }
+        .animation(.easeInOut(duration: 0.4), value: viewModel.shouldShowActivityArc)
         .toolbar {
             leadingToolbarItem
             principalToolbarItem
@@ -454,7 +455,7 @@ struct ChatView: View {
 
                         // Invisible anchor for auto-scroll when processing
                         // (visible indicator is the Dynamic Island overlay)
-                        if shouldShowProcessingAnimation {
+                        if viewModel.shouldShowActivityArc {
                             Color.clear.frame(height: 1).id("processing")
                         }
 

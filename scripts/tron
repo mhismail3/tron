@@ -4,7 +4,7 @@
 # Usage: tron <command> [options]
 #
 # Commands:
-#   dev        Start beta server (-b to build, -t to tail, -k to kill)
+#   dev        Start beta server (-b to build, -t to tail, -k to kill, -r to restart)
 #   deploy     Build, test, and deploy to production
 #   install    Initial production setup (launchd + CLI)
 #   rollback   Restore previous deployment
@@ -580,15 +580,19 @@ cmd_dev() {
 
     # Parse flags
     local do_build=false
+    local do_test=false
     local do_tail=false
     local do_kill=false
+    local do_restart=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -b|--build) do_build=true; shift ;;
-            -t|--tail)  do_tail=true; shift ;;
-            -k|--kill)  do_kill=true; shift ;;
-            -bt|-tb)    do_build=true; do_tail=true; shift ;;
+            -b|--build)   do_build=true; do_test=true; shift ;;
+            -t|--tail)    do_tail=true; shift ;;
+            -k|--kill)    do_kill=true; shift ;;
+            -r|--restart) do_restart=true; do_build=true; shift ;;
+            -bt|-tb)      do_build=true; do_test=true; do_tail=true; shift ;;
+            -rt|-tr)      do_restart=true; do_build=true; do_test=true; shift ;;
             -h|--help)
                 echo ""
                 echo -e "${CYAN}tron dev${NC} - Start beta development server"
@@ -596,9 +600,10 @@ cmd_dev() {
                 echo "Usage: tron dev [options]"
                 echo ""
                 echo "Options:"
-                echo "  -b, --build   Build and test before starting"
-                echo "  -t, --tail    Run in foreground (tail logs)"
-                echo "  -k, --kill    Kill running beta server"
+                echo "  -b, --build     Build and test before starting"
+                echo "  -t, --tail      Run in foreground (tail logs)"
+                echo "  -k, --kill      Kill running beta server"
+                echo "  -r, --restart   Kill, build, and restart beta server"
                 echo ""
                 echo "Examples:"
                 echo "  tron dev       # Start server in background"
@@ -606,6 +611,8 @@ cmd_dev() {
                 echo "  tron dev -b    # Build, test, then start in background"
                 echo "  tron dev -bt   # Build, test, then start in foreground"
                 echo "  tron dev -k    # Kill running beta server"
+                echo "  tron dev -r    # Kill, rebuild, restart (no tests)"
+                echo "  tron dev -rt   # Kill, rebuild, test, restart"
                 echo ""
                 return 0
                 ;;
@@ -625,6 +632,16 @@ cmd_dev() {
         return 0
     fi
 
+    # Restart mode - kill running server, then continue to build + start
+    if [ "$do_restart" = true ]; then
+        local beta_pid=$(get_beta_pid)
+        if [ -n "$beta_pid" ]; then
+            kill "$beta_pid" 2>/dev/null
+            sleep 1
+            print_success "Killed beta server (PID: $beta_pid)"
+        fi
+    fi
+
     # Check if beta port is already in use
     if [ -n "$(get_beta_pid)" ]; then
         print_error "Beta server already running on port $BETA_WS_PORT"
@@ -634,13 +651,19 @@ cmd_dev() {
 
     # Optional build step
     if [ "$do_build" = true ]; then
-        print_header "Building and Testing"
+        if [ "$do_test" = true ]; then
+            print_header "Building and Testing"
+        else
+            print_header "Building"
+        fi
         build_workspace
 
-        if ! run_tests; then
-            print_warning "Tests failed!"
-            if ! confirm_action "Continue anyway?"; then
-                exit 1
+        if [ "$do_test" = true ]; then
+            if ! run_tests; then
+                print_warning "Tests failed!"
+                if ! confirm_action "Continue anyway?"; then
+                    exit 1
+                fi
             fi
         fi
     fi
@@ -1302,7 +1325,7 @@ cmd_help() {
     echo "Usage: tron <command> [options]"
     echo ""
     echo "Development:"
-    echo "  dev        Start beta server (-b to build, -t to tail, -k to kill)"
+    echo "  dev        Start beta server (-b build, -t tail, -k kill, -r restart)"
     echo "  setup      First-time project setup"
     echo ""
     echo "Production:"

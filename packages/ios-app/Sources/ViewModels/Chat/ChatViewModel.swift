@@ -607,6 +607,10 @@ final class ChatViewModel: ChatEventContext {
 
     // MARK: - Computed Properties
 
+    var shouldShowActivityArc: Bool {
+        agentPhase != .idle
+    }
+
     var canSend: Bool {
         !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }

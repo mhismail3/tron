@@ -15,9 +15,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.defaultTurnFallback, 8)
         XCTAssertFalse(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
-        XCTAssertEqual(state.webFetchTimeoutMs, 30000)
-        XCTAssertEqual(state.webCacheTtlMs, 900000)
-        XCTAssertEqual(state.webCacheMaxEntries, 100)
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
         XCTAssertFalse(state.isLoadingModels)
@@ -36,9 +33,6 @@ final class SettingsStateTests: XCTestCase {
         state.defaultTurnFallback = 15
         state.memoryAutoInject = true
         state.memoryAutoInjectCount = 8
-        state.webFetchTimeoutMs = 60000
-        state.webCacheTtlMs = 1800000
-        state.webCacheMaxEntries = 200
         state.quickSessionWorkspace = "/some/other/path"
 
         // Reset
@@ -51,9 +45,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.defaultTurnFallback, 8)
         XCTAssertFalse(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
-        XCTAssertEqual(state.webFetchTimeoutMs, 30000)
-        XCTAssertEqual(state.webCacheTtlMs, 900000)
-        XCTAssertEqual(state.webCacheMaxEntries, 100)
     }
 
     // MARK: - Build Update
