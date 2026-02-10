@@ -36,7 +36,7 @@ struct GlassActionButton: View {
         }
         .matchedGeometryEffect(id: "actionButtonMorph", in: namespace)
         .glassEffect(
-            .regular.tint(canSend && !isProcessing ? Color.tronEmeraldDark : Color.tronPhthaloGreen.opacity(0.45)).interactive(),
+            .regular.tint(canSend && !isProcessing ? Color.tronEmeraldDark : Color.tronPhthaloGreen.opacity(0.15)).interactive(),
             in: .circle
         )
         .disabled(!isProcessing && !canSend)
@@ -96,7 +96,7 @@ struct GlassMicButton: View {
         if shouldPulseMicTint {
             return Color.red.opacity(isMicPulsing ? 0.45 : 0.25)
         }
-        return Color.tronPhthaloGreen.opacity(0.45)
+        return Color.tronPhthaloGreen.opacity(0.15)
     }
 
     var body: some View {
@@ -221,7 +221,7 @@ struct GlassAttachmentButton: View {
             .font(TronTypography.buttonSM)
             .foregroundStyle(isMenuDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
             .frame(width: buttonSize, height: buttonSize)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.45)).interactive(), in: .circle)
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: .circle)
             .opacity(isMenuDisabled ? 0.5 : 1.0)
             .overlay {
                 // Invisible Menu overlay handles interaction only

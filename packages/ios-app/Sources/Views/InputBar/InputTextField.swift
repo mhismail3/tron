@@ -40,7 +40,7 @@ struct GlassTextField: View {
                 }
         }
         .frame(minHeight: 40)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.45)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
 
