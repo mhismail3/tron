@@ -68,10 +68,7 @@ struct ToolsSection: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronClay.opacity(0.15))
-        }
+        .sectionFill(.tronClay)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -170,10 +167,7 @@ struct ExpandableContentSection: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(iconColor.opacity(0.15))
-        }
+        .sectionFill(iconColor, cornerRadius: 8)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

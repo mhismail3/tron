@@ -117,11 +117,7 @@ struct DetailedMessageRow: View {
                                     .lineLimit(5)
                             }
                             .padding(8)
-                            .background {
-                                // Lightweight fill instead of glassEffect
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(Color.tronAmber.opacity(0.15))
-                            }
+                            .sectionFill(.tronAmber, cornerRadius: 6)
                         }
                     }
 
@@ -143,11 +139,7 @@ struct DetailedMessageRow: View {
                 .padding(.bottom, 12)
                             }
         }
-        .background {
-            // Lightweight fill instead of glassEffect for better animation performance
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(iconColor.opacity(0.15))
-        }
+        .sectionFill(iconColor, cornerRadius: 10)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
@@ -254,10 +246,7 @@ struct MessagesContainer: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronEmerald.opacity(0.15))
-        }
+        .sectionFill(.tronEmerald)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -335,10 +324,7 @@ struct AddedSkillsContainer: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronCyan.opacity(0.15))
-        }
+        .sectionFill(.tronCyan)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

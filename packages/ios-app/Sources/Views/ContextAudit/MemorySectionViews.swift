@@ -64,10 +64,7 @@ struct MemorySection: View {
                 .padding(10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.purple.opacity(0.15))
-        }
+        .sectionFill(.purple)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -134,10 +131,7 @@ struct MemoryEntryRow: View {
                 }
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.purple.opacity(0.08))
-        }
+        .sectionFill(.purple, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

@@ -119,14 +119,7 @@ struct TodoWriteChipFallback: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(Color.tronSlate.opacity(0.15))
-        )
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.tronSlate.opacity(0.4), lineWidth: 0.5)
-        )
+        .chipFill(.tronSlate)
         .contentShape(Capsule())
     }
 

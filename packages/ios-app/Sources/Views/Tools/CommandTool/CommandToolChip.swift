@@ -118,14 +118,7 @@ struct CommandToolChipFallback: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(statusColor.opacity(0.15))
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(statusColor.opacity(0.3), lineWidth: 0.5)
-            )
+            .chipFill(statusColor, strokeOpacity: 0.3)
             .clipShape(Capsule())
             .contentShape(Capsule())
             .animation(.smooth(duration: 0.3), value: data.summary)

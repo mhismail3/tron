@@ -54,10 +54,7 @@ struct SystemPromptSection: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronPurple.opacity(0.15))
-        }
+        .sectionFill(.tronPurple)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

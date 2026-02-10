@@ -71,10 +71,7 @@ struct SkillReferencesSection: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronCyan.opacity(0.15))
-        }
+        .sectionFill(.tronCyan)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -157,11 +154,7 @@ struct SkillReferenceRow: View {
                     .padding(.bottom, 8)
             }
         }
-        .background {
-            // Lightweight fill instead of glassEffect for better animation performance
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(sourceColor.opacity(0.12))
-        }
+        .sectionFill(sourceColor, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         // No context menu - skill references are not removable
     }
@@ -259,11 +252,7 @@ struct AddedSkillRow: View {
                 .padding(.bottom, 8)
             }
         }
-        .background {
-            // Teal tint for added skills container (matches skill references)
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.tronCyan.opacity(0.12))
-        }
+        .sectionFill(.tronCyan, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contextMenu {
             if onDelete != nil {

@@ -62,10 +62,7 @@ struct RulesSection: View {
                 .padding(10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronTerracotta.opacity(0.15))
-        }
+        .sectionFill(.tronTerracotta)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -184,10 +181,7 @@ struct RulesFileRow: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.tronTerracotta.opacity(0.08))
-        }
+        .sectionFill(.tronTerracotta, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         // NO context menu - rules cannot be deleted
     }

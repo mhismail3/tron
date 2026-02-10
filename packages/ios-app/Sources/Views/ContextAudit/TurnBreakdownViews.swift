@@ -71,10 +71,7 @@ struct TurnBreakdownContainer: View {
                 }
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronEmerald.opacity(0.15))
-        }
+        .sectionFill(.tronEmerald)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -270,10 +267,7 @@ struct TurnRow: View {
                 .padding(.bottom, 10)
             }
         }
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.tronEmerald.opacity(0.08))
-        }
+        .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

@@ -42,10 +42,7 @@ struct CostSummaryCard: View {
             }
         }
         .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.tronAmber.opacity(0.15))
-        }
+        .sectionFill(.tronAmber)
     }
 
     private func formatLatency(_ ms: Int) -> String {

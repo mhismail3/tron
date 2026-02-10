@@ -146,14 +146,7 @@ struct RenderAppUIChipFallback: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(tintColor.opacity(0.15))
-        )
-        .overlay(
-            Capsule()
-                .strokeBorder(tintColor.opacity(0.4), lineWidth: 0.5)
-        )
+        .chipFill(tintColor)
         .contentShape(Capsule())
     }
 

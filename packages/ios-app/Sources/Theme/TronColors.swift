@@ -83,14 +83,14 @@ extension Color {
 
     // MARK: - Backgrounds (adaptive)
 
-    /// Deepest background
-    static let tronBackground = Color(lightHex: "#FAFAFA", darkHex: "#09090B")
+    /// Deepest background (subtle cool-green tint in light mode)
+    static let tronBackground = Color(lightHex: "#F7FAF9", darkHex: "#09090B")
 
-    /// Surface background (cards, etc)
-    static let tronSurface = Color(lightHex: "#FFFFFF", darkHex: "#18181B")
+    /// Surface background (cards, etc — barely perceptible green tint in light mode)
+    static let tronSurface = Color(lightHex: "#FBFCFB", darkHex: "#18181B")
 
-    /// Elevated surface background
-    static let tronSurfaceElevated = Color(lightHex: "#F4F4F5", darkHex: "#27272A")
+    /// Elevated surface background (subtle green undertone in light mode)
+    static let tronSurfaceElevated = Color(lightHex: "#F0F4F2", darkHex: "#27272A")
 
     /// Subtle separator/border color
     static let tronBorder = Color(lightHex: "#D4D4D8", darkHex: "#3F3F46")
@@ -223,6 +223,59 @@ extension View {
     }
 }
 
+// MARK: - Adaptive Section Fill
+
+private struct SectionFillModifier: ViewModifier {
+    let color: Color
+    let cornerRadius: CGFloat
+    let subtle: Bool
+    @Environment(\.colorScheme) var colorScheme
+
+    private var opacity: Double {
+        if subtle {
+            return colorScheme == .dark ? 0.08 : 0.04
+        } else {
+            return colorScheme == .dark ? 0.15 : 0.08
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content.background {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(color.opacity(opacity))
+        }
+    }
+}
+
+extension View {
+    /// Adaptive section background fill — uses higher opacity in dark mode, lower in light mode.
+    /// `subtle: true` for nested/inner rows (half the standard intensity).
+    func sectionFill(_ color: Color, cornerRadius: CGFloat = 12, subtle: Bool = false) -> some View {
+        self.modifier(SectionFillModifier(color: color, cornerRadius: cornerRadius, subtle: subtle))
+    }
+
+    /// Adaptive chip fill + stroke for capsule-shaped tool chips.
+    func chipFill(_ color: Color, strokeOpacity: Double = 0.4) -> some View {
+        self.modifier(ChipFillModifier(color: color, strokeOpacity: strokeOpacity))
+    }
+}
+
+private struct ChipFillModifier: ViewModifier {
+    let color: Color
+    let strokeOpacity: Double
+    @Environment(\.colorScheme) var colorScheme
+
+    private var fillOpacity: Double {
+        colorScheme == .dark ? 0.15 : 0.08
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .background(Capsule().fill(color.opacity(fillOpacity)))
+            .overlay(Capsule().strokeBorder(color.opacity(strokeOpacity), lineWidth: 0.5))
+    }
+}
+
 // MARK: - Gradient Definitions
 
 extension LinearGradient {
@@ -242,7 +295,7 @@ extension LinearGradient {
 
     /// Background gradient (adaptive)
     static let tronBackgroundGradient = LinearGradient(
-        colors: [Color.tronBackground, Color(lightHex: "#F4F4F5", darkHex: "#000000")],
+        colors: [Color.tronBackground, Color(lightHex: "#EEF2F0", darkHex: "#000000")],
         startPoint: .top,
         endPoint: .bottom
     )
