@@ -41,7 +41,7 @@ struct StreamingContentView: View {
                 // Use plain Text, NOT LocalizedStringKey - avoids parsing overhead
                 Text(text)
                     .font(TronTypography.messageBody)
-                    .foregroundStyle(.tronTextPrimary)
+                    .foregroundStyle(.assistantMessageText)
                     .lineSpacing(4)
                     .selectableText(!textSelectionDisabled)
             }

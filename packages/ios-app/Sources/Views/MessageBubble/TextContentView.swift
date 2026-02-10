@@ -87,13 +87,13 @@ struct TextContentView: View {
                             if isUser {
                                 StyledSkillMentionText(text: content)
                                     .font(TronTypography.messageBody)
-                                    .foregroundStyle(.tronEmerald)
+                                    .foregroundStyle(.userMessageText)
                                     .selectableText(!textSelectionDisabled)
                                     .lineSpacing(4)
                             } else {
                                 Text(Self.markdownAttributedString(from: content))
                                     .font(TronTypography.messageBody)
-                                    .foregroundStyle(.tronTextPrimary)
+                                    .foregroundStyle(.assistantMessageText)
                                     .selectableText(!textSelectionDisabled)
                                     .lineSpacing(4)
                             }

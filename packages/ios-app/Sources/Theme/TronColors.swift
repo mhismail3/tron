@@ -79,7 +79,7 @@ extension Color {
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
-    static let tronPhthaloGreen = Color(lightHex: "#6EE7B7", darkHex: "#123524")
+    static let tronPhthaloGreen = Color(lightHex: "#123524", darkHex: "#123524")
 
     // MARK: - Backgrounds (adaptive — warm cream in light mode)
 
@@ -101,6 +101,13 @@ extension Color {
     static let tronTextSecondary = Color(lightHex: "#52525B", darkHex: "#A1A1AA")
     static let tronTextMuted = Color(hex: "#71717A")
     static let tronTextDisabled = Color(lightHex: "#A1A1AA", darkHex: "#52525B")
+
+    // MARK: - Message Text Colors (adaptive per role)
+
+    /// User message text: black in light mode, emerald in dark mode
+    static let userMessageText = Color(lightHex: "#18181B", darkHex: "#10B981")
+    /// Assistant message text: emerald in light mode, near-white in dark mode
+    static let assistantMessageText = Color(lightHex: "#059669", darkHex: "#FAFAFA")
 
     // MARK: - Role Colors (adaptive)
 
@@ -455,6 +462,10 @@ extension ShapeStyle where Self == Color {
     static var tronTextSecondary: Color { .tronTextSecondary }
     static var tronTextMuted: Color { .tronTextMuted }
     static var tronTextDisabled: Color { .tronTextDisabled }
+
+    // Message Text Colors
+    static var userMessageText: Color { .userMessageText }
+    static var assistantMessageText: Color { .assistantMessageText }
 
     // Role Colors
     static var userBubble: Color { .userBubble }
