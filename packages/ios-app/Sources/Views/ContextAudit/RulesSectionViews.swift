@@ -168,7 +168,7 @@ struct RulesFileRow: View {
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .background(Color.tronSurfaceElevated)
+                        .sectionFill(.tronTerracotta, cornerRadius: 6, subtle: true)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else {
                         Text("Content not available")

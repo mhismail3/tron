@@ -239,7 +239,7 @@ struct AddedSkillRow: View {
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .background(Color.tronSurfaceElevated)
+                        .sectionFill(.tronCyan, cornerRadius: 6, subtle: true)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .padding(.horizontal, 8)
                     } else {

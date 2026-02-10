@@ -131,7 +131,7 @@ struct DetailedMessageRow: View {
                             lineNumFontSize: 9,
                             maxCollapsedHeight: 200
                         )
-                        .background(Color.tronSurfaceElevated)
+                        .sectionFill(iconColor, cornerRadius: 6, subtle: true)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }

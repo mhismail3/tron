@@ -118,7 +118,7 @@ struct MemoryEntryRow: View {
                             .textSelection(.enabled)
                     }
                     .frame(maxHeight: 300)
-                    .background(Color.tronSurfaceElevated)
+                    .sectionFill(.purple, cornerRadius: 6, subtle: true)
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)

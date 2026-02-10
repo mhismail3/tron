@@ -112,10 +112,7 @@ private struct ProviderSection: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
         }
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(provider.color.opacity(0.08))
-        }
+        .sectionFill(provider.color)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -197,10 +194,7 @@ private struct FamilySection: View {
             }
         }
         .clipped()
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.tronSurfaceElevated)
-        }
+        .sectionFill(providerColor, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

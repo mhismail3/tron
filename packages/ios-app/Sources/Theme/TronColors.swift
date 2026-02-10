@@ -83,14 +83,14 @@ extension Color {
 
     // MARK: - Backgrounds (adaptive)
 
-    /// Deepest background (subtle cool-green tint in light mode)
-    static let tronBackground = Color(lightHex: "#F7FAF9", darkHex: "#09090B")
+    /// Deepest background (subtle warm cream tint in light mode)
+    static let tronBackground = Color(lightHex: "#FAF9F7", darkHex: "#09090B")
 
-    /// Surface background (cards, etc — barely perceptible green tint in light mode)
-    static let tronSurface = Color(lightHex: "#FBFCFB", darkHex: "#18181B")
+    /// Surface background (cards, etc — barely perceptible cream tint in light mode)
+    static let tronSurface = Color(lightHex: "#FDFCFB", darkHex: "#18181B")
 
-    /// Elevated surface background (subtle green undertone in light mode)
-    static let tronSurfaceElevated = Color(lightHex: "#F0F4F2", darkHex: "#27272A")
+    /// Elevated surface background (warm cream undertone in light mode)
+    static let tronSurfaceElevated = Color(lightHex: "#F5F4F1", darkHex: "#27272A")
 
     /// Subtle separator/border color
     static let tronBorder = Color(lightHex: "#D4D4D8", darkHex: "#3F3F46")
@@ -295,7 +295,7 @@ extension LinearGradient {
 
     /// Background gradient (adaptive)
     static let tronBackgroundGradient = LinearGradient(
-        colors: [Color.tronBackground, Color(lightHex: "#EEF2F0", darkHex: "#000000")],
+        colors: [Color.tronBackground, Color(lightHex: "#F2F1EE", darkHex: "#000000")],
         startPoint: .top,
         endPoint: .bottom
     )

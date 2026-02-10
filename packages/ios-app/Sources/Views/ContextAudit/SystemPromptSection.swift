@@ -48,7 +48,7 @@ struct SystemPromptSection: View {
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.tronSurfaceElevated)
+                .sectionFill(.tronPurple, cornerRadius: 6, subtle: true)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)

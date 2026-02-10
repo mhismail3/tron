@@ -62,7 +62,7 @@ struct ToolsSection: View {
                     .padding(.vertical, 4)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.tronSurfaceElevated)
+                .sectionFill(.tronClay, cornerRadius: 6, subtle: true)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
@@ -163,7 +163,7 @@ struct ExpandableContentSection: View {
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 300)
-                .background(Color.tronSurfaceElevated)
+                .sectionFill(iconColor, cornerRadius: 6, subtle: true)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
