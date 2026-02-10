@@ -15,59 +15,59 @@ extension Color {
         })
     }
 
-    // MARK: - Accent Colors
+    // MARK: - Accent Colors (adaptive: deeper in light mode)
 
     /// Primary accent - refined emerald
-    static let tronPrimary = Color(hex: "#10B981")
+    static let tronPrimary = Color(lightHex: "#059669", darkHex: "#10B981")
 
     /// Light accent for hover/highlights
-    static let tronPrimaryLight = Color(hex: "#34D399")
+    static let tronPrimaryLight = Color(lightHex: "#10B981", darkHex: "#34D399")
 
     /// Bright accent for emphasis
-    static let tronPrimaryBright = Color(hex: "#6EE7B7")
+    static let tronPrimaryBright = Color(lightHex: "#34D399", darkHex: "#6EE7B7")
 
     /// Vivid accent for interactive elements
-    static let tronPrimaryVivid = Color(hex: "#10B981")
+    static let tronPrimaryVivid = Color(lightHex: "#059669", darkHex: "#10B981")
 
     /// Emerald - assistant accent
-    static let tronEmerald = Color(hex: "#10B981")
+    static let tronEmerald = Color(lightHex: "#059669", darkHex: "#10B981")
 
     /// Darker emerald for send button
-    static let tronEmeraldDark = Color(hex: "#059669")
+    static let tronEmeraldDark = Color(lightHex: "#047857", darkHex: "#059669")
 
     /// Mint - user accent
-    static let tronMint = Color(hex: "#34D399")
+    static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
 
     /// Sage - subtle accents
-    static let tronSage = Color(hex: "#6EE7B7")
+    static let tronSage = Color(lightHex: "#34D399", darkHex: "#6EE7B7")
 
-    // MARK: - Semantic Colors
+    // MARK: - Semantic Colors (adaptive: deeper in light mode)
 
-    static let tronSuccess = Color(hex: "#10B981")
-    static let tronWarning = Color(hex: "#F59E0B")
-    static let tronError = Color(hex: "#EF4444")
-    static let tronInfo = Color(hex: "#3B82F6")
+    static let tronSuccess = Color(lightHex: "#059669", darkHex: "#10B981")
+    static let tronWarning = Color(lightHex: "#D97706", darkHex: "#F59E0B")
+    static let tronError = Color(lightHex: "#DC2626", darkHex: "#EF4444")
+    static let tronInfo = Color(lightHex: "#2563EB", darkHex: "#3B82F6")
 
-    // Additional accent colors
-    static let tronAmber = Color(hex: "#F59E0B")
-    static let tronPurple = Color(hex: "#8B5CF6")
-    static let tronBlue = Color(hex: "#3B82F6")
-    static let tronCyan = Color(hex: "#06B6D4")
-    static let tronIndigo = Color(hex: "#818CF8")
-    static let tronTeal = Color(hex: "#2DD4BF")
-    static let tronPink = Color(hex: "#EC4899")
-    static let tronPinkLight = Color(hex: "#F472B6")
+    // Additional accent colors (adaptive: deeper in light mode)
+    static let tronAmber = Color(lightHex: "#D97706", darkHex: "#F59E0B")
+    static let tronPurple = Color(lightHex: "#7C3AED", darkHex: "#8B5CF6")
+    static let tronBlue = Color(lightHex: "#2563EB", darkHex: "#3B82F6")
+    static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
+    static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
+    static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
+    static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
+    static let tronPinkLight = Color(lightHex: "#EC4899", darkHex: "#F472B6")
 
     // Warm colors (Tokens theme) - Earthy/muted palette
-    static let tronAmberLight = Color(hex: "#D97706")
-    static let tronOrange = Color(hex: "#C2410C")
-    static let tronRed = Color(hex: "#B45309")
-    static let tronBronze = Color(hex: "#78350F")
+    static let tronAmberLight = Color(lightHex: "#B45309", darkHex: "#D97706")
+    static let tronOrange = Color(lightHex: "#9A3412", darkHex: "#C2410C")
+    static let tronRed = Color(lightHex: "#92400E", darkHex: "#B45309")
+    static let tronBronze = Color(lightHex: "#451A03", darkHex: "#78350F")
 
-    // Earthy accent colors
-    static let tronTerracotta = Color(hex: "#9A3412")
-    static let tronClay = Color(hex: "#A16207")
-    static let tronSienna = Color(hex: "#B45309")
+    // Earthy accent colors (adaptive: deeper in light mode)
+    static let tronTerracotta = Color(lightHex: "#7C2D12", darkHex: "#9A3412")
+    static let tronClay = Color(lightHex: "#854D0E", darkHex: "#A16207")
+    static let tronSienna = Color(lightHex: "#92400E", darkHex: "#B45309")
 
     // Cool neutral (Compact/Window theme)
     static let tronSlate = Color(hex: "#64748B")
@@ -79,18 +79,18 @@ extension Color {
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
-    static let tronPhthaloGreen = Color(lightHex: "#A7F3D0", darkHex: "#123524")
+    static let tronPhthaloGreen = Color(lightHex: "#6EE7B7", darkHex: "#123524")
 
-    // MARK: - Backgrounds (adaptive)
+    // MARK: - Backgrounds (adaptive — warm cream in light mode)
 
-    /// Deepest background (subtle warm cream tint in light mode)
-    static let tronBackground = Color(lightHex: "#FAF9F7", darkHex: "#09090B")
+    /// Deepest background
+    static let tronBackground = Color(lightHex: "#F8F6F1", darkHex: "#09090B")
 
-    /// Surface background (cards, etc — barely perceptible cream tint in light mode)
-    static let tronSurface = Color(lightHex: "#FDFCFB", darkHex: "#18181B")
+    /// Surface background (cards, sheets)
+    static let tronSurface = Color(lightHex: "#FBF9F5", darkHex: "#18181B")
 
-    /// Elevated surface background (warm cream undertone in light mode)
-    static let tronSurfaceElevated = Color(lightHex: "#F5F4F1", darkHex: "#27272A")
+    /// Elevated surface background
+    static let tronSurfaceElevated = Color(lightHex: "#F2F0EB", darkHex: "#27272A")
 
     /// Subtle separator/border color
     static let tronBorder = Color(lightHex: "#D4D4D8", darkHex: "#3F3F46")
@@ -104,9 +104,9 @@ extension Color {
 
     // MARK: - Role Colors (adaptive)
 
-    static let userBubble = Color(hex: "#10B981")
-    static let assistantBubble = Color(lightHex: "#F4F4F5", darkHex: "#27272A")
-    static let systemBubble = Color(lightHex: "#E4E4E7", darkHex: "#3F3F46")
+    static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
+    static let assistantBubble = Color(lightHex: "#F0EEE9", darkHex: "#27272A")
+    static let systemBubble = Color(lightHex: "#E8E6E1", darkHex: "#3F3F46")
     static let toolBubble = Color(lightHex: "#DBEAFE", darkHex: "#1E3A5F")
     static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
 
@@ -322,7 +322,7 @@ extension LinearGradient {
 
     /// Background gradient (adaptive)
     static let tronBackgroundGradient = LinearGradient(
-        colors: [Color.tronBackground, Color(lightHex: "#F2F1EE", darkHex: "#000000")],
+        colors: [Color.tronBackground, Color(lightHex: "#EDE9E0", darkHex: "#000000")],
         startPoint: .top,
         endPoint: .bottom
     )
