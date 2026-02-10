@@ -79,7 +79,7 @@ extension Color {
     // MARK: - Special Colors
 
     /// Phthalo green for iOS 26 liquid glass effect
-    static let tronPhthaloGreen = Color(lightHex: "#ECFDF5", darkHex: "#123524")
+    static let tronPhthaloGreen = Color(lightHex: "#34D399", darkHex: "#123524")
 
     // MARK: - Backgrounds (adaptive — warm cream in light mode)
 
