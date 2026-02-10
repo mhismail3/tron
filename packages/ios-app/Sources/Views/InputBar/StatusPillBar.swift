@@ -160,7 +160,7 @@ struct StatusPillsColumn: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: .capsule)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
         .opacity(readOnly ? 0.5 : 1.0)
         .disabled(readOnly)
     }
@@ -183,7 +183,7 @@ struct StatusPillsColumn: View {
         .foregroundStyle(readOnly ? reasoningLevelColor(reasoningLevel).opacity(0.5) : reasoningLevelColor(reasoningLevel))
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: .capsule)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
         .opacity(readOnly ? 0.5 : 1.0)
         .overlay {
             // Invisible Menu overlay handles interaction only
@@ -245,7 +245,7 @@ struct StatusPillsColumn: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: .capsule)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
         .opacity(readOnly ? 0.5 : 1.0)
         .disabled(readOnly)
     }
@@ -310,6 +310,6 @@ struct TokenStatsPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: .capsule)
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .capsule)
     }
 }

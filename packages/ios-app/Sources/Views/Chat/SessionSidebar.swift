@@ -149,7 +149,7 @@ struct FloatingNewSessionButton: View {
             .foregroundStyle(.tronEmerald)
             .frame(width: 56, height: 56)
             .contentShape(Circle())
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(), in: .circle)
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
             .onTapGesture { action() }
             .onLongPressGesture(minimumDuration: 0.5) {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -284,7 +284,7 @@ struct CachedSessionSidebarRow: View {
         .glassEffect(
             isSelected
                 ? .regular.tint(Color.tronEmerald.opacity(0.25)).interactive()
-                : .regular.tint(Color.tronPhthaloGreen.opacity(0.15)).interactive(),
+                : .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))

@@ -27,7 +27,7 @@ struct VoiceNoteDetailSheet: View {
                     }
                     .padding()
                     .glassEffect(
-                        .regular.tint(Color.tronPhthaloGreen.opacity(0.15)),
+                        .regular.tint(Color.tronPhthaloGreen.opacity(0.25)),
                         in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                     )
 
