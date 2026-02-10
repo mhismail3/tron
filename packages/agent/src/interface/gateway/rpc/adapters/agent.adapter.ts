@@ -9,6 +9,7 @@
 import { randomUUID } from 'crypto';
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
 import { SkillRegistry } from '@capabilities/extensions/skills/index.js';
+import type { SkillFrontmatter } from '@capabilities/extensions/skills/types.js';
 import type { AdapterDependencies, AgentManagerAdapter } from '../types.js';
 
 const logger = createLogger('agent-adapter');
@@ -60,7 +61,7 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
         });
 
         // Load each skill by name
-        const loadedSkills: Array<{ name: string; content: string; frontmatter?: { allowedTools?: string[]; tools?: string[]; [key: string]: unknown } }> = [];
+        const loadedSkills: Array<{ name: string; content: string; frontmatter?: SkillFrontmatter }> = [];
         for (const name of skillNames) {
           const skill = registry.get(name);
           if (skill) {

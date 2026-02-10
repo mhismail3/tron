@@ -99,6 +99,8 @@ export interface ApiSettings {
 export interface ModelSettings {
   /** Default model ID */
   default: string;
+  /** Default model for skill subagents */
+  subagent: string;
 }
 
 // =============================================================================

@@ -67,7 +67,6 @@ struct ChatSheetTests {
             displayName: "Skill 1",
             description: "Test",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let skill2 = Skill(
@@ -75,7 +74,6 @@ struct ChatSheetTests {
             displayName: "Skill 2",
             description: "Test",
             source: .global,
-            autoInject: false,
             tags: nil
         )
 
@@ -92,7 +90,6 @@ struct ChatSheetTests {
             displayName: "Test",
             description: "Test",
             source: .global,
-            autoInject: false,
             tags: nil
         )
 
@@ -183,7 +180,6 @@ struct ChatSheetTests {
             displayName: "Test",
             description: "Test",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
@@ -447,7 +443,6 @@ struct SheetCoordinatorTests {
             displayName: "Test",
             description: "Test",
             source: .global,
-            autoInject: false,
             tags: nil
         )
 

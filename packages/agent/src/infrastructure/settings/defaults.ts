@@ -8,7 +8,7 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import type { TronSettings } from './types.js';
-import { DEFAULT_API_MODEL, DEFAULT_SERVER_MODEL } from '@llm/providers/model-ids.js';
+import { DEFAULT_API_MODEL, DEFAULT_SERVER_MODEL, SUBAGENT_MODEL } from '@llm/providers/model-ids.js';
 import {
   MAX_TURNS_DEFAULT,
   INACTIVE_SESSION_TIMEOUT_MS,
@@ -125,6 +125,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
   // Model Configuration
   models: {
     default: DEFAULT_API_MODEL,
+    subagent: SUBAGENT_MODEL,
   },
 
   // Retry Configuration

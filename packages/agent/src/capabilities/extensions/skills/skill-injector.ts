@@ -104,15 +104,17 @@ export function removeSkillReferences(prompt: string, references: SkillReference
 // =============================================================================
 
 /**
- * Build a tool preferences block for skills that specify allowedTools.
- * This provides a strong suggestion to the agent about which tools to prefer.
+ * Build a tool preferences/restrictions block for skills that specify tool constraints.
  */
 function buildToolPreferences(skill: SkillMetadata): string {
-  const frontmatter = skill.frontmatter;
+  const fm = skill.frontmatter;
 
-  if (frontmatter.allowedTools && frontmatter.allowedTools.length > 0) {
-    const toolList = frontmatter.allowedTools.join(', ');
-    return `<skill-tool-preferences>This skill works best with: ${toolList}. Please prefer these tools when executing this skill.</skill-tool-preferences>`;
+  if (fm.allowedTools && fm.allowedTools.length > 0) {
+    return `<skill-tool-preferences>This skill works best with: ${fm.allowedTools.join(', ')}. Prefer these tools.</skill-tool-preferences>`;
+  }
+
+  if (fm.deniedTools && fm.deniedTools.length > 0) {
+    return `<skill-tool-restrictions>This skill must NOT use: ${fm.deniedTools.join(', ')}. These tools are restricted.</skill-tool-restrictions>`;
   }
 
   return '';
@@ -169,38 +171,18 @@ function escapeXml(str: string): string {
 export function processPromptForSkills(
   prompt: string,
   registry: SkillRegistry,
-  options?: {
-    /** Include auto-inject skills even if not referenced */
-    includeAutoInject?: boolean;
-  }
 ): SkillInjectionResult {
-  // Extract @references from prompt
   const references = extractSkillReferences(prompt);
-
-  // De-duplicate referenced skill names
   const referencedNames = [...new Set(references.map(r => r.name))];
-
-  // Look up skills
   const { found, notFound } = registry.getMany(referencedNames);
 
-  // Get auto-inject skills if requested
-  const autoInjectSkills = options?.includeAutoInject
-    ? registry.getAutoInjectSkills().filter(s => !referencedNames.includes(s.name))
-    : [];
-
-  // Combine all skills (auto-inject first, then referenced)
-  const allSkills = [...autoInjectSkills, ...found];
-
-  // Remove references from prompt
   const cleanedPrompt = removeSkillReferences(prompt, references);
-
-  // Build the skill context
-  const skillContext = buildSkillContext(allSkills);
+  const skillContext = buildSkillContext(found);
 
   return {
     originalPrompt: prompt,
     cleanedPrompt,
-    injectedSkills: allSkills,
+    injectedSkills: found,
     notFoundSkills: notFound,
     skillContext,
   };

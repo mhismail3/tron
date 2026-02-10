@@ -105,7 +105,6 @@ struct AgentClientTests {
             displayName: name,
             description: "A test skill",
             source: .global,
-            autoInject: false,
             tags: nil
         )
     }

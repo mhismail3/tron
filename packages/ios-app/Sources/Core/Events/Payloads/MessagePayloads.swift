@@ -124,7 +124,6 @@ struct UserMessagePayload {
                     displayName: displayName,
                     description: "",
                     source: source,
-                    autoInject: false,
                     tags: nil
                 )
             }
@@ -144,7 +143,6 @@ struct UserMessagePayload {
                     displayName: displayName,
                     description: "",
                     source: source,
-                    autoInject: false,
                     tags: nil
                 )
             }

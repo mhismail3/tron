@@ -8,8 +8,8 @@ final class MentionDetectorTests: XCTestCase {
 
     // MARK: - Helper
 
-    private func makeSkill(_ name: String, autoInject: Bool = false, tags: [String]? = nil) -> Skill {
-        Skill(name: name, displayName: name.capitalized, description: "Description for \(name)", source: .global, autoInject: autoInject, tags: tags)
+    private func makeSkill(_ name: String, tags: [String]? = nil) -> Skill {
+        Skill(name: name, displayName: name.capitalized, description: "Description for \(name)", source: .global, tags: tags)
     }
 
     // MARK: - Basic Detection (@)
@@ -148,7 +148,7 @@ final class MentionDetectorTests: XCTestCase {
     }
 
     func testFilterSkills_matchesDescription() {
-        let skills = [Skill(name: "foo", displayName: "Foo", description: "Handles TypeScript validation", source: .global, autoInject: false, tags: nil)]
+        let skills = [Skill(name: "foo", displayName: "Foo", description: "Handles TypeScript validation", source: .global, tags: nil)]
         let result = MentionDetector.filterSkills(skills, query: "typescript")
         XCTAssertEqual(result.count, 1)
     }

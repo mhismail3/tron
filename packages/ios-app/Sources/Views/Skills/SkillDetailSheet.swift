@@ -161,24 +161,6 @@ struct SkillDetailSheet: View {
                             .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
-                    // Auto-inject badge
-                    if metadata.autoInject {
-                        HStack(spacing: 4) {
-                            Image(systemName: "bolt.fill")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            Text("Auto-inject")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        }
-                        .foregroundStyle(.tronAmber)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.clear)
-                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.25)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        }
-                    }
-
                     Spacer()
 
                     // Tags (purple for visual distinction)
@@ -363,7 +345,6 @@ struct SkillDetailSheet: View {
             displayName: "TypeScript Rules",
             description: "TypeScript coding standards and best practices for the project",
             source: .global,
-            autoInject: false,
             tags: ["coding", "typescript"]
         ),
         skillStore: SkillStore()

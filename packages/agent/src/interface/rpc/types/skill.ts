@@ -20,8 +20,6 @@ export interface RpcSkillInfo {
   description: string;
   /** Where the skill was loaded from */
   source: 'global' | 'project';
-  /** Whether this skill auto-injects into every prompt (Rules) */
-  autoInject: boolean;
   /** Tags for categorization */
   tags?: string[];
 }
@@ -44,8 +42,6 @@ export interface SkillListParams {
   sessionId?: string;
   /** Filter by source (global, project) */
   source?: 'global' | 'project';
-  /** Filter for auto-inject skills only */
-  autoInjectOnly?: boolean;
   /** Include full content in results */
   includeContent?: boolean;
 }
@@ -55,8 +51,6 @@ export interface SkillListResult {
   skills: RpcSkillInfo[] | RpcSkillMetadata[];
   /** Total number of skills */
   totalCount: number;
-  /** Number of auto-inject skills (Rules) */
-  autoInjectCount: number;
 }
 
 /** Get a single skill by name */

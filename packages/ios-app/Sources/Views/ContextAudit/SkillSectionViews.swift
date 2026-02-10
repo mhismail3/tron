@@ -88,10 +88,6 @@ struct SkillReferenceRow: View {
         skill.source == .project ? .tronEmerald : .tronCyan
     }
 
-    private var autoInjectBadge: String? {
-        skill.autoInject ? "auto" : nil
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row
@@ -105,19 +101,6 @@ struct SkillReferenceRow: View {
                     .foregroundStyle(.tronCyan)
 
                 Spacer()
-
-                // Auto-inject badge if applicable
-                if let badge = autoInjectBadge {
-                    Text(badge)
-                        .font(TronTypography.badge)
-                        .foregroundStyle(.tronAmber)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 2)
-                        .background {
-                            Capsule()
-                                .fill(Color.tronAmber.opacity(0.2))
-                        }
-                }
 
                 // Tags if any
                 if let tags = skill.tags, !tags.isEmpty {

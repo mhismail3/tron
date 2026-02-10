@@ -169,7 +169,6 @@ struct ChatNotificationCoordinatorTests {
             displayName: "Plan",
             description: "Create a plan",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let otherSkill = Skill(
@@ -177,7 +176,6 @@ struct ChatNotificationCoordinatorTests {
             displayName: "Other",
             description: "Other skill",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let availableSkills = [otherSkill, planSkill]
@@ -199,7 +197,6 @@ struct ChatNotificationCoordinatorTests {
             displayName: "Plan",
             description: "Create a plan",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let availableSkills = [planSkill]
@@ -220,7 +217,6 @@ struct ChatNotificationCoordinatorTests {
             displayName: "Other",
             description: "Other skill",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let availableSkills = [otherSkill]
@@ -241,7 +237,6 @@ struct ChatNotificationCoordinatorTests {
             displayName: "Plan",
             description: "Create a plan",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         let availableSkills = [planSkill]

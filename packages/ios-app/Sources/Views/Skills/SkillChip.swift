@@ -67,28 +67,22 @@ struct SkillChip: View {
 
     private var chipIcon: String {
         switch mode {
-        case .skill:
-            return skill.autoInject ? "bolt.fill" : "sparkles"
-        case .spell:
-            return "wand.and.stars"
+        case .skill: return "sparkles"
+        case .spell: return "wand.and.stars"
         }
     }
 
     private var chipIconColor: Color {
         switch mode {
-        case .skill:
-            return skill.autoInject ? .tronAmber : .tronCyan
-        case .spell:
-            return .tronPink
+        case .skill: return .tronCyan
+        case .spell: return .tronPink
         }
     }
 
     private var chipTintColor: Color {
         switch mode {
-        case .skill:
-            return skill.autoInject ? .tronAmber : .tronCyan
-        case .spell:
-            return .tronPink
+        case .skill: return .tronCyan
+        case .spell: return .tronPink
         }
     }
 
@@ -197,19 +191,15 @@ struct SkillChipFallback: View {
 
     private var iconName: String {
         switch mode {
-        case .skill:
-            return skill.autoInject ? "bolt.fill" : "sparkles"
-        case .spell:
-            return "wand.and.stars"
+        case .skill: return "sparkles"
+        case .spell: return "wand.and.stars"
         }
     }
 
     private var iconColor: Color {
         switch mode {
-        case .skill:
-            return skill.autoInject ? .orange : .cyan
-        case .spell:
-            return .tronPink
+        case .skill: return .cyan
+        case .spell: return .tronPink
         }
     }
 
@@ -269,7 +259,6 @@ struct SkillChipFallback: View {
                     displayName: "TypeScript Rules",
                     description: "TypeScript coding standards",
                     source: .global,
-                    autoInject: false,
                     tags: ["coding"]
                 )
             )
@@ -280,7 +269,6 @@ struct SkillChipFallback: View {
                     displayName: "Project Context",
                     description: "Project-specific context",
                     source: .project,
-                    autoInject: true,
                     tags: ["context"]
                 )
             )
@@ -289,9 +277,9 @@ struct SkillChipFallback: View {
         // Row with remove buttons (InputBar style)
         SkillChipRow(
             skills: [
-                Skill(name: "api-design", displayName: "API Design", description: "API design patterns", source: .global, autoInject: false, tags: nil),
-                Skill(name: "testing", displayName: "Testing", description: "Testing best practices", source: .project, autoInject: false, tags: nil),
-                Skill(name: "rules", displayName: "Rules", description: "Project rules", source: .global, autoInject: true, tags: nil)
+                Skill(name: "api-design", displayName: "API Design", description: "API design patterns", source: .global, tags: nil),
+                Skill(name: "testing", displayName: "Testing", description: "Testing best practices", source: .project, tags: nil),
+                Skill(name: "rules", displayName: "Rules", description: "Project rules", source: .global, tags: nil)
             ],
             onRemove: { _ in },
             onTap: { _ in }
@@ -300,7 +288,7 @@ struct SkillChipFallback: View {
         // Message chips (read-only)
         MessageSkillChips(
             skills: [
-                Skill(name: "swift-style", displayName: "Swift Style", description: "Swift coding style", source: .global, autoInject: false, tags: nil)
+                Skill(name: "swift-style", displayName: "Swift Style", description: "Swift coding style", source: .global, tags: nil)
             ],
             onTap: { _ in }
         )

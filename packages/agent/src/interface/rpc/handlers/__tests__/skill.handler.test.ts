@@ -64,11 +64,10 @@ describe('Skill Handlers', () => {
 
       const mockResult = {
         skills: [
-          { name: 'skill1', displayName: 'Skill 1', description: 'First skill', source: 'global' as const, autoInject: false },
-          { name: 'skill2', displayName: 'Skill 2', description: 'Second skill', source: 'project' as const, autoInject: true },
+          { name: 'skill1', displayName: 'Skill 1', description: 'First skill', source: 'global' as const },
+          { name: 'skill2', displayName: 'Skill 2', description: 'Second skill', source: 'project' as const },
         ],
         totalCount: 2,
-        autoInjectCount: 1,
       };
       mockListSkills.mockResolvedValue(mockResult);
 
@@ -136,7 +135,6 @@ describe('Skill Handlers', () => {
           displayName: 'Test Skill',
           description: 'A test skill',
           source: 'global' as const,
-          autoInject: false,
           content: '# Test Skill\n\nSome content',
           path: '/path/to/skill',
           additionalFiles: [],

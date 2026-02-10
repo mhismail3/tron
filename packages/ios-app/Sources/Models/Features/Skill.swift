@@ -20,17 +20,10 @@ struct Skill: Identifiable, Codable, Equatable {
     let description: String
     /// Where the skill was loaded from
     let source: SkillSource
-    /// Whether this skill auto-injects into every prompt (Rules)
-    let autoInject: Bool
     /// Tags for categorization
     let tags: [String]?
 
     var id: String { name }
-
-    // Coding keys for JSON decoding
-    private enum CodingKeys: String, CodingKey {
-        case name, displayName, description, source, autoInject, tags
-    }
 }
 
 // MARK: - Skill Metadata (Full Details)
@@ -45,8 +38,6 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
     let description: String
     /// Where the skill was loaded from
     let source: SkillSource
-    /// Whether this skill auto-injects into every prompt (Rules)
-    let autoInject: Bool
     /// Tags for categorization
     let tags: [String]?
     /// Full SKILL.md content (after frontmatter stripped)
@@ -65,7 +56,6 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
             displayName: displayName,
             description: description,
             source: source,
-            autoInject: autoInject,
             tags: tags
         )
     }
@@ -77,7 +67,6 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
 struct SkillListResponse: Codable {
     let skills: [Skill]
     let totalCount: Int
-    let autoInjectCount: Int
 }
 
 /// Response from skill.get RPC call

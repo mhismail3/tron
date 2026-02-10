@@ -5,6 +5,7 @@
  * Catches accidental changes during refactoring.
  */
 import { describe, it, expect } from 'vitest';
+import { DEFAULT_SETTINGS } from '../defaults.js';
 
 // Context constants
 import {
@@ -236,6 +237,13 @@ describe('constants snapshot', () => {
       expect(DEFAULT_API_MODEL).toBe(CLAUDE_OPUS_4_6);
       expect(DEFAULT_SERVER_MODEL).toBe(CLAUDE_SONNET_4);
       expect(DEFAULT_GOOGLE_MODEL).toBe(GEMINI_2_5_FLASH);
+    });
+  });
+
+  describe('default settings', () => {
+    it('models defaults include subagent', () => {
+      expect(DEFAULT_SETTINGS.models.default).toBe(CLAUDE_OPUS_4_6);
+      expect(DEFAULT_SETTINGS.models.subagent).toBe(CLAUDE_HAIKU_4_5);
     });
   });
 });

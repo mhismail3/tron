@@ -91,15 +91,13 @@ function parseSimpleYaml(yaml: string): SkillFrontmatter {
     if (!rawValue) {
       currentKey = key;
       currentArray = [];
-      if (key === 'tools') {
-        result.tools = currentArray;
-      } else if (key === 'tags') {
+      if (key === 'tags') {
         result.tags = currentArray;
       } else if (key === 'allowedTools') {
         result.allowedTools = currentArray;
+      } else if (key === 'deniedTools') {
+        result.deniedTools = currentArray;
       }
-      // Note: allowedPatterns is complex nested YAML - for now we don't parse it
-      // in this simple parser. It can be added later with a more robust parser.
       continue;
     }
 
@@ -117,43 +115,31 @@ function parseSimpleYaml(yaml: string): SkillFrontmatter {
       case 'description':
         result.description = String(value);
         break;
-      case 'autoInject':
-        result.autoInject = value === true || value === 'true';
-        break;
       case 'version':
         result.version = String(value);
         break;
-      case 'tools':
-        // Inline array: tools: [read, write]
-        if (typeof value === 'string' && value.startsWith('[')) {
-          result.tools = parseInlineArray(value);
-        }
-        break;
       case 'tags':
-        // Inline array: tags: [coding, standards]
         if (typeof value === 'string' && value.startsWith('[')) {
           result.tags = parseInlineArray(value);
         }
         break;
       case 'allowedTools':
-        // Inline array: allowedTools: [Read, Glob, Grep]
         if (typeof value === 'string' && value.startsWith('[')) {
           result.allowedTools = parseInlineArray(value);
         }
         break;
+      case 'deniedTools':
+        if (typeof value === 'string' && value.startsWith('[')) {
+          result.deniedTools = parseInlineArray(value);
+        }
+        break;
       case 'subagent':
-        // Subagent mode: 'no' | 'ask' | 'yes'
         if (value === 'no' || value === 'ask' || value === 'yes') {
           result.subagent = value as SkillSubagentMode;
         }
         break;
       case 'subagentModel':
         result.subagentModel = String(value);
-        break;
-      case 'subagentMaxTurns':
-        if (typeof value === 'number') {
-          result.subagentMaxTurns = value;
-        }
         break;
     }
   }

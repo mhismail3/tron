@@ -277,7 +277,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
             displayName: name,
             description: "Test skill",
             source: .global,
-            autoInject: false,
             tags: nil
         )
     }

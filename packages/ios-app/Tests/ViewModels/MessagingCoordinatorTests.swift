@@ -227,7 +227,7 @@ final class MessagingCoordinatorTests: XCTestCase {
     func testSendMessagePassesSkillsToServer() async {
         // Given: Input with skills
         mockContext.inputText = "Test"
-        let skills = [Skill(name: "test-skill", displayName: "Test Skill", description: "Test", source: .global, autoInject: false, tags: nil)]
+        let skills = [Skill(name: "test-skill", displayName: "Test Skill", description: "Test", source: .global, tags: nil)]
 
         // When: Sending message with skills
         await coordinator.sendMessage(skills: skills, context: mockContext)

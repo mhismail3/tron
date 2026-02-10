@@ -68,7 +68,6 @@ describe('SkillAdapter', () => {
 
       expect(result.skills).toEqual([]);
       expect(result.totalCount).toBe(0);
-      expect(result.autoInjectCount).toBe(0);
     });
 
     it('should use process.cwd when no session provided', async () => {

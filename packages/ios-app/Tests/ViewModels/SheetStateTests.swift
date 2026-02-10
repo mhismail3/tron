@@ -62,7 +62,6 @@ struct SheetStateTests {
             displayName: "Test Skill",
             description: "Test description",
             source: .global,
-            autoInject: false,
             tags: nil
         )
 
@@ -81,7 +80,6 @@ struct SheetStateTests {
             displayName: "Another Skill",
             description: "Another description",
             source: .project,
-            autoInject: false,
             tags: nil
         )
 
@@ -172,7 +170,6 @@ struct SheetStateTests {
                 displayName: "Test",
                 description: "test",
                 source: .global,
-                autoInject: false,
                 tags: nil
             ),
             mode: .spell
@@ -234,7 +231,6 @@ struct SheetStateTests {
             displayName: "Test",
             description: "test",
             source: .global,
-            autoInject: false,
             tags: nil
         )
         state.presentSkillDetail(skill, mode: .skill)

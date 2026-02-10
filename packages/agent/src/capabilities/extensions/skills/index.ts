@@ -24,8 +24,7 @@ export type {
   AddedSkillInfo,
   // Subagent mode types
   SkillSubagentMode,
-  AllowedPatternRule,
-  AllowedPatternConstraint,
+  SkillDeniedPatternRule,
 } from './types.js';
 
 // Loader
@@ -58,7 +57,6 @@ export type { SkillTrackingEvent } from './skill-tracker.js';
 
 // Skill to Denials Converter
 export {
-  skillAllowedToolsToDenials,
-  getEffectiveAllowedTools,
+  skillFrontmatterToDenials,
   getSkillSubagentMode,
 } from './skill-to-denials.js';

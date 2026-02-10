@@ -17,17 +17,12 @@ struct MentionStyle: Sendable {
         tintColor: .tronCyan,
         prefix: "@",
         rowIcon: { skill in
-            skill.autoInject
-                ? (name: "bolt.fill", color: .tronAmber)
-                : (name: "sparkles", color: .tronCyan)
+            (name: "sparkles", color: .tronCyan)
         },
         badges: { skill in
             var badges: [MentionBadge] = []
             if skill.source == .project {
                 badges.append(MentionBadge(text: "project", color: .tronEmerald))
-            }
-            if skill.autoInject {
-                badges.append(MentionBadge(text: "rule", color: .tronAmber))
             }
             return badges
         }

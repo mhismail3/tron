@@ -3,7 +3,6 @@
  *
  * In-memory cache for loaded skills with precedence handling.
  * Project skills take precedence over global skills with the same name.
- * Provides get(), list(), and getAutoInjectSkills() methods.
  */
 
 import type {
@@ -110,13 +109,7 @@ export class SkillRegistry {
     const result: SkillInfo[] = [];
 
     for (const skill of this.skills.values()) {
-      // Apply source filter
       if (options?.source && skill.source !== options.source) {
-        continue;
-      }
-
-      // Apply autoInject filter
-      if (options?.autoInjectOnly && !skill.frontmatter.autoInject) {
         continue;
       }
 
@@ -125,12 +118,10 @@ export class SkillRegistry {
         displayName: skill.displayName,
         description: skill.description,
         source: skill.source,
-        autoInject: skill.frontmatter.autoInject ?? false,
         tags: skill.frontmatter.tags,
       });
     }
 
-    // Sort by name
     return result.sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -141,28 +132,14 @@ export class SkillRegistry {
     const result: SkillMetadata[] = [];
 
     for (const skill of this.skills.values()) {
-      // Apply source filter
       if (options?.source && skill.source !== options.source) {
-        continue;
-      }
-
-      // Apply autoInject filter
-      if (options?.autoInjectOnly && !skill.frontmatter.autoInject) {
         continue;
       }
 
       result.push(skill);
     }
 
-    // Sort by name
     return result.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  /**
-   * Get all auto-inject skills (Rules)
-   */
-  getAutoInjectSkills(): SkillMetadata[] {
-    return this.listFull({ autoInjectOnly: true });
   }
 
   /**

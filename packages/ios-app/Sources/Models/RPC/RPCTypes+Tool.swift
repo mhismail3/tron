@@ -38,13 +38,11 @@ struct ToolResultResponse: Decodable {
 struct SkillListParams: Encodable {
     let sessionId: String?
     let source: String?
-    let autoInjectOnly: Bool?
     let includeContent: Bool?
 
-    init(sessionId: String? = nil, source: String? = nil, autoInjectOnly: Bool? = nil, includeContent: Bool? = nil) {
+    init(sessionId: String? = nil, source: String? = nil, includeContent: Bool? = nil) {
         self.sessionId = sessionId
         self.source = source
-        self.autoInjectOnly = autoInjectOnly
         self.includeContent = includeContent
     }
 }

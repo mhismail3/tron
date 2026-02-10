@@ -7,9 +7,6 @@
  * Skills can be:
  * - Global: Located in ~/.tron/skills/ (shared across all projects)
  * - Project: Located in .tron/skills/ (project-specific, takes precedence)
- *
- * Skills with autoInject: true act as "Rules" and are automatically included
- * in every prompt without explicit reference.
  */
 
 // =============================================================================
@@ -17,31 +14,22 @@
 // =============================================================================
 
 /**
- * Pattern constraint for a specific parameter of an allowed tool.
- * Only invocations matching these patterns are permitted.
+ * Granular deny rule for specific tool parameters.
+ * Blocks specific invocations of a tool based on parameter patterns.
  */
-export interface AllowedPatternConstraint {
-  /** Parameter name to check (e.g., 'file_path', 'command') */
-  parameter: string;
-  /** Regex patterns that ARE allowed for this parameter */
-  allow: string[];
-}
-
-/**
- * Granular pattern rule for an allowed tool.
- * Restricts which invocations of the tool are permitted.
- */
-export interface AllowedPatternRule {
+export interface SkillDeniedPatternRule {
   /** Tool name this rule applies to */
   tool: string;
-  /** Parameter patterns that define what's allowed */
-  patterns: AllowedPatternConstraint[];
+  /** Parameter patterns that trigger denial */
+  denyPatterns: { parameter: string; patterns: string[] }[];
+  /** Optional custom denial message */
+  message?: string;
 }
 
 /**
  * Subagent execution mode for skills.
  *
- * - 'no' (default): Inject skill into current agent. AllowedTools are suggestions only.
+ * - 'no' (default): Inject skill into current agent. Tool preferences are suggestions only.
  * - 'ask': Prompt user whether to run in current agent or spawn subagent.
  * - 'yes': Always spawn subagent with enforced tool restrictions.
  */
@@ -55,33 +43,38 @@ export interface SkillFrontmatter {
   name?: string;
   /** Short description of what this skill does */
   description?: string;
-  /** Auto-inject this skill into every prompt (acts as a "Rule") */
-  autoInject?: boolean;
   /** Semantic version of the skill */
   version?: string;
-  /** Tools this skill is designed to work with */
-  tools?: string[];
   /** Tags for categorization and filtering */
   tags?: string[];
 
   // ============================================================================
-  // Unified Tool Restriction System
+  // Tool Restriction System
   // ============================================================================
 
   /**
-   * Tools this skill needs (positive permissions).
+   * Tools this skill needs (allow-list mode, for third-party/imported skills).
    * Enforcement depends on subagent mode:
    * - subagent: 'no' → Strong suggestion in skill prompt (no enforcement)
    * - subagent: 'yes' → Enforced via ToolDenialConfig (everything else blocked)
+   * Mutually exclusive with deniedTools.
    */
   allowedTools?: string[];
 
   /**
-   * Granular pattern constraints on allowed tools.
-   * Only specific invocations matching these patterns are permitted.
+   * Tools to block entirely (deny-list mode, primary for first-party skills).
+   * Enforcement depends on subagent mode:
+   * - subagent: 'no' → Noted as restrictions in skill prompt
+   * - subagent: 'yes' → Enforced via ToolDenialConfig
+   * Mutually exclusive with allowedTools.
+   */
+  deniedTools?: string[];
+
+  /**
+   * Granular deny rules for specific tool parameters.
    * Only enforced when subagent: 'yes'.
    */
-  allowedPatterns?: AllowedPatternRule[];
+  deniedPatterns?: SkillDeniedPatternRule[];
 
   /**
    * Subagent execution mode.
@@ -95,11 +88,6 @@ export interface SkillFrontmatter {
    * Model to use when spawning subagent (only used when subagent != 'no').
    */
   subagentModel?: string;
-
-  /**
-   * Maximum turns for subagent execution (only used when subagent != 'no').
-   */
-  subagentMaxTurns?: number;
 }
 
 // =============================================================================
@@ -143,7 +131,6 @@ export interface SkillInfo {
   displayName: string;
   description: string;
   source: SkillSource;
-  autoInject: boolean;
   tags?: string[];
 }
 
@@ -222,8 +209,6 @@ export interface SkillScanError {
 export interface SkillListOptions {
   /** Filter by source */
   source?: SkillSource;
-  /** Filter for auto-inject skills only */
-  autoInjectOnly?: boolean;
   /** Include full content in results */
   includeContent?: boolean;
 }

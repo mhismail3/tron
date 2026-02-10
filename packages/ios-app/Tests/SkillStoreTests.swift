@@ -12,13 +12,12 @@ final class SkillStoreTests: XCTestCase {
 
     // MARK: - Test Helpers
 
-    func createSkill(name: String, autoInject: Bool = false, description: String = "Test skill") -> Skill {
+    func createSkill(name: String, description: String = "Test skill") -> Skill {
         return Skill(
             name: name,
             displayName: name.split(separator: "-").map { $0.capitalized }.joined(separator: " "),
             description: description,
             source: .global,
-            autoInject: autoInject,
             tags: ["test"]
         )
     }
@@ -161,21 +160,9 @@ final class SkillStoreTests: XCTestCase {
         XCTAssertNil(skillStore.error)
         XCTAssertNil(skillStore.lastRefresh)
         XCTAssertEqual(skillStore.totalCount, 0)
-        XCTAssertEqual(skillStore.autoInjectCount, 0)
     }
 
     // MARK: - Tests: Computed Properties
-
-    /// Test autoInjectSkills filter
-    @MainActor
-    func testAutoInjectSkillsFilter() {
-        // Since we can't easily set skills directly, we test the filter logic
-        // by verifying the computed property exists and works with empty array
-        let skillStore = SkillStore()
-
-        XCTAssertEqual(skillStore.autoInjectSkills.count, 0)
-        XCTAssertEqual(skillStore.regularSkills.count, 0)
-    }
 
     /// Test source-based filters
     @MainActor

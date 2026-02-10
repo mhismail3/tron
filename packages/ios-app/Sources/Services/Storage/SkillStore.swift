@@ -22,16 +22,6 @@ final class SkillStore {
 
     // MARK: - Computed Properties
 
-    /// Skills that auto-inject (Rules)
-    var autoInjectSkills: [Skill] {
-        skills.filter { $0.autoInject }
-    }
-
-    /// Skills that don't auto-inject (regular skills)
-    var regularSkills: [Skill] {
-        skills.filter { !$0.autoInject }
-    }
-
     /// Global skills
     var globalSkills: [Skill] {
         skills.filter { $0.source == .global }
@@ -45,11 +35,6 @@ final class SkillStore {
     /// Total skill count
     var totalCount: Int {
         skills.count
-    }
-
-    /// Auto-inject skill count
-    var autoInjectCount: Int {
-        autoInjectSkills.count
     }
 
     // MARK: - Dependencies
@@ -85,7 +70,7 @@ final class SkillStore {
             skills = result.skills
             // Note: Don't update lastRefresh here - this just loads from server cache
             // lastRefresh is only updated when we actually rescan from disk
-            logger.debug("Loaded \(result.totalCount) skills (\(result.autoInjectCount) auto-inject)", category: .rpc)
+            logger.debug("Loaded \(result.totalCount) skills", category: .rpc)
         } catch {
             self.error = error.localizedDescription
             logger.error("Failed to load skills: \(error.localizedDescription)", category: .rpc)
