@@ -290,6 +290,14 @@ export interface MemoryAutoInjectSettings {
   count: number;
 }
 
+/**
+ * Ledger writing configuration
+ */
+export interface MemoryLedgerSettings {
+  /** Enable automatic ledger writes after each response cycle */
+  enabled: boolean;
+}
+
 export interface MemorySettings {
   /** Maximum entries in memory cache */
   maxEntries: number;
@@ -297,6 +305,8 @@ export interface MemorySettings {
   embedding: MemoryEmbeddingSettings;
   /** Auto-injection of recent session memories */
   autoInject: MemoryAutoInjectSettings;
+  /** Ledger writing settings */
+  ledger: MemoryLedgerSettings;
 }
 
 /**

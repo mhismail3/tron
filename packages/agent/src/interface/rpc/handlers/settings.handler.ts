@@ -75,6 +75,9 @@ export function createSettingsHandlers(): MethodRegistration[] {
         alertTurnFallback: settings.context.compactor.alertTurnFallback ?? 5,
       },
       memory: {
+        ledger: {
+          enabled: settings.context.memory.ledger?.enabled ?? true,
+        },
         autoInject: {
           enabled: settings.context.memory.autoInject?.enabled ?? false,
           count: settings.context.memory.autoInject?.count ?? 5,

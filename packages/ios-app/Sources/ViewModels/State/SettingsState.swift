@@ -16,6 +16,7 @@ final class SettingsState {
     var forceAlwaysCompact: Bool = false
     var triggerTokenThreshold: Double = 0.70
     var defaultTurnFallback: Int = 8
+    var memoryLedgerEnabled: Bool = true
     var memoryAutoInject: Bool = false
     var memoryAutoInjectCount: Int = 5
     var maxConcurrentSessions: Int = 10
@@ -47,6 +48,7 @@ final class SettingsState {
             forceAlwaysCompact = settings.compaction.forceAlways
             triggerTokenThreshold = settings.compaction.triggerTokenThreshold
             defaultTurnFallback = settings.compaction.defaultTurnFallback
+            memoryLedgerEnabled = settings.memory.ledger.enabled
             memoryAutoInject = settings.memory.autoInject.enabled
             memoryAutoInjectCount = settings.memory.autoInject.count
             maxConcurrentSessions = settings.maxConcurrentSessions
@@ -76,6 +78,7 @@ final class SettingsState {
         forceAlwaysCompact = false
         triggerTokenThreshold = 0.70
         defaultTurnFallback = 8
+        memoryLedgerEnabled = true
         memoryAutoInject = false
         memoryAutoInjectCount = 5
         maxConcurrentSessions = 10
@@ -87,12 +90,15 @@ final class SettingsState {
     func buildResetUpdate() -> ServerSettingsUpdate {
         ServerSettingsUpdate(
             server: .init(defaultWorkspace: AppConstants.defaultWorkspace, maxConcurrentSessions: 10),
-            context: .init(compactor: .init(
+            context: .init(
+                compactor: .init(
                 preserveRecentCount: 5,
                 forceAlways: false,
                 triggerTokenThreshold: 0.70,
                 defaultTurnFallback: 8
-            )),
+                ),
+                memory: .init(ledger: .init(enabled: true))
+            ),
             tools: .init(web: .init(
                 fetch: .init(timeoutMs: 30000),
                 cache: .init(ttlMs: 900000, maxEntries: 100)

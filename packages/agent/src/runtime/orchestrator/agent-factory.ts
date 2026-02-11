@@ -302,6 +302,7 @@ function wireMemoryLedger(
     executeCompaction: () => memCfg.executeCompaction(sessionId),
     emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
     embedMemory: memCfg.embedMemory,
+    isLedgerEnabled: () => getSettings().context.memory.ledger?.enabled ?? true,
     sessionId,
     workspaceId,
   });

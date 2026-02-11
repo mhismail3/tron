@@ -20,7 +20,12 @@ struct ServerSettings: Decodable {
     }
 
     struct MemorySettings: Decodable {
+        let ledger: LedgerSettings
         let autoInject: AutoInjectSettings
+
+        struct LedgerSettings: Decodable {
+            let enabled: Bool
+        }
 
         struct AutoInjectSettings: Decodable {
             let enabled: Bool
@@ -72,7 +77,12 @@ struct ServerSettingsUpdate: Encodable {
         }
 
         struct MemoryUpdate: Encodable {
+            var ledger: LedgerUpdate?
             var autoInject: AutoInjectUpdate?
+
+            struct LedgerUpdate: Encodable {
+                var enabled: Bool?
+            }
 
             struct AutoInjectUpdate: Encodable {
                 var enabled: Bool?

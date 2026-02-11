@@ -208,6 +208,9 @@ export const DEFAULT_SETTINGS: TronSettings = {
         enabled: false,
         count: 5,
       },
+      ledger: {
+        enabled: true,
+      },
     },
   },
 

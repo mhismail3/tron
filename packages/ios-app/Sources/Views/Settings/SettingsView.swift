@@ -106,6 +106,7 @@ struct SettingsView: View {
                 )
 
                 MemorySettingsSection(
+                    memoryLedgerEnabled: Bindable(settingsState).memoryLedgerEnabled,
                     memoryAutoInject: Bindable(settingsState).memoryAutoInject,
                     memoryAutoInjectCount: Bindable(settingsState).memoryAutoInjectCount,
                     updateServerSetting: updateServerSetting

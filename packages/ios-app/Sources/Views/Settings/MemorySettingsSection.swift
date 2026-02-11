@@ -1,12 +1,24 @@
 import SwiftUI
 
 struct MemorySettingsSection: View {
+    @Binding var memoryLedgerEnabled: Bool
     @Binding var memoryAutoInject: Bool
     @Binding var memoryAutoInjectCount: Int
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
     var body: some View {
         Section {
+            Toggle(isOn: $memoryLedgerEnabled) {
+                Label("Auto-update ledger", systemImage: "book.closed")
+                    .font(TronTypography.subheadline)
+            }
+            .tint(.tronEmerald)
+            .onChange(of: memoryLedgerEnabled) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(context: .init(memory: .init(ledger: .init(enabled: newValue))))
+                }
+            }
+
             Toggle(isOn: $memoryAutoInject) {
                 Label("Auto-inject memories", systemImage: "brain.head.profile")
                     .font(TronTypography.subheadline)

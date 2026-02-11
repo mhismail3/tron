@@ -29,6 +29,7 @@ function createDeps(overrides: Partial<MemoryManagerDeps> = {}): MemoryManagerDe
     resetCompactionTrigger: vi.fn(),
     executeCompaction: vi.fn().mockResolvedValue({ success: true }),
     emitMemoryUpdated: vi.fn(),
+    isLedgerEnabled: vi.fn().mockReturnValue(true),
     sessionId: 'sess-1',
     ...overrides,
   };
@@ -268,6 +269,45 @@ describe('MemoryManager', () => {
       await manager.onCycleComplete(createCycleInfo());
 
       expect(deps.emitMemoryUpdated).toHaveBeenCalled();
+    });
+  });
+
+  describe('isLedgerEnabled', () => {
+    it('should skip ledger write when disabled', async () => {
+      deps = createDeps({
+        isLedgerEnabled: vi.fn().mockReturnValue(false),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.writeLedgerEntry).not.toHaveBeenCalled();
+      expect(deps.emitMemoryUpdated).not.toHaveBeenCalled();
+    });
+
+    it('should still run compaction when ledger is disabled', async () => {
+      deps = createDeps({
+        isLedgerEnabled: vi.fn().mockReturnValue(false),
+        shouldCompact: vi.fn().mockReturnValue({ compact: true, reason: 'turns' }),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.executeCompaction).toHaveBeenCalled();
+      expect(deps.resetCompactionTrigger).toHaveBeenCalled();
+      expect(deps.writeLedgerEntry).not.toHaveBeenCalled();
+    });
+
+    it('should write ledger when enabled', async () => {
+      deps = createDeps({
+        isLedgerEnabled: vi.fn().mockReturnValue(true),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.writeLedgerEntry).toHaveBeenCalled();
     });
   });
 });

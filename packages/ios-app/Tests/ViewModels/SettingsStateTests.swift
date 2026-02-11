@@ -13,6 +13,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 8)
+        XCTAssertTrue(state.memoryLedgerEnabled)
         XCTAssertFalse(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
@@ -32,6 +33,7 @@ final class SettingsStateTests: XCTestCase {
         state.forceAlwaysCompact = true
         state.triggerTokenThreshold = 0.90
         state.defaultTurnFallback = 15
+        state.memoryLedgerEnabled = false
         state.memoryAutoInject = true
         state.memoryAutoInjectCount = 8
         state.maxConcurrentSessions = 25
@@ -45,6 +47,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 8)
+        XCTAssertTrue(state.memoryLedgerEnabled)
         XCTAssertFalse(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
@@ -71,6 +74,8 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertNotNil(update.server)
         XCTAssertEqual(update.server?.maxConcurrentSessions, 10)
         XCTAssertNotNil(update.context?.compactor)
+        XCTAssertNotNil(update.context?.memory?.ledger)
+        XCTAssertEqual(update.context?.memory?.ledger?.enabled, true)
         XCTAssertNotNil(update.tools?.web)
     }
 

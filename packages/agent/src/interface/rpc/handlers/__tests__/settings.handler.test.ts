@@ -71,6 +71,7 @@ function createMockSettings(overrides: Record<string, any> = {}) {
       },
       memory: {
         maxEntries: 1000,
+        ledger: { enabled: true },
         autoInject: { enabled: false, count: 5 },
         ...overrides.memory,
       },
@@ -130,6 +131,7 @@ describe('Settings Handlers', () => {
           alertTurnFallback: 5,
         },
         memory: {
+          ledger: { enabled: true },
           autoInject: { enabled: false, count: 5 },
         },
         tools: {
@@ -177,6 +179,7 @@ describe('Settings Handlers', () => {
           alertTurnFallback: 4,
         },
         memory: {
+          ledger: { enabled: true },
           autoInject: { enabled: false, count: 5 },
         },
         tools: {
@@ -200,6 +203,26 @@ describe('Settings Handlers', () => {
       const result = response.result as any;
 
       expect(result.compaction.forceAlways).toBe(false);
+    });
+
+    it('should return memory ledger enabled', async () => {
+      const request: RpcRequest = { id: '3a', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.memory.ledger.enabled).toBe(true);
+    });
+
+    it('should return memory ledger disabled when set', async () => {
+      mockGetSettings.mockReturnValue(createMockSettings({
+        memory: { ledger: { enabled: false }, autoInject: { enabled: false, count: 5 } },
+      }));
+
+      const request: RpcRequest = { id: '3a2', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.memory.ledger.enabled).toBe(false);
     });
 
     it('should return memory autoInject settings', async () => {
@@ -414,6 +437,27 @@ describe('Settings Handlers', () => {
       const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
       expect(savedArg.context.memory.autoInject.enabled).toBe(true);
       expect(savedArg.context.memory.autoInject.count).toBe(5);
+    });
+
+    it('should update memory ledger enabled', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        context: { memory: { ledger: { enabled: true } } },
+      });
+
+      const request: RpcRequest = {
+        id: '10b',
+        method: 'settings.update',
+        params: {
+          settings: {
+            context: { memory: { ledger: { enabled: false } } },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.context.memory.ledger.enabled).toBe(false);
     });
 
     it('should update memory autoInject count', async () => {

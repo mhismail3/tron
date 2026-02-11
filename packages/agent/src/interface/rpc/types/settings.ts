@@ -22,6 +22,7 @@ export interface SettingsGetResult {
     alertTurnFallback: number;
   };
   memory: {
+    ledger: { enabled: boolean };
     autoInject: { enabled: boolean; count: number };
   };
   tools: {
@@ -46,6 +47,7 @@ export interface SettingsUpdateParams {
         alertTurnFallback?: number;
       };
       memory?: {
+        ledger?: { enabled?: boolean };
         autoInject?: { enabled?: boolean; count?: number };
       };
     };

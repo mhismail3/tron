@@ -31,6 +31,8 @@ export interface MemoryManagerDeps {
   emitMemoryUpdated: (data: { sessionId: string; title?: string; entryType?: string }) => void;
   /** Fire-and-forget embedding callback. Called after successful ledger write. */
   embedMemory?: (eventId: string, workspaceId: string, payload: Record<string, unknown>) => Promise<void>;
+  /** Whether ledger writing is enabled. Checked each cycle. */
+  isLedgerEnabled: () => boolean;
   sessionId: string;
   workspaceId?: string;
 }
@@ -71,35 +73,37 @@ export class MemoryManager {
       }
     }
 
-    try {
-      const ledgerResult = await this.deps.writeLedgerEntry({
-        model: info.model,
-        workingDirectory: info.workingDirectory,
-      });
-
-      if (ledgerResult.written) {
-        this.deps.emitMemoryUpdated({
-          sessionId: this.deps.sessionId,
-          title: ledgerResult.title,
-          entryType: ledgerResult.entryType,
+    if (this.deps.isLedgerEnabled()) {
+      try {
+        const ledgerResult = await this.deps.writeLedgerEntry({
+          model: info.model,
+          workingDirectory: info.workingDirectory,
         });
 
-        // Fire-and-forget embedding for semantic search
-        if (this.deps.embedMemory && ledgerResult.eventId && ledgerResult.payload) {
-          this.deps.embedMemory(
-            ledgerResult.eventId,
-            this.deps.workspaceId ?? '',
-            ledgerResult.payload
-          ).catch(err => {
-            logger.warn('Failed to embed memory', { error: (err as Error).message });
+        if (ledgerResult.written) {
+          this.deps.emitMemoryUpdated({
+            sessionId: this.deps.sessionId,
+            title: ledgerResult.title,
+            entryType: ledgerResult.entryType,
           });
+
+          // Fire-and-forget embedding for semantic search
+          if (this.deps.embedMemory && ledgerResult.eventId && ledgerResult.payload) {
+            this.deps.embedMemory(
+              ledgerResult.eventId,
+              this.deps.workspaceId ?? '',
+              ledgerResult.payload
+            ).catch(err => {
+              logger.warn('Failed to embed memory', { error: (err as Error).message });
+            });
+          }
         }
+      } catch (error) {
+        logger.error('Ledger write failed', {
+          error: (error as Error).message,
+          sessionId: this.deps.sessionId,
+        });
       }
-    } catch (error) {
-      logger.error('Ledger write failed', {
-        error: (error as Error).message,
-        sessionId: this.deps.sessionId,
-      });
     }
   }
 }
