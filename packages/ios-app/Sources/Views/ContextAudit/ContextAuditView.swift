@@ -31,8 +31,6 @@ struct ContextAuditView: View {
 
     // Manual memory update state
     @State private var isAutoLedgerEnabled: Bool = true
-    @State private var isUpdatingLedger: Bool = false
-    @State private var showNoNewContentAlert: Bool = false
 
     // Message pagination state
     @State private var messagesLoadedCount: Int = 10  // Initial batch size
@@ -95,11 +93,6 @@ struct ContextAuditView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-            .alert("No New Content", isPresented: $showNoNewContentAlert) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("There's nothing new to retain since the last memory update.")
-            }
             .task {
                 await loadContext()
             }
@@ -161,20 +154,14 @@ struct ContextAuditView: View {
                 Task { await updateMemoryLedger() }
             } label: {
                 HStack(spacing: 4) {
-                    if isUpdatingLedger {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .tint(.purple)
-                    } else {
-                        Image(systemName: "brain")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                    }
+                    Image(systemName: "brain")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     Text("Retain")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                 }
                 .foregroundStyle(hasMessages && !readOnly ? .purple : .tronTextMuted)
             }
-            .disabled(isUpdatingLedger || !hasMessages || readOnly)
+            .disabled(!hasMessages || readOnly)
         }
     }
 
@@ -473,18 +460,9 @@ struct ContextAuditView: View {
     }
 
     private func updateMemoryLedger() async {
-        isUpdatingLedger = true
-        do {
-            let result = try await rpcClient.misc.updateLedger(sessionId: sessionId)
-            if result.written {
-                dismiss()
-            } else if !result.written {
-                showNoNewContentAlert = true
-            }
-        } catch {
-            errorMessage = "Failed to update memory: \(error.localizedDescription)"
-        }
-        isUpdatingLedger = false
+        dismiss()
+        // Fire-and-forget: the spinner pill and result show in the chat view
+        _ = try? await rpcClient.misc.updateLedger(sessionId: sessionId)
     }
 
     private func removeSkillFromContext(skillName: String) async {
