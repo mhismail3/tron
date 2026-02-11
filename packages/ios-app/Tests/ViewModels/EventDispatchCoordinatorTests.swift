@@ -580,6 +580,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     // MARK: - Context Operations
     var handleCompactionCalledWith: CompactionPlugin.Result?
+    var handleMemoryUpdatingCalled = false
     var handleMemoryUpdatedCalledWith: MemoryUpdatedPlugin.Result?
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
@@ -665,6 +666,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleCompaction(_ result: CompactionPlugin.Result) {
         handleCompactionCalledWith = result
+    }
+
+    func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result) {
+        handleMemoryUpdatingCalled = true
     }
 
     func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result) {

@@ -139,6 +139,8 @@ final class ChatViewModel: ChatEventContext {
     var catchingUpMessageId: UUID?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
+    /// ID of the memory-updating-in-progress notification (replaced when memory update completes)
+    var memoryUpdatingInProgressMessageId: UUID?
     /// Defensive timeout: if agent.ready never arrives after agent.complete, recover after 10s
     @ObservationIgnored
     var postProcessingTimeoutTask: Task<Void, Never>?

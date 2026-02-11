@@ -156,6 +156,8 @@ export interface AgentFactoryConfig {
     appendEvent: (sessionId: string, type: EventType, payload: Record<string, unknown>) => Promise<{ id: string }>;
     /** Get all events for a session */
     getEventsBySession: (sessionId: string) => Promise<import('@infrastructure/events/types/index.js').SessionEvent[]>;
+    /** Emit memory_updating event to WebSocket clients (spinner before write) */
+    emitMemoryUpdating: (data: { sessionId: string }) => void;
     /** Emit memory_updated event to WebSocket clients */
     emitMemoryUpdated: (data: { sessionId: string; title?: string; entryType?: string }) => void;
     /** Get current context token ratio for a session */
@@ -312,6 +314,7 @@ function wireMemoryLedger(
     shouldCompact: (input) => compactionTrigger.shouldCompact(input),
     resetCompactionTrigger: () => compactionTrigger.reset(),
     executeCompaction: () => memCfg.executeCompaction(sessionId),
+    emitMemoryUpdating: (data) => memCfg.emitMemoryUpdating(data),
     emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
     embedMemory: memCfg.embedMemory,
     isLedgerEnabled: () => getSettings().context.memory.ledger?.enabled ?? true,
@@ -333,6 +336,7 @@ function wireMemoryLedger(
   }));
 
   const triggerLedgerUpdate = async () => {
+    memCfg.emitMemoryUpdating({ sessionId });
     try {
       const result = await ledgerWriter.writeLedgerEntry({
         model,
@@ -351,10 +355,13 @@ function wireMemoryLedger(
           const entry = formatLedgerAsMemory(result.payload);
           agent.addSessionMemory(entry);
         }
+      } else {
+        memCfg.emitMemoryUpdated({ sessionId, entryType: 'skipped' });
       }
       return { written: result.written, title: result.title, entryType: result.entryType };
     } catch (error) {
       logger.error('Manual ledger update failed', { sessionId, error: (error as Error).message });
+      memCfg.emitMemoryUpdated({ sessionId, entryType: 'skipped' });
       return { written: false };
     }
   };

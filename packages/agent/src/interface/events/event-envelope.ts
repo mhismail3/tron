@@ -25,6 +25,7 @@ export const BroadcastEventType = {
   AGENT_MESSAGE_DELETED: 'agent.message_deleted',
   AGENT_CONTEXT_CLEARED: 'agent.context_cleared',
   AGENT_COMPACTION: 'agent.compaction',
+  AGENT_MEMORY_UPDATING: 'agent.memory_updating',
   AGENT_MEMORY_UPDATED: 'agent.memory_updated',
   AGENT_SKILL_REMOVED: 'agent.skill_removed',
   AGENT_TODOS_UPDATED: 'agent.todos_updated',

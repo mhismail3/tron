@@ -33,6 +33,8 @@ enum SystemEvent: Equatable {
     case turnFailed(error: String, code: String?, recoverable: Bool)
     /// Subagent completed while parent was idle - results available for review
     case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
+    /// Memory ledger write in progress (spinner)
+    case memoryUpdating
     /// Memory ledger entry was written after a response cycle
     case memoryUpdated(title: String, entryType: String)
     /// Memories were auto-injected at session start
@@ -74,6 +76,8 @@ enum SystemEvent: Equatable {
             return "Request failed: \(error)"
         case .subagentResultAvailable(_, let taskPreview, let success):
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
+        case .memoryUpdating:
+            return "Retaining memory..."
         case .memoryUpdated(let title, _):
             return "Memory updated: \(title)"
         case .memoriesLoaded(let count):

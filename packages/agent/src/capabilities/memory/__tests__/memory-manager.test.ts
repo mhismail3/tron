@@ -28,6 +28,7 @@ function createDeps(overrides: Partial<MemoryManagerDeps> = {}): MemoryManagerDe
     shouldCompact: vi.fn().mockReturnValue({ compact: false, reason: 'no trigger' }),
     resetCompactionTrigger: vi.fn(),
     executeCompaction: vi.fn().mockResolvedValue({ success: true }),
+    emitMemoryUpdating: vi.fn(),
     emitMemoryUpdated: vi.fn(),
     isLedgerEnabled: vi.fn().mockReturnValue(true),
     sessionId: 'sess-1',
@@ -104,13 +105,16 @@ describe('MemoryManager', () => {
       expect(deps.emitMemoryUpdated).toHaveBeenCalled();
     });
 
-    it('should not emit memory updated when ledger skipped', async () => {
+    it('should emit memory updated with skipped entryType when ledger skipped', async () => {
       deps.writeLedgerEntry = vi.fn().mockResolvedValue({ written: false, reason: 'skipped' });
 
       const manager = new MemoryManager(deps);
       await manager.onCycleComplete(createCycleInfo());
 
-      expect(deps.emitMemoryUpdated).not.toHaveBeenCalled();
+      expect(deps.emitMemoryUpdated).toHaveBeenCalledWith({
+        sessionId: 'sess-1',
+        entryType: 'skipped',
+      });
     });
 
     it('should still write ledger even if compaction fails', async () => {
@@ -390,6 +394,53 @@ describe('MemoryManager', () => {
       await manager.onCycleComplete(createCycleInfo());
 
       expect(deps.writeLedgerEntry).toHaveBeenCalled();
+    });
+  });
+
+  describe('emitMemoryUpdating', () => {
+    it('should emit memoryUpdating before writing ledger', async () => {
+      const order: string[] = [];
+      deps = createDeps({
+        emitMemoryUpdating: vi.fn().mockImplementation(() => { order.push('updating'); }),
+        writeLedgerEntry: vi.fn().mockImplementation(async () => {
+          order.push('write');
+          return { written: true };
+        }),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.emitMemoryUpdating).toHaveBeenCalledWith({ sessionId: 'sess-1' });
+      expect(order[0]).toBe('updating');
+      expect(order[1]).toBe('write');
+    });
+
+    it('should emit memoryUpdating even if ledger write fails', async () => {
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockRejectedValue(new Error('Ledger failed')),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.emitMemoryUpdating).toHaveBeenCalledWith({ sessionId: 'sess-1' });
+      // Should also emit skipped to clean up the spinner
+      expect(deps.emitMemoryUpdated).toHaveBeenCalledWith({
+        sessionId: 'sess-1',
+        entryType: 'skipped',
+      });
+    });
+
+    it('should not emit memoryUpdating when ledger is disabled', async () => {
+      deps = createDeps({
+        isLedgerEnabled: vi.fn().mockReturnValue(false),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.emitMemoryUpdating).not.toHaveBeenCalled();
     });
   });
 });

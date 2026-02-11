@@ -28,6 +28,7 @@ export interface MemoryManagerDeps {
   shouldCompact: (input: CompactionTriggerInput) => CompactionTriggerResult;
   resetCompactionTrigger: () => void;
   executeCompaction: () => Promise<{ success: boolean }>;
+  emitMemoryUpdating: (data: { sessionId: string }) => void;
   emitMemoryUpdated: (data: { sessionId: string; title?: string; entryType?: string }) => void;
   /** Fire-and-forget embedding callback. Called after successful ledger write. */
   embedMemory?: (eventId: string, workspaceId: string, payload: Record<string, unknown>) => Promise<void>;
@@ -76,6 +77,7 @@ export class MemoryManager {
     }
 
     if (this.deps.isLedgerEnabled()) {
+      this.deps.emitMemoryUpdating({ sessionId: this.deps.sessionId });
       try {
         const ledgerResult = await this.deps.writeLedgerEntry({
           model: info.model,
@@ -103,11 +105,20 @@ export class MemoryManager {
               logger.warn('Failed to embed memory', { error: (err as Error).message });
             });
           }
+        } else {
+          this.deps.emitMemoryUpdated({
+            sessionId: this.deps.sessionId,
+            entryType: 'skipped',
+          });
         }
       } catch (error) {
         logger.error('Ledger write failed', {
           error: (error as Error).message,
           sessionId: this.deps.sessionId,
+        });
+        this.deps.emitMemoryUpdated({
+          sessionId: this.deps.sessionId,
+          entryType: 'skipped',
         });
       }
     }

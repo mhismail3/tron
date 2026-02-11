@@ -218,6 +218,14 @@ export class TronServer {
       ));
     });
 
+    this.orchestrator.on('memory_updating', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.AGENT_MEMORY_UPDATING,
+        {},
+        data.sessionId
+      ));
+    });
+
     this.orchestrator.on('memory_updated', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
         BroadcastEventType.AGENT_MEMORY_UPDATED,

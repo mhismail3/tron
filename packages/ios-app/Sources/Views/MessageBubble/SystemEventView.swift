@@ -67,6 +67,9 @@ struct SystemEventView: View {
                 }
             )
 
+        case .memoryUpdating:
+            MemoryUpdatingNotificationView()
+
         case .memoryUpdated(let title, let entryType):
             MemoryUpdatedNotificationView(
                 title: title,

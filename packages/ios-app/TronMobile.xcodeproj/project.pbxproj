@@ -444,6 +444,7 @@
 		EF6AD2F7E3EB8DCF607670CD /* ChatViewModel+AskUserQuestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86BAA5A3FA745A6568A4E81 /* ChatViewModel+AskUserQuestion.swift */; };
 		EF9A5E2E418095614FE6841C /* UIRenderCompletePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D852CC9B6B86088E87C5E1 /* UIRenderCompletePlugin.swift */; };
 		EFFC904A4E54926877D34AC2 /* BreathingLineIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D4D5D63FFD47EA2872E39B4 /* BreathingLineIndicator.swift */; };
+		F076521253635FC28C1D1286 /* MemoryUpdatingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9B869A32A0EF5A35F9D34F /* MemoryUpdatingPlugin.swift */; };
 		F151C70F8C1F7F750511A1C9 /* CompletePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 778EBE6FA27F00677570A951 /* CompletePlugin.swift */; };
 		F2AF817FC04D5E7A67A18827 /* ToolResultRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7170BDE82B7EED1E313977D /* ToolResultRouter.swift */; };
 		F2D7335139565BC49B3E2499 /* CostAnalyticsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BF1D72A233400951F137FBE /* CostAnalyticsViews.swift */; };
@@ -601,6 +602,7 @@
 		393C89DB821923F90B216AFE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3953ED855FFC129DC9D1EA5B /* RPCTypes+Todo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Todo.swift"; sourceTree = "<group>"; };
 		3ACFA2E1D7E2775277E8E1C4 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Fonts; path = Sources/Resources/Fonts; sourceTree = SOURCE_ROOT; };
+		3B9B869A32A0EF5A35F9D34F /* MemoryUpdatingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUpdatingPlugin.swift; sourceTree = "<group>"; };
 		3C6E6FFC4582D53935EF1C41 /* MessagePayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagePayloads.swift; sourceTree = "<group>"; };
 		3C9B14E52315013A746D7375 /* SyncRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRepository.swift; sourceTree = "<group>"; };
 		3DB821C6EE04931AAE866190 /* SessionPreviewSheetWrapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPreviewSheetWrapper.swift; sourceTree = "<group>"; };
@@ -1701,6 +1703,7 @@
 				9F02C32D8D43B7DC9E958BAC /* ContextClearedPlugin.swift */,
 				1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */,
 				CF4D7932E415EF8FCCB9ADDC /* MemoryUpdatedPlugin.swift */,
+				3B9B869A32A0EF5A35F9D34F /* MemoryUpdatingPlugin.swift */,
 				A208757B29D974B8B65009CB /* MessageDeletedPlugin.swift */,
 				EA3AD6BC883E889FAA49FBB2 /* SkillRemovedPlugin.swift */,
 				7A0089B84FFEBA67C05982B8 /* TurnFailedPlugin.swift */,
@@ -2623,6 +2626,7 @@
 				130A07335CF3919D7624336B /* MemorySectionViews.swift in Sources */,
 				864A02025028755C37B0FC2B /* MemorySettingsSection.swift in Sources */,
 				225E21C270FF1F05161BD8E0 /* MemoryUpdatedPlugin.swift in Sources */,
+				F076521253635FC28C1D1286 /* MemoryUpdatingPlugin.swift in Sources */,
 				6769C4A760E9872FC4462501 /* MentionDetector.swift in Sources */,
 				9AC06F5C5CE6D5573AA30BC3 /* MentionPopup.swift in Sources */,
 				D227BCFF3007E6E8AB7698A3 /* MessageBubble.swift in Sources */,

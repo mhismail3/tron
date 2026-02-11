@@ -449,6 +449,24 @@ struct TurnFailedNotificationView: View {
     }
 }
 
+// MARK: - Memory Updating Notification View
+
+struct MemoryUpdatingNotificationView: View {
+    var body: some View {
+        NotificationPill(tint: .purple, interactive: true) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(.purple)
+
+                Text("Retaining memory...")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.purple.opacity(0.9))
+            }
+        }
+    }
+}
+
 // MARK: - Memory Updated Notification View
 
 struct MemoryUpdatedNotificationView: View {

@@ -97,6 +97,11 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .catchingUp)
     }
 
+    /// In-chat notification for memory ledger write in progress (spinner)
+    static func memoryUpdating() -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryUpdating)
+    }
+
     /// In-chat notification for memory ledger update
     static func memoryUpdated(title: String, entryType: String) -> ChatMessage {
         ChatMessage(role: .system, content: .memoryUpdated(title: title, entryType: entryType))

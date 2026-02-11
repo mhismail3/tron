@@ -372,6 +372,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         },
         getEventsBySession: (sessionId) =>
           this.eventStore.getEventsBySession(sessionId as SessionId),
+        emitMemoryUpdating: (data) => this.emit('memory_updating', data),
         emitMemoryUpdated: (data) => this.emit('memory_updated', data),
         getTokenRatio: (sessionId) => {
           const active = this.activeSessions.get(sessionId);

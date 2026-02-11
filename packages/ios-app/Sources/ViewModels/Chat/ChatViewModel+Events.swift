@@ -243,14 +243,44 @@ extension ChatViewModel {
         }
     }
 
+    func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
+        logger.info("Memory updating started", category: .events)
+
+        flushPendingTextUpdates()
+        finalizeStreamingMessage()
+
+        let inProgressMessage = ChatMessage.memoryUpdating()
+        messages.append(inProgressMessage)
+        memoryUpdatingInProgressMessageId = inProgressMessage.id
+    }
+
     func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
         logger.info("Memory updated: \(pluginResult.title) (type: \(pluginResult.entryType))", category: .events)
+
+        // "skipped" means ledger write determined nothing worth retaining — just remove spinner
+        if pluginResult.entryType == "skipped" {
+            if let inProgressId = memoryUpdatingInProgressMessageId,
+               let index = MessageFinder.indexById(inProgressId, in: messages) {
+                messages.remove(at: index)
+            }
+            memoryUpdatingInProgressMessageId = nil
+            return
+        }
 
         let message = ChatMessage.memoryUpdated(
             title: pluginResult.title,
             entryType: pluginResult.entryType
         )
-        messages.append(message)
+
+        // Replace in-progress pill if present (two-phase animation)
+        if let inProgressId = memoryUpdatingInProgressMessageId,
+           let index = MessageFinder.indexById(inProgressId, in: messages) {
+            messages[index] = message
+            memoryUpdatingInProgressMessageId = nil
+        } else {
+            // No in-progress pill (e.g. reconstruction) — just append
+            messages.append(message)
+        }
     }
 
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
@@ -320,6 +350,7 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
+        memoryUpdatingInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,
