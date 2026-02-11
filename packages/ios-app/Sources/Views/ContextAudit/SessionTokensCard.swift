@@ -56,7 +56,7 @@ struct SessionTokensCard: View {
                             .foregroundStyle(.tronAmberLight)
                         Text("Input")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronAmber.opacity(0.6))
+                            .foregroundStyle(.tronTextMuted)
                     }
                     Text(formatTokenCount(inputTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -74,7 +74,7 @@ struct SessionTokensCard: View {
                             .foregroundStyle(.tronAmberLight)
                         Text("Output")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronAmber.opacity(0.6))
+                            .foregroundStyle(.tronTextMuted)
                     }
                     Text(formatTokenCount(outputTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -96,7 +96,7 @@ struct SessionTokensCard: View {
                                 .foregroundStyle(.tronAmber)
                             Text("Cache Read")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronAmber.opacity(0.6))
+                                .foregroundStyle(.tronTextMuted)
                         }
                         Text(formatTokenCount(cacheReadTokens))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -114,7 +114,7 @@ struct SessionTokensCard: View {
                                 .foregroundStyle(.tronAmber)
                             Text("Cache Write")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronAmber.opacity(0.6))
+                                .foregroundStyle(.tronTextMuted)
                         }
                         Text(formatTokenCount(cacheCreationTokens))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -129,7 +129,7 @@ struct SessionTokensCard: View {
             // Footer explanation
             Text("Total tokens consumed this session (for billing)")
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronAmber.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)

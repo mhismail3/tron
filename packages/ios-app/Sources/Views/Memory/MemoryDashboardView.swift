@@ -74,10 +74,9 @@ struct MemoryDashboardView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Text("MEMORY")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                Text("Memory")
+                    .font(TronTypography.mono(size: 20, weight: .bold))
                     .foregroundStyle(.purple)
-                    .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {

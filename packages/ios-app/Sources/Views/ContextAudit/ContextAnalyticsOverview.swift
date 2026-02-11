@@ -23,10 +23,10 @@ struct AnalyticsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Analytics")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronTextSecondary)
                 Text("Session performance and cost breakdown")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronAmber.opacity(0.5))
+                    .foregroundStyle(.tronTextDisabled)
             }
 
             // Session ID (tappable to copy)
@@ -65,7 +65,7 @@ struct SessionIdRow: View {
 
             Text(showCopied ? "Copied!" : sessionId)
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(showCopied ? .tronEmerald : .tronAmber.opacity(0.8))
+                .foregroundStyle(showCopied ? .tronEmerald : .tronTextSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .animation(.easeInOut(duration: 0.15), value: showCopied)
@@ -74,7 +74,7 @@ struct SessionIdRow: View {
 
             Image(systemName: "doc.on.doc")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronAmber.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
         }
         .padding(12)
         .sectionFill(.tronAmber)

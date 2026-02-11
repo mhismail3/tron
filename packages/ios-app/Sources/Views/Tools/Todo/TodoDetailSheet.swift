@@ -109,7 +109,7 @@ struct TodoDetailSheet: View {
                 Image(systemName: icon)
                     .font(.system(size: 12))
                     .foregroundStyle(iconColor)
-                Text(title.uppercased())
+                Text(title)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
                 // Count bubble
@@ -163,7 +163,7 @@ struct TodoDetailSheet: View {
                     Image(systemName: "archivebox")
                         .font(.system(size: 12))
                         .foregroundStyle(.tronSlate)
-                    Text("BACKLOG")
+                    Text("Backlog")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                         .foregroundStyle(.tronTextMuted)
                     // Count bubble

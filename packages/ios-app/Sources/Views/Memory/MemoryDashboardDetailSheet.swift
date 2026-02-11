@@ -299,7 +299,7 @@ struct MemoryDashboardDetailSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Ledger Entry")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(.purple)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(prettyPrintEntry(entry))

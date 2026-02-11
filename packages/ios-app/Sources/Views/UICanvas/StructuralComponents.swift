@@ -13,7 +13,6 @@ struct CanvasSection: View {
                 Text(header)
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
-                    .textCase(.uppercase)
                     .tracking(0.5)
             }
 

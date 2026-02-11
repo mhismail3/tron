@@ -112,6 +112,13 @@ extension TokenRecord {
         return source.rawCacheCreationTokens.formattedTokenCount
     }
 
+    /// Combined cache tokens for simplified display (read + write)
+    var formattedCache: String? {
+        let total = source.rawCacheReadTokens + source.rawCacheCreationTokens
+        guard total > 0 else { return nil }
+        return total.formattedTokenCount
+    }
+
     /// Check if there's any cache activity to display
     var hasCacheActivity: Bool {
         source.rawCacheReadTokens > 0 || source.rawCacheCreationTokens > 0

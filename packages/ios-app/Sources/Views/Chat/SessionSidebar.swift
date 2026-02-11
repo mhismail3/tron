@@ -120,10 +120,9 @@ struct SessionSidebar: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Text("SESSIONS")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                Text("Sessions")
+                    .font(TronTypography.mono(size: 20, weight: .bold))
                     .foregroundStyle(.tronEmerald)
-                    .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
@@ -328,24 +327,14 @@ struct CachedSessionSidebarRow: View {
             }
             .foregroundStyle(.tronTextDisabled)
 
-            // Cache read (if non-zero)
-            if session.cacheReadTokens > 0 {
+            // Cache (combined read + write)
+            if session.cacheReadTokens + session.cacheCreationTokens > 0 {
                 HStack(spacing: 2) {
                     Image(systemName: "bolt.fill")
                         .font(TronTypography.labelSM)
-                    Text(session.cacheReadTokens.formattedTokenCount)
+                    Text((session.cacheReadTokens + session.cacheCreationTokens).formattedTokenCount)
                 }
-                .foregroundStyle(.tronCyan)
-            }
-
-            // Cache write (if non-zero)
-            if session.cacheCreationTokens > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "pencil")
-                        .font(TronTypography.labelSM)
-                    Text(session.cacheCreationTokens.formattedTokenCount)
-                }
-                .foregroundStyle(.tronAmber)
+                .foregroundStyle(.tronAmberLight)
             }
         }
         .font(TronTypography.pill)

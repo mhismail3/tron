@@ -20,30 +20,14 @@ struct TokenBadge: View {
                 Text(record.formattedOutput)
             }
 
-            // Cache section (if any cache activity)
-            if record.hasCacheActivity {
-                Text("\u{2022}")
-                    .foregroundStyle(.tronTextMuted)
-
-                // Cache read
-                if let cacheRead = record.formattedCacheRead {
-                    HStack(spacing: 2) {
-                        Image(systemName: "bolt.fill")
-                            .font(TronTypography.labelSM)
-                        Text(cacheRead)
-                    }
-                    .foregroundStyle(.tronAmberLight)
+            // Cache (combined read + write for simplicity)
+            if let cache = record.formattedCache {
+                HStack(spacing: 2) {
+                    Image(systemName: "bolt.fill")
+                        .font(TronTypography.labelSM)
+                    Text(cache)
                 }
-
-                // Cache write
-                if let cacheWrite = record.formattedCacheWrite {
-                    HStack(spacing: 2) {
-                        Image(systemName: "pencil")
-                            .font(TronTypography.labelSM)
-                        Text(cacheWrite)
-                    }
-                    .foregroundStyle(.tronAmber)
-                }
+                .foregroundStyle(.tronAmberLight)
             }
         }
         .font(TronTypography.codeSM)

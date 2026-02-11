@@ -165,7 +165,7 @@ struct CommandToolDetailSheet: View {
                 Image(systemName: "chevron.left.forwardslash.chevron.right")
                     .font(.system(size: 11))
                     .foregroundStyle(.tronTextMuted)
-                Text("ARGUMENTS")
+                Text("Arguments")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
             }
@@ -217,7 +217,7 @@ struct CommandToolDetailSheet: View {
                 Image(systemName: "doc.text")
                     .font(.system(size: 11))
                     .foregroundStyle(.tronTextMuted)
-                Text("RESULTS")
+                Text("Results")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
 
@@ -254,7 +254,7 @@ struct CommandToolDetailSheet: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11))
                     .foregroundStyle(.tronTextMuted)
-                Text("RESULTS")
+                Text("Results")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
             }

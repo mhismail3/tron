@@ -32,11 +32,11 @@ struct TurnBreakdownContainer: View {
 
                 Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronAmberLight.opacity(0.8))
+                    .foregroundStyle(.tronTextSecondary)
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                    .foregroundStyle(.tronAmberLight.opacity(0.5))
+                    .foregroundStyle(.tronTextMuted)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -53,7 +53,7 @@ struct TurnBreakdownContainer: View {
                 if turns.isEmpty {
                     Text("No turns recorded")
                         .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronAmberLight.opacity(0.5))
+                        .foregroundStyle(.tronTextMuted)
                         .frame(maxWidth: .infinity)
                         .padding(12)
                 } else {
@@ -114,7 +114,7 @@ struct TurnRow: View {
                         // Tokens
                         Text("\(TokenFormatter.format(turn.totalTokens)) tokens")
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronAmberLight.opacity(0.8))
+                            .foregroundStyle(.tronTextSecondary)
 
                         // Cost
                         Text(formatCost(turn.cost))
@@ -125,7 +125,7 @@ struct TurnRow: View {
                         if turn.latency > 0 {
                             Text(formatLatency(turn.latency))
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronAmberLight.opacity(0.5))
+                                .foregroundStyle(.tronTextMuted)
                         }
                     }
 
@@ -154,7 +154,7 @@ struct TurnRow: View {
                         if let model = turn.model {
                             Text(model)
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.tronAmberLight.opacity(0.5))
+                                .foregroundStyle(.tronTextMuted)
                         }
                     }
                 }
@@ -163,7 +163,7 @@ struct TurnRow: View {
 
                 Image(systemName: "chevron.down")
                     .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    .foregroundStyle(.tronAmberLight.opacity(0.4))
+                    .foregroundStyle(.tronTextDisabled)
                     .rotationEffect(.degrees(isExpanded ? -180 : 0))
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
             }
@@ -183,7 +183,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Input")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.tronAmberLight.opacity(0.6))
+                                .foregroundStyle(.tronTextMuted)
                             Text(TokenFormatter.format(turn.inputTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronAmberLight)
@@ -192,7 +192,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Output")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.tronAmberLight.opacity(0.6))
+                                .foregroundStyle(.tronTextMuted)
                             Text(TokenFormatter.format(turn.outputTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronAmberLight)
@@ -203,7 +203,7 @@ struct TurnRow: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Cache")
                                     .font(TronTypography.pill)
-                                    .foregroundStyle(.tronAmberLight.opacity(0.6))
+                                    .foregroundStyle(.tronTextMuted)
                                 HStack(spacing: 4) {
                                     if turn.cacheReadTokens > 0 {
                                         Text("↓\(TokenFormatter.format(turn.cacheReadTokens))")
@@ -213,7 +213,7 @@ struct TurnRow: View {
                                     if turn.cacheCreationTokens > 0 {
                                         Text("↑\(TokenFormatter.format(turn.cacheCreationTokens))")
                                             .font(TronTypography.codeSM)
-                                            .foregroundStyle(.tronAmberLight.opacity(0.8))
+                                            .foregroundStyle(.tronAmberLight)
                                     }
                                 }
                             }
@@ -227,7 +227,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Tools")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.tronAmberLight.opacity(0.6))
+                                .foregroundStyle(.tronTextMuted)
 
                             FlowLayout(spacing: 4) {
                                 ForEach(turn.tools, id: \.self) { tool in
@@ -248,7 +248,7 @@ struct TurnRow: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Errors")
                                 .font(TronTypography.pill)
-                                .foregroundStyle(.tronAmberLight.opacity(0.6))
+                                .foregroundStyle(.tronTextMuted)
 
                             ForEach(turn.errors, id: \.self) { error in
                                 Text(error)

@@ -130,24 +130,14 @@ struct RecentSessionRow: View {
             }
             .foregroundStyle(.tronTextMuted)
 
-            // Cache read (if non-zero)
-            if let cacheRead = session.cacheReadTokens, cacheRead > 0 {
+            // Cache (combined read + write)
+            if (session.cacheReadTokens ?? 0) + (session.cacheCreationTokens ?? 0) > 0 {
                 HStack(spacing: 2) {
                     Image(systemName: "bolt.fill")
                         .font(TronTypography.labelSM)
-                    Text(cacheRead.formattedTokenCount)
+                    Text(((session.cacheReadTokens ?? 0) + (session.cacheCreationTokens ?? 0)).formattedTokenCount)
                 }
                 .foregroundStyle(.tronAmberLight)
-            }
-
-            // Cache write (if non-zero)
-            if let cacheWrite = session.cacheCreationTokens, cacheWrite > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "pencil")
-                        .font(TronTypography.labelSM)
-                    Text(cacheWrite.formattedTokenCount)
-                }
-                .foregroundStyle(.tronAmber)
             }
         }
         .font(TronTypography.pill)

@@ -71,7 +71,7 @@ struct CostStatItem: View {
                 .foregroundStyle(isError ? .tronError : color.opacity(0.8))
             Text(label)
                 .font(TronTypography.pill)
-                .foregroundStyle(color.opacity(0.5))
+                .foregroundStyle(.tronTextMuted)
         }
         .frame(maxWidth: .infinity)
     }

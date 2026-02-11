@@ -405,10 +405,9 @@ struct ContentView: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("TRON")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                    Text("Tron")
+                        .font(TronTypography.mono(size: 20, weight: .bold))
                         .foregroundStyle(.tronEmerald)
-                        .tracking(2)
                 }
             }
         }
@@ -558,10 +557,9 @@ struct WelcomePage: View {
                     }
                 }
                 ToolbarItem(placement: .principal) {
-                    Text("TRON")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                    Text("Tron")
+                        .font(TronTypography.mono(size: 20, weight: .bold))
                         .foregroundStyle(.tronEmerald)
-                        .tracking(2)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: onSettings) {

@@ -74,10 +74,9 @@ struct SandboxesDashboardView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Text("SANDBOXES")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                Text("Sandboxes")
+                    .font(TronTypography.mono(size: 20, weight: .bold))
                     .foregroundStyle(.tronIndigo)
-                    .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
@@ -212,10 +211,9 @@ struct SandboxesDashboardView: View {
 
     private func sectionHeader(_ title: String, color: Color) -> some View {
         HStack {
-            Text(title.uppercased())
+            Text(title)
                 .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
                 .foregroundStyle(color)
-                .tracking(1.5)
             Spacer()
         }
     }

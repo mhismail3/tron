@@ -90,7 +90,7 @@ struct NotifyAppDetailSheet: View {
                 Image(systemName: "doc.text")
                     .font(.system(size: 12))
                     .foregroundStyle(.tronSlate)
-                Text("DETAILS")
+                Text("Details")
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
                 Spacer()

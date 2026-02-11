@@ -141,7 +141,7 @@ struct MemoryDetailSheet: View {
             // Section header (outside the card)
             Text("Ledger Entry")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(.purple)
 
             // Card content
             ScrollView(.horizontal, showsIndicators: false) {

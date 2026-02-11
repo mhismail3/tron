@@ -70,10 +70,9 @@ struct VoiceNotesListView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Text("VOICE NOTES")
-                    .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .bold))
+                Text("Voice Notes")
+                    .font(TronTypography.mono(size: 20, weight: .bold))
                     .foregroundStyle(.tronTeal)
-                    .tracking(2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
