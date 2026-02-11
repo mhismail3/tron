@@ -110,9 +110,10 @@ export class LedgerWriter {
       // 6. Parse response
       let parsed: Record<string, unknown>;
       try {
-        // Strip markdown code fences if present
-        const cleaned = result.output.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-        parsed = JSON.parse(cleaned);
+        // Extract JSON from markdown code fences (ignoring any trailing content like emoji)
+        const fenceMatch = result.output.match(/```(?:json)?\n([\s\S]*?)\n```/);
+        const jsonStr = fenceMatch ? fenceMatch[1]! : result.output.trim();
+        parsed = JSON.parse(jsonStr);
       } catch {
         logger.warn('Failed to parse ledger subagent output', {
           output: result.output.slice(0, 200),

@@ -291,6 +291,42 @@ describe('LedgerWriter', () => {
       );
     });
 
+    it('should parse JSON wrapped in code fences with trailing content', async () => {
+      deps.spawnSubsession = vi.fn().mockResolvedValue({
+        sessionId: 'sub-1',
+        success: true,
+        output: '```json\n{"title":"Test","entryType":"research","status":"completed","tags":[],"input":"q","actions":["a"],"files":[],"decisions":[],"lessons":[],"thinkingInsights":[]}\n```\n\n🫎',
+        tokenUsage: { inputTokens: 100, outputTokens: 50 },
+      });
+
+      const writer = new LedgerWriter(deps);
+      const result = await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      expect(result.written).toBe(true);
+      expect(result.title).toBe('Test');
+      expect(result.entryType).toBe('research');
+    });
+
+    it('should parse JSON wrapped in code fences without language tag', async () => {
+      deps.spawnSubsession = vi.fn().mockResolvedValue({
+        sessionId: 'sub-1',
+        success: true,
+        output: '```\n{"title":"Test","entryType":"feature","status":"completed"}\n```',
+      });
+
+      const writer = new LedgerWriter(deps);
+      const result = await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      expect(result.written).toBe(true);
+      expect(result.title).toBe('Test');
+    });
+
     it('should handle empty output from subagent', async () => {
       deps.spawnSubsession = vi.fn().mockResolvedValue({
         sessionId: 'sub-1',
