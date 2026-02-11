@@ -286,7 +286,7 @@ describe('BrowseTheWebTool', () => {
       expect(content[0].text).toContain('PDF');
     });
 
-    it('should return error when delegate execution fails', async () => {
+    it('should return error with isError when delegate execution fails', async () => {
       (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
       (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: false, error: 'Navigation failed' });
 
@@ -296,17 +296,39 @@ describe('BrowseTheWebTool', () => {
       const content = result.content as any[];
       expect(content[0].text).toContain('failed');
       expect(content[0].text).toContain('Navigation failed');
+      expect(result.isError).toBe(true);
     });
 
-    it('should handle exceptions gracefully', async () => {
+    it('should return isError when ensureSession throws', async () => {
       (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
-      (mockDelegate.ensureSession as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Session creation failed'));
+      (mockDelegate.ensureSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error("Executable doesn't exist at /path/to/chromium")
+      );
 
       const result = await tool.execute({ action: 'navigate', url: 'https://example.com' });
 
-      expect(result.content).toBeDefined();
+      expect(result.isError).toBe(true);
       const content = result.content as any[];
-      expect(content[0].text).toContain('error');
+      expect(content[0].text).toContain('Browser unavailable');
+      expect(content[0].text).toContain('do not retry');
+    });
+
+    it('should not set session when ensureSession throws', async () => {
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.ensureSession as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Browser launch failed')
+      );
+
+      await tool.execute({ action: 'navigate', url: 'https://example.com' });
+
+      // On next call, ensureSession should be called again (session was never set)
+      (mockDelegate.ensureSession as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      (mockDelegate.hasSession as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (mockDelegate.execute as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { url: 'https://example.com' } });
+
+      const result = await tool.execute({ action: 'navigate', url: 'https://example.com' });
+      expect(mockDelegate.ensureSession).toHaveBeenCalledTimes(2);
+      expect(result.isError).toBeUndefined();
     });
   });
 

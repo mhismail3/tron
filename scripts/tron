@@ -148,6 +148,7 @@ build_production() {
     cd "$PROJECT_DIR"
 
     build_workspace
+    setup_browser
 
     rm -rf dist/prod
     mkdir -p dist/prod
@@ -263,6 +264,25 @@ setup_transcription_sidecar() {
 
     print_success "Transcription sidecar configured"
     return 0
+}
+
+# Ensure Playwright chromium headless shell is installed (idempotent)
+setup_browser() {
+    # Check if playwright-core can find its browser
+    if bunx playwright-core browser-versions chromium 2>/dev/null | grep -q "chromium"; then
+        local install_path="$HOME/Library/Caches/ms-playwright"
+        if [ -d "$install_path" ] && ls "$install_path"/chromium_headless_shell-* &>/dev/null; then
+            print_success "Playwright browser already installed"
+            return 0
+        fi
+    fi
+
+    print_status "Installing Playwright chromium headless shell..."
+    if bunx playwright-core install chromium --only-shell 2>&1; then
+        print_success "Playwright browser ready"
+    else
+        print_warning "Failed to install Playwright browser (BrowseTheWeb tool will be unavailable)"
+    fi
 }
 
 #=============================================================================
@@ -670,6 +690,9 @@ cmd_dev() {
 
     # Ensure transcription sidecar is set up
     setup_transcription_sidecar
+
+    # Ensure Playwright browser is available
+    setup_browser
 
     # Set beta environment
     export TRON_WS_PORT=$BETA_WS_PORT
@@ -1142,6 +1165,9 @@ EOF
 
     # Set up transcription sidecar
     setup_transcription_sidecar
+
+    # Set up Playwright browser
+    setup_browser
 
     # Run tests if dev mode
     if [ "$dev_mode" = true ]; then

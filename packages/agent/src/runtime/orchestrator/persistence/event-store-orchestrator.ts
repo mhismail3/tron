@@ -352,7 +352,10 @@ export class EventStoreOrchestrator extends EventEmitter {
       } : undefined,
       browserService: this.browserService ? {
         execute: (sid, action, params) => this.browserService.execute(sid, action, params),
-        createSession: async (sid) => { await this.browserService.createSession(sid); },
+        createSession: async (sid) => {
+          const result = await this.browserService.createSession(sid);
+          return { success: result.success, error: result.error };
+        },
         startScreencast: async (sid, options) => { await this.browserService.startScreencast(sid, options); },
         hasSession: (sid) => this.browserService.hasSession(sid),
       } : undefined,

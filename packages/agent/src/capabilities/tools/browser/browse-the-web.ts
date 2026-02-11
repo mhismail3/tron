@@ -246,6 +246,7 @@ The browser runs headless by default and streams frames to the iOS app.`;
               text: `Browser action failed: ${result.error ?? 'Unknown error'}`,
             },
           ],
+          isError: true,
         };
       }
 
@@ -265,13 +266,18 @@ The browser runs headless by default and streams frames to the iOS app.`;
 
       return toolResult;
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const isSetupError = !this.session || !this.delegate!.hasSession(this.session.sessionId);
       return {
         content: [
           {
             type: 'text',
-            text: `Browser error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            text: isSetupError
+              ? `Browser unavailable: ${message}. The browser could not be launched — do not retry this action.`
+              : `Browser error: ${message}`,
           },
         ],
+        isError: true,
       };
     }
   }
@@ -282,18 +288,14 @@ The browser runs headless by default and streams frames to the iOS app.`;
    * control the browser session via RPC methods like browser.startStream
    */
   private async ensureSession(): Promise<void> {
-    if (!this.session) {
-      // Use Tron session ID if configured, otherwise generate a fallback
-      const sessionId = this.configuredSessionId ?? `browser-${Date.now()}`;
-      this.session = {
-        sessionId,
-        elementRefs: new Map(),
-      };
+    const sessionId = this.session?.sessionId ?? this.configuredSessionId ?? `browser-${Date.now()}`;
+
+    if (!this.delegate!.hasSession(sessionId)) {
+      await this.delegate!.ensureSession(sessionId);
     }
 
-    // Create session via delegate if it doesn't exist
-    if (!this.delegate!.hasSession(this.session.sessionId)) {
-      await this.delegate!.ensureSession(this.session.sessionId);
+    if (!this.session) {
+      this.session = { sessionId, elementRefs: new Map() };
     }
   }
 

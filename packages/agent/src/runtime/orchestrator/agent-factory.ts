@@ -184,7 +184,10 @@ export interface AgentFactoryConfig {
       data?: Record<string, unknown>;
       error?: string;
     }>;
-    createSession: (sessionId: string) => Promise<void>;
+    createSession: (sessionId: string) => Promise<{
+      success: boolean;
+      error?: string;
+    }>;
     startScreencast: (sessionId: string, options: Record<string, unknown>) => Promise<void>;
     hasSession: (sessionId: string) => boolean;
   };
@@ -204,7 +207,10 @@ function createBrowserDelegate(
   return {
     execute: (sid, action, params) => service.execute(sid, action, params),
     ensureSession: async (sid) => {
-      await service.createSession(sid);
+      const result = await service.createSession(sid);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create browser session');
+      }
       await service.startScreencast(sid, {
         format: 'jpeg',
         quality: 60,
