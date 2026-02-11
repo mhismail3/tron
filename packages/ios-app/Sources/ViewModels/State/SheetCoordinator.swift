@@ -112,9 +112,14 @@ final class SheetCoordinator {
         present(.uiCanvas)
     }
 
-    /// Show task list sheet
+    /// Show task list sheet (from toolbar menu)
     func showTaskList() {
         present(.taskList)
+    }
+
+    /// Show task detail sheet (from chip tap, with tool result data)
+    func showTaskDetail(_ data: TaskManagerChipData) {
+        present(.taskDetail(data))
     }
 
     /// Show notify app detail sheet

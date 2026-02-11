@@ -3,9 +3,8 @@ import SwiftUI
 // MARK: - TaskManager Chip (iOS 26)
 
 /// Compact chip for TaskManager tool calls
-/// Shows spinner + action text while running,
-/// then result summary when complete
-/// Tappable (when completed) to open TaskDetailSheet
+/// Shows "Task Manager" label in bold + action summary
+/// Follows CommandToolChip pattern: bold name, lighter summary, chevron
 @available(iOS 26.0, *)
 struct TaskManagerChip: View {
     let data: TaskManagerChipData
@@ -32,15 +31,19 @@ struct TaskManagerChip: View {
         HStack(spacing: 6) {
             statusIcon
 
-            Text(statusText)
-                .font(TronTypography.filePath)
+            Text("Task Manager")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronSlate)
+
+            Text(data.chipSummary)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(.tronSlate.opacity(0.7))
                 .lineLimit(1)
 
             if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronSlate.opacity(0.6))
+                    .foregroundStyle(.tronSlate.opacity(0.5))
             }
         }
         .padding(.horizontal, 10)
@@ -53,7 +56,8 @@ struct TaskManagerChip: View {
         switch data.status {
         case .running:
             ProgressView()
-                .scaleEffect(0.7)
+                .scaleEffect(0.6)
+                .frame(width: TronTypography.sizeBodySM, height: TronTypography.sizeBodySM)
                 .tint(.tronSlate)
         case .completed:
             Image(systemName: "checklist")
@@ -61,48 +65,10 @@ struct TaskManagerChip: View {
                 .foregroundStyle(.tronSlate)
         }
     }
-
-    private var statusText: String {
-        switch data.status {
-        case .running:
-            return runningText
-        case .completed:
-            if let summary = data.resultSummary {
-                return summary
-            }
-            return completedText
-        }
-    }
-
-    private var runningText: String {
-        switch data.action {
-        case "create": return "Creating task..."
-        case "update": return "Updating task..."
-        case "delete": return "Deleting task..."
-        case "list": return "Listing tasks..."
-        case "search": return "Searching tasks..."
-        case "get": return "Getting task..."
-        case "create_project": return "Creating project..."
-        case "update_project": return "Updating project..."
-        case "list_projects": return "Listing projects..."
-        default: return "Managing tasks..."
-        }
-    }
-
-    private var completedText: String {
-        switch data.action {
-        case "create": return "Task created"
-        case "update": return "Task updated"
-        case "delete": return "Task deleted"
-        case "list": return "Tasks listed"
-        default: return "Tasks updated"
-        }
-    }
 }
 
 // MARK: - TaskManager Chip Fallback (iOS < 26)
 
-/// Fallback chip without glass effect for older iOS versions
 struct TaskManagerChipFallback: View {
     let data: TaskManagerChipData
     let onTap: () -> Void
@@ -124,15 +90,19 @@ struct TaskManagerChipFallback: View {
         HStack(spacing: 6) {
             statusIcon
 
-            Text(statusText)
-                .font(TronTypography.filePath)
+            Text("Task Manager")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronSlate)
+
+            Text(data.chipSummary)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(.tronSlate.opacity(0.7))
                 .lineLimit(1)
 
             if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronSlate.opacity(0.6))
+                    .foregroundStyle(.tronSlate.opacity(0.5))
             }
         }
         .padding(.horizontal, 10)
@@ -146,36 +116,13 @@ struct TaskManagerChipFallback: View {
         switch data.status {
         case .running:
             ProgressView()
-                .scaleEffect(0.7)
+                .scaleEffect(0.6)
+                .frame(width: TronTypography.sizeBodySM, height: TronTypography.sizeBodySM)
                 .tint(.tronSlate)
         case .completed:
             Image(systemName: "checklist")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSlate)
-        }
-    }
-
-    private var statusText: String {
-        switch data.status {
-        case .running:
-            switch data.action {
-            case "create": return "Creating task..."
-            case "update": return "Updating task..."
-            case "delete": return "Deleting task..."
-            case "list": return "Listing tasks..."
-            default: return "Managing tasks..."
-            }
-        case .completed:
-            if let summary = data.resultSummary {
-                return summary
-            }
-            switch data.action {
-            case "create": return "Task created"
-            case "update": return "Task updated"
-            case "delete": return "Task deleted"
-            case "list": return "Tasks listed"
-            default: return "Tasks updated"
-            }
         }
     }
 }

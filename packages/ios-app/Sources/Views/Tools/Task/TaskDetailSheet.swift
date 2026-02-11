@@ -1,34 +1,43 @@
 import SwiftUI
 
-/// Sheet view displaying persistent tasks
+/// Sheet view for task manager — two modes:
+/// 1. From toolbar: shows current task list
+/// 2. From chip tap: shows tool result output + task overview
 @available(iOS 26.0, *)
 struct TaskDetailSheet: View {
     let rpcClient: RPCClient
     @Bindable var taskState: TaskState
+    var chipData: TaskManagerChipData? = nil
 
     @Environment(\.dismiss) private var dismiss
 
+    /// Whether we're showing a specific tool result (chip tap) vs general task list (toolbar)
+    private var isDetailMode: Bool { chipData != nil }
+
     var body: some View {
         NavigationStack {
-            ZStack {
-                if taskState.isLoading {
-                    ProgressView()
-                        .tint(.tronEmerald)
-                } else if let error = taskState.errorMessage {
-                    errorView(error)
-                } else if taskState.tasks.isEmpty {
-                    emptyStateView
-                } else {
-                    contentView
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    if let chip = chipData {
+                        toolResultSection(chip)
+                    }
+                    tasksOverviewSection
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text("Tasks")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
+                    HStack(spacing: 6) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.tronSlate)
+                        Text("Task Manager")
+                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+                            .foregroundStyle(.tronSlate)
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
@@ -47,84 +56,199 @@ struct TaskDetailSheet: View {
         .tint(.tronEmerald)
     }
 
-    // MARK: - Content Views
+    // MARK: - Tool Result Section
 
     @ViewBuilder
-    private var contentView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
-                // In Progress Section
-                if !taskState.inProgressTasks.isEmpty {
-                    taskSection(
-                        title: "In Progress",
-                        icon: "circle.fill",
-                        iconColor: .tronEmerald,
-                        tasks: taskState.inProgressTasks
-                    )
-                }
+    private func toolResultSection(_ chip: TaskManagerChipData) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Section header
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tronTextMuted)
+                Text("Result")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
 
-                // Pending Section
-                if !taskState.pendingTasks.isEmpty {
-                    taskSection(
-                        title: "Pending",
-                        icon: "circle",
-                        iconColor: .tronSlate,
-                        tasks: taskState.pendingTasks
-                    )
-                }
+                Spacer()
 
-                // Backlog Section (collapsed by default)
-                if !taskState.backlogTasks.isEmpty {
-                    taskSection(
-                        title: "Backlog",
-                        icon: "tray",
-                        iconColor: .tronSlate,
-                        tasks: taskState.backlogTasks
-                    )
-                }
-
-                // Completed Section
-                if !taskState.completedTasks.isEmpty {
-                    taskSection(
-                        title: "Completed",
-                        icon: "checkmark.circle.fill",
-                        iconColor: .tronTextMuted,
-                        tasks: taskState.completedTasks
-                    )
-                }
+                // Action badge
+                Text(chip.action.replacingOccurrences(of: "_", with: " "))
+                    .font(TronTypography.mono(size: 11, weight: .medium))
+                    .foregroundStyle(.tronSlate)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.tronSlate.opacity(0.15))
+                    .clipShape(Capsule())
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+
+            // Result output
+            if let result = chip.fullResult, !result.isEmpty {
+                Text(result)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextSecondary)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.tronSurface.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.tronBorder.opacity(0.3), lineWidth: 0.5)
+                    )
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(.tronAmber)
+                    Text("Waiting for result...")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.tronSurface.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    // MARK: - Tasks Overview Section
+
+    @ViewBuilder
+    private var tasksOverviewSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Section header
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tronTextMuted)
+                Text(isDetailMode ? "All Tasks" : "Tasks")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+
+                if !taskState.tasks.isEmpty {
+                    Text("\(taskState.tasks.count)")
+                        .font(TronTypography.mono(size: 11, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.tronSlate.opacity(0.4))
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
+            }
+
+            if taskState.isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(.tronEmerald)
+                    Text("Loading tasks...")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                        .foregroundStyle(.tronTextMuted)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.tronSurface.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if let error = taskState.errorMessage {
+                VStack(spacing: 8) {
+                    Text(error)
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                        .foregroundStyle(.tronError)
+                    Button("Retry") {
+                        Task { await loadTasks() }
+                    }
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(.tronEmerald)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.tronSurface.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if taskState.tasks.isEmpty {
+                emptyTasksView
+            } else {
+                taskListContent
+            }
         }
     }
 
     @ViewBuilder
-    private func taskSection(
+    private var taskListContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !taskState.inProgressTasks.isEmpty {
+                taskGroup(
+                    title: "In Progress",
+                    icon: "circle.fill",
+                    iconColor: .tronEmerald,
+                    tasks: taskState.inProgressTasks
+                )
+            }
+
+            if !taskState.pendingTasks.isEmpty {
+                taskGroup(
+                    title: "Pending",
+                    icon: "circle",
+                    iconColor: .tronSlate,
+                    tasks: taskState.pendingTasks
+                )
+            }
+
+            if !taskState.backlogTasks.isEmpty {
+                taskGroup(
+                    title: "Backlog",
+                    icon: "tray",
+                    iconColor: .tronSlate,
+                    tasks: taskState.backlogTasks
+                )
+            }
+
+            if !taskState.completedTasks.isEmpty {
+                taskGroup(
+                    title: "Completed",
+                    icon: "checkmark.circle.fill",
+                    iconColor: .tronTextMuted,
+                    tasks: taskState.completedTasks
+                )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.tronBorder.opacity(0.3), lineWidth: 0.5)
+        )
+    }
+
+    @ViewBuilder
+    private func taskGroup(
         title: String,
         icon: String,
         iconColor: Color,
         tasks: [RpcTask]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Section Header
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(.system(size: 10))
                     .foregroundStyle(iconColor)
                 Text(title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .font(TronTypography.mono(size: 11, weight: .semibold))
                     .foregroundStyle(.tronTextMuted)
                 Text("\(tasks.count)")
-                    .font(TronTypography.mono(size: 11, weight: .medium))
-                    .foregroundStyle(.tronTextMuted)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.tronSlate.opacity(0.4))
-                    .clipShape(Capsule())
-                Spacer()
+                    .font(TronTypography.mono(size: 10, weight: .medium))
+                    .foregroundStyle(.tronTextMuted.opacity(0.7))
             }
 
-            // Task Items
             ForEach(tasks) { task in
                 taskRow(task)
             }
@@ -133,15 +257,14 @@ struct TaskDetailSheet: View {
 
     @ViewBuilder
     private func taskRow(_ task: RpcTask) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                // Show activeForm for in-progress, title otherwise
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(task.status == .inProgress ? (task.activeForm ?? task.title) : task.title)
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
                     .foregroundStyle(task.status == .completed ? .tronTextMuted : .tronTextPrimary)
                     .strikethrough(task.status == .completed, color: .tronTextMuted)
+                    .lineLimit(2)
 
-                // Priority badge for high/critical
                 if task.priority == .high || task.priority == .critical {
                     Text(task.priority.displayName)
                         .font(TronTypography.mono(size: 10, weight: .medium))
@@ -149,66 +272,39 @@ struct TaskDetailSheet: View {
                 }
             }
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 8)
 
-            // Timestamp - right aligned
             Text(task.formattedCreatedAt)
-                .font(TronTypography.mono(size: 11, weight: .regular))
+                .font(TronTypography.mono(size: 10, weight: .regular))
                 .foregroundStyle(.tronTextMuted.opacity(0.7))
         }
-        .padding(.vertical, 6)
-        .padding(.leading, 20)
+        .padding(.vertical, 3)
+        .padding(.leading, 16)
     }
 
-    // MARK: - Empty/Error States
+    // MARK: - Empty State
 
     @ViewBuilder
-    private var emptyStateView: some View {
-        VStack(spacing: 16) {
+    private var emptyTasksView: some View {
+        HStack(spacing: 8) {
             Image(systemName: "checklist")
-                .font(.system(size: 48))
+                .font(.system(size: 14))
                 .foregroundStyle(.tronTextMuted)
-            Text("No Tasks")
-                .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(.tronTextPrimary)
-            Text("Tasks will appear here when the agent creates them")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
+            Text("No tasks")
+                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
                 .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
         }
-    }
-
-    @ViewBuilder
-    private func errorView(_ message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 48))
-                .foregroundStyle(.tronError)
-            Text("Failed to Load")
-                .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(.tronTextPrimary)
-            Text(message)
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
-                .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
-            Button("Retry") {
-                Task {
-                    await loadTasks()
-                }
-            }
-            .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-            .foregroundStyle(.tronEmerald)
-            .padding(.top, 8)
-        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(Color.tronSurface.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Data Loading
 
     private func loadTasks() async {
         taskState.startLoading()
-
         do {
             let result = try await rpcClient.misc.listTasks()
             taskState.updateTasks(result.tasks)
@@ -220,7 +316,6 @@ struct TaskDetailSheet: View {
 
 // MARK: - Legacy Fallback
 
-/// Fallback view for iOS versions before 26.0
 struct TaskDetailSheetLegacy: View {
     let rpcClient: RPCClient
     @Bindable var taskState: TaskState

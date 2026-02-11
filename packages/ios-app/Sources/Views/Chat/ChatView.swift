@@ -401,8 +401,8 @@ struct ChatView: View {
                                         }
                                     }
                                 },
-                                onTaskManagerTap: {
-                                    viewModel.taskState.showSheet = true
+                                onTaskManagerTap: { [sheetCoordinator] data in
+                                    sheetCoordinator.showTaskDetail(data)
                                 },
                                 onNotifyAppTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showNotifyApp(data)

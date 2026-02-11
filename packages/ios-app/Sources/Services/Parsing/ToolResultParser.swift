@@ -138,26 +138,83 @@ struct ToolResultParser {
                 toolCallId: tool.toolCallId,
                 action: action,
                 taskTitle: taskTitle,
-                resultSummary: nil,
+                chipSummary: taskManagerRunningSummary(action: action),
+                fullResult: nil,
+                arguments: tool.arguments,
                 status: .running
             )
         }
 
-        let resultSummary: String?
-        if let result = tool.result {
-            let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
-            resultSummary = lines.first.map { $0.count > 80 ? String($0.prefix(80)) + "..." : $0 }
-        } else {
-            resultSummary = nil
-        }
+        let chipSummary = taskManagerChipSummary(action: action, title: taskTitle, result: tool.result)
 
         return TaskManagerChipData(
             toolCallId: tool.toolCallId,
             action: action,
             taskTitle: taskTitle,
-            resultSummary: resultSummary,
+            chipSummary: chipSummary,
+            fullResult: tool.result,
+            arguments: tool.arguments,
             status: .completed
         )
+    }
+
+    /// Running state summary for chip
+    private static func taskManagerRunningSummary(action: String) -> String {
+        switch action {
+        case "create": return "Creating task..."
+        case "update": return "Updating task..."
+        case "delete": return "Deleting task..."
+        case "list": return "Listing tasks..."
+        case "search": return "Searching tasks..."
+        case "get": return "Getting task..."
+        case "create_project": return "Creating project..."
+        case "update_project": return "Updating project..."
+        case "list_projects": return "Listing projects..."
+        case "log_time": return "Logging time..."
+        case "add_dependency": return "Adding dependency..."
+        case "remove_dependency": return "Removing dependency..."
+        default: return "Managing tasks..."
+        }
+    }
+
+    /// Completed state summary for chip — short and clean
+    private static func taskManagerChipSummary(action: String, title: String?, result: String?) -> String {
+        if let title = title {
+            let truncated = title.count > 40 ? String(title.prefix(40)) + "..." : title
+            switch action {
+            case "create": return "Created \"\(truncated)\""
+            case "update": return "Updated \"\(truncated)\""
+            case "delete": return "Deleted \"\(truncated)\""
+            case "get": return "\"\(truncated)\""
+            case "create_project": return "Created \"\(truncated)\""
+            case "update_project": return "Updated \"\(truncated)\""
+            default: break
+            }
+        }
+
+        // Extract count from result for list/search actions
+        if let result = result {
+            if action == "list", let match = result.firstMatch(of: /Tasks \((\d+)/) {
+                return "\(match.1) tasks"
+            }
+            if action == "search", let match = result.firstMatch(of: /\((\d+)\)/) {
+                return "\(match.1) results"
+            }
+            if action == "list_projects", let match = result.firstMatch(of: /Projects \((\d+)\)/) {
+                return "\(match.1) projects"
+            }
+            // Fallback: first line truncated
+            let firstLine = result.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? result
+            return firstLine.count > 50 ? String(firstLine.prefix(50)) + "..." : firstLine
+        }
+
+        switch action {
+        case "create": return "Task created"
+        case "update": return "Task updated"
+        case "delete": return "Task deleted"
+        case "list": return "Tasks listed"
+        default: return "Done"
+        }
     }
 
     // MARK: - NotifyApp Parsing

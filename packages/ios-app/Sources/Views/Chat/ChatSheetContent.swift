@@ -85,6 +85,13 @@ struct ChatSheetContent: View {
                 taskState: viewModel.taskState
             )
 
+        case .taskDetail(let data):
+            TaskDetailSheet(
+                rpcClient: rpcClient,
+                taskState: viewModel.taskState,
+                chipData: data
+            )
+
         case .notifyApp(let data):
             NotifyAppDetailSheet(data: data)
 

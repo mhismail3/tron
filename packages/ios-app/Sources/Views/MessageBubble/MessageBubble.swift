@@ -11,7 +11,7 @@ struct MessageBubble: View {
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
     var onSubagentTap: ((SubagentToolData) -> Void)?
     var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
-    var onTaskManagerTap: (() -> Void)?
+    var onTaskManagerTap: ((TaskManagerChipData) -> Void)?
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
     var onQueryAgentTap: ((QueryAgentChipData) -> Void)?
@@ -164,11 +164,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseTaskManager(from: tool) {
                     if #available(iOS 26.0, *) {
                         TaskManagerChip(data: chipData) {
-                            onTaskManagerTap?()
+                            onTaskManagerTap?(chipData)
                         }
                     } else {
                         TaskManagerChipFallback(data: chipData) {
-                            onTaskManagerTap?()
+                            onTaskManagerTap?(chipData)
                         }
                     }
                 } else {

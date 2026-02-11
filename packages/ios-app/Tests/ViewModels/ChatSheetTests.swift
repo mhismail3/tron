@@ -173,6 +173,34 @@ struct ChatSheetTests {
         #expect(sheet1.id == "thinking")
     }
 
+    @Test("Task detail sheet has unique id per tool call")
+    func testTaskDetailId() {
+        let data1 = TaskManagerChipData(
+            toolCallId: "call_1",
+            action: "create",
+            taskTitle: "Task 1",
+            chipSummary: "Created \"Task 1\"",
+            fullResult: "Created task task_1: Task 1 [pending]",
+            arguments: "{}",
+            status: .completed
+        )
+        let data2 = TaskManagerChipData(
+            toolCallId: "call_2",
+            action: "list",
+            taskTitle: nil,
+            chipSummary: "3 tasks",
+            fullResult: "Tasks (3/3):",
+            arguments: "{}",
+            status: .completed
+        )
+
+        let sheet1 = ChatSheet.taskDetail(data1)
+        let sheet2 = ChatSheet.taskDetail(data2)
+
+        #expect(sheet1.id != sheet2.id)
+        #expect(sheet1.id == "taskDetail-call_1")
+    }
+
     @Test("All sheet cases have unique base ids")
     func testAllCasesHaveUniqueBaseIds() {
         let skill = Skill(
@@ -204,6 +232,15 @@ struct ChatSheetTests {
             result: nil,
             isResultTruncated: false
         )
+        let taskData = TaskManagerChipData(
+            toolCallId: "task_tool",
+            action: "create",
+            taskTitle: "Test",
+            chipSummary: "Created \"Test\"",
+            fullResult: "Created task task_1: Test [pending]",
+            arguments: "{}",
+            status: .completed
+        )
 
         let sheets: [ChatSheet] = [
             .safari(URL(string: "https://example.com")!),
@@ -217,9 +254,11 @@ struct ChatSheetTests {
             .subagentDetail,
             .uiCanvas,
             .taskList,
+            .taskDetail(taskData),
             .notifyApp(notifyData),
             .thinkingDetail("content"),
-            .commandToolDetail(commandToolData)
+            .commandToolDetail(commandToolData),
+            .modelPicker
         ]
 
         // Extract base ids (before any dynamic suffix)
@@ -511,6 +550,30 @@ struct SheetCoordinatorTests {
         coordinator.showTaskList()
 
         #expect(coordinator.activeSheet == .taskList)
+    }
+
+    @Test("showTaskDetail creates task detail sheet with chip data")
+    func testShowTaskDetailCreatesCorrectSheet() {
+        let coordinator = SheetCoordinator()
+        let data = TaskManagerChipData(
+            toolCallId: "call_123",
+            action: "create",
+            taskTitle: "Fix bug",
+            chipSummary: "Created \"Fix bug\"",
+            fullResult: "Created task task_abc: Fix bug [pending]",
+            arguments: "{\"action\":\"create\",\"title\":\"Fix bug\"}",
+            status: .completed
+        )
+
+        coordinator.showTaskDetail(data)
+
+        if case .taskDetail(let sheetData) = coordinator.activeSheet {
+            #expect(sheetData.toolCallId == "call_123")
+            #expect(sheetData.action == "create")
+            #expect(sheetData.fullResult == "Created task task_abc: Fix bug [pending]")
+        } else {
+            Issue.record("Expected taskDetail sheet")
+        }
     }
 
     @Test("showNotifyApp creates notify app sheet with data")
