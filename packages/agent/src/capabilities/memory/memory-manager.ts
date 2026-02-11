@@ -33,6 +33,8 @@ export interface MemoryManagerDeps {
   embedMemory?: (eventId: string, workspaceId: string, payload: Record<string, unknown>) => Promise<void>;
   /** Whether ledger writing is enabled. Checked each cycle. */
   isLedgerEnabled: () => boolean;
+  /** Called after a successful ledger write with the payload and title. */
+  onMemoryWritten?: (payload: Record<string, unknown>, title: string) => void;
   sessionId: string;
   workspaceId?: string;
 }
@@ -86,6 +88,10 @@ export class MemoryManager {
             title: ledgerResult.title,
             entryType: ledgerResult.entryType,
           });
+
+          if (this.deps.onMemoryWritten && ledgerResult.payload) {
+            this.deps.onMemoryWritten(ledgerResult.payload, ledgerResult.title ?? 'Untitled');
+          }
 
           // Fire-and-forget embedding for semantic search
           if (this.deps.embedMemory && ledgerResult.eventId && ledgerResult.payload) {

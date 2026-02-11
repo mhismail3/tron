@@ -65,6 +65,68 @@ struct MemorySection: View {
     }
 }
 
+// MARK: - Session Memories Section (memories written during this session)
+
+@available(iOS 26.0, *)
+struct SessionMemoriesSection: View {
+    let memory: LoadedMemory
+    @State private var isExpanded = false
+
+    private var entries: [LoadedMemoryEntry] { memory.entries ?? [] }
+    private var hasEntries: Bool { !entries.isEmpty }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "brain.head.profile.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(.purple)
+                    .frame(width: 18)
+                Text("New Memories")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                    .foregroundStyle(.purple)
+
+                Text("\(memory.count)")
+                    .font(TronTypography.pillValue)
+                    .countBadge(.purple)
+
+                Spacer()
+
+                Text(TokenFormatter.format(memory.tokens))
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+
+                if hasEntries {
+                    Image(systemName: "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(.tronTextMuted)
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+                }
+            }
+            .padding(12)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .onTapGesture {
+                guard hasEntries else { return }
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(entries) { entry in
+                        MemoryEntryRow(entry: entry)
+                    }
+                }
+                .padding(10)
+            }
+        }
+        .sectionFill(.purple)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
 // MARK: - Memory Entry Row (expandable to view content)
 
 @available(iOS 26.0, *)

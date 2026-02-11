@@ -41,6 +41,7 @@ import {
   type CompactionResult,
   type ProcessedToolResult,
   type ExportedState,
+  type SessionMemoryEntry,
 } from './types.js';
 
 // =============================================================================
@@ -74,6 +75,8 @@ export class ContextManager {
   private dynamicRulesContent: string | undefined;
   /** Memory content (workspace lessons + cross-project recall) */
   private memoryContent: string | undefined;
+  /** Session memories written during this session (auto or manual ledger) */
+  private sessionMemories: SessionMemoryEntry[] = [];
 
   // Cached values for performance
   private cachedSystemPromptTokens: number | null = null;
@@ -284,6 +287,57 @@ export class ContextManager {
    */
   getMemoryContent(): string | undefined {
     return this.memoryContent;
+  }
+
+  /**
+   * Add a session memory entry (written mid-session via auto or manual ledger).
+   * Invalidates system prompt cache since memory content changes.
+   */
+  addSessionMemory(entry: { title: string; content: string }): void {
+    this.sessionMemories.push({
+      title: entry.title,
+      content: entry.content,
+      tokens: Math.ceil(entry.content.length / 4),
+    });
+    this.invalidateSystemPromptCache();
+  }
+
+  /**
+   * Get all session memory entries (defensive copy).
+   */
+  getSessionMemories(): SessionMemoryEntry[] {
+    return [...this.sessionMemories];
+  }
+
+  /**
+   * Clear all session memory entries.
+   */
+  clearSessionMemories(): void {
+    this.sessionMemories = [];
+    this.invalidateSystemPromptCache();
+  }
+
+  /**
+   * Get full memory content including session memories.
+   * Used by turn-runner for LLM context injection.
+   * Returns startup memory + formatted session memories.
+   */
+  getFullMemoryContent(): string | undefined {
+    if (!this.memoryContent && this.sessionMemories.length === 0) {
+      return undefined;
+    }
+
+    const parts: string[] = [];
+    if (this.memoryContent) {
+      parts.push(this.memoryContent);
+    }
+    if (this.sessionMemories.length > 0) {
+      const formatted = this.sessionMemories
+        .map(m => `### ${m.title}\n${m.content}`)
+        .join('\n\n');
+      parts.push(`## New memories from this session\n\n${formatted}`);
+    }
+    return parts.join('\n\n');
   }
 
   /**
@@ -556,8 +610,14 @@ export class ContextManager {
   }
 
   private estimateMemoryTokens(): number {
-    if (!this.memoryContent) return 0;
-    return Math.ceil(this.memoryContent.length / 4);
+    let tokens = 0;
+    if (this.memoryContent) {
+      tokens += Math.ceil(this.memoryContent.length / 4);
+    }
+    for (const entry of this.sessionMemories) {
+      tokens += entry.tokens;
+    }
+    return tokens;
   }
 
   private getMessagesTokens(): number {
@@ -593,4 +653,5 @@ export type {
   CompactionResult,
   ProcessedToolResult,
   ExportedState,
+  SessionMemoryEntry,
 } from './types.js';

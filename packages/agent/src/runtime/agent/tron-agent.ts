@@ -354,6 +354,10 @@ export class TronAgent {
     this.contextManager.setMemoryContent(memoryContent);
   }
 
+  addSessionMemory(entry: { title: string; content: string }): void {
+    this.contextManager.addSessionMemory(entry);
+  }
+
   // ===========================================================================
   // State Access
   // ===========================================================================

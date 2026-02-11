@@ -64,6 +64,11 @@ struct ContextAuditView: View {
         messagesLoadedCount < allMessages.count
     }
 
+    /// Whether session memories exist
+    private var hasSessionMemories: Bool {
+        detailedSnapshot?.sessionMemories?.count ?? 0 > 0
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -77,99 +82,9 @@ struct ContextAuditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showClearPopover = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            if isClearing {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                    .tint(.tronError)
-                            } else {
-                                Image(systemName: "trash")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                            }
-                            Text("Clear")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                        }
-                        .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
-                    }
-                    .disabled(isClearing || !hasMessages || readOnly)
-                    .popover(isPresented: $showClearPopover, arrowEdge: .top) {
-                        GlassActionSheet(
-                            actions: [
-                                GlassAction(
-                                    title: "Clear Context",
-                                    icon: "trash",
-                                    color: .tronError,
-                                    role: .destructive
-                                ) {
-                                    showClearPopover = false
-                                    Task { await clearContext() }
-                                },
-                                GlassAction(
-                                    title: "Cancel",
-                                    icon: nil,
-                                    color: .tronTextMuted,
-                                    role: .cancel
-                                ) {
-                                    showClearPopover = false
-                                }
-                            ]
-                        )
-                        .presentationCompactAdaptation(.popover)
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Context")
-                        .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showCompactPopover = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            if isCompacting {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                    .tint(.tronSlate)
-                            } else {
-                                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                            }
-                            Text("Compact")
-                                .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                        }
-                        .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
-                    }
-                    .disabled(isCompacting || !hasMessages || readOnly)
-                    .popover(isPresented: $showCompactPopover, arrowEdge: .top) {
-                        GlassActionSheet(
-                            actions: [
-                                GlassAction(
-                                    title: "Compact Context",
-                                    icon: "arrow.down.right.and.arrow.up.left",
-                                    color: Color(red: 0.55, green: 0.7, blue: 0.8),
-                                    role: .default
-                                ) {
-                                    showCompactPopover = false
-                                    Task { await compactContext() }
-                                },
-                                GlassAction(
-                                    title: "Cancel",
-                                    icon: nil,
-                                    color: .tronTextMuted,
-                                    role: .cancel
-                                ) {
-                                    showCompactPopover = false
-                                }
-                            ]
-                        )
-                        .presentationCompactAdaptation(.popover)
-                    }
-                }
+                ToolbarItem(placement: .topBarLeading) { leadingToolbarContent }
+                ToolbarItem(placement: .principal) { principalToolbarContent }
+                ToolbarItem(placement: .topBarTrailing) { trailingToolbarContent }
             }
             .alert("Error", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -207,6 +122,152 @@ struct ContextAuditView: View {
         contextView
     }
 
+    // MARK: - Toolbar Content
+
+    @ViewBuilder
+    private var leadingToolbarContent: some View {
+        if isAutoLedgerEnabled {
+            // Auto-ledger ON: Clear button with icon + text
+            clearButton(iconOnly: false)
+        } else {
+            // Auto-ledger OFF: icon-only Clear + icon-only Compact
+            HStack(spacing: 12) {
+                clearButton(iconOnly: true)
+                compactButton(iconOnly: true)
+            }
+        }
+    }
+
+    private var principalToolbarContent: some View {
+        Text("Context")
+            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
+            .foregroundStyle(.tronEmerald)
+    }
+
+    @ViewBuilder
+    private var trailingToolbarContent: some View {
+        if isAutoLedgerEnabled {
+            // Auto-ledger ON: Compact button with icon + text
+            compactButton(iconOnly: false)
+        } else {
+            // Auto-ledger OFF: Retain button
+            Button {
+                Task { await updateMemoryLedger() }
+            } label: {
+                HStack(spacing: 4) {
+                    if isUpdatingLedger {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.purple)
+                    } else {
+                        Image(systemName: "book.closed")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    }
+                    Text("Retain")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                }
+                .foregroundStyle(hasMessages && !readOnly ? .purple : .tronTextMuted)
+            }
+            .disabled(isUpdatingLedger || !hasMessages || readOnly)
+        }
+    }
+
+    // MARK: - Toolbar Button Builders
+
+    private func clearButton(iconOnly: Bool) -> some View {
+        Button {
+            showClearPopover = true
+        } label: {
+            HStack(spacing: 4) {
+                if isClearing {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.tronError)
+                } else {
+                    Image(systemName: "trash")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                }
+                if !iconOnly {
+                    Text("Clear")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                }
+            }
+            .foregroundStyle(hasMessages && !readOnly ? .tronError : .tronTextMuted)
+        }
+        .disabled(isClearing || !hasMessages || readOnly)
+        .popover(isPresented: $showClearPopover, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Clear Context",
+                        icon: "trash",
+                        color: .tronError,
+                        role: .destructive
+                    ) {
+                        showClearPopover = false
+                        Task { await clearContext() }
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showClearPopover = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private func compactButton(iconOnly: Bool) -> some View {
+        Button {
+            showCompactPopover = true
+        } label: {
+            HStack(spacing: 4) {
+                if isCompacting {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(.tronSlate)
+                } else {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                }
+                if !iconOnly {
+                    Text("Compact")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                }
+            }
+            .foregroundStyle(hasMessages && !readOnly ? .tronSlate : .tronTextMuted)
+        }
+        .disabled(isCompacting || !hasMessages || readOnly)
+        .popover(isPresented: $showCompactPopover, arrowEdge: .top) {
+            GlassActionSheet(
+                actions: [
+                    GlassAction(
+                        title: "Compact Context",
+                        icon: "arrow.down.right.and.arrow.up.left",
+                        color: Color(red: 0.55, green: 0.7, blue: 0.8),
+                        role: .default
+                    ) {
+                        showCompactPopover = false
+                        Task { await compactContext() }
+                    },
+                    GlassAction(
+                        title: "Cancel",
+                        icon: nil,
+                        color: .tronTextMuted,
+                        role: .cancel
+                    ) {
+                        showCompactPopover = false
+                    }
+                ]
+            )
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
     // MARK: - Context View
 
     private var contextView: some View {
@@ -215,32 +276,6 @@ struct ContextAuditView: View {
                 if let snapshot = detailedSnapshot {
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 16) {
-                            // Manual memory update button (visible when auto-ledger is OFF)
-                            if !isAutoLedgerEnabled && !readOnly {
-                                Button {
-                                    Task { await updateMemoryLedger() }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        if isUpdatingLedger {
-                                            ProgressView()
-                                                .scaleEffect(0.7)
-                                                .tint(.purple)
-                                        } else {
-                                            Image(systemName: "book.closed")
-                                        }
-                                        Text("Update Memory")
-                                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                                    }
-                                    .foregroundStyle(.purple)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(.purple.opacity(0.1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                }
-                                .disabled(isUpdatingLedger || !hasMessages)
-                                .padding(.horizontal)
-                            }
-
                             // Usage gauge
                             ContextUsageGaugeView(
                                 currentTokens: snapshot.currentTokens,
@@ -285,8 +320,8 @@ struct ContextAuditView: View {
                             }
                             .padding(.horizontal)
 
-                            // Session Context — only shown when skills or messages exist
-                            if !displayedSkills.isEmpty || !allMessages.isEmpty {
+                            // Session Context — only shown when skills, session memories, or messages exist
+                            if !displayedSkills.isEmpty || hasSessionMemories || !allMessages.isEmpty {
                                 SessionContextHeader()
                                     .padding(.horizontal)
 
@@ -303,6 +338,10 @@ struct ContextAuditView: View {
                                                 return metadata?.content
                                             }
                                         )
+                                    }
+
+                                    if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
+                                        SessionMemoriesSection(memory: sessionMem)
                                     }
 
                                     if !allMessages.isEmpty {

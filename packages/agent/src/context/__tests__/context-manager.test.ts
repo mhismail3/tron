@@ -928,4 +928,103 @@ describe('ContextManager', () => {
       expect(cm.getMessages()).toHaveLength(0);
     });
   });
+
+  // ===========================================================================
+  // Session Memories
+  // ===========================================================================
+
+  describe('Session Memories', () => {
+    let cm: ContextManager;
+
+    beforeEach(() => {
+      cm = createContextManager({ model: 'claude-sonnet-4-20250514' });
+    });
+
+    it('starts with empty session memories', () => {
+      expect(cm.getSessionMemories()).toHaveLength(0);
+    });
+
+    it('adds session memory entries', () => {
+      cm.addSessionMemory({ title: 'Test', content: '- lesson 1' });
+      const memories = cm.getSessionMemories();
+      expect(memories).toHaveLength(1);
+      expect(memories[0].title).toBe('Test');
+      expect(memories[0].content).toBe('- lesson 1');
+      expect(memories[0].tokens).toBeGreaterThan(0);
+    });
+
+    it('estimates tokens as ceil(content.length / 4)', () => {
+      cm.addSessionMemory({ title: 'Test', content: 'A'.repeat(100) });
+      expect(cm.getSessionMemories()[0].tokens).toBe(25);
+    });
+
+    it('returns defensive copy', () => {
+      cm.addSessionMemory({ title: 'Test', content: 'content' });
+      const copy = cm.getSessionMemories();
+      copy.push({ title: 'Injected', content: 'bad', tokens: 0 });
+      expect(cm.getSessionMemories()).toHaveLength(1);
+    });
+
+    it('clears session memories', () => {
+      cm.addSessionMemory({ title: 'Test', content: 'content' });
+      cm.clearSessionMemories();
+      expect(cm.getSessionMemories()).toHaveLength(0);
+    });
+
+    it('includes session memory tokens in estimateMemoryTokens', () => {
+      const tokensBefore = cm.getCurrentTokens();
+      cm.addSessionMemory({ title: 'Test', content: 'A'.repeat(400) });
+      const tokensAfter = cm.getCurrentTokens();
+      expect(tokensAfter).toBeGreaterThan(tokensBefore);
+    });
+
+    it('getFullMemoryContent returns undefined when no memory at all', () => {
+      expect(cm.getFullMemoryContent()).toBeUndefined();
+    });
+
+    it('getFullMemoryContent returns startup memory only when no session memories', () => {
+      cm.setMemoryContent('## Startup lessons');
+      expect(cm.getFullMemoryContent()).toBe('## Startup lessons');
+    });
+
+    it('getFullMemoryContent returns session memories only when no startup memory', () => {
+      cm.addSessionMemory({ title: 'Fix bug', content: '- use vitest' });
+      const full = cm.getFullMemoryContent()!;
+      expect(full).toContain('## New memories from this session');
+      expect(full).toContain('### Fix bug');
+      expect(full).toContain('- use vitest');
+    });
+
+    it('getFullMemoryContent combines startup and session memories', () => {
+      cm.setMemoryContent('## Startup lessons\n\n- lesson A');
+      cm.addSessionMemory({ title: 'New insight', content: '- insight B' });
+      const full = cm.getFullMemoryContent()!;
+      expect(full).toContain('## Startup lessons');
+      expect(full).toContain('- lesson A');
+      expect(full).toContain('## New memories from this session');
+      expect(full).toContain('### New insight');
+      expect(full).toContain('- insight B');
+    });
+
+    it('getMemoryContent still returns only startup content', () => {
+      cm.setMemoryContent('startup only');
+      cm.addSessionMemory({ title: 'Session', content: 'session stuff' });
+      expect(cm.getMemoryContent()).toBe('startup only');
+    });
+
+    it('session memories survive clearMessages', () => {
+      cm.addSessionMemory({ title: 'Test', content: 'content' });
+      cm.addMessage({ role: 'user', content: 'Hello' });
+      cm.clearMessages();
+      expect(cm.getSessionMemories()).toHaveLength(1);
+    });
+
+    it('clearSessionMemories does not affect startup memory', () => {
+      cm.setMemoryContent('startup');
+      cm.addSessionMemory({ title: 'Session', content: 'session' });
+      cm.clearSessionMemories();
+      expect(cm.getMemoryContent()).toBe('startup');
+      expect(cm.getSessionMemories()).toHaveLength(0);
+    });
+  });
 });

@@ -266,6 +266,8 @@ struct DetailedContextSnapshotResult: Codable {
     let rules: LoadedRules?
     /// Memory loaded for this session (if auto-inject enabled)
     let memory: LoadedMemory?
+    /// Session memories written during this session (auto or manual ledger)
+    let sessionMemories: LoadedMemory?
 }
 
 /// A single auto-injected memory entry

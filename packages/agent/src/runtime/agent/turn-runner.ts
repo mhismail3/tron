@@ -352,7 +352,7 @@ export class AgentTurnRunner implements ITurnRunner {
       })),
       workingDirectory: this.workingDirectory,
       rulesContent: this.contextManager.getRulesContent(),
-      memoryContent: this.contextManager.getMemoryContent(),
+      memoryContent: this.contextManager.getFullMemoryContent(),
       skillContext,
       subagentResultsContext,
       todoContext,

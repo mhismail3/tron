@@ -38,6 +38,7 @@ export {
   type ThresholdLevel,
   type RulesFileSnapshot,
   type RulesSnapshot,
+  type SessionMemoryEntry,
 } from './context-manager.js';
 
 export {

@@ -159,6 +159,7 @@ export class ContextOps {
     } as DetailedContextSnapshot & {
       addedSkills: typeof addedSkills;
       memory?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
+      sessionMemories?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
     };
 
     // Include memory info if memory was auto-injected
@@ -177,6 +178,16 @@ export class ContextOps {
         count: Math.max(entries.length, 1),
         tokens: Math.ceil(memoryContent.length / 4),
         entries,
+      };
+    }
+
+    // Include session memories if any were written during this session
+    const sessionMemories = active.agent.getContextManager().getSessionMemories();
+    if (sessionMemories.length > 0) {
+      result.sessionMemories = {
+        count: sessionMemories.length,
+        tokens: sessionMemories.reduce((sum, m) => sum + m.tokens, 0),
+        entries: sessionMemories.map(m => ({ title: m.title, content: m.content })),
       };
     }
 
@@ -345,6 +356,9 @@ export class ContextOps {
 
     // Clear all messages from context manager
     cm.clearMessages();
+
+    // Clear session memories (don't survive context clear)
+    cm.clearSessionMemories();
 
     // Clear skill tracker (skills don't survive context clear)
     active.skillTracker.clear();

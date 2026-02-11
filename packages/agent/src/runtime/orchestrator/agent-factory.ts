@@ -255,6 +255,18 @@ function createWebFetchSummarizer(
 }
 
 /**
+ * Format a ledger payload as a session memory entry.
+ * Mirrors EmbeddingController.loadWorkspaceMemory() format.
+ */
+function formatLedgerAsMemory(payload: Record<string, unknown>): { title: string; content: string } {
+  const p = payload as { title?: string; lessons?: string[]; decisions?: Array<{ choice: string; reason: string }> };
+  const parts: string[] = [];
+  if (p.lessons?.length) parts.push(p.lessons.map(l => `- ${l}`).join('\n'));
+  if (p.decisions?.length) parts.push(p.decisions.map(d => `- ${d.choice}: ${d.reason}`).join('\n'));
+  return { title: String(p.title ?? 'Untitled'), content: parts.join('\n') };
+}
+
+/**
  * Wire the memory ledger hook into an agent.
  * Sets up CompactionTrigger → LedgerWriter → MemoryManager pipeline.
  */
@@ -303,6 +315,10 @@ function wireMemoryLedger(
     emitMemoryUpdated: (data) => memCfg.emitMemoryUpdated(data),
     embedMemory: memCfg.embedMemory,
     isLedgerEnabled: () => getSettings().context.memory.ledger?.enabled ?? true,
+    onMemoryWritten: (payload) => {
+      const entry = formatLedgerAsMemory(payload);
+      agent.addSessionMemory(entry);
+    },
     sessionId,
     workspaceId,
   });
@@ -330,6 +346,10 @@ function wireMemoryLedger(
         });
         if (memCfg.embedMemory && result.eventId && result.payload) {
           memCfg.embedMemory(result.eventId, workspaceId, result.payload).catch(() => {});
+        }
+        if (result.payload) {
+          const entry = formatLedgerAsMemory(result.payload);
+          agent.addSessionMemory(entry);
         }
       }
       return { written: result.written, title: result.title, entryType: result.entryType };

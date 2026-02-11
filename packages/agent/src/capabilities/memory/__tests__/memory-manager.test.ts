@@ -272,6 +272,88 @@ describe('MemoryManager', () => {
     });
   });
 
+  describe('onMemoryWritten', () => {
+    it('should call onMemoryWritten after successful ledger write with payload', async () => {
+      const onMemoryWritten = vi.fn();
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          title: 'Bug fix session',
+          payload: { title: 'Bug fix session', lessons: ['use vitest'] },
+        }),
+        onMemoryWritten,
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(onMemoryWritten).toHaveBeenCalledWith(
+        { title: 'Bug fix session', lessons: ['use vitest'] },
+        'Bug fix session'
+      );
+    });
+
+    it('should not call onMemoryWritten when ledger write is skipped', async () => {
+      const onMemoryWritten = vi.fn();
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({ written: false }),
+        onMemoryWritten,
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(onMemoryWritten).not.toHaveBeenCalled();
+    });
+
+    it('should not call onMemoryWritten when payload is missing', async () => {
+      const onMemoryWritten = vi.fn();
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({ written: true, title: 'Test' }),
+        onMemoryWritten,
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(onMemoryWritten).not.toHaveBeenCalled();
+    });
+
+    it('should use "Untitled" when title is missing from ledger result', async () => {
+      const onMemoryWritten = vi.fn();
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          payload: { lessons: ['test'] },
+        }),
+        onMemoryWritten,
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(onMemoryWritten).toHaveBeenCalledWith(
+        { lessons: ['test'] },
+        'Untitled'
+      );
+    });
+
+    it('should work when onMemoryWritten callback is not provided', async () => {
+      deps = createDeps({
+        writeLedgerEntry: vi.fn().mockResolvedValue({
+          written: true,
+          title: 'Test',
+          payload: { title: 'Test', lessons: ['test'] },
+        }),
+      });
+
+      const manager = new MemoryManager(deps);
+      await manager.onCycleComplete(createCycleInfo());
+
+      expect(deps.emitMemoryUpdated).toHaveBeenCalled();
+    });
+  });
+
   describe('isLedgerEnabled', () => {
     it('should skip ledger write when disabled', async () => {
       deps = createDeps({
