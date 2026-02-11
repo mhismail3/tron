@@ -6,14 +6,12 @@ final class SubagentStateTests: XCTestCase {
 
     private var sut: SubagentState!
 
-    override func setUp() {
-        super.setUp()
-        sut = SubagentState()
+    override func setUp() async throws {
+        sut = await SubagentState()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         sut = nil
-        super.tearDown()
     }
 
     // MARK: - Helper

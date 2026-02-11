@@ -43,12 +43,25 @@ final class AppearanceSettings {
         }
     }
 
+    var thinkingIndicatorStyle: ThinkingIndicatorStyle {
+        didSet {
+            UserDefaults.standard.set(thinkingIndicatorStyle.rawValue, forKey: "thinkingIndicatorStyle")
+        }
+    }
+
     private init() {
         if let saved = UserDefaults.standard.string(forKey: "appearanceMode"),
            let parsed = AppearanceMode(rawValue: saved) {
             self.mode = parsed
         } else {
             self.mode = .dark
+        }
+
+        if let saved = UserDefaults.standard.string(forKey: "thinkingIndicatorStyle"),
+           let parsed = ThinkingIndicatorStyle(rawValue: saved) {
+            self.thinkingIndicatorStyle = parsed
+        } else {
+            self.thinkingIndicatorStyle = .neuralSpark
         }
     }
 }

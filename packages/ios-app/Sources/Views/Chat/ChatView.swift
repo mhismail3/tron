@@ -341,6 +341,8 @@ struct ChatView: View {
                         // Load more messages button (like iOS Messages)
                         if viewModel.hasMoreMessages {
                             loadMoreButton
+                                .opacity(initialLoadComplete ? 1 : 0)
+                                .animation(.smooth(duration: 0.3), value: initialLoadComplete)
                                 .id("loadMore")
                         }
 
@@ -447,7 +449,7 @@ struct ChatView: View {
 
                         // Always present in view tree to avoid layout shifts.
                         // Zero height + clipped + zero opacity = invisible with no layout impact.
-                        BreathingLineIndicator()
+                        AnimatedThinkingLine()
                             .frame(height: viewModel.shouldShowBreathingLine ? nil : 0, alignment: .top)
                             .clipped()
                             .opacity(viewModel.shouldShowBreathingLine ? 1 : 0)
@@ -457,6 +459,8 @@ struct ChatView: View {
                         // Show workspace deleted notification when workspace folder no longer exists
                         if workspaceDeleted {
                             WorkspaceDeletedNotificationView()
+                                .opacity(initialLoadComplete ? 1 : 0)
+                                .animation(.smooth(duration: 0.3), value: initialLoadComplete)
                                 .id("workspaceDeleted")
                         }
 

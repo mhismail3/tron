@@ -17,6 +17,8 @@ struct AppearanceSection: View {
             }
             .pickerStyle(.segmented)
 
+            thinkingIndicatorPickerRow
+
             fontPickerRow
 
             axisSliders
@@ -27,6 +29,67 @@ struct AppearanceSection: View {
             footerText
         }
         .listSectionSpacing(16)
+    }
+
+    // MARK: - Thinking Indicator Picker
+
+    private var thinkingIndicatorPickerRow: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: appearanceSettings.thinkingIndicatorStyle.icon)
+                    .font(.system(size: 24))
+                    .foregroundStyle(.tronEmerald)
+                    .frame(width: 32, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(appearanceSettings.thinkingIndicatorStyle.displayName)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(.tronTextPrimary)
+                    Text("Thinking animation")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(.tronTextSecondary)
+                }
+
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(ThinkingIndicatorStyle.allCases) { style in
+                        indicatorChip(style)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func indicatorChip(_ style: ThinkingIndicatorStyle) -> some View {
+        let isSelected = appearanceSettings.thinkingIndicatorStyle == style
+        return Button {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                appearanceSettings.thinkingIndicatorStyle = style
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: style.icon)
+                    .font(.system(size: 12))
+                Text(style.displayName)
+                    .font(TronTypography.caption)
+            }
+            .foregroundStyle(isSelected ? .tronSurface : .tronTextPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(isSelected ? Color.tronEmerald : Color.tronSurfaceElevated)
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(isSelected ? Color.clear : Color.tronBorder, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Font Picker

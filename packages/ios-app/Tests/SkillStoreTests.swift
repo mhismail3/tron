@@ -330,19 +330,22 @@ final class SkillStoreTests: XCTestCase {
             name: "test",
             source: .global,
             addedVia: .mention,
-            eventId: "evt_1"
+            eventId: "evt_1",
+            tokens: nil
         )
         let skill2 = AddedSkillInfo(
             name: "test",
             source: .global,
             addedVia: .mention,
-            eventId: "evt_1"
+            eventId: "evt_1",
+            tokens: nil
         )
         let skill3 = AddedSkillInfo(
             name: "different",
             source: .project,
             addedVia: .explicit,
-            eventId: "evt_2"
+            eventId: "evt_2",
+            tokens: nil
         )
 
         XCTAssertEqual(skill1, skill2)
@@ -355,7 +358,8 @@ final class SkillStoreTests: XCTestCase {
             name: "my-skill",
             source: .global,
             addedVia: .mention,
-            eventId: "evt_123"
+            eventId: "evt_123",
+            tokens: nil
         )
 
         XCTAssertEqual(skill.id, "my-skill")
