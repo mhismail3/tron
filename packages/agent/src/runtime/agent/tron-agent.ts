@@ -309,6 +309,21 @@ export class TronAgent {
   }
 
   /**
+   * Check if compaction is currently in progress.
+   */
+  isCompacting(): boolean {
+    return this.compactionHandler.isCompacting();
+  }
+
+  /**
+   * Wait for in-progress compaction to complete, with a timeout.
+   * Resolves immediately if no compaction is running.
+   */
+  waitForCompaction(timeoutMs: number): Promise<void> {
+    return this.compactionHandler.waitForCompaction(timeoutMs);
+  }
+
+  /**
    * Attempt compaction using the agent's configured LLM summarizer.
    */
   async attemptCompaction(reason: 'pre_turn_guardrail' | 'threshold_exceeded' | 'manual' = 'manual'): Promise<{

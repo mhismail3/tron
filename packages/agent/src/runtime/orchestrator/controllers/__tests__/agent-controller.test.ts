@@ -31,6 +31,8 @@ describe('AgentController', () => {
     wasInterrupted: false,
     agent: {
       abort: vi.fn(),
+      isCompacting: vi.fn().mockReturnValue(false),
+      waitForCompaction: vi.fn().mockResolvedValue(undefined),
       getPendingBackgroundHookCount: vi.fn().mockReturnValue(0),
       waitForBackgroundHooks: vi.fn().mockResolvedValue(undefined),
     },
@@ -169,10 +171,10 @@ describe('AgentController', () => {
       expect((mockActiveSession.sessionContext as any).setProcessing).toHaveBeenLastCalledWith(false);
     });
 
-    it('waits for pending background hooks before starting new run', async () => {
+    it('waits for in-progress compaction before starting new run', async () => {
       mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
-      (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(2);
+      (mockActiveSession.agent as any).isCompacting.mockReturnValue(true);
       mockAgentRunner.run.mockResolvedValue([]);
 
       await controller.run({
@@ -180,14 +182,14 @@ describe('AgentController', () => {
         prompt: 'Hello',
       });
 
-      expect((mockActiveSession.agent as any).waitForBackgroundHooks).toHaveBeenCalledWith(10_000);
+      expect((mockActiveSession.agent as any).waitForCompaction).toHaveBeenCalledWith(10_000);
       expect(mockAgentRunner.run).toHaveBeenCalled();
     });
 
-    it('skips background hook wait when none are pending', async () => {
+    it('skips compaction wait when not compacting', async () => {
       mockSessionStore.get.mockReturnValue(mockActiveSession);
       (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
-      (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(0);
+      (mockActiveSession.agent as any).isCompacting.mockReturnValue(false);
       mockAgentRunner.run.mockResolvedValue([]);
 
       await controller.run({
@@ -195,6 +197,23 @@ describe('AgentController', () => {
         prompt: 'Hello',
       });
 
+      expect((mockActiveSession.agent as any).waitForCompaction).not.toHaveBeenCalled();
+    });
+
+    it('does not block on background hooks when only ledger is pending', async () => {
+      mockSessionStore.get.mockReturnValue(mockActiveSession);
+      (mockActiveSession.sessionContext as any).isProcessing.mockReturnValue(false);
+      // Ledger hook is pending but no compaction in progress
+      (mockActiveSession.agent as any).getPendingBackgroundHookCount.mockReturnValue(1);
+      (mockActiveSession.agent as any).isCompacting.mockReturnValue(false);
+      mockAgentRunner.run.mockResolvedValue([]);
+
+      await controller.run({
+        sessionId: 'sess-123',
+        prompt: 'Hello',
+      });
+
+      expect((mockActiveSession.agent as any).waitForCompaction).not.toHaveBeenCalled();
       expect((mockActiveSession.agent as any).waitForBackgroundHooks).not.toHaveBeenCalled();
     });
 

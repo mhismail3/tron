@@ -282,6 +282,107 @@ describe('AgentCompactionHandler', () => {
       });
     });
   });
+
+  describe('isCompacting', () => {
+    it('returns false by default', () => {
+      expect(handler.isCompacting()).toBe(false);
+    });
+
+    it('returns true during attemptCompaction execution', async () => {
+      handler.setSummarizer(mockSummarizer);
+
+      let resolveCompaction!: (value: any) => void;
+      mockContextManager.executeCompaction = vi.fn().mockReturnValue(
+        new Promise(resolve => { resolveCompaction = resolve; })
+      );
+
+      const compactionPromise = handler.attemptCompaction('manual');
+      expect(handler.isCompacting()).toBe(true);
+
+      resolveCompaction({
+        success: true,
+        tokensBefore: 50000,
+        tokensAfter: 20000,
+        compressionRatio: 0.4,
+        summary: 'Test summary',
+      });
+      await compactionPromise;
+
+      expect(handler.isCompacting()).toBe(false);
+    });
+
+    it('returns false after attemptCompaction fails', async () => {
+      handler.setSummarizer(mockSummarizer);
+
+      mockContextManager.executeCompaction = vi.fn().mockRejectedValue(
+        new Error('Compaction failed')
+      );
+
+      await handler.attemptCompaction('manual');
+      expect(handler.isCompacting()).toBe(false);
+    });
+
+    it('returns false when auto-compaction is not available', async () => {
+      // No summarizer set — attemptCompaction returns early
+      await handler.attemptCompaction('manual');
+      expect(handler.isCompacting()).toBe(false);
+    });
+  });
+
+  describe('waitForCompaction', () => {
+    it('resolves immediately when not compacting', async () => {
+      await handler.waitForCompaction(5000);
+    });
+
+    it('resolves when compaction completes', async () => {
+      handler.setSummarizer(mockSummarizer);
+
+      let resolveCompaction!: (value: any) => void;
+      mockContextManager.executeCompaction = vi.fn().mockReturnValue(
+        new Promise(resolve => { resolveCompaction = resolve; })
+      );
+
+      const compactionPromise = handler.attemptCompaction('manual');
+
+      const waitPromise = handler.waitForCompaction(5000);
+
+      resolveCompaction({
+        success: true,
+        tokensBefore: 50000,
+        tokensAfter: 20000,
+        compressionRatio: 0.4,
+        summary: 'Test summary',
+      });
+
+      await waitPromise;
+      await compactionPromise;
+
+      expect(handler.isCompacting()).toBe(false);
+    });
+
+    it('resolves after timeout if compaction takes too long', async () => {
+      vi.useFakeTimers();
+
+      handler.setSummarizer(mockSummarizer);
+
+      // Compaction that never resolves
+      mockContextManager.executeCompaction = vi.fn().mockReturnValue(
+        new Promise(() => {})
+      );
+
+      handler.attemptCompaction('manual');
+
+      const waitPromise = handler.waitForCompaction(1000);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await waitPromise;
+
+      // Still compacting (it never resolved), but wait finished via timeout
+      expect(handler.isCompacting()).toBe(true);
+
+      vi.useRealTimers();
+    });
+  });
 });
 
 describe('createCompactionHandler', () => {

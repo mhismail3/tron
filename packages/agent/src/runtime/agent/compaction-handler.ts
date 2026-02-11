@@ -34,6 +34,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
 
   private summarizer: Summarizer | null = null;
   private autoCompactionEnabled: boolean = true;
+  private compactionPromise: Promise<CompactionAttemptResult> | null = null;
 
   constructor(deps: CompactionHandlerDependencies) {
     this.contextManager = deps.contextManager;
@@ -96,9 +97,25 @@ export class AgentCompactionHandler implements ICompactionHandler {
   }
 
   /**
-   * Attempt compaction if needed
-   * @param reason - The reason for compaction (for logging/events)
+   * Check if compaction is currently in progress
    */
+  isCompacting(): boolean {
+    return this.compactionPromise !== null;
+  }
+
+  /**
+   * Wait for in-progress compaction to complete, with a timeout.
+   * Resolves immediately if no compaction is running.
+   */
+  async waitForCompaction(timeoutMs: number): Promise<void> {
+    if (!this.compactionPromise) return;
+
+    await Promise.race([
+      this.compactionPromise.then(() => {}, () => {}),
+      new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+
   async attemptCompaction(reason: CompactionReason): Promise<CompactionAttemptResult> {
     if (!this.canAutoCompact() || !this.summarizer) {
       return {
@@ -107,6 +124,17 @@ export class AgentCompactionHandler implements ICompactionHandler {
       };
     }
 
+    const promise = this.doCompaction(reason);
+    this.compactionPromise = promise;
+
+    try {
+      return await promise;
+    } finally {
+      this.compactionPromise = null;
+    }
+  }
+
+  private async doCompaction(reason: CompactionReason): Promise<CompactionAttemptResult> {
     const totalTokens = this.contextManager.getCurrentTokens();
 
     // Execute PreCompact hook first (before emitting compaction_start)
@@ -133,7 +161,7 @@ export class AgentCompactionHandler implements ICompactionHandler {
 
     try {
       const result = await this.contextManager.executeCompaction({
-        summarizer: this.summarizer,
+        summarizer: this.summarizer!,
       });
 
       // After executeCompaction (which calls setMessages, resetting API tokens to null),
