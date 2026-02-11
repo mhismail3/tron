@@ -383,49 +383,83 @@ final class BrowserTypesTests: XCTestCase {
     }
 }
 
-// MARK: - Todo Types Tests
+// MARK: - Task Types Tests
 
 @MainActor
-final class TodoTypesTests: XCTestCase {
+final class TaskTypesTests: XCTestCase {
 
-    func testRpcTodoItemDecoding() throws {
+    func testRpcTaskDecoding() throws {
         let json = """
         {
-            "id": "todo_123",
-            "content": "Fix the bug",
+            "id": "task_123",
+            "title": "Fix the bug",
+            "description": "There is a bug in the login flow",
             "activeForm": "Fixing the bug",
             "status": "in_progress",
+            "priority": "high",
             "source": "agent",
+            "tags": ["urgent"],
             "createdAt": "2026-01-26T00:00:00.000Z",
-            "completedAt": null,
-            "metadata": null
+            "updatedAt": "2026-01-26T00:00:00.000Z"
         }
         """.data(using: .utf8)!
 
-        let todo = try JSONDecoder().decode(RpcTodoItem.self, from: json)
+        let task = try JSONDecoder().decode(RpcTask.self, from: json)
 
-        XCTAssertEqual(todo.id, "todo_123")
-        XCTAssertEqual(todo.content, "Fix the bug")
-        XCTAssertEqual(todo.status, .inProgress)
-        XCTAssertEqual(todo.source, .agent)
+        XCTAssertEqual(task.id, "task_123")
+        XCTAssertEqual(task.title, "Fix the bug")
+        XCTAssertEqual(task.description, "There is a bug in the login flow")
+        XCTAssertEqual(task.status, .inProgress)
+        XCTAssertEqual(task.priority, .high)
+        XCTAssertEqual(task.source, .agent)
+        XCTAssertEqual(task.tags, ["urgent"])
     }
 
-    func testTodoStatusDisplayName() {
-        XCTAssertEqual(RpcTodoItem.TodoStatus.pending.displayName, "Pending")
-        XCTAssertEqual(RpcTodoItem.TodoStatus.inProgress.displayName, "In Progress")
-        XCTAssertEqual(RpcTodoItem.TodoStatus.completed.displayName, "Completed")
+    func testTaskStatusDisplayName() {
+        XCTAssertEqual(RpcTask.TaskStatus.backlog.displayName, "Backlog")
+        XCTAssertEqual(RpcTask.TaskStatus.pending.displayName, "Pending")
+        XCTAssertEqual(RpcTask.TaskStatus.inProgress.displayName, "In Progress")
+        XCTAssertEqual(RpcTask.TaskStatus.completed.displayName, "Completed")
+        XCTAssertEqual(RpcTask.TaskStatus.cancelled.displayName, "Cancelled")
     }
 
-    func testTodoStatusIcon() {
-        XCTAssertEqual(RpcTodoItem.TodoStatus.pending.icon, "circle")
-        XCTAssertEqual(RpcTodoItem.TodoStatus.inProgress.icon, "circle.fill")
-        XCTAssertEqual(RpcTodoItem.TodoStatus.completed.icon, "checkmark.circle.fill")
+    func testTaskStatusIcon() {
+        XCTAssertEqual(RpcTask.TaskStatus.backlog.icon, "tray")
+        XCTAssertEqual(RpcTask.TaskStatus.pending.icon, "circle")
+        XCTAssertEqual(RpcTask.TaskStatus.inProgress.icon, "circle.fill")
+        XCTAssertEqual(RpcTask.TaskStatus.completed.icon, "checkmark.circle.fill")
+        XCTAssertEqual(RpcTask.TaskStatus.cancelled.icon, "xmark.circle.fill")
     }
 
-    func testBacklogReasonDisplayName() {
-        XCTAssertEqual(RpcBackloggedTask.BacklogReason.sessionClear.displayName, "Session Cleared")
-        XCTAssertEqual(RpcBackloggedTask.BacklogReason.contextCompact.displayName, "Context Compacted")
-        XCTAssertEqual(RpcBackloggedTask.BacklogReason.sessionEnd.displayName, "Session Ended")
+    func testTaskPriorityDisplayName() {
+        XCTAssertEqual(RpcTask.TaskPriority.low.displayName, "Low")
+        XCTAssertEqual(RpcTask.TaskPriority.medium.displayName, "Medium")
+        XCTAssertEqual(RpcTask.TaskPriority.high.displayName, "High")
+        XCTAssertEqual(RpcTask.TaskPriority.critical.displayName, "Critical")
+    }
+
+    func testTaskListResultDecoding() throws {
+        let json = """
+        {
+            "tasks": [{
+                "id": "1",
+                "title": "Test task",
+                "status": "pending",
+                "priority": "medium",
+                "source": "agent",
+                "tags": [],
+                "createdAt": "2026-01-26T00:00:00.000Z",
+                "updatedAt": "2026-01-26T00:00:00.000Z"
+            }],
+            "total": 1
+        }
+        """.data(using: .utf8)!
+
+        let result = try JSONDecoder().decode(TaskListResult.self, from: json)
+
+        XCTAssertEqual(result.tasks.count, 1)
+        XCTAssertEqual(result.total, 1)
+        XCTAssertEqual(result.tasks[0].title, "Test task")
     }
 }
 

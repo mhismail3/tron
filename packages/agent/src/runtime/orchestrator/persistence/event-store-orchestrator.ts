@@ -343,6 +343,7 @@ export class EventStoreOrchestrator extends EventEmitter {
       },
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
       taskService: this.taskService,
+      onTaskEvent: (event, data) => this.emit(event, data),
       dbPath: this.eventStore.dbPath,
       get embeddingService() { return self.embeddings.getEmbeddingService() ?? undefined; },
       get vectorRepo() { return self.embeddings.getVectorRepo() ?? undefined; },

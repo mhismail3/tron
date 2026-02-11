@@ -53,7 +53,7 @@ enum MyEventPlugin: DispatchableEventPlugin {
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
 | UICanvas | `Plugins/UICanvas/` | render_start, render_chunk, render_complete, render_error, render_retry |
 | Browser | `Plugins/Browser/` | browser_frame, browser_closed |
-| Todo | `Plugins/Todo/` | todos_updated |
+| Task | `Plugins/Task/` | task.created, task.updated, task.deleted |
 
 ### Registration
 
@@ -99,13 +99,13 @@ Handlers are split into domain-specific protocols:
 }
 
 // ... TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
-//     SubagentEventHandler, UICanvasEventHandler, TodoEventHandler, EventDispatchLogger
+//     SubagentEventHandler, UICanvasEventHandler, TaskEventHandler, EventDispatchLogger
 
 // Composed target — ChatViewModel conforms to this
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    UICanvasEventHandler, TodoEventHandler, EventDispatchLogger {}
+    UICanvasEventHandler, TaskEventHandler, EventDispatchLogger {}
 ```
 
 ### Implementation

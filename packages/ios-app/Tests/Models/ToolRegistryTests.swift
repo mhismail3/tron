@@ -276,7 +276,7 @@ struct ToolRegistryTests {
         #expect(!ToolRegistry.isCommandTool("askuserquestion"))
         #expect(!ToolRegistry.isCommandTool("spawnsubagent"))
         #expect(!ToolRegistry.isCommandTool("renderappui"))
-        #expect(!ToolRegistry.isCommandTool("todowrite"))
+        #expect(!ToolRegistry.isCommandTool("taskmanager"))
     }
 
     // MARK: - Viewer Factory Tests

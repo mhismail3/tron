@@ -1,9 +1,8 @@
 import Foundation
 
-/// Plugin for handling todos updated events.
-/// These events signal that the todo list was modified.
-enum TodosUpdatedPlugin: DispatchableEventPlugin {
-    static let eventType = "agent.todos_updated"
+/// Plugin for handling task updated events.
+enum TaskUpdatedPlugin: DispatchableEventPlugin {
+    static let eventType = "task.updated"
 
     // MARK: - Event Data
 
@@ -14,30 +13,36 @@ enum TodosUpdatedPlugin: DispatchableEventPlugin {
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let todos: [RpcTodoItem]
-            let restoredCount: Int?
+            let taskId: String
+            let title: String
+            let status: String
+            let changedFields: [String]
         }
     }
 
     // MARK: - Result
 
     struct Result: EventResult {
-        let todos: [RpcTodoItem]
-        let restoredCount: Int
+        let taskId: String
+        let title: String
+        let status: String
+        let changedFields: [String]
     }
 
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
-            todos: event.data.todos,
-            restoredCount: event.data.restoredCount ?? 0
+            taskId: event.data.taskId,
+            title: event.data.title,
+            status: event.data.status,
+            changedFields: event.data.changedFields
         )
     }
 
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
         guard let r = result as? Result else { return }
-        context.handleTodosUpdated(r)
+        context.handleTaskUpdated(r)
     }
 }

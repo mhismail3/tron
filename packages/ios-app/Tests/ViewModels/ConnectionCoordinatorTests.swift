@@ -63,15 +63,15 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.getAgentStateCalled)
     }
 
-    func testConnectAndResumeFetchesTodosAfterResume() async {
+    func testConnectAndResumeFetchesTasksAfterResume() async {
         // Given: Connection succeeds
         mockContext.isConnected = true
 
         // When: Connect and resume
         await coordinator.connectAndResume(context: mockContext)
 
-        // Then: Should fetch todos
-        XCTAssertTrue(mockContext.listTodosCalled)
+        // Then: Should fetch tasks
+        XCTAssertTrue(mockContext.listTasksCalled)
     }
 
     func testConnectAndResumeSetsShouldDismissOnSessionNotFound() async {
@@ -151,15 +151,15 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.getAgentStateCalled)
     }
 
-    func testReconnectAndResumeFetchesTodos() async {
+    func testReconnectAndResumeFetchesTasks() async {
         // Given: Already connected
         mockContext.isConnected = true
 
         // When: Reconnect and resume
         await coordinator.reconnectAndResume(context: mockContext)
 
-        // Then: Should fetch todos
-        XCTAssertTrue(mockContext.listTodosCalled)
+        // Then: Should fetch tasks
+        XCTAssertTrue(mockContext.listTasksCalled)
     }
 
     // MARK: - Check and Resume Agent State Tests
@@ -245,29 +245,29 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.isProcessing)
     }
 
-    // MARK: - Fetch Todos Tests
+    // MARK: - Fetch Tasks Tests
 
-    func testFetchTodosUpdatesTodoState() async {
-        // Given: Todos available
-        mockContext.todosResult = createMockTodoListResult(count: 1)
+    func testFetchTasksUpdatesTaskState() async {
+        // Given: Tasks available
+        mockContext.tasksResult = createMockTaskListResult(count: 1)
 
-        // When: Fetch todos
-        await coordinator.fetchTodosOnResume(context: mockContext)
+        // When: Fetch tasks
+        await coordinator.fetchTasksOnResume(context: mockContext)
 
-        // Then: Should update todo state
-        XCTAssertTrue(mockContext.updateTodosCalled)
-        XCTAssertEqual(mockContext.lastTodosCount, 1)
+        // Then: Should update task state
+        XCTAssertTrue(mockContext.updateTasksCalled)
+        XCTAssertEqual(mockContext.lastTasksCount, 1)
     }
 
-    func testFetchTodosHandlesError() async {
+    func testFetchTasksHandlesError() async {
         // Given: Fetch will fail
-        mockContext.listTodosShouldFail = true
+        mockContext.listTasksShouldFail = true
 
-        // When: Fetch todos
-        await coordinator.fetchTodosOnResume(context: mockContext)
+        // When: Fetch tasks
+        await coordinator.fetchTasksOnResume(context: mockContext)
 
         // Then: Should not crash, just log warning
-        XCTAssertFalse(mockContext.updateTodosCalled)
+        XCTAssertFalse(mockContext.updateTasksCalled)
     }
 
     // MARK: - Disconnect Tests
@@ -346,15 +346,14 @@ final class ConnectionCoordinatorTests: XCTestCase {
         return try! JSONDecoder().decode(HistoryMessage.self, from: json)
     }
 
-    private func createMockTodoListResult(count: Int) -> TodoListResult {
-        // Create mock todo items
+    private func createMockTaskListResult(count: Int) -> TaskListResult {
         let json = """
         {
-            "todos": \(count > 0 ? "[{\"id\": \"1\", \"content\": \"Test\", \"activeForm\": \"Testing\", \"status\": \"pending\", \"source\": \"agent\", \"createdAt\": \"2024-01-01T00:00:00Z\"}]" : "[]"),
-            "summary": "\(count) task(s)"
+            "tasks": \(count > 0 ? "[{\"id\": \"1\", \"title\": \"Test\", \"status\": \"pending\", \"priority\": \"medium\", \"source\": \"agent\", \"tags\": [], \"createdAt\": \"2024-01-01T00:00:00Z\", \"updatedAt\": \"2024-01-01T00:00:00Z\"}]" : "[]"),
+            "total": \(count)
         }
         """.data(using: .utf8)!
-        return try! JSONDecoder().decode(TodoListResult.self, from: json)
+        return try! JSONDecoder().decode(TaskListResult.self, from: json)
     }
 }
 
@@ -402,10 +401,9 @@ final class MockConnectionContext: ConnectionContext {
     var resumeSessionCalled = false
     var lastResumeSessionId: String?
     var getAgentStateCalled = false
-    var listTodosCalled = false
-    var updateTodosCalled = false
-    var lastTodosCount: Int = 0
-    var lastTodosSummary: String?
+    var listTasksCalled = false
+    var updateTasksCalled = false
+    var lastTasksCount: Int = 0
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
     var showErrorAlertCalled = false
@@ -421,12 +419,12 @@ final class MockConnectionContext: ConnectionContext {
     var agentStateIsRunning = false
     var agentStateCurrentTurnText: String?
     var agentStateToolCalls: [TestToolCall] = []
-    var listTodosShouldFail = false
-    var todosResult: TodoListResult = {
+    var listTasksShouldFail = false
+    var tasksResult: TaskListResult = {
         let json = """
-        {"todos": [], "summary": ""}
+        {"tasks": [], "total": 0}
         """.data(using: .utf8)!
-        return try! JSONDecoder().decode(TodoListResult.self, from: json)
+        return try! JSONDecoder().decode(TaskListResult.self, from: json)
     }()
 
     // MARK: - Protocol Methods
@@ -490,18 +488,17 @@ final class MockConnectionContext: ConnectionContext {
         return try! JSONDecoder().decode(AgentStateResult.self, from: json)
     }
 
-    func listTodos(sessionId: String) async throws -> TodoListResult {
-        listTodosCalled = true
-        if listTodosShouldFail {
+    func listTasks() async throws -> TaskListResult {
+        listTasksCalled = true
+        if listTasksShouldFail {
             throw ConnectionTestError.generic
         }
-        return todosResult
+        return tasksResult
     }
 
-    func updateTodos(_ todos: [RpcTodoItem], summary: String?) {
-        updateTodosCalled = true
-        lastTodosCount = todos.count
-        lastTodosSummary = summary
+    func updateTasks(_ tasks: [RpcTask]) {
+        updateTasksCalled = true
+        lastTasksCount = tasks.count
     }
 
     func setSessionProcessing(_ isProcessing: Bool) {

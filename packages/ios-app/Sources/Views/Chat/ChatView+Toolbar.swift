@@ -69,9 +69,9 @@ extension ChatView {
                     Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
                         Label("Context Manager", systemImage: "brain")
                     }
-                    if viewModel.todoState.hasTodos {
+                    if viewModel.taskState.hasTasks {
                         Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {
-                            Label("Tasks (\(viewModel.todoState.incompleteCount))", systemImage: "checklist")
+                            Label("Tasks (\(viewModel.taskState.incompleteCount))", systemImage: "checklist")
                         }
                     }
                     Divider()

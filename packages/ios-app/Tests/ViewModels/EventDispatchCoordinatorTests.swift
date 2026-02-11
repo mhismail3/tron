@@ -489,21 +489,21 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleUIRenderRetryCalledWith?.canvasId, "canvas_123")
     }
 
-    // MARK: - Todo Event Tests
+    // MARK: - Task Event Tests
 
-    func testDispatch_todosUpdated_callsHandleTodosUpdated() {
-        // Given: A todos updated result
-        let result = TodosUpdatedPlugin.Result(todos: [], restoredCount: 0)
+    func testDispatch_taskCreated_callsHandleTaskCreated() {
+        // Given: A task created result
+        let result = TaskCreatedPlugin.Result(taskId: "t1", title: "Test", status: "pending", projectId: nil)
 
         // When: Dispatching
         coordinator.dispatch(
-            type: TodosUpdatedPlugin.eventType,
+            type: TaskCreatedPlugin.eventType,
             transform: { result },
             context: mockContext
         )
 
         // Then: Handler should be called
-        XCTAssertTrue(mockContext.handleTodosUpdatedCalled)
+        XCTAssertTrue(mockContext.handleTaskCreatedCalled)
     }
 
     // MARK: - Edge Case Tests
@@ -604,8 +604,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleUIRenderErrorCalledWith: UIRenderErrorPlugin.Result?
     var handleUIRenderRetryCalledWith: UIRenderRetryPlugin.Result?
 
-    // MARK: - Todo
-    var handleTodosUpdatedCalled = false
+    // MARK: - Task
+    var handleTaskCreatedCalled = false
+    var handleTaskUpdatedCalled = false
+    var handleTaskDeletedCalled = false
 
     // MARK: - Logging
     var logWarningCalled = false
@@ -740,8 +742,16 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleUIRenderRetryCalledWith = result
     }
 
-    func handleTodosUpdated(_ result: TodosUpdatedPlugin.Result) {
-        handleTodosUpdatedCalled = true
+    func handleTaskCreated(_ result: TaskCreatedPlugin.Result) {
+        handleTaskCreatedCalled = true
+    }
+
+    func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result) {
+        handleTaskUpdatedCalled = true
+    }
+
+    func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
+        handleTaskDeletedCalled = true
     }
 
     func logWarning(_ message: String) {

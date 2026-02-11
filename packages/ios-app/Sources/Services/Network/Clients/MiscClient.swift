@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for miscellaneous RPC methods.
-/// Handles system, skills, canvas, worktree, todo, device token, memory, and message operations.
+/// Handles system, skills, canvas, worktree, tasks, device token, memory, and message operations.
 @MainActor
 final class MiscClient {
     private weak var transport: RPCTransport?
@@ -262,63 +262,15 @@ final class MiscClient {
         return try await ws.send(method: "canvas.get", params: params)
     }
 
-    // MARK: - Todo Methods
+    // MARK: - Task Methods
 
-    /// Get todos for a session
-    func listTodos(sessionId: String? = nil) async throws -> TodoListResult {
+    /// List tasks with optional filters
+    func listTasks(status: String? = nil, limit: Int? = nil) async throws -> TaskListResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
-        let sid: String
-        if let sessionId {
-            sid = sessionId
-        } else {
-            let (_, currentSessionId) = try transport.requireSession()
-            sid = currentSessionId
-        }
-
-        let params = TodoListParams(sessionId: sid)
-        return try await ws.send(method: "todo.list", params: params)
-    }
-
-    /// Get backlogged tasks for a workspace
-    func getBacklog(workspaceId: String, includeRestored: Bool? = nil, limit: Int? = nil) async throws -> TodoGetBacklogResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        let ws = try transport.requireConnection()
-
-        let params = TodoGetBacklogParams(
-            workspaceId: workspaceId,
-            includeRestored: includeRestored,
-            limit: limit
-        )
-        return try await ws.send(method: "todo.getBacklog", params: params)
-    }
-
-    /// Restore tasks from backlog to a session
-    func restoreFromBacklog(sessionId: String? = nil, taskIds: [String]) async throws -> TodoRestoreResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        let ws = try transport.requireConnection()
-
-        let sid: String
-        if let sessionId {
-            sid = sessionId
-        } else {
-            let (_, currentSessionId) = try transport.requireSession()
-            sid = currentSessionId
-        }
-
-        let params = TodoRestoreParams(sessionId: sid, taskIds: taskIds)
-        return try await ws.send(method: "todo.restore", params: params)
-    }
-
-    /// Get count of unrestored backlogged tasks for a workspace
-    func getBacklogCount(workspaceId: String) async throws -> Int {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        let ws = try transport.requireConnection()
-
-        let params = TodoGetBacklogCountParams(workspaceId: workspaceId)
-        let result: TodoGetBacklogCountResult = try await ws.send(method: "todo.getBacklogCount", params: params)
-        return result.count
+        let params = TaskListParams(status: status, limit: limit)
+        return try await ws.send(method: "tasks.list", params: params)
     }
 
     // MARK: - Device Token Methods (Push Notifications)

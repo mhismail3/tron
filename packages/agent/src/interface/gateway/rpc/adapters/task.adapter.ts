@@ -26,15 +26,33 @@ export function createTaskAdapter(deps: AdapterDependencies): TaskRpcManager {
     },
 
     createTask(params: Record<string, unknown>) {
-      return service.createTask(params as any);
+      const task = service.createTask(params as any);
+      orchestrator.emit('task_created', {
+        taskId: task.id,
+        title: task.title,
+        status: task.status,
+        projectId: task.projectId ?? null,
+      });
+      return task;
     },
 
     updateTask(taskId: string, params: Record<string, unknown>) {
-      return service.updateTask(taskId, params as any);
+      const task = service.updateTask(taskId, params as any);
+      const changedFields = Object.keys(params).filter(k => k !== 'sessionId');
+      orchestrator.emit('task_updated', {
+        taskId: task.id,
+        title: task.title,
+        status: task.status,
+        changedFields,
+      });
+      return task;
     },
 
     deleteTask(taskId: string) {
+      const task = service.getTask(taskId);
+      const title = task?.title ?? '';
       service.deleteTask(taskId);
+      orchestrator.emit('task_deleted', { taskId, title });
       return { success: true };
     },
 

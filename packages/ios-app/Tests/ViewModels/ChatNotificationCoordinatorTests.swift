@@ -13,20 +13,20 @@ struct ChatNotificationCoordinatorTests {
     func testHandleMenuAction_history_setsShowSessionHistory() {
         var showSessionHistory = false
         var showContextAudit = false
-        var showTodoSheet = false
+        var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "history",
             showSessionHistory: &showSessionHistory,
             showContextAudit: &showContextAudit,
-            showTodoSheet: &showTodoSheet,
+            showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
         #expect(showSessionHistory)
         #expect(!showContextAudit)
-        #expect(!showTodoSheet)
+        #expect(!showTaskSheet)
         #expect(!showSettings)
     }
 
@@ -34,41 +34,41 @@ struct ChatNotificationCoordinatorTests {
     func testHandleMenuAction_context_setsShowContextAudit() {
         var showSessionHistory = false
         var showContextAudit = false
-        var showTodoSheet = false
+        var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "context",
             showSessionHistory: &showSessionHistory,
             showContextAudit: &showContextAudit,
-            showTodoSheet: &showTodoSheet,
+            showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
         #expect(!showSessionHistory)
         #expect(showContextAudit)
-        #expect(!showTodoSheet)
+        #expect(!showTaskSheet)
         #expect(!showSettings)
     }
 
-    @Test("Handle menu action 'tasks' sets showTodoSheet")
-    func testHandleMenuAction_tasks_setsTodoSheet() {
+    @Test("Handle menu action 'tasks' sets showTaskSheet")
+    func testHandleMenuAction_tasks_setsTaskSheet() {
         var showSessionHistory = false
         var showContextAudit = false
-        var showTodoSheet = false
+        var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "tasks",
             showSessionHistory: &showSessionHistory,
             showContextAudit: &showContextAudit,
-            showTodoSheet: &showTodoSheet,
+            showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
         #expect(!showSessionHistory)
         #expect(!showContextAudit)
-        #expect(showTodoSheet)
+        #expect(showTaskSheet)
         #expect(!showSettings)
     }
 
@@ -76,20 +76,20 @@ struct ChatNotificationCoordinatorTests {
     func testHandleMenuAction_settings_setsShowSettings() {
         var showSessionHistory = false
         var showContextAudit = false
-        var showTodoSheet = false
+        var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "settings",
             showSessionHistory: &showSessionHistory,
             showContextAudit: &showContextAudit,
-            showTodoSheet: &showTodoSheet,
+            showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
         #expect(!showSessionHistory)
         #expect(!showContextAudit)
-        #expect(!showTodoSheet)
+        #expect(!showTaskSheet)
         #expect(showSettings)
     }
 
@@ -97,20 +97,20 @@ struct ChatNotificationCoordinatorTests {
     func testHandleMenuAction_unknown_doesNothing() {
         var showSessionHistory = false
         var showContextAudit = false
-        var showTodoSheet = false
+        var showTaskSheet = false
         var showSettings = false
 
         ChatNotificationCoordinator.handleChatMenuAction(
             "unknown_action",
             showSessionHistory: &showSessionHistory,
             showContextAudit: &showContextAudit,
-            showTodoSheet: &showTodoSheet,
+            showTaskSheet: &showTaskSheet,
             showSettings: &showSettings
         )
 
         #expect(!showSessionHistory)
         #expect(!showContextAudit)
-        #expect(!showTodoSheet)
+        #expect(!showTaskSheet)
         #expect(!showSettings)
     }
 

@@ -285,7 +285,7 @@ struct CommandToolTypesTests {
         #expect(!CommandToolRegistry.isCommandTool("spawnsubagent"))
         #expect(!CommandToolRegistry.isCommandTool("waitforsubagent"))
         #expect(!CommandToolRegistry.isCommandTool("renderappui"))
-        #expect(!CommandToolRegistry.isCommandTool("todowrite"))
+        #expect(!CommandToolRegistry.isCommandTool("taskmanager"))
         #expect(!CommandToolRegistry.isCommandTool("notifyapp"))
         #expect(!CommandToolRegistry.isCommandTool("adapt"))
     }

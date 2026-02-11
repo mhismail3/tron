@@ -61,7 +61,7 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var settings: SettingsClient = SettingsClient(transport: self)
 
-    /// Miscellaneous operations client (system, skills, canvas, worktree, todo, device, memory, message)
+    /// Miscellaneous operations client (system, skills, canvas, worktree, tasks, device, memory, message)
     @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)
 

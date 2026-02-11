@@ -5,12 +5,12 @@
 #
 # Commands:
 #   dev        Start beta server (-b to build, -t to tail, -k to kill, -r to restart)
-#   deploy     Build, test, and deploy to production
+#   deploy     Build, test, and deploy (append 'beta' for beta)
 #   install    Initial production setup (launchd + CLI)
 #   rollback   Restore previous deployment
 #   setup      First-time project setup
 #   status     Show service status and health
-#   start/stop/restart  Manage production service
+#   start/stop/restart  Manage service (append 'beta' for beta)
 #   logs       Query database logs
 #   errors     Show recent errors
 #   uninstall  Remove service (preserves data)
@@ -300,6 +300,61 @@ get_service_pid() {
 
 get_beta_pid() {
     lsof -t -i :$BETA_WS_PORT -sTCP:LISTEN 2>/dev/null || true
+}
+
+beta_is_running() {
+    [ -n "$(get_beta_pid)" ]
+}
+
+beta_start() {
+    require_project_dir
+
+    if beta_is_running; then
+        print_warning "Beta service is already running (PID: $(get_beta_pid))"
+        return 0
+    fi
+
+    print_status "Starting beta service..."
+
+    TRON_WS_PORT=$BETA_WS_PORT \
+    TRON_HEALTH_PORT=$BETA_HEALTH_PORT \
+    TRON_BUILD_TIER=beta \
+    TRON_EVENT_STORE_DB="$TRON_HOME/database/beta.db" \
+    TRON_REPO_ROOT="$PROJECT_DIR" \
+    LOG_LEVEL="${LOG_LEVEL:-trace}" \
+    NODE_ENV=development \
+    bun "$PROJECT_DIR/packages/agent/dist/interface/server.js" >/dev/null 2>&1 &
+    local pid=$!
+
+    sleep 2
+
+    if kill -0 $pid 2>/dev/null; then
+        print_success "Beta service started (PID: $pid)"
+        echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
+        echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
+    else
+        print_error "Beta service failed to start"
+        return 1
+    fi
+}
+
+beta_stop() {
+    local beta_pid=$(get_beta_pid)
+    if [ -z "$beta_pid" ]; then
+        print_warning "Beta service is not running"
+        return 0
+    fi
+
+    print_status "Stopping beta service..."
+    kill "$beta_pid" 2>/dev/null
+    sleep 1
+
+    if [ -z "$(get_beta_pid)" ]; then
+        print_success "Beta service stopped"
+    else
+        print_error "Failed to stop beta service"
+        return 1
+    fi
 }
 
 service_start() {
@@ -866,19 +921,55 @@ deploy_swap() {
     return 1
 }
 
+cmd_deploy_beta() {
+    require_project_dir
+    cd "$PROJECT_DIR"
+
+    print_header "Deploying to Beta"
+    echo "  Workspace: $PROJECT_DIR"
+    echo ""
+
+    build_workspace
+
+    if ! run_tests; then
+        print_warning "Tests failed!"
+        if ! confirm_action "Continue anyway?"; then
+            exit 1
+        fi
+    fi
+
+    if beta_is_running; then
+        beta_stop
+        sleep 1
+    fi
+
+    beta_start
+
+    echo ""
+    print_success "Beta deploy complete!"
+    echo ""
+}
+
 cmd_deploy() {
     local prepare_only=false
     local swap_only=false
     local delay=3
+    local tier="prod"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --prepare) prepare_only=true; shift ;;
             --swap)    swap_only=true; shift ;;
             --delay)   delay="$2"; shift 2 ;;
+            beta)      tier="beta"; shift ;;
             *)         shift ;;
         esac
     done
+
+    if [ "$tier" = "beta" ]; then
+        cmd_deploy_beta
+        return $?
+    fi
 
     if $prepare_only; then
         deploy_prepare
@@ -1280,6 +1371,11 @@ cmd_status() {
 }
 
 cmd_start() {
+    local tier="${1:-prod}"
+    if [ "$tier" = "beta" ]; then
+        beta_start
+        return $?
+    fi
     if service_is_running; then
         print_warning "Production service is already running"
         return 0
@@ -1288,10 +1384,23 @@ cmd_start() {
 }
 
 cmd_stop() {
+    local tier="${1:-prod}"
+    if [ "$tier" = "beta" ]; then
+        beta_stop
+        return $?
+    fi
     service_stop
 }
 
 cmd_restart() {
+    local tier="${1:-prod}"
+    if [ "$tier" = "beta" ]; then
+        print_status "Restarting beta service..."
+        beta_stop 2>/dev/null || true
+        sleep 1
+        beta_start
+        return $?
+    fi
     print_status "Restarting production service..."
     service_stop 2>/dev/null || true
     sleep 1
@@ -1355,16 +1464,17 @@ cmd_help() {
     echo "  setup      First-time project setup"
     echo ""
     echo "Production:"
-    echo "  deploy     Build, test, and deploy to production (--prepare, --swap, --delay N)"
+    echo "  deploy     Build, test, and deploy (--prepare, --swap, --delay N)"
+    echo "  deploy beta  Build, test, and deploy to beta"
     echo "  install    Initial production setup (launchd + CLI)"
     echo "  rollback   Restore previous deployment (--yes, --delay N)"
     echo "  uninstall  Remove service (preserves data)"
     echo ""
     echo "Service:"
-    echo "  status     Show service status and health"
-    echo "  start      Start production service"
-    echo "  stop       Stop production service"
-    echo "  restart    Restart production service"
+    echo "  status       Show service status and health"
+    echo "  start [beta] Start service (prod or beta)"
+    echo "  stop [beta]  Stop service (prod or beta)"
+    echo "  restart [beta] Restart service (prod or beta)"
     echo ""
     echo "Logs:"
     echo "  logs       Query database logs (use -h for options)"
@@ -1392,9 +1502,9 @@ case "${1:-help}" in
     rollback)  shift; cmd_rollback "$@" ;;
     setup)     shift; cmd_setup "$@" ;;
     status)    cmd_status ;;
-    start)     cmd_start ;;
-    stop)      cmd_stop ;;
-    restart)   cmd_restart ;;
+    start)     shift; cmd_start "$@" ;;
+    stop)      shift; cmd_stop "$@" ;;
+    restart)   shift; cmd_restart "$@" ;;
     logs)      shift; query_logs "$@" ;;
     errors)    cmd_errors "${2:-}" ;;
     uninstall) cmd_uninstall ;;

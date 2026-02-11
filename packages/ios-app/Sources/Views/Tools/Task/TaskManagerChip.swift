@@ -1,19 +1,19 @@
 import SwiftUI
 
-// MARK: - TodoWrite Chip (iOS 26)
+// MARK: - TaskManager Chip (iOS 26)
 
-/// Compact chip for TodoWrite tool calls
-/// Shows spinner + "Updating Tasks..." while running,
-/// then "Tasks Updated" with optional counts "(X new, Y done)" when complete
-/// Tappable (when updated) to open TodoDetailSheet
+/// Compact chip for TaskManager tool calls
+/// Shows spinner + action text while running,
+/// then result summary when complete
+/// Tappable (when completed) to open TaskDetailSheet
 @available(iOS 26.0, *)
-struct TodoWriteChip: View {
-    let data: TodoWriteChipData
+struct TaskManagerChip: View {
+    let data: TaskManagerChipData
     let onTap: () -> Void
 
     var body: some View {
         Group {
-            if data.status == .updated {
+            if data.status == .completed {
                 Button(action: onTap) {
                     chipContent
                 }
@@ -37,7 +37,7 @@ struct TodoWriteChip: View {
                 .foregroundStyle(.tronSlate)
                 .lineLimit(1)
 
-            if data.status == .updated {
+            if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(.tronSlate.opacity(0.6))
@@ -51,11 +51,11 @@ struct TodoWriteChip: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
-        case .updating:
+        case .running:
             ProgressView()
                 .scaleEffect(0.7)
                 .tint(.tronSlate)
-        case .updated:
+        case .completed:
             Image(systemName: "checklist")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSlate)
@@ -64,34 +64,52 @@ struct TodoWriteChip: View {
 
     private var statusText: String {
         switch data.status {
-        case .updating:
-            return "Updating Tasks..."
-        case .updated:
-            var parts: [String] = []
-            if data.newCount > 0 {
-                parts.append("\(data.newCount) new")
+        case .running:
+            return runningText
+        case .completed:
+            if let summary = data.resultSummary {
+                return summary
             }
-            if data.doneCount > 0 {
-                parts.append("\(data.doneCount) done")
-            }
-            if parts.isEmpty {
-                return "Tasks Updated"
-            }
-            return "Tasks Updated (\(parts.joined(separator: ", ")))"
+            return completedText
+        }
+    }
+
+    private var runningText: String {
+        switch data.action {
+        case "create": return "Creating task..."
+        case "update": return "Updating task..."
+        case "delete": return "Deleting task..."
+        case "list": return "Listing tasks..."
+        case "search": return "Searching tasks..."
+        case "get": return "Getting task..."
+        case "create_project": return "Creating project..."
+        case "update_project": return "Updating project..."
+        case "list_projects": return "Listing projects..."
+        default: return "Managing tasks..."
+        }
+    }
+
+    private var completedText: String {
+        switch data.action {
+        case "create": return "Task created"
+        case "update": return "Task updated"
+        case "delete": return "Task deleted"
+        case "list": return "Tasks listed"
+        default: return "Tasks updated"
         }
     }
 }
 
-// MARK: - TodoWrite Chip Fallback (iOS < 26)
+// MARK: - TaskManager Chip Fallback (iOS < 26)
 
 /// Fallback chip without glass effect for older iOS versions
-struct TodoWriteChipFallback: View {
-    let data: TodoWriteChipData
+struct TaskManagerChipFallback: View {
+    let data: TaskManagerChipData
     let onTap: () -> Void
 
     var body: some View {
         Group {
-            if data.status == .updated {
+            if data.status == .completed {
                 Button(action: onTap) {
                     chipContent
                 }
@@ -111,7 +129,7 @@ struct TodoWriteChipFallback: View {
                 .foregroundStyle(.tronSlate)
                 .lineLimit(1)
 
-            if data.status == .updated {
+            if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                     .foregroundStyle(.tronSlate.opacity(0.6))
@@ -126,11 +144,11 @@ struct TodoWriteChipFallback: View {
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
-        case .updating:
+        case .running:
             ProgressView()
                 .scaleEffect(0.7)
                 .tint(.tronSlate)
-        case .updated:
+        case .completed:
             Image(systemName: "checklist")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronSlate)
@@ -139,76 +157,25 @@ struct TodoWriteChipFallback: View {
 
     private var statusText: String {
         switch data.status {
-        case .updating:
-            return "Updating Tasks..."
-        case .updated:
-            var parts: [String] = []
-            if data.newCount > 0 {
-                parts.append("\(data.newCount) new")
+        case .running:
+            switch data.action {
+            case "create": return "Creating task..."
+            case "update": return "Updating task..."
+            case "delete": return "Deleting task..."
+            case "list": return "Listing tasks..."
+            default: return "Managing tasks..."
             }
-            if data.doneCount > 0 {
-                parts.append("\(data.doneCount) done")
+        case .completed:
+            if let summary = data.resultSummary {
+                return summary
             }
-            if parts.isEmpty {
-                return "Tasks Updated"
+            switch data.action {
+            case "create": return "Task created"
+            case "update": return "Task updated"
+            case "delete": return "Task deleted"
+            case "list": return "Tasks listed"
+            default: return "Tasks updated"
             }
-            return "Tasks Updated (\(parts.joined(separator: ", ")))"
         }
     }
 }
-
-// MARK: - Preview
-
-#if DEBUG
-@available(iOS 26.0, *)
-#Preview("TodoWrite Chip States") {
-    VStack(spacing: 16) {
-        // Updating (running)
-        TodoWriteChip(
-            data: TodoWriteChipData(
-                toolCallId: "call_0",
-                newCount: 0,
-                doneCount: 0,
-                totalCount: 0,
-                status: .updating
-            ),
-            onTap: { }
-        )
-
-        // Updated - no counts
-        TodoWriteChip(
-            data: TodoWriteChipData(
-                toolCallId: "call_1",
-                newCount: 0,
-                doneCount: 0,
-                totalCount: 3
-            ),
-            onTap: { }
-        )
-
-        // New only
-        TodoWriteChip(
-            data: TodoWriteChipData(
-                toolCallId: "call_2",
-                newCount: 3,
-                doneCount: 0,
-                totalCount: 5
-            ),
-            onTap: { }
-        )
-
-        // Both new and done
-        TodoWriteChip(
-            data: TodoWriteChipData(
-                toolCallId: "call_3",
-                newCount: 3,
-                doneCount: 2,
-                totalCount: 5
-            ),
-            onTap: { }
-        )
-    }
-    .padding()
-    .background(Color.tronBackground)
-}
-#endif

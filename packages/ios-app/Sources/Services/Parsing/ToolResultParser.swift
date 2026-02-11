@@ -125,49 +125,38 @@ struct ToolResultParser {
         )
     }
 
-    // MARK: - TodoWrite Parsing
+    // MARK: - TaskManager Parsing
 
-    /// Parse TodoWrite tool to create TodoWriteChipData for chip display
-    static func parseTodoWrite(from tool: ToolUseData) -> TodoWriteChipData? {
+    /// Parse TaskManager tool to create TaskManagerChipData for chip display
+    static func parseTaskManager(from tool: ToolUseData) -> TaskManagerChipData? {
+        let action = ToolArgumentParser.string("action", from: tool.arguments) ?? "list"
+        let taskTitle = ToolArgumentParser.string("title", from: tool.arguments)
+            ?? ToolArgumentParser.string("projectTitle", from: tool.arguments)
+
         guard tool.result != nil else {
-            return TodoWriteChipData(
+            return TaskManagerChipData(
                 toolCallId: tool.toolCallId,
-                newCount: 0,
-                doneCount: 0,
-                totalCount: 0,
-                status: .updating
+                action: action,
+                taskTitle: taskTitle,
+                resultSummary: nil,
+                status: .running
             )
         }
 
-        var completed = 0
-        var inProgress = 0
-        var pending = 0
-
-        // Prefer structured details from server
-        if let details = tool.details,
-           let c = details["completedCount"]?.value as? Int,
-           let ip = details["inProgressCount"]?.value as? Int,
-           let p = details["pendingCount"]?.value as? Int {
-            completed = c
-            inProgress = ip
-            pending = p
-        } else if let result = tool.result,
-                  let match = result.firstMatch(of: /(\d+)\s+completed,\s+(\d+)\s+in\s+progress,\s+(\d+)\s+pending/) {
-            // Fallback: regex on freetext result
-            completed = Int(match.1) ?? 0
-            inProgress = Int(match.2) ?? 0
-            pending = Int(match.3) ?? 0
+        let resultSummary: String?
+        if let result = tool.result {
+            let lines = result.components(separatedBy: "\n").filter { !$0.isEmpty }
+            resultSummary = lines.first.map { $0.count > 80 ? String($0.prefix(80)) + "..." : $0 }
+        } else {
+            resultSummary = nil
         }
 
-        let totalCount = completed + inProgress + pending
-        let newCount = inProgress + pending
-
-        return TodoWriteChipData(
+        return TaskManagerChipData(
             toolCallId: tool.toolCallId,
-            newCount: newCount,
-            doneCount: completed,
-            totalCount: totalCount,
-            status: .updated
+            action: action,
+            taskTitle: taskTitle,
+            resultSummary: resultSummary,
+            status: .completed
         )
     }
 

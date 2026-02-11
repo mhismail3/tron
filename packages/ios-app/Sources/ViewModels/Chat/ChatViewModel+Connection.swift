@@ -25,12 +25,12 @@ extension ChatViewModel: ConnectionContext {
         try await rpcClient.agent.getState(sessionId: sessionId)
     }
 
-    func listTodos(sessionId: String) async throws -> TodoListResult {
-        try await rpcClient.misc.listTodos(sessionId: sessionId)
+    func listTasks() async throws -> TaskListResult {
+        try await rpcClient.misc.listTasks()
     }
 
-    func updateTodos(_ todos: [RpcTodoItem], summary: String?) {
-        todoState.updateTodos(todos, summary: summary)
+    func updateTasks(_ tasks: [RpcTask]) {
+        taskState.updateTasks(tasks)
     }
 
     func appendCatchingUpMessage() -> UUID {

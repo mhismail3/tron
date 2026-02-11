@@ -254,7 +254,7 @@ export class TronServer {
       this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.BROWSER_CLOSED, {}, data.sessionId));
     });
 
-    // Forward todo update events
+    // Forward todo update events (legacy)
     this.orchestrator.on('todos_updated', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(
         BroadcastEventType.AGENT_TODOS_UPDATED,
@@ -263,6 +263,28 @@ export class TronServer {
           restoredCount: data.restoredCount,
         },
         data.sessionId
+      ));
+    });
+
+    // Forward task events
+    this.orchestrator.on('task_created', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.TASK_CREATED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    this.orchestrator.on('task_updated', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.TASK_UPDATED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    this.orchestrator.on('task_deleted', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.TASK_DELETED,
+        data as Record<string, unknown>,
       ));
     });
   }

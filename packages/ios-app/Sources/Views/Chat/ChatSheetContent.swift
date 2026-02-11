@@ -79,12 +79,10 @@ struct ChatSheetContent: View {
         case .uiCanvas:
             UICanvasSheet(state: viewModel.uiCanvasState)
 
-        case .todoList:
-            TodoDetailSheet(
+        case .taskList:
+            TaskDetailSheet(
                 rpcClient: rpcClient,
-                sessionId: sessionId,
-                workspaceId: viewModel.workspaceId,
-                todoState: viewModel.todoState
+                taskState: viewModel.taskState
             )
 
         case .notifyApp(let data):

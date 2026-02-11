@@ -17,7 +17,7 @@ enum ToolKind: Sendable, Equatable {
     case waitForSubagent
     case waitForAgents
     case queryAgent
-    case todoWrite
+    case taskManager
     case notifyApp
     case other(String)
 
@@ -37,7 +37,7 @@ enum ToolKind: Sendable, Equatable {
         case "waitforsubagent":   self = .waitForSubagent
         case "waitforagents":     self = .waitForAgents
         case "queryagent":        self = .queryAgent
-        case "todowrite":         self = .todoWrite
+        case "taskmanager":       self = .taskManager
         case "notifyapp":         self = .notifyApp
         default:                  self = .other(toolName)
         }

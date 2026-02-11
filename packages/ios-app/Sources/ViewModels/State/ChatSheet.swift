@@ -37,7 +37,7 @@ enum ChatSheet: Identifiable, Equatable {
     case askUserQuestion
     case subagentDetail
     case uiCanvas
-    case todoList
+    case taskList
 
     // Notification sheets
     case notifyApp(NotifyAppChipData)
@@ -73,8 +73,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "subagent"
         case .uiCanvas:
             return "uiCanvas"
-        case .todoList:
-            return "todoList"
+        case .taskList:
+            return "taskList"
         case .notifyApp(let data):
             return "notifyApp-\(data.toolCallId)"
         case .thinkingDetail:
@@ -112,7 +112,7 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.uiCanvas, .uiCanvas):
             return true
-        case (.todoList, .todoList):
+        case (.taskList, .taskList):
             return true
         case (.notifyApp(let data1), .notifyApp(let data2)):
             return data1.toolCallId == data2.toolCallId

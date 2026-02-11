@@ -12,13 +12,13 @@ enum ChatNotificationCoordinator {
     ///   - action: The action string ("history", "context", "tasks", "settings")
     ///   - showSessionHistory: Binding to session history sheet visibility
     ///   - showContextAudit: Binding to context audit sheet visibility
-    ///   - showTodoSheet: Binding to todo sheet visibility
+    ///   - showTaskSheet: Binding to task sheet visibility
     ///   - showSettings: Binding to settings sheet visibility
     static func handleChatMenuAction(
         _ action: String,
         showSessionHistory: inout Bool,
         showContextAudit: inout Bool,
-        showTodoSheet: inout Bool,
+        showTaskSheet: inout Bool,
         showSettings: inout Bool
     ) {
         switch action {
@@ -27,7 +27,7 @@ enum ChatNotificationCoordinator {
         case "context":
             showContextAudit = true
         case "tasks":
-            showTodoSheet = true
+            showTaskSheet = true
         case "settings":
             showSettings = true
         default:

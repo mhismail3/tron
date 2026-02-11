@@ -421,15 +421,30 @@ extension ChatViewModel {
         uiCanvasCoordinator.handleUIRenderRetry(pluginResult, context: self)
     }
 
-    // MARK: - Todo Event Handlers
+    // MARK: - Task Event Handlers
 
-    func handleTodosUpdated(_ pluginResult: TodosUpdatedPlugin.Result) {
-        // Process through handler (extracts todos)
-        let result = eventHandler.handleTodosUpdated(pluginResult)
-        logger.debug("Todos updated: count=\(result.todos.count), restoredCount=\(result.restoredCount)", category: .events)
+    func handleTaskCreated(_ result: TaskCreatedPlugin.Result) {
+        logger.debug("Task created: \(result.taskId)", category: .events)
+        Task { await refreshTasks() }
+    }
 
-        // Update todo state directly from plugin result
-        todoState.updateTodos(pluginResult.todos)
+    func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result) {
+        logger.debug("Task updated: \(result.taskId)", category: .events)
+        Task { await refreshTasks() }
+    }
+
+    func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
+        logger.debug("Task deleted: \(result.taskId)", category: .events)
+        taskState.removeTask(id: result.taskId)
+    }
+
+    private func refreshTasks() async {
+        do {
+            let result = try await rpcClient.misc.listTasks()
+            taskState.updateTasks(result.tasks)
+        } catch {
+            logger.warning("Failed to refresh tasks: \(error.localizedDescription)", category: .events)
+        }
     }
 
     // MARK: - Plugin Result Handlers

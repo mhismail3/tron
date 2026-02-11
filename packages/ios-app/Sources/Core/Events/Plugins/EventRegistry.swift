@@ -111,8 +111,10 @@ final class EventRegistry: @unchecked Sendable {
         register(BrowserFramePlugin.self)
         register(BrowserClosedPlugin.self)
 
-        // Todo events
-        register(TodosUpdatedPlugin.self)
+        // Task events
+        register(TaskCreatedPlugin.self)
+        register(TaskUpdatedPlugin.self)
+        register(TaskDeletedPlugin.self)
 
         // Agent turn events
         register(AgentTurnPlugin.self)

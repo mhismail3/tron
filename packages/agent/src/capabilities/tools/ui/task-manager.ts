@@ -83,6 +83,7 @@ export interface TaskManagerToolConfig {
   service: TaskService;
   getSessionId: () => string;
   getWorkspaceId: () => string | undefined;
+  onTaskEvent?: (event: string, data: Record<string, unknown>) => void;
 }
 
 // =============================================================================
@@ -210,6 +211,13 @@ backlog → pending → in_progress → completed/cancelled
       workspaceId: this.config.getWorkspaceId(),
     });
 
+    this.config.onTaskEvent?.('task_created', {
+      taskId: task.id,
+      title: task.title,
+      status: task.status,
+      projectId: task.projectId ?? null,
+    });
+
     return {
       content: `Created task ${task.id}: ${task.title} [${task.status}]`,
       isError: false,
@@ -257,6 +265,14 @@ backlog → pending → in_progress → completed/cancelled
         this.config.service.removeDependency(blockerId, args.taskId);
       }
     }
+
+    const changedFields = Object.keys(args).filter(k => k !== 'action' && k !== 'taskId');
+    this.config.onTaskEvent?.('task_updated', {
+      taskId: task.id,
+      title: task.title,
+      status: task.status,
+      changedFields,
+    });
 
     return {
       content: `Updated task ${task.id}: ${task.title} [${task.status}]`,
@@ -378,8 +394,12 @@ backlog → pending → in_progress → completed/cancelled
   private handleDelete(args: TaskManagerParams): TronToolResult {
     if (!args.taskId) return { content: 'Error: taskId is required for delete', isError: true };
 
+    const task = this.config.service.getTask(args.taskId);
+    const title = task?.title ?? '';
     const deleted = this.config.service.deleteTask(args.taskId);
     if (!deleted) return { content: `Task not found: ${args.taskId}`, isError: true };
+
+    this.config.onTaskEvent?.('task_deleted', { taskId: args.taskId, title });
 
     return { content: `Deleted task ${args.taskId}`, isError: false };
   }

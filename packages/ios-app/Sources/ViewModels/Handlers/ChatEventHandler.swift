@@ -122,11 +122,6 @@ struct UIRenderRetryResult {
     let errors: String
 }
 
-/// Result of handling todos updated
-struct TodosUpdatedResult {
-    let todos: [RpcTodoItem]
-    let restoredCount: Int
-}
 
 // MARK: - Event Handler
 
@@ -449,15 +444,4 @@ final class ChatEventHandler {
         )
     }
 
-    // MARK: - Todo Handling
-
-    /// Handle todos updated event
-    /// - Parameter result: The plugin result with todos
-    /// - Returns: Result with todos
-    func handleTodosUpdated(_ result: TodosUpdatedPlugin.Result) -> TodosUpdatedResult {
-        return TodosUpdatedResult(
-            todos: result.todos,
-            restoredCount: result.restoredCount
-        )
-    }
 }

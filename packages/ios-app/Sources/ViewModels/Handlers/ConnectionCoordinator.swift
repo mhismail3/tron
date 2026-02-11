@@ -29,11 +29,11 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     /// Get agent state from the server
     func getAgentState(sessionId: String) async throws -> AgentStateResult
 
-    /// List todos for a session
-    func listTodos(sessionId: String) async throws -> TodoListResult
+    /// List tasks
+    func listTasks() async throws -> TaskListResult
 
-    /// Update todos in the todo state
-    func updateTodos(_ todos: [RpcTodoItem], summary: String?)
+    /// Update tasks in the task state
+    func updateTasks(_ tasks: [RpcTask])
 
     /// Append a "catching up" message and return its ID
     func appendCatchingUpMessage() -> UUID
@@ -51,7 +51,7 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
 /// - Connecting to server and resuming sessions
 /// - Reconnecting after app returns to foreground
 /// - Checking agent state and setting up streaming for in-progress sessions
-/// - Fetching todos on resume
+/// - Fetching tasks on resume
 /// - Converting history messages to chat messages
 ///
 /// This coordinator extracts connection logic from ChatViewModel+Connection.swift,
@@ -117,8 +117,8 @@ final class ConnectionCoordinator {
         // This must happen BEFORE loading messages so isProcessing flag is set correctly
         await checkAndResumeAgentState(context: context)
 
-        // Fetch current todos for this session
-        await fetchTodosOnResume(context: context)
+        // Fetch current tasks
+        await fetchTasksOnResume(context: context)
 
         context.logDebug("Session resumed, using local EventDatabase for message history")
     }
@@ -161,23 +161,23 @@ final class ConnectionCoordinator {
         // Check if agent is running and catch up on any missed content
         await checkAndResumeAgentState(context: context)
 
-        // Refresh todos in case they changed while disconnected
-        await fetchTodosOnResume(context: context)
+        // Refresh tasks in case they changed while disconnected
+        await fetchTasksOnResume(context: context)
     }
 
-    // MARK: - Fetch Todos
+    // MARK: - Fetch Tasks
 
-    /// Fetch current todos when resuming a session.
+    /// Fetch current tasks when resuming a session.
     ///
     /// - Parameter context: The context providing access to state and dependencies
-    func fetchTodosOnResume(context: ConnectionContext) async {
+    func fetchTasksOnResume(context: ConnectionContext) async {
         do {
-            let result = try await context.listTodos(sessionId: context.sessionId)
-            context.updateTodos(result.todos, summary: result.summary)
-            context.logDebug("Fetched \(result.todos.count) todos on session resume")
+            let result = try await context.listTasks()
+            context.updateTasks(result.tasks)
+            context.logDebug("Fetched \(result.tasks.count) tasks on session resume")
         } catch {
-            // Non-fatal - todos just won't show until next update
-            context.logWarning("Failed to fetch todos on resume: \(error.localizedDescription)")
+            // Non-fatal - tasks just won't show until next update
+            context.logWarning("Failed to fetch tasks on resume: \(error.localizedDescription)")
         }
     }
 

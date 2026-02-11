@@ -134,11 +134,11 @@ struct ChatSheetTests {
         #expect(sheet.id == "uiCanvas")
     }
 
-    @Test("Todo list sheet has consistent id")
-    func testTodoListId() {
-        let sheet = ChatSheet.todoList
+    @Test("Task list sheet has consistent id")
+    func testTaskListId() {
+        let sheet = ChatSheet.taskList
 
-        #expect(sheet.id == "todoList")
+        #expect(sheet.id == "taskList")
     }
 
     @Test("Notify app sheets with different data have different ids")
@@ -216,7 +216,7 @@ struct ChatSheetTests {
             .askUserQuestion,
             .subagentDetail,
             .uiCanvas,
-            .todoList,
+            .taskList,
             .notifyApp(notifyData),
             .thinkingDetail("content"),
             .commandToolDetail(commandToolData)
@@ -504,13 +504,13 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == .uiCanvas)
     }
 
-    @Test("showTodoList creates todo list sheet")
-    func testShowTodoListCreatesSheet() {
+    @Test("showTaskList creates task list sheet")
+    func testShowTaskListCreatesSheet() {
         let coordinator = SheetCoordinator()
 
-        coordinator.showTodoList()
+        coordinator.showTaskList()
 
-        #expect(coordinator.activeSheet == .todoList)
+        #expect(coordinator.activeSheet == .taskList)
     }
 
     @Test("showNotifyApp creates notify app sheet with data")

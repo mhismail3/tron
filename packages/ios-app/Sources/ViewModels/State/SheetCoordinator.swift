@@ -112,9 +112,9 @@ final class SheetCoordinator {
         present(.uiCanvas)
     }
 
-    /// Show todo list sheet
-    func showTodoList() {
-        present(.todoList)
+    /// Show task list sheet
+    func showTaskList() {
+        present(.taskList)
     }
 
     /// Show notify app detail sheet

@@ -54,8 +54,10 @@ import Foundation
     func handleUIRenderRetry(_ result: UIRenderRetryPlugin.Result)
 }
 
-@MainActor protocol TodoEventHandler: AnyObject {
-    func handleTodosUpdated(_ result: TodosUpdatedPlugin.Result)
+@MainActor protocol TaskEventHandler: AnyObject {
+    func handleTaskCreated(_ result: TaskCreatedPlugin.Result)
+    func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result)
+    func handleTaskDeleted(_ result: TaskDeletedPlugin.Result)
 }
 
 @MainActor protocol EventDispatchLogger: AnyObject {
@@ -70,5 +72,5 @@ import Foundation
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    UICanvasEventHandler, TodoEventHandler, EventDispatchLogger {}
+    UICanvasEventHandler, TaskEventHandler, EventDispatchLogger {}
 

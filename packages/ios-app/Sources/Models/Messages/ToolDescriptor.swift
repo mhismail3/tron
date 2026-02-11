@@ -43,7 +43,7 @@ enum ToolRegistry {
         "askuserquestion",
         "spawnsubagent", "queryagent", "waitforagents",
         "renderappui",
-        "todowrite",
+        "taskmanager",
         "notifyapp"
     ]
 

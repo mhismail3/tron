@@ -11,7 +11,7 @@ struct MessageBubble: View {
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
     var onSubagentTap: ((SubagentToolData) -> Void)?
     var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
-    var onTodoWriteTap: (() -> Void)?
+    var onTaskManagerTap: (() -> Void)?
     var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
     var onQueryAgentTap: ((QueryAgentChipData) -> Void)?
@@ -159,16 +159,16 @@ struct MessageBubble: View {
                     // Fallback to regular tool view if parsing fails
                     ToolResultRouter(tool: tool)
                 }
-            case .todoWrite:
-                // Show TodoWrite as compact chip with task counts
-                if let chipData = ToolResultParser.parseTodoWrite(from: tool) {
+            case .taskManager:
+                // Show TaskManager as compact chip with action/result summary
+                if let chipData = ToolResultParser.parseTaskManager(from: tool) {
                     if #available(iOS 26.0, *) {
-                        TodoWriteChip(data: chipData) {
-                            onTodoWriteTap?()
+                        TaskManagerChip(data: chipData) {
+                            onTaskManagerTap?()
                         }
                     } else {
-                        TodoWriteChipFallback(data: chipData) {
-                            onTodoWriteTap?()
+                        TaskManagerChipFallback(data: chipData) {
+                            onTaskManagerTap?()
                         }
                     }
                 } else {

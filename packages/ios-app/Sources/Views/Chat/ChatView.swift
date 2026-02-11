@@ -200,7 +200,7 @@ struct ChatView: View {
             switch action {
             case "history": sheetCoordinator.showSessionHistory()
             case "context": sheetCoordinator.showContextAudit()
-            case "tasks": sheetCoordinator.showTodoList()
+            case "tasks": sheetCoordinator.showTaskList()
             case "settings": sheetCoordinator.showSettings()
             default: break
             }
@@ -401,8 +401,8 @@ struct ChatView: View {
                                         }
                                     }
                                 },
-                                onTodoWriteTap: {
-                                    viewModel.todoState.showSheet = true
+                                onTaskManagerTap: {
+                                    viewModel.taskState.showSheet = true
                                 },
                                 onNotifyAppTap: { [sheetCoordinator] data in
                                     sheetCoordinator.showNotifyApp(data)

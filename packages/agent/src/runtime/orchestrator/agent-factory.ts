@@ -119,6 +119,8 @@ export interface AgentFactoryConfig {
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
   /** Task management service (persistent, SQLite-backed) */
   taskService: TaskService;
+  /** Callback for task mutation events (create/update/delete) */
+  onTaskEvent?: (event: string, data: Record<string, unknown>) => void;
   /** Path to shared SQLite database (for tmux mode agent spawning) */
   dbPath: string;
   /** Anthropic API key for WebFetch summarizer (optional - enables WebFetch if provided) */
@@ -434,6 +436,7 @@ export class AgentFactory {
         service: this.config.taskService,
         getSessionId: () => sessionId,
         getWorkspaceId: () => this.config.memoryConfig?.getWorkspaceId?.(sessionId),
+        onTaskEvent: this.config.onTaskEvent,
       }),
       new RememberTool({
         dbPath: this.config.dbPath,

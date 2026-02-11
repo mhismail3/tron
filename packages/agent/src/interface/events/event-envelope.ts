@@ -30,6 +30,11 @@ export const BroadcastEventType = {
   AGENT_SKILL_REMOVED: 'agent.skill_removed',
   AGENT_TODOS_UPDATED: 'agent.todos_updated',
 
+  // Task events
+  TASK_CREATED: 'task.created',
+  TASK_UPDATED: 'task.updated',
+  TASK_DELETED: 'task.deleted',
+
   // Browser events
   BROWSER_FRAME: 'browser.frame',
   BROWSER_CLOSED: 'browser.closed',
