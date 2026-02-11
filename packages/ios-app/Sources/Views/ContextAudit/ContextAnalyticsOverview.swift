@@ -23,10 +23,10 @@ struct AnalyticsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Analytics")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(.tronAmber)
                 Text("Session performance and cost breakdown")
                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextDisabled)
+                    .foregroundStyle(.tronAmber.opacity(0.5))
             }
 
             // Session ID (tappable to copy)
@@ -61,11 +61,11 @@ struct SessionIdRow: View {
         HStack {
             Image(systemName: "number.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronAmber)
 
             Text(showCopied ? "Copied!" : sessionId)
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(showCopied ? .tronEmerald : .tronTextSecondary)
+                .foregroundStyle(showCopied ? .tronEmerald : .tronAmber.opacity(0.8))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .animation(.easeInOut(duration: 0.15), value: showCopied)
@@ -74,14 +74,11 @@ struct SessionIdRow: View {
 
             Image(systemName: "doc.on.doc")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronAmber.opacity(0.5))
         }
         .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.tronOverlay(0.05))
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .sectionFill(.tronAmber)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture {
             UIPasteboard.general.string = sessionId
             showCopied = true

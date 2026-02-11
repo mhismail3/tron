@@ -137,7 +137,7 @@ struct RecentSessionRow: View {
                         .font(TronTypography.labelSM)
                     Text(cacheRead.formattedTokenCount)
                 }
-                .foregroundStyle(.tronCyan)
+                .foregroundStyle(.tronAmberLight)
             }
 
             // Cache write (if non-zero)

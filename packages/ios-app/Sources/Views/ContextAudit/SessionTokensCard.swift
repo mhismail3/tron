@@ -53,36 +53,36 @@ struct SessionTokensCard: View {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronOrange)
+                            .foregroundStyle(.tronAmberLight)
                         Text("Input")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
+                            .foregroundStyle(.tronAmber.opacity(0.6))
                     }
                     Text(formatTokenCount(inputTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronOrange)
+                        .foregroundStyle(.tronAmberLight)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .sectionFill(.tronOrange, cornerRadius: 8, subtle: true)
+                .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
 
                 // Output tokens
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronRed)
+                            .foregroundStyle(.tronAmberLight)
                         Text("Output")
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
+                            .foregroundStyle(.tronAmber.opacity(0.6))
                     }
                     Text(formatTokenCount(outputTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(.tronRed)
+                        .foregroundStyle(.tronAmberLight)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
-                .sectionFill(.tronRed, cornerRadius: 8, subtle: true)
+                .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
             }
 
             // Cache tokens row (only shown if cache tokens exist)
@@ -96,7 +96,7 @@ struct SessionTokensCard: View {
                                 .foregroundStyle(.tronAmber)
                             Text("Cache Read")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextMuted)
+                                .foregroundStyle(.tronAmber.opacity(0.6))
                         }
                         Text(formatTokenCount(cacheReadTokens))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -114,7 +114,7 @@ struct SessionTokensCard: View {
                                 .foregroundStyle(.tronAmber)
                             Text("Cache Write")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextMuted)
+                                .foregroundStyle(.tronAmber.opacity(0.6))
                         }
                         Text(formatTokenCount(cacheCreationTokens))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
@@ -129,7 +129,7 @@ struct SessionTokensCard: View {
             // Footer explanation
             Text("Total tokens consumed this session (for billing)")
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(.tronAmber.opacity(0.5))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)

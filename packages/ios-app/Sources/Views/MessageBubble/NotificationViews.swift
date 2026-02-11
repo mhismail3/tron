@@ -388,15 +388,15 @@ struct RulesLoadedNotificationView: View {
     let count: Int
 
     var body: some View {
-        NotificationPill(tint: .tronAmber) {
+        NotificationPill(tint: .tronIndigo) {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
                     .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronIndigo)
 
                 Text("Loaded \(count) \(count == 1 ? "rule" : "rules")")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.tronAmber.opacity(0.9))
+                    .foregroundStyle(.tronIndigo.opacity(0.9))
             }
         }
     }

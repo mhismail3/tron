@@ -14,16 +14,16 @@ struct RulesSection: View {
             HStack(spacing: 8) {
                 Image(systemName: "doc.text.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronTerracotta)
+                    .foregroundStyle(.tronIndigo)
                     .frame(width: 18)
                 Text("Rules")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTerracotta)
+                    .foregroundStyle(.tronIndigo)
 
                 // Count badge
                 Text("\(rules.totalFiles)")
                     .font(TronTypography.pillValue)
-                    .countBadge(.tronTerracotta)
+                    .countBadge(.tronIndigo)
 
                 Spacer()
 
@@ -58,7 +58,7 @@ struct RulesSection: View {
                 .padding(10)
             }
         }
-        .sectionFill(.tronTerracotta)
+        .sectionFill(.tronIndigo)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -82,7 +82,7 @@ struct RulesFileRow: View {
             HStack(spacing: 10) {
                 Image(systemName: file.icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTerracotta.opacity(0.8))
+                    .foregroundStyle(.tronIndigo.opacity(0.8))
                     .frame(width: 20)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -125,7 +125,7 @@ struct RulesFileRow: View {
                         HStack {
                             ProgressView()
                                 .scaleEffect(0.7)
-                                .tint(.tronTerracotta)
+                                .tint(.tronIndigo)
                             Text("Loading content...")
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
@@ -162,7 +162,7 @@ struct RulesFileRow: View {
                                 .textSelection(.enabled)
                         }
                         .frame(maxHeight: 300)
-                        .sectionFill(.tronTerracotta, cornerRadius: 6, subtle: true)
+                        .sectionFill(.tronIndigo, cornerRadius: 6, subtle: true)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else {
                         Text("Content not available")
@@ -175,7 +175,7 @@ struct RulesFileRow: View {
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronTerracotta, cornerRadius: 8, subtle: true)
+        .sectionFill(.tronIndigo, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         // NO context menu - rules cannot be deleted
     }

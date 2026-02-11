@@ -20,29 +20,29 @@ struct CostSummaryCard: View {
             HStack {
                 Image(systemName: "dollarsign.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronAmberLight)
 
                 Text("Session Cost")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronAmberLight)
 
                 Spacer()
 
                 Text(formatCost(analytics.totalCost))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronAmberLight)
             }
 
             // Stats row
             HStack(spacing: 0) {
-                CostStatItem(value: "\(analytics.totalTurns)", label: "turns")
-                CostStatItem(value: formatLatency(analytics.avgLatency), label: "avg latency")
-                CostStatItem(value: "\(analytics.totalToolCalls)", label: "tool calls")
-                CostStatItem(value: "\(analytics.totalErrors)", label: "errors", isError: analytics.totalErrors > 0)
+                CostStatItem(color: .tronAmberLight, value: "\(analytics.totalTurns)", label: "turns")
+                CostStatItem(color: .tronAmberLight, value: formatLatency(analytics.avgLatency), label: "avg latency")
+                CostStatItem(color: .tronAmberLight, value: "\(analytics.totalToolCalls)", label: "tool calls")
+                CostStatItem(color: .tronAmberLight, value: "\(analytics.totalErrors)", label: "errors", isError: analytics.totalErrors > 0)
             }
         }
         .padding(14)
-        .sectionFill(.tronAmber)
+        .sectionFill(.tronAmberLight)
     }
 
     private func formatLatency(_ ms: Int) -> String {
@@ -59,6 +59,7 @@ struct CostSummaryCard: View {
 
 @available(iOS 26.0, *)
 struct CostStatItem: View {
+    var color: Color = .tronAmberLight
     let value: String
     let label: String
     var isError: Bool = false
@@ -67,10 +68,10 @@ struct CostStatItem: View {
         VStack(spacing: 2) {
             Text(value)
                 .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(isError ? .tronError : .tronTextSecondary)
+                .foregroundStyle(isError ? .tronError : color.opacity(0.8))
             Text(label)
                 .font(TronTypography.pill)
-                .foregroundStyle(.tronTextMuted)
+                .foregroundStyle(color.opacity(0.5))
         }
         .frame(maxWidth: .infinity)
     }

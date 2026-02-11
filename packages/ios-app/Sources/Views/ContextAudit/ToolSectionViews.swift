@@ -14,15 +14,15 @@ struct ToolsSection: View {
             HStack(spacing: 8) {
                 Image(systemName: "hammer.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronClay)
+                    .foregroundStyle(.tronTeal)
                     .frame(width: 18)
                 Text("Tools")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronClay)
+                    .foregroundStyle(.tronTeal)
 
                 Text("\(toolsContent.count)")
                     .font(TronTypography.pillValue)
-                    .countBadge(.tronClay)
+                    .countBadge(.tronTeal)
 
                 Spacer()
                 Text(TokenFormatter.format(tokens))
@@ -52,7 +52,7 @@ struct ToolsSection: View {
                 .padding(.bottom, 10)
             }
         }
-        .sectionFill(.tronClay)
+        .sectionFill(.tronTeal)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
@@ -84,11 +84,11 @@ struct ToolItemRow: View {
             HStack(spacing: 8) {
                 Image(systemName: "wrench.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronClay)
+                    .foregroundStyle(.tronTeal)
 
                 Text(toolName)
                     .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronClay)
+                    .foregroundStyle(.tronTeal)
 
                 Spacer()
 
@@ -112,7 +112,7 @@ struct ToolItemRow: View {
                     .padding(.bottom, 8)
             }
         }
-        .sectionFill(.tronClay, cornerRadius: 6, subtle: true)
+        .sectionFill(.tronTeal, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }

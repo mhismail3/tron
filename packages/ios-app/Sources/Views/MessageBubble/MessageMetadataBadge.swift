@@ -32,7 +32,7 @@ struct TokenBadge: View {
                             .font(TronTypography.labelSM)
                         Text(cacheRead)
                     }
-                    .foregroundStyle(.tronCyan)
+                    .foregroundStyle(.tronAmberLight)
                 }
 
                 // Cache write
