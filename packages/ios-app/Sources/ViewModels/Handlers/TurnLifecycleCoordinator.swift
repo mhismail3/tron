@@ -104,7 +104,7 @@ final class TurnLifecycleCoordinator {
         }
 
         // Update thinking message to mark streaming as complete
-        // This removes the spinning brain icon and "Thinking" header
+        // This removes the pulsing thinking icon and "Thinking" header
         if let id = context.thinkingMessageId,
            let index = MessageFinder.indexById(id, in: context.messages),
            case .thinking(let visible, let isExpanded, _) = context.messages[index].content {

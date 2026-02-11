@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Thinking Content View
 
 /// Displays thinking content with a vertical line indicator (matching TextContentView exactly)
-/// - Only shows spinning brain + "Thinking" label when actively streaming
+/// - Only shows pulsing sparkle + "Thinking" label when actively streaming
 /// - Historical (non-streaming) blocks show just the text with vertical line
 struct ThinkingContentView: View {
     let content: String
@@ -52,7 +52,7 @@ struct ThinkingContentView: View {
                 // Header with thinking icon - ONLY shown when actively streaming
                 if isStreaming {
                     HStack(spacing: 6) {
-                        RotatingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
+                        PulsingIcon(icon: .thinking, size: 12, color: Color.secondary.opacity(0.7))
                         Text("Thinking")
                             .font(TronTypography.caption)
                             .fontWeight(.medium)

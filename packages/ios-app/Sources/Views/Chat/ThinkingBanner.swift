@@ -14,7 +14,7 @@ struct ThinkingBanner: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    RotatingIcon(icon: .thinking, size: 12, color: .tronTextMuted)
+                    PulsingIcon(icon: .thinking, size: 12, color: .tronTextMuted)
                     Text("Thinking")
                         .font(TronTypography.caption)
                         .foregroundStyle(.tronTextMuted)

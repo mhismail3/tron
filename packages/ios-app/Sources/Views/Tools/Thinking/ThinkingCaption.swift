@@ -11,8 +11,8 @@ struct ThinkingCaption: View {
             thinkingState.showSheet = true
         } label: {
             HStack(spacing: 8) {
-                // Rotating thinking icon
-                RotatingIcon(icon: .thinking, size: 14, color: Color.secondary.opacity(0.7))
+                // Pulsing thinking icon
+                PulsingIcon(icon: .thinking, size: 14, color: Color.secondary.opacity(0.7))
 
                 // Preview text (max 3 lines worth)
                 Text(thinkingState.captionText)
@@ -47,7 +47,7 @@ struct ThinkingCaptionFallback: View {
             thinkingState.showSheet = true
         } label: {
             HStack(spacing: 8) {
-                RotatingIcon(icon: .thinking, size: 14, color: Color.secondary.opacity(0.7))
+                PulsingIcon(icon: .thinking, size: 14, color: Color.secondary.opacity(0.7))
 
                 Text(thinkingState.captionText)
                     .lineLimit(3)

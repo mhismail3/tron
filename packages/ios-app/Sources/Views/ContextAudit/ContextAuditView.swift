@@ -32,6 +32,7 @@ struct ContextAuditView: View {
     // Manual memory update state
     @State private var isAutoLedgerEnabled: Bool = true
     @State private var isUpdatingLedger: Bool = false
+    @State private var showNoNewContentAlert: Bool = false
 
     // Message pagination state
     @State private var messagesLoadedCount: Int = 10  // Initial batch size
@@ -93,6 +94,11 @@ struct ContextAuditView: View {
                 Button("OK") { errorMessage = nil }
             } message: {
                 Text(errorMessage ?? "")
+            }
+            .alert("No New Content", isPresented: $showNoNewContentAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("There's nothing new to retain since the last memory update.")
             }
             .task {
                 await loadContext()
@@ -160,7 +166,7 @@ struct ContextAuditView: View {
                             .scaleEffect(0.7)
                             .tint(.purple)
                     } else {
-                        Image(systemName: "book.closed")
+                        Image(systemName: "brain")
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                     }
                     Text("Retain")
@@ -340,10 +346,6 @@ struct ContextAuditView: View {
                                         )
                                     }
 
-                                    if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
-                                        SessionMemoriesSection(memory: sessionMem)
-                                    }
-
                                     if !allMessages.isEmpty {
                                         MessagesContainer(
                                             messages: paginatedMessages,
@@ -354,6 +356,10 @@ struct ContextAuditView: View {
                                                 messagesLoadedCount += 10
                                             }
                                         )
+                                    }
+
+                                    if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
+                                        SessionMemoriesSection(memory: sessionMem)
                                     }
                                 }
                                 .padding(.horizontal)
@@ -472,6 +478,8 @@ struct ContextAuditView: View {
             let result = try await rpcClient.misc.updateLedger(sessionId: sessionId)
             if result.written {
                 dismiss()
+            } else if result.reason == "no_new_content" {
+                showNoNewContentAlert = true
             }
         } catch {
             errorMessage = "Failed to update memory: \(error.localizedDescription)"

@@ -62,7 +62,7 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     func handleAgentError(_ message: String)
 
     /// Finalize thinking message (mark as no longer streaming)
-    /// Called on abort to stop the spinning brain icon
+    /// Called on abort to stop the pulsing thinking icon
     func finalizeThinkingMessage()
 
     /// Clear the thinking caption state

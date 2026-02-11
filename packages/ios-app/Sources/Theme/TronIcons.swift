@@ -16,7 +16,7 @@ enum TronIcon: String, CaseIterable {
     case toolPending = "clock.fill"
 
     // MARK: - Agent State
-    case thinking = "brain"
+    case thinking = "sparkle"
     case streaming = "waveform"
     case ready = "circle.fill"
     case processing = "ellipsis.circle"
@@ -226,7 +226,7 @@ struct ThinkingIndicator: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            RotatingIcon(icon: .thinking, size: 16, color: .tronPrimaryVivid)
+            PulsingIcon(icon: .thinking, size: 16, color: .tronPrimaryVivid)
 
             Text("Thinking" + String(repeating: ".", count: dots))
                 .font(.subheadline)
