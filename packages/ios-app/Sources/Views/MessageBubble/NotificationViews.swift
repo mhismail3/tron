@@ -458,9 +458,10 @@ struct MemoryNotificationView: View {
     var onTap: (() -> Void)? = nil
 
     private let iconSize: CGFloat = TronTypography.sizeBody2
+    private var isSkipped: Bool { entryType == "skipped" }
 
     var body: some View {
-        NotificationPill(tint: .purple, interactive: true, onTap: isInProgress ? nil : onTap) {
+        NotificationPill(tint: .purple, interactive: true, onTap: isInProgress || isSkipped ? nil : onTap) {
             HStack(spacing: 8) {
                 ZStack {
                     if isInProgress {
@@ -469,20 +470,20 @@ struct MemoryNotificationView: View {
                             .tint(.purple)
                             .transition(.blurReplace)
                     } else {
-                        Image(systemName: "brain.fill")
+                        Image(systemName: isSkipped ? "brain" : "brain.fill")
                             .font(TronTypography.codeSM)
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(.purple.opacity(isSkipped ? 0.5 : 1))
                             .transition(.blurReplace)
                     }
                 }
                 .frame(width: iconSize, height: iconSize)
 
-                Text(isInProgress ? "Retaining memory..." : "Memory updated")
+                Text(isInProgress ? "Retaining memory..." : isSkipped ? "Nothing new to retain" : "Memory updated")
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.purple.opacity(0.9))
+                    .foregroundStyle(.purple.opacity(isSkipped ? 0.5 : 0.9))
                     .contentTransition(.interpolate)
 
-                if !isInProgress && !title.isEmpty {
+                if !isInProgress && !isSkipped && !title.isEmpty {
                     Text("\u{2022}")
                         .font(TronTypography.badge)
                         .foregroundStyle(.purple.opacity(0.5))
@@ -496,6 +497,7 @@ struct MemoryNotificationView: View {
                 }
             }
             .animation(.smooth(duration: 0.35), value: isInProgress)
+            .animation(.smooth(duration: 0.35), value: isSkipped)
         }
     }
 }

@@ -257,12 +257,22 @@ extension ChatViewModel {
     func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
         logger.info("Memory updated: \(pluginResult.title) (type: \(pluginResult.entryType))", category: .events)
 
-        // "skipped" means ledger write determined nothing worth retaining — just remove spinner
+        // "skipped" means ledger write determined nothing worth retaining
+        // Transition spinner → "Nothing new to retain" briefly, then auto-remove
         if pluginResult.entryType == "skipped" {
             if let inProgressId = memoryUpdatingInProgressMessageId,
                let index = MessageFinder.indexById(inProgressId, in: messages) {
-                _ = withAnimation(.smooth(duration: 0.3)) {
-                    messages.remove(at: index)
+                withAnimation(.smooth(duration: 0.35)) {
+                    messages[index].content = .memoryUpdated(title: "Nothing new to retain", entryType: "skipped")
+                }
+                let messageId = inProgressId
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(3))
+                    if let idx = MessageFinder.indexById(messageId, in: messages) {
+                        _ = withAnimation(.smooth(duration: 0.3)) {
+                            messages.remove(at: idx)
+                        }
+                    }
                 }
             }
             memoryUpdatingInProgressMessageId = nil
