@@ -76,9 +76,11 @@ struct UnifiedEventTransformer {
         // Transform events, processing message.assistant content blocks in order
         var messages: [ChatMessage] = []
         for event in sorted {
-            // Skip tool.call and tool.result - they're processed via message.assistant content blocks
+            // Skip tool.call, tool.result, and stream.thinking_complete —
+            // all are processed via message.assistant content blocks
             if event.type == PersistedEventType.toolCall.rawValue ||
-               event.type == PersistedEventType.toolResult.rawValue {
+               event.type == PersistedEventType.toolResult.rawValue ||
+               event.type == PersistedEventType.streamThinkingComplete.rawValue {
                 continue
             }
 
@@ -277,7 +279,7 @@ extension UnifiedEventTransformer {
                 state.sessionInfo.startTime = parseTimestamp(event.timestamp)
                 state.sessionInfo.initialModel = payload.model
 
-            case .toolResult, .toolCall:
+            case .toolResult, .toolCall, .streamThinkingComplete:
                 // Skip - processed via message.assistant content blocks
                 break
 
@@ -312,8 +314,7 @@ extension UnifiedEventTransformer {
                  .notificationInterrupted, .notificationSubagentResult,
                  .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .memoryLedger, .memoryLoaded, .skillRemoved, .rulesLoaded,
-                 .errorAgent, .errorTool, .errorProvider,
-                 .streamThinkingComplete:
+                 .errorAgent, .errorTool, .errorProvider:
                 if var message = transformPersistedEvent(event) {
                     if eventType == .messageUser {
                         message.eventId = event.id

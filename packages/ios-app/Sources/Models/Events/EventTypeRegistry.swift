@@ -102,7 +102,7 @@ enum PersistedEventType: String, CaseIterable {
              .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
              .memoryLedger, .memoryLoaded,
              .errorAgent, .errorTool, .errorProvider,
-             .streamThinkingComplete, .turnFailed:
+             .turnFailed:
             return true
         default:
             return false

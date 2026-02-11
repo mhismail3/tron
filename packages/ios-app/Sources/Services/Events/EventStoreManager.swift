@@ -296,36 +296,52 @@ final class EventStoreManager {
 
     // MARK: - State Reconstruction (Unified Transformer)
 
-    /// Get ChatMessages for a session using the unified transformer.
-    func getChatMessages(sessionId: String) throws -> [ChatMessage] {
-        guard let session = try eventDB.sessions.get(sessionId),
-              let headEventId = session.headEventId else {
-            return []
+    /// Load all events needed to reconstruct a session.
+    /// Uses getBySession (single SQL query) instead of getAncestors (N+1 parent-chain walk)
+    /// so that broken parent chains from sync gaps don't silently truncate history.
+    /// For forked sessions, also fetches ancestor events from the parent session.
+    func getSessionEvents(sessionId: String) throws -> (events: [SessionEvent], presorted: Bool) {
+        guard let session = try eventDB.sessions.get(sessionId) else {
+            return ([], false)
         }
 
-        let events = try eventDB.events.getAncestors(headEventId)
+        // Filter out locally-persisted stream.thinking_complete events.
+        // ThinkingState persists these (seq 0, parentId nil) for the thinking history sheet.
+        // They must not participate in reconstruction — thinking content is already embedded
+        // in message.assistant content blocks via InterleavedContentProcessor.
+        let sessionEvents = try eventDB.events.getBySession(sessionId)
+            .filter { $0.type != "stream.thinking_complete" }
+        guard !sessionEvents.isEmpty else { return ([], false) }
+
+        // For forked sessions, fetch parent chain events and prepend them
+        guard session.isFork == true,
+              let firstEvent = sessionEvents.first,
+              let parentId = firstEvent.parentId,
+              !sessionEvents.contains(where: { $0.id == parentId }) else {
+            return (sessionEvents, false)
+        }
+
+        let parentEvents = try eventDB.events.getAncestors(parentId)
+        let combined = parentEvents + sessionEvents
+        return (combined, true)
+    }
+
+    /// Get ChatMessages for a session using the unified transformer.
+    func getChatMessages(sessionId: String) throws -> [ChatMessage] {
+        let (events, _) = try getSessionEvents(sessionId: sessionId)
         return UnifiedEventTransformer.transformPersistedEvents(events)
     }
 
     /// Get full reconstructed session state using the unified transformer.
     func getReconstructedState(sessionId: String) throws -> ReconstructedState {
-        guard let session = try eventDB.sessions.get(sessionId) else {
-            logger.warning("[RECONSTRUCT] Session not found: \(sessionId)", category: .session)
+        let (events, presorted) = try getSessionEvents(sessionId: sessionId)
+        guard !events.isEmpty else {
+            logger.warning("[RECONSTRUCT] No events for session: \(sessionId)", category: .session)
             return ReconstructedState()
         }
 
-        guard let headEventId = session.headEventId else {
-            logger.warning("[RECONSTRUCT] Session \(sessionId) has no headEventId", category: .session)
-            return ReconstructedState()
-        }
-
-        logger.info("[RECONSTRUCT] Loading state for session \(sessionId), headEventId=\(headEventId)", category: .session)
-        let events = try eventDB.events.getAncestors(headEventId)
-        logger.info("[RECONSTRUCT] Got \(events.count) ancestor events", category: .session)
-
-        // Pass presorted: true because getAncestors returns events in correct chain order.
-        // This is critical for forked sessions where sequence numbers reset per-session.
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events, presorted: true)
+        logger.info("[RECONSTRUCT] Loading state for session \(sessionId), \(events.count) events, presorted=\(presorted)", category: .session)
+        let state = UnifiedEventTransformer.reconstructSessionState(from: events, presorted: presorted)
         logger.info("[RECONSTRUCT] Transformed to \(state.messages.count) messages", category: .session)
         return state
     }
