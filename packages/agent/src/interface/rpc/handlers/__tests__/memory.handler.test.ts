@@ -225,21 +225,61 @@ describe('Memory Handlers', () => {
     });
   });
 
+  describe('memory.updateLedger', () => {
+    it('should return result from agentManager.triggerLedgerUpdate', async () => {
+      const mockTrigger = vi.fn().mockResolvedValue({ written: true, title: 'Feature', entryType: 'feature' });
+      mockContext.agentManager = { triggerLedgerUpdate: mockTrigger } as any;
+
+      const request: RpcRequest = {
+        id: '1',
+        method: 'memory.updateLedger',
+        params: { sessionId: 'sess-1' },
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(true);
+      expect(response.result).toEqual({ written: true, title: 'Feature', entryType: 'feature' });
+      expect(mockTrigger).toHaveBeenCalledWith('sess-1');
+    });
+
+    it('should return error for missing sessionId', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'memory.updateLedger',
+        params: {},
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+    });
+
+    it('should require agentManager', () => {
+      const handlers = createMemoryHandlers();
+      const handler = handlers.find(h => h.method === 'memory.updateLedger');
+
+      expect(handler?.options?.requiredManagers).toContain('agentManager');
+    });
+  });
+
   describe('createMemoryHandlers', () => {
     it('should create handlers for registration', () => {
       const handlers = createMemoryHandlers();
 
-      expect(handlers).toHaveLength(1);
+      expect(handlers).toHaveLength(2);
       expect(handlers[0].method).toBe('memory.getLedger');
+      expect(handlers[1].method).toBe('memory.updateLedger');
     });
 
-    it('should have eventStore as required manager', () => {
+    it('should have eventStore as required manager for getLedger', () => {
       const handlers = createMemoryHandlers();
 
       expect(handlers[0].options?.requiredManagers).toContain('eventStore');
     });
 
-    it('should require workingDirectory param', () => {
+    it('should require workingDirectory param for getLedger', () => {
       const handlers = createMemoryHandlers();
 
       expect(handlers[0].options?.requiredParams).toContain('workingDirectory');

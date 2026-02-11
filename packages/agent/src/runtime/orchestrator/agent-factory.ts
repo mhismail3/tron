@@ -266,7 +266,7 @@ function wireMemoryLedger(
   memCfg: NonNullable<AgentFactoryConfig['memoryConfig']>,
   compactorSettings: ReturnType<typeof getSettings>['context']['compactor'],
   spawnSubsession: AgentFactoryConfig['subagents']['spawn'],
-): void {
+): () => Promise<{ written: boolean; title?: string; entryType?: string }> {
   const compactionTrigger = new CompactionTrigger({
     triggerTokenThreshold: compactorSettings.triggerTokenThreshold,
     alertZoneThreshold: compactorSettings.alertZoneThreshold,
@@ -316,7 +316,31 @@ function wireMemoryLedger(
     getRecentToolCalls: () => memCfg.getRecentToolCalls(sessionId),
   }));
 
+  const triggerLedgerUpdate = async () => {
+    try {
+      const result = await ledgerWriter.writeLedgerEntry({
+        model,
+        workingDirectory,
+      });
+      if (result.written) {
+        memCfg.emitMemoryUpdated({
+          sessionId,
+          title: result.title,
+          entryType: result.entryType,
+        });
+        if (memCfg.embedMemory && result.eventId && result.payload) {
+          memCfg.embedMemory(result.eventId, workspaceId, result.payload).catch(() => {});
+        }
+      }
+      return { written: result.written, title: result.title, entryType: result.entryType };
+    } catch (error) {
+      logger.error('Manual ledger update failed', { sessionId, error: (error as Error).message });
+      return { written: false };
+    }
+  };
+
   logger.debug('Memory ledger hook registered', { sessionId });
+  return triggerLedgerUpdate;
 }
 
 // =============================================================================
@@ -348,7 +372,7 @@ export class AgentFactory {
     systemPrompt?: string,
     isSubagent?: boolean,
     toolDenials?: ToolDenialConfig,
-  ): Promise<TronAgent> {
+  ): Promise<{ agent: TronAgent; triggerLedgerUpdate?: () => Promise<{ written: boolean; title?: string; entryType?: string }> }> {
     // Get auth for the model (handles Codex OAuth vs standard auth)
     const auth = await this.config.getAuthForProvider(model);
     const providerType = detectProviderFromModel(model);
@@ -578,15 +602,16 @@ export class AgentFactory {
     }
 
     // Register memory ledger hook for non-subagent sessions
+    let triggerLedgerUpdate: (() => Promise<{ written: boolean; title?: string; entryType?: string }>) | undefined;
     if (!isSubagent && this.config.memoryConfig) {
-      wireMemoryLedger(
+      triggerLedgerUpdate = wireMemoryLedger(
         agent, sessionId, model, workingDirectory,
         this.config.memoryConfig, compactorSettings,
         this.config.subagents.spawn,
       );
     }
 
-    return agent;
+    return { agent, triggerLedgerUpdate };
   }
 }
 

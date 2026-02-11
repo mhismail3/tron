@@ -116,6 +116,14 @@ final class MiscClient {
         )
     }
 
+    /// Trigger a one-shot memory ledger update for the current session
+    func updateLedger(sessionId: String) async throws -> MemoryUpdateLedgerResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+        let params = MemoryUpdateLedgerParams(sessionId: sessionId)
+        return try await ws.send(method: "memory.updateLedger", params: params)
+    }
+
     // MARK: - Worktree Methods
 
     /// Get worktree status for a session

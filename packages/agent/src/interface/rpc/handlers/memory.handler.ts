@@ -3,6 +3,7 @@
  *
  * Handlers for memory.* RPC methods:
  * - memory.getLedger: Get paginated ledger entries for a workspace
+ * - memory.updateLedger: Trigger a one-shot memory ledger update for a session
  */
 
 import type { MethodRegistration, MethodHandler } from '../registry.js';
@@ -16,6 +17,10 @@ interface MemoryGetLedgerParams {
   limit?: number;
   offset?: number;
   tags?: string[];
+}
+
+interface MemoryUpdateLedgerParams {
+  sessionId: string;
 }
 
 // =============================================================================
@@ -32,6 +37,11 @@ export function createMemoryHandlers(): MethodRegistration[] {
     });
   };
 
+  const updateLedgerHandler: MethodHandler<MemoryUpdateLedgerParams> = async (request, context) => {
+    const params = request.params!;
+    return context.agentManager.triggerLedgerUpdate(params.sessionId);
+  };
+
   return [
     {
       method: 'memory.getLedger',
@@ -40,6 +50,15 @@ export function createMemoryHandlers(): MethodRegistration[] {
         requiredParams: ['workingDirectory'],
         requiredManagers: ['eventStore'],
         description: 'Get paginated ledger entries for a workspace',
+      },
+    },
+    {
+      method: 'memory.updateLedger',
+      handler: updateLedgerHandler,
+      options: {
+        requiredParams: ['sessionId'],
+        requiredManagers: ['agentManager'],
+        description: 'Trigger a one-shot memory ledger update for the current session',
       },
     },
   ];

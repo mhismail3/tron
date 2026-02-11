@@ -29,6 +29,10 @@ struct ContextAuditView: View {
     // Cached token usage to avoid recomputation on every body evaluation
     @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) = (0, 0, 0, 0)
 
+    // Manual memory update state
+    @State private var isAutoLedgerEnabled: Bool = true
+    @State private var isUpdatingLedger: Bool = false
+
     // Message pagination state
     @State private var messagesLoadedCount: Int = 10  // Initial batch size
 
@@ -211,6 +215,32 @@ struct ContextAuditView: View {
                 if let snapshot = detailedSnapshot {
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 16) {
+                            // Manual memory update button (visible when auto-ledger is OFF)
+                            if !isAutoLedgerEnabled && !readOnly {
+                                Button {
+                                    Task { await updateMemoryLedger() }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if isUpdatingLedger {
+                                            ProgressView()
+                                                .scaleEffect(0.7)
+                                                .tint(.purple)
+                                        } else {
+                                            Image(systemName: "book.closed")
+                                        }
+                                        Text("Update Memory")
+                                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
+                                    }
+                                    .foregroundStyle(.purple)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
+                                    .background(.purple.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                                .disabled(isUpdatingLedger || !hasMessages)
+                                .padding(.horizontal)
+                            }
+
                             // Usage gauge
                             ContextUsageGaugeView(
                                 currentTokens: snapshot.currentTokens,
@@ -333,6 +363,11 @@ struct ContextAuditView: View {
             detailedSnapshot = try await snapshotTask
             sessionEvents = events
             updateCachedTokenUsage()
+
+            // Check if auto-ledger is enabled
+            if let settings = try? await rpcClient.settings.get() {
+                isAutoLedgerEnabled = settings.memory.ledger.enabled
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -390,6 +425,19 @@ struct ContextAuditView: View {
             errorMessage = "Failed to compact context: \(error.localizedDescription)"
             isCompacting = false
         }
+    }
+
+    private func updateMemoryLedger() async {
+        isUpdatingLedger = true
+        do {
+            let result = try await rpcClient.misc.updateLedger(sessionId: sessionId)
+            if result.written {
+                dismiss()
+            }
+        } catch {
+            errorMessage = "Failed to update memory: \(error.localizedDescription)"
+        }
+        isUpdatingLedger = false
     }
 
     private func removeSkillFromContext(skillName: String) async {

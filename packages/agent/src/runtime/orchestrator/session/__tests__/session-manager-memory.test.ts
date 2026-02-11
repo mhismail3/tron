@@ -227,7 +227,7 @@ function createConfig(overrides: Partial<SessionManagerConfig> = {}): SessionMan
     defaultModel: 'claude-sonnet-4-5-20250929',
     defaultProvider: 'anthropic',
     sessionStore: createMockSessionStore(),
-    createAgentForSession: vi.fn().mockResolvedValue(createMockAgent()),
+    createAgentForSession: vi.fn().mockResolvedValue({ agent: createMockAgent() }),
     emit: vi.fn(),
     estimateTokens: vi.fn().mockReturnValue(100),
     ...overrides,
@@ -245,7 +245,7 @@ describe('SessionManager - Memory Injection', () => {
   beforeEach(() => {
     mockAgent = createMockAgent();
     config = createConfig({
-      createAgentForSession: vi.fn().mockResolvedValue(mockAgent),
+      createAgentForSession: vi.fn().mockResolvedValue({ agent: mockAgent }),
     });
   });
 

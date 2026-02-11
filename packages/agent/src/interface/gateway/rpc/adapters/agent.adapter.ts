@@ -161,6 +161,17 @@ export function createAgentAdapter(deps: AdapterDependencies): AgentManagerAdapt
     },
 
     /**
+     * Trigger a manual memory ledger update for a session
+     */
+    async triggerLedgerUpdate(sessionId) {
+      const active = orchestrator.getActiveSession(sessionId);
+      if (!active?.triggerLedgerUpdate) {
+        return { written: false };
+      }
+      return active.triggerLedgerUpdate();
+    },
+
+    /**
      * Get current agent state
      */
     async getState(sessionId) {

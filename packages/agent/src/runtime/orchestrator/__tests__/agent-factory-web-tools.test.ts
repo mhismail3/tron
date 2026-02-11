@@ -83,7 +83,7 @@ describe('AgentFactory Web Tools', () => {
       const configWithoutKey = createMockConfig();
       const factoryWithoutKey = new AgentFactory(configWithoutKey);
 
-      const agent = await factoryWithoutKey.createAgentForSession(
+      const { agent } = await factoryWithoutKey.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -107,7 +107,7 @@ describe('AgentFactory Web Tools', () => {
       configWithMock.subagents.spawn = spawnSubsessionMock;
       const factoryWithMock = new AgentFactory(configWithMock);
 
-      const agent = await factoryWithMock.createAgentForSession(
+      const { agent } = await factoryWithMock.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -130,7 +130,7 @@ describe('AgentFactory Web Tools', () => {
       });
       const factoryWithBlocked = new AgentFactory(configWithBlocked);
 
-      const agent = await factoryWithBlocked.createAgentForSession(
+      const { agent } = await factoryWithBlocked.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -153,7 +153,7 @@ describe('AgentFactory Web Tools', () => {
       const configWithoutKey = createMockConfig();
       const factoryWithoutKey = new AgentFactory(configWithoutKey);
 
-      const agent = await factoryWithoutKey.createAgentForSession(
+      const { agent } = await factoryWithoutKey.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -171,7 +171,7 @@ describe('AgentFactory Web Tools', () => {
       });
       const factoryWithKey = new AgentFactory(configWithKey);
 
-      const agent = await factoryWithKey.createAgentForSession(
+      const { agent } = await factoryWithKey.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -192,7 +192,7 @@ describe('AgentFactory Web Tools', () => {
       });
       const factoryWithBlocked = new AgentFactory(configWithBlocked);
 
-      const agent = await factoryWithBlocked.createAgentForSession(
+      const { agent } = await factoryWithBlocked.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -216,7 +216,7 @@ describe('AgentFactory Web Tools', () => {
       });
       const factoryWithBoth = new AgentFactory(configWithBoth);
 
-      const agent = await factoryWithBoth.createAgentForSession(
+      const { agent } = await factoryWithBoth.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -238,7 +238,7 @@ describe('AgentFactory Web Tools', () => {
       });
       const factoryWithBoth = new AgentFactory(configWithBoth);
 
-      const agent = await factoryWithBoth.createAgentForSession(
+      const { agent } = await factoryWithBoth.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'
@@ -264,7 +264,7 @@ describe('AgentFactory Web Tools', () => {
       const factoryWithKeys = new AgentFactory(configWithKeys);
 
       // Create a subagent session (isSubagent = true)
-      const agent = await factoryWithKeys.createAgentForSession(
+      const { agent } = await factoryWithKeys.createAgentForSession(
         'sess_sub',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -294,7 +294,7 @@ describe('AgentFactory Web Tools', () => {
       configWithMock.subagents.spawn = spawnSubsessionMock;
       const factoryWithMock = new AgentFactory(configWithMock);
 
-      const agent = await factoryWithMock.createAgentForSession(
+      const { agent } = await factoryWithMock.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514'

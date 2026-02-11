@@ -635,7 +635,7 @@ export class EventStoreOrchestrator extends EventEmitter {
     systemPrompt?: string,
     isSubagent?: boolean,
     toolDenials?: import('../../../capabilities/tools/subagent/tool-denial.js').ToolDenialConfig,
-  ): Promise<TronAgent> {
+  ): Promise<{ agent: TronAgent; triggerLedgerUpdate?: () => Promise<{ written: boolean; title?: string; entryType?: string }> }> {
     return this.agentFactory.createAgentForSession(sessionId, workingDirectory, model, systemPrompt, isSubagent, toolDenials);
   }
 

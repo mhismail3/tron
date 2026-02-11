@@ -196,6 +196,48 @@ describe('AgentAdapter', () => {
     });
   });
 
+  describe('triggerLedgerUpdate', () => {
+    it('should call active session trigger and return result', async () => {
+      const mockTrigger = vi.fn().mockResolvedValue({ written: true, title: 'Test', entryType: 'feature' });
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue({
+        triggerLedgerUpdate: mockTrigger,
+      } as any);
+
+      const adapter = createAgentAdapter({
+        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+      });
+
+      const result = await adapter.triggerLedgerUpdate('sess-123');
+
+      expect(result).toEqual({ written: true, title: 'Test', entryType: 'feature' });
+      expect(mockTrigger).toHaveBeenCalled();
+    });
+
+    it('should return { written: false } when no active session', async () => {
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
+
+      const adapter = createAgentAdapter({
+        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+      });
+
+      const result = await adapter.triggerLedgerUpdate('sess-nonexistent');
+
+      expect(result).toEqual({ written: false });
+    });
+
+    it('should return { written: false } when no trigger on session', async () => {
+      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue({} as any);
+
+      const adapter = createAgentAdapter({
+        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+      });
+
+      const result = await adapter.triggerLedgerUpdate('sess-no-trigger');
+
+      expect(result).toEqual({ written: false });
+    });
+  });
+
   describe('getState', () => {
     it('should return running state when agent is active', async () => {
       mockSessionContext.isProcessing.mockReturnValue(true);

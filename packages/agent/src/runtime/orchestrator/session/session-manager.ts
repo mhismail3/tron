@@ -77,7 +77,7 @@ export interface SessionManagerConfig {
     systemPrompt?: string,
     isSubagent?: boolean,
     toolDenials?: import('../../../capabilities/tools/subagent/tool-denial.js').ToolDenialConfig,
-  ) => Promise<TronAgent>;
+  ) => Promise<{ agent: TronAgent; triggerLedgerUpdate?: () => Promise<{ written: boolean; title?: string; entryType?: string }> }>;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
   /** Estimate token count for text */
@@ -141,7 +141,7 @@ export class SessionManager {
     // Create agent for session (use the resolved working directory path)
     // Pass isSubagent flag to exclude SpawnSubagent tool for subagent sessions
     const isSubagent = !!options.parentSessionId;
-    const agent = await this.config.createAgentForSession(
+    const { agent, triggerLedgerUpdate } = await this.config.createAgentForSession(
       sessionId,
       workingDir.path,
       model,
@@ -347,6 +347,7 @@ export class SessionManager {
     const activeSession: ActiveSession = {
       sessionId,
       agent,
+      triggerLedgerUpdate,
       workingDirectory: workingDir.path,
       model,
       // Parent session ID if this is a subagent (for event forwarding)
@@ -417,7 +418,7 @@ export class SessionManager {
     const sessionState = await this.eventStore.getStateAtHead(session.id);
 
     // Create agent with restored system prompt (use resolved working directory path)
-    const agent = await this.config.createAgentForSession(
+    const { agent, triggerLedgerUpdate } = await this.config.createAgentForSession(
       session.id,
       workingDir.path,
       session.latestModel,
@@ -597,6 +598,7 @@ export class SessionManager {
     const activeSession: ActiveSession = {
       sessionId: session.id,
       agent,
+      triggerLedgerUpdate,
       workingDirectory: workingDir.path,
       model: session.latestModel,
       workingDir,

@@ -66,7 +66,7 @@ describe('AgentFactory - Tool Denial System', () => {
 
   describe('toolDenials = undefined (default behavior)', () => {
     it('includes all default tools when toolDenials is not specified', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -96,7 +96,7 @@ describe('AgentFactory - Tool Denial System', () => {
     it('creates agent with zero tools when denyAll is true', async () => {
       const toolDenials: ToolDenialConfig = { denyAll: true };
 
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-haiku-4-5-20251001',
@@ -115,7 +115,7 @@ describe('AgentFactory - Tool Denial System', () => {
       const customPrompt = 'You are a web content analyzer.';
       const toolDenials: ToolDenialConfig = { denyAll: true };
 
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-haiku-4-5-20251001',
@@ -137,7 +137,7 @@ describe('AgentFactory - Tool Denial System', () => {
         tools: ['Bash', 'Write', 'Edit'],
       };
 
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -165,7 +165,7 @@ describe('AgentFactory - Tool Denial System', () => {
         tools: ['SpawnSubagent'], // Only deny this one
       };
 
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -187,7 +187,7 @@ describe('AgentFactory - Tool Denial System', () => {
 
   describe('isSubagent automatically denies subagent tools', () => {
     it('subagent cannot spawn other subagents', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -220,7 +220,7 @@ describe('AgentFactory - Tool Denial System', () => {
         tools: ['Bash', 'Write'],
       };
 
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -254,7 +254,7 @@ describe('AgentFactory - Tool Denial System', () => {
     it('denyAll takes precedence over isSubagent denials', async () => {
       const toolDenials: ToolDenialConfig = { denyAll: true };
 
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-haiku-4-5-20251001',
@@ -270,7 +270,7 @@ describe('AgentFactory - Tool Denial System', () => {
 
   describe('non-subagent with no denials has all tools', () => {
     it('top-level agent has all tools including subagent management', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_test',
         '/tmp/test',
         'claude-sonnet-4-20250514',
@@ -313,7 +313,7 @@ Do not make up information not present in the content.`;
 
     const toolDenials: ToolDenialConfig = { denyAll: true };
 
-    const agent = await factory.createAgentForSession(
+    const { agent } = await factory.createAgentForSession(
       'sess_summarizer',
       '/tmp/test',
       'claude-haiku-4-5-20251001',
@@ -350,7 +350,7 @@ describe('AgentFactory - Subagent MaxTokens', () => {
 
   describe('subagent maxTokens based on model capacity', () => {
     it('sets maxTokens to 90% of model maxOutput for subagents', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_subagent',
         '/tmp/test',
         'claude-sonnet-4-5-20250929', // maxOutput: 64000
@@ -367,7 +367,7 @@ describe('AgentFactory - Subagent MaxTokens', () => {
     });
 
     it('uses 90% of model capacity for Claude 4.5 models', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_subagent',
         '/tmp/test',
         'claude-opus-4-5-20251101', // maxOutput: 64000
@@ -381,7 +381,7 @@ describe('AgentFactory - Subagent MaxTokens', () => {
     });
 
     it('does not set maxTokens for non-subagent (uses default)', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_normal',
         '/tmp/test',
         'claude-sonnet-4-5-20250929',
@@ -397,7 +397,7 @@ describe('AgentFactory - Subagent MaxTokens', () => {
     });
 
     it('falls back to default capacity if model not in registry', async () => {
-      const agent = await factory.createAgentForSession(
+      const { agent } = await factory.createAgentForSession(
         'sess_subagent',
         '/tmp/test',
         'claude-unknown-model', // Not in registry, defaults to maxOutput: 4096

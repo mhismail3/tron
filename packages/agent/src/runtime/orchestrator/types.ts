@@ -100,6 +100,8 @@ export interface SessionRuntime {
   sessionContext: SessionContext;
   /** WorkingDirectory abstraction (if worktree coordination is enabled) */
   workingDir?: WorkingDirectory;
+  /** Manual ledger update trigger (set by wireMemoryLedger for non-subagent sessions) */
+  triggerLedgerUpdate?: () => Promise<{ written: boolean; title?: string; entryType?: string }>;
 }
 
 /**
