@@ -267,16 +267,20 @@ struct GlassAttachmentButton: View {
             case "photos": showingImagePicker = true
             case "files": showFilePicker = true
             case "skills":
-                // Show the non-blocking skill mention popup instead of the old sheet
                 withAnimation(.tronStandard) {
+                    // Close spell popup first (mutual exclusion)
+                    showSpellMentionPopup = false
+                    spellMentionQuery = ""
                     showSkillMentionPopup = true
-                    skillMentionQuery = "" // Start with empty query to show all skills
+                    skillMentionQuery = ""
                 }
             case "spells":
-                // Show the non-blocking spell mention popup
                 withAnimation(.tronStandard) {
+                    // Close skill popup first (mutual exclusion)
+                    showSkillMentionPopup = false
+                    skillMentionQuery = ""
                     showSpellMentionPopup = true
-                    spellMentionQuery = "" // Start with empty query to show all skills
+                    spellMentionQuery = ""
                 }
             case "draftPlan":
                 // Post notification for ChatView to handle plan skill selection

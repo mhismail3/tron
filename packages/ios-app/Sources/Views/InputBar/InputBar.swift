@@ -388,6 +388,7 @@ struct InputBar: View {
             selected: state.selectedSkills,
             showPopup: $showSkillMentionPopup,
             query: $skillMentionQuery,
+            dismissOther: { dismissSpellMentionPopup() },
             onCompleted: { skill in
                 if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
                     state.selectedSkills.append(skill)
@@ -404,6 +405,7 @@ struct InputBar: View {
             selected: state.selectedSpells,
             showPopup: $showSpellMentionPopup,
             query: $spellMentionQuery,
+            dismissOther: { dismissSkillMentionPopup() },
             onCompleted: { skill in
                 if !state.selectedSpells.contains(where: { $0.name == skill.name }) {
                     state.selectedSpells.append(skill)
@@ -418,6 +420,7 @@ struct InputBar: View {
         selected: [Skill],
         showPopup: Binding<Bool>,
         query: Binding<String>,
+        dismissOther: () -> Void,
         onCompleted: (Skill) -> Void
     ) {
         guard let store = config.skillStore else { return }
@@ -435,6 +438,7 @@ struct InputBar: View {
             query.wrappedValue = q
             if !showPopup.wrappedValue {
                 withAnimation(.tronStandard) {
+                    dismissOther()
                     showPopup.wrappedValue = true
                 }
             }

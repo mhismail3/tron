@@ -11,26 +11,18 @@ struct SkillDetailSheet: View {
     let skillStore: SkillStore
     var mode: ChipMode = .skill
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var skillMetadata: SkillMetadata?
     @State private var isLoading = true
     @State private var error: String?
 
-    /// Accent color based on mode: cyan for skills, pink for spells
-    private var accentColor: Color {
-        switch mode {
-        case .skill: return .tronCyan
-        case .spell: return .tronPink
-        }
+    private var tint: TintedColors {
+        TintedColors(mode: mode, colorScheme: colorScheme)
     }
 
-    /// Icon for the mode: sparkles for skills, wand for spells
-    private var modeIcon: String {
-        switch mode {
-        case .skill: return "sparkles"
-        case .spell: return "wand.and.stars"
-        }
-    }
+    /// Accent color based on mode: cyan for skills, pink for spells
+    private var accentColor: Color { tint.accent }
 
     var body: some View {
         NavigationStack {
@@ -133,7 +125,7 @@ struct SkillDetailSheet: View {
             // Section header (outside the card, like Context Manager)
             Text("Description")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(tint.heading)
 
             // Card content
             VStack(spacing: 12) {
@@ -207,7 +199,7 @@ struct SkillDetailSheet: View {
             HStack {
                 Text("SKILL.md")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(tint.heading)
 
                 Spacer()
 
@@ -238,16 +230,12 @@ struct SkillDetailSheet: View {
                 // Markdown content
                 Text(TextContentView.markdownAttributedString(from: metadata.content))
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTextSecondary)
+                    .foregroundStyle(tint.body)
                     .lineSpacing(4)
                     .textSelection(.enabled)
             }
             .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(accentColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
+            .sectionFill(accentColor)
         }
     }
 
@@ -256,7 +244,7 @@ struct SkillDetailSheet: View {
             // Section header
             Text("Other Files")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+                .foregroundStyle(tint.heading)
 
             if metadata.additionalFiles.isEmpty {
                 // Empty state
@@ -275,7 +263,7 @@ struct SkillDetailSheet: View {
 
                             Text(file)
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronTextSecondary)
+                                .foregroundStyle(tint.body)
 
                             Spacer()
                         }

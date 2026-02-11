@@ -20,17 +20,23 @@ struct SkillChip: View {
     var onRemove: (() -> Void)?
     var onTap: (() -> Void)?
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tint: TintedColors {
+        TintedColors(mode: mode, colorScheme: colorScheme)
+    }
+
     var body: some View {
         HStack(spacing: 5) {
             // Chip icon based on mode
             Image(systemName: chipIcon)
                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(chipIconColor)
+                .foregroundStyle(tint.accent)
 
             // Skill/spell name
             Text(skill.name)
                 .font(TronTypography.filePath)
-                .foregroundStyle(.tronTextPrimary)
+                .foregroundStyle(tint.name)
                 .lineLimit(1)
 
             // Source indicator (subtle) - only for skills
@@ -47,7 +53,7 @@ struct SkillChip: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronTextSecondary)
+                        .foregroundStyle(tint.dismiss)
                 }
                 .buttonStyle(.plain)
                 .contentShape(Circle())
@@ -56,7 +62,7 @@ struct SkillChip: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .glassEffect(
-            .regular.tint(chipTintColor.opacity(0.4)).interactive(),
+            .regular.tint(tint.accent.opacity(0.4)).interactive(),
             in: .capsule
         )
         .contentShape(Capsule())
@@ -70,24 +76,6 @@ struct SkillChip: View {
         case .skill: return "sparkles"
         case .spell: return "wand.and.stars"
         }
-    }
-
-    private var chipIconColor: Color {
-        switch mode {
-        case .skill: return .tronCyan
-        case .spell: return .tronPink
-        }
-    }
-
-    private var chipTintColor: Color {
-        switch mode {
-        case .skill: return .tronCyan
-        case .spell: return .tronPink
-        }
-    }
-
-    private var chipBorderColor: Color {
-        chipTintColor
     }
 }
 
@@ -189,17 +177,16 @@ struct SkillChipFallback: View {
     var onRemove: (() -> Void)?
     var onTap: (() -> Void)?
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tint: TintedColors {
+        TintedColors(mode: mode, colorScheme: colorScheme)
+    }
+
     private var iconName: String {
         switch mode {
         case .skill: return "sparkles"
         case .spell: return "wand.and.stars"
-        }
-    }
-
-    private var iconColor: Color {
-        switch mode {
-        case .skill: return .cyan
-        case .spell: return .tronPink
         }
     }
 
@@ -210,17 +197,17 @@ struct SkillChipFallback: View {
             HStack(spacing: 5) {
                 Image(systemName: iconName)
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(iconColor)
+                    .foregroundStyle(tint.accent)
 
                 Text(skill.name)
                     .font(TronTypography.filePath)
-                    .foregroundStyle(.tronTextPrimary)
+                    .foregroundStyle(tint.name)
                     .lineLimit(1)
 
                 if skill.source == .project {
                     Image(systemName: "folder.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeXXS))
-                        .foregroundStyle(.green.opacity(0.6))
+                        .foregroundStyle(.tronEmerald.opacity(0.6))
                 }
 
                 if showRemoveButton {
@@ -229,7 +216,7 @@ struct SkillChipFallback: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .foregroundStyle(.tronTextMuted)
+                            .foregroundStyle(tint.dismiss)
                     }
                     .buttonStyle(.plain)
                 }

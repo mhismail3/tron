@@ -64,6 +64,12 @@ struct MentionPopup: View {
     let onSelect: (Skill) -> Void
     let onDismiss: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tint: TintedColors {
+        TintedColors(accent: style.tintColor, colorScheme: colorScheme)
+    }
+
     private var filteredSkills: [Skill] {
         MentionDetector.filterSkills(skills, query: query)
     }
@@ -84,7 +90,7 @@ struct MentionPopup: View {
                     if !query.isEmpty {
                         Text("· \"\(query)\"")
                             .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(tint.secondary)
                     }
                 }
 
@@ -95,7 +101,7 @@ struct MentionPopup: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(tint.dismiss)
                         .frame(width: 36, height: 36)
                         .contentShape(Rectangle())
                 }
@@ -110,11 +116,11 @@ struct MentionPopup: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(tint.subtle)
 
                     Text("No skills found")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(tint.secondary)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
@@ -122,7 +128,7 @@ struct MentionPopup: View {
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(filteredSkills) { skill in
-                            MentionRow(skill: skill, style: style) {
+                            MentionRow(skill: skill, style: style, tint: tint) {
                                 onSelect(skill)
                             }
                         }
@@ -149,6 +155,7 @@ struct MentionPopup: View {
 private struct MentionRow: View {
     let skill: Skill
     let style: MentionStyle
+    let tint: TintedColors
     let onTap: () -> Void
 
     var body: some View {
@@ -175,7 +182,7 @@ private struct MentionRow: View {
                     HStack(spacing: 5) {
                         Text("\(style.prefix)\(skill.name)")
                             .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(tint.name)
 
                         ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
                             Text(badge.text)
@@ -190,7 +197,7 @@ private struct MentionRow: View {
 
                     Text(skill.description)
                         .font(TronTypography.sans(size: TronTypography.sizeBody2))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(tint.secondary)
                         .lineLimit(1)
                 }
 

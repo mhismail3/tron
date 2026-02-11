@@ -128,6 +128,27 @@ extension Color {
         tronOverlay.opacity(opacity)
     }
 
+    // MARK: - Adaptive Color Composition
+
+    /// Creates a color that resolves to different existing Color values in light vs dark mode.
+    /// Use when you want to compose adaptive colors from existing tokens rather than raw hex.
+    ///
+    ///     // Different per mode:
+    ///     let name = Color.adaptive(light: .tronCyan, dark: .tronTextPrimary)
+    ///     // Same in both modes (pass one value):
+    ///     let accent = Color.adaptive(.tronCyan)
+    ///
+    static func adaptive(light: Color, dark: Color) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+    }
+
+    /// Convenience: same color in both modes (no adaptation).
+    static func adaptive(_ color: Color) -> Color {
+        color
+    }
+
     // MARK: - Hex Initializer
 
     init(hex: String) {
@@ -311,6 +332,69 @@ private struct ChipFillModifier: ViewModifier {
         content
             .background(Capsule().fill(color.opacity(fillOpacity)))
             .overlay(Capsule().strokeBorder(color.opacity(strokeOpacity), lineWidth: 0.5))
+    }
+}
+
+// MARK: - Tinted Component Colors
+
+/// Derives role-based text and interactive element colors from an accent color,
+/// with distinct light-mode (tinted) and dark-mode (neutral) palettes.
+///
+/// Light mode: text is tinted with the accent color at varying opacities.
+/// Dark mode: text uses standard neutral tokens (.tronTextPrimary, .tronTextSecondary, etc.)
+///
+/// Usage:
+/// ```swift
+/// @Environment(\.colorScheme) private var colorScheme
+/// private var tint: TintedColors { TintedColors(accent: .tronCyan, colorScheme: colorScheme) }
+///
+/// Text(name).foregroundStyle(tint.name)
+/// Text(description).foregroundStyle(tint.secondary)
+/// ```
+struct TintedColors {
+    /// The base accent color (always the same in both modes)
+    let accent: Color
+
+    /// Prominent text — names, row titles (light: accent, dark: tronTextPrimary)
+    let name: Color
+
+    /// Medium-emphasis text — descriptions, labels (light: accent@0.6, dark: tronTextSecondary)
+    let secondary: Color
+
+    /// Section headers (light: accent@0.7, dark: tronTextSecondary)
+    let heading: Color
+
+    /// Body content — markdown, file names (light: accent@0.6, dark: tronTextSecondary)
+    let body: Color
+
+    /// Dismiss/remove buttons (light: accent@0.5, dark: tronTextSecondary)
+    let dismiss: Color
+
+    /// Very subtle icons — empty state, search (light: accent@0.4, dark: tronTextMuted)
+    let subtle: Color
+
+    init(accent: Color, colorScheme: ColorScheme) {
+        self.accent = accent
+        if colorScheme == .light {
+            name      = accent
+            secondary = accent.opacity(0.6)
+            heading   = accent.opacity(0.7)
+            body      = accent.opacity(0.6)
+            dismiss   = accent.opacity(0.5)
+            subtle    = accent.opacity(0.4)
+        } else {
+            name      = .tronTextPrimary
+            secondary = .tronTextSecondary
+            heading   = .tronTextSecondary
+            body      = .tronTextSecondary
+            dismiss   = .tronTextSecondary
+            subtle    = .tronTextMuted
+        }
+    }
+
+    /// Convenience: create from ChipMode
+    init(mode: ChipMode, colorScheme: ColorScheme) {
+        self.init(accent: mode == .skill ? .tronCyan : .tronPink, colorScheme: colorScheme)
     }
 }
 
