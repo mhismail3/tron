@@ -156,9 +156,7 @@ struct RulesFileRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     } else if let displayContent = loadedContent ?? content {
                         ScrollView {
-                            Text(displayContent)
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextSecondary)
+                            ContextMarkdownContent(content: displayContent)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .textSelection(.enabled)

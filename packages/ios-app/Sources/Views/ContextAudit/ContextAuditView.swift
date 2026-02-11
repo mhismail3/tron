@@ -224,68 +224,71 @@ struct ContextAuditView: View {
                             TokenBreakdownHeader()
                                 .padding(.horizontal)
 
-                            // System section containers with tighter spacing
+                            // Auto-Loaded section containers
                             VStack(spacing: 10) {
-                                // System Prompt (standalone container)
                                 SystemPromptSection(
                                     tokens: snapshot.breakdown.systemPrompt,
                                     content: snapshot.systemPromptContent
                                 )
 
-                                // Tools (standalone container with badge - clay/ochre)
                                 ToolsSection(
                                     toolsContent: snapshot.toolsContent,
                                     tokens: snapshot.breakdown.tools
                                 )
 
-                                // Rules section (immutable, terracotta - right after Tools)
                                 if let rules = snapshot.rules, rules.totalFiles > 0 {
                                     RulesSection(
                                         rules: rules,
                                         onFetchContent: { path in
-                                            // Fetch rule content from server
                                             try await rpcClient.filesystem.readFile(path: path)
                                         }
                                     )
                                 }
 
-                                // Memory section (auto-injected memories, purple)
                                 if let memory = snapshot.memory, memory.count > 0 {
                                     MemorySection(memory: memory)
                                 }
 
-                                // Skill References (standalone container with badge and token count)
                                 if let skills = skillStore?.skills, !skills.isEmpty {
                                     SkillReferencesSection(skills: skills)
                                 }
-
-                                // Added Skills section (explicitly added via @skillname or skill sheet, deletable)
-                                if !displayedSkills.isEmpty {
-                                    AddedSkillsContainer(
-                                        skills: displayedSkills,
-                                        onDelete: readOnly ? nil : { skillName in
-                                            Task { await removeSkillFromContext(skillName: skillName) }
-                                        },
-                                        onFetchContent: { skillName in
-                                            guard let store = skillStore else { return nil }
-                                            let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
-                                            return metadata?.content
-                                        }
-                                    )
-                                }
-
-                                // Messages (collapsible container with count badge and token total)
-                                MessagesContainer(
-                                    messages: paginatedMessages,
-                                    totalMessages: allMessages.count,
-                                    totalTokens: snapshot.breakdown.messages,
-                                    hasMoreMessages: hasMoreMessages,
-                                    onLoadMore: {
-                                        messagesLoadedCount += 10
-                                    }
-                                )
                             }
                             .padding(.horizontal)
+
+                            // Session Context — only shown when skills or messages exist
+                            if !displayedSkills.isEmpty || !allMessages.isEmpty {
+                                SessionContextHeader()
+                                    .padding(.horizontal)
+
+                                VStack(spacing: 10) {
+                                    if !displayedSkills.isEmpty {
+                                        AddedSkillsContainer(
+                                            skills: displayedSkills,
+                                            onDelete: readOnly ? nil : { skillName in
+                                                Task { await removeSkillFromContext(skillName: skillName) }
+                                            },
+                                            onFetchContent: { skillName in
+                                                guard let store = skillStore else { return nil }
+                                                let metadata = await store.getSkill(name: skillName, sessionId: sessionId)
+                                                return metadata?.content
+                                            }
+                                        )
+                                    }
+
+                                    if !allMessages.isEmpty {
+                                        MessagesContainer(
+                                            messages: paginatedMessages,
+                                            totalMessages: allMessages.count,
+                                            totalTokens: snapshot.breakdown.messages,
+                                            hasMoreMessages: hasMoreMessages,
+                                            onLoadMore: {
+                                                messagesLoadedCount += 10
+                                            }
+                                        )
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
 
                             // Analytics Section
                             AnalyticsSection(

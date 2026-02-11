@@ -40,9 +40,7 @@ struct SystemPromptSection: View {
             // Content
             if isExpanded {
                 ScrollView {
-                    Text(content)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
+                    ContextMarkdownContent(content: content)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .textSelection(.enabled)

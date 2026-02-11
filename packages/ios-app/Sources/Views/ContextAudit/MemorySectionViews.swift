@@ -18,7 +18,7 @@ struct MemorySection: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                     .foregroundStyle(.purple)
                     .frame(width: 18)
-                Text("Memory")
+                Text("Memories")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.purple)
 
@@ -106,9 +106,7 @@ struct MemoryEntryRow: View {
             if isExpanded {
                 if !entry.content.isEmpty {
                     ScrollView {
-                        Text(entry.content)
-                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
+                        ContextMarkdownContent(content: entry.content)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
                             .textSelection(.enabled)

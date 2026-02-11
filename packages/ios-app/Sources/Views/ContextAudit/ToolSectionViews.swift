@@ -10,7 +10,7 @@ struct ToolsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header - using onTapGesture to avoid any button highlight behavior
+            // Header
             HStack(spacing: 8) {
                 Image(systemName: "hammer.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeBody))
@@ -20,7 +20,6 @@ struct ToolsSection: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(.tronClay)
 
-                // Count badge
                 Text("\(toolsContent.count)")
                     .font(TronTypography.pillValue)
                     .countBadge(.tronClay)
@@ -43,23 +42,12 @@ struct ToolsSection: View {
                 }
             }
 
-            // Content
             if isExpanded {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(toolsContent.enumerated()), id: \.offset) { index, tool in
-                            ToolItemView(tool: tool)
-                            if index < toolsContent.count - 1 {
-                                Divider()
-                                    .background(Color.tronOverlay(0.1))
-                            }
-                        }
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(toolsContent.enumerated()), id: \.offset) { _, tool in
+                        ToolItemRow(tool: tool)
                     }
-                    .padding(.vertical, 4)
                 }
-                .frame(maxHeight: 300)
-                .sectionFill(.tronClay, cornerRadius: 6, subtle: true)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
             }
@@ -69,11 +57,12 @@ struct ToolsSection: View {
     }
 }
 
-// MARK: - Tool Item View
+// MARK: - Tool Item Row (expandable sub-container showing description)
 
 @available(iOS 26.0, *)
-struct ToolItemView: View {
+struct ToolItemRow: View {
     let tool: String
+    @State private var isExpanded = false
 
     private var toolName: String {
         if let colonIndex = tool.firstIndex(of: ":") {
@@ -91,21 +80,40 @@ struct ToolItemView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(toolName)
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
-                .foregroundStyle(.tronClay)
-                .lineLimit(2)
-            if !toolDescription.isEmpty {
-                Text(toolDescription)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
-                    .lineLimit(3)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "wrench.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronClay)
+
+                Text(toolName)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronClay)
+
+                Spacer()
+
+                Image(systemName: "chevron.down")
+                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                    .foregroundStyle(.tronTextDisabled)
+                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+            }
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            if isExpanded && !toolDescription.isEmpty {
+                ContextMarkdownContent(content: toolDescription)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .sectionFill(.tronClay, cornerRadius: 6, subtle: true)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -151,9 +159,7 @@ struct ExpandableContentSection: View {
             // Content
             if isExpanded {
                 ScrollView {
-                    Text(content)
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.tronTextSecondary)
+                    ContextMarkdownContent(content: content)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .textSelection(.enabled)

@@ -126,9 +126,7 @@ struct SkillReferenceRow: View {
 
             // Expanded description (just description, not full content)
             if isExpanded {
-                Text(skill.description)
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
+                ContextMarkdownContent(content: skill.description)
                     .padding(.horizontal, 8)
                     .padding(.bottom, 8)
             }
@@ -210,9 +208,7 @@ struct AddedSkillRow: View {
                         .padding(12)
                     } else if let content = fullContent {
                         ScrollView {
-                            Text(content)
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextSecondary)
+                            ContextMarkdownContent(content: content)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(10)
                                 .textSelection(.enabled)
