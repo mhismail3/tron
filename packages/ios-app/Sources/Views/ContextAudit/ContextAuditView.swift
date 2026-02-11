@@ -478,7 +478,7 @@ struct ContextAuditView: View {
             let result = try await rpcClient.misc.updateLedger(sessionId: sessionId)
             if result.written {
                 dismiss()
-            } else if result.reason == "no_new_content" {
+            } else if !result.written {
                 showNoNewContentAlert = true
             }
         } catch {
