@@ -237,7 +237,7 @@ export interface AgentManager {
   prompt(params: AgentPromptParams): Promise<AgentPromptResult>;
   abort(sessionId: string): Promise<AgentAbortResult>;
   getState(sessionId: string): Promise<AgentGetStateResult>;
-  triggerLedgerUpdate(sessionId: string): Promise<{ written: boolean; title?: string; entryType?: string }>;
+  triggerLedgerUpdate(sessionId: string): Promise<{ written: boolean; title?: string; entryType?: string; reason?: string }>;
 }
 
 /**

@@ -133,6 +133,7 @@ struct MemoryUpdateLedgerResult: Decodable {
     let written: Bool
     let title: String?
     let entryType: String?
+    let reason: String?
 }
 
 // MARK: - Sandbox Types

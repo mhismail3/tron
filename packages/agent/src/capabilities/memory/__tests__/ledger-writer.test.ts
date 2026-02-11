@@ -327,6 +327,86 @@ describe('LedgerWriter', () => {
       expect(result.title).toBe('Test');
     });
 
+    it('should return no_new_content without spawning subagent when no meaningful events since last ledger', async () => {
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-1' as any, type: 'message.user', sequence: 1, payload: { content: 'Do X' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.assistant', sequence: 2, payload: { content: [{ type: 'text', text: 'Done' }] } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'memory.ledger', sequence: 3, payload: { title: 'Previous' } }),
+        // Only non-meaningful events after the boundary (e.g. subagent.spawned from the ledger write itself)
+        createMockEvent({ id: 'evt-4' as any, type: 'subagent.spawned', sequence: 4, payload: {} }),
+        createMockEvent({ id: 'evt-5' as any, type: 'subagent.completed', sequence: 5, payload: {} }),
+      ]);
+
+      const writer = new LedgerWriter(deps);
+      const result = await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      expect(result.written).toBe(false);
+      expect(result.reason).toBe('no_new_content');
+      expect(deps.spawnSubsession).not.toHaveBeenCalled();
+    });
+
+    it('should return no_new_content when no events exist after last ledger', async () => {
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-1' as any, type: 'message.user', sequence: 1, payload: { content: 'Do X' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'memory.ledger', sequence: 2, payload: { title: 'Previous' } }),
+      ]);
+
+      const writer = new LedgerWriter(deps);
+      const result = await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      expect(result.written).toBe(false);
+      expect(result.reason).toBe('no_new_content');
+      expect(deps.spawnSubsession).not.toHaveBeenCalled();
+    });
+
+    it('should only send current-cycle events to subagent, not events before memory.ledger boundary', async () => {
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-old' as any, type: 'message.user', sequence: 1, payload: { content: 'Old question about gold prices' } }),
+        createMockEvent({ id: 'evt-old-resp' as any, type: 'message.assistant', sequence: 2, payload: { content: [{ type: 'text', text: 'Gold is at $2000' }] } }),
+        createMockEvent({ id: 'evt-ledger' as any, type: 'memory.ledger', sequence: 3, payload: { title: 'Gold price research' } }),
+        createMockEvent({ id: 'evt-new' as any, type: 'message.user', sequence: 4, payload: { content: 'What about the year 3000' } }),
+        createMockEvent({ id: 'evt-new-resp' as any, type: 'message.assistant', sequence: 5, payload: { content: [{ type: 'text', text: 'The year 3000 will be amazing' }] } }),
+      ]);
+
+      const writer = new LedgerWriter(deps);
+      await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      const call = (deps.spawnSubsession as any).mock.calls[0][0];
+      // Should NOT contain old cycle content
+      expect(call.task).not.toContain('gold prices');
+      expect(call.task).not.toContain('Gold is at');
+      // Should contain new cycle content
+      expect(call.task).toContain('year 3000');
+      expect(call.task).toContain('will be amazing');
+    });
+
+    it('should proceed normally when meaningful events exist after last ledger', async () => {
+      deps.getEventsBySession = vi.fn().mockResolvedValue([
+        createMockEvent({ id: 'evt-1' as any, type: 'memory.ledger', sequence: 1, payload: { title: 'Previous' } }),
+        createMockEvent({ id: 'evt-2' as any, type: 'message.user', sequence: 2, payload: { content: 'New question' } }),
+        createMockEvent({ id: 'evt-3' as any, type: 'stream.turn_start', sequence: 3, payload: { turn: 2 } }),
+        createMockEvent({ id: 'evt-4' as any, type: 'message.assistant', sequence: 4, payload: { content: [{ type: 'text', text: 'Answer' }] } }),
+      ]);
+
+      const writer = new LedgerWriter(deps);
+      const result = await writer.writeLedgerEntry({
+        model: 'claude-sonnet-4-5-20250929',
+        workingDirectory: '/project',
+      });
+
+      expect(result.written).toBe(true);
+      expect(deps.spawnSubsession).toHaveBeenCalled();
+    });
+
     it('should handle empty output from subagent', async () => {
       deps.spawnSubsession = vi.fn().mockResolvedValue({
         sessionId: 'sub-1',

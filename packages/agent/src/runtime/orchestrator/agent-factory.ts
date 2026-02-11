@@ -342,12 +342,18 @@ function wireMemoryLedger(
   }));
 
   const triggerLedgerUpdate = async () => {
-    memCfg.emitMemoryUpdating({ sessionId });
     try {
+      // Pre-flight check: writeLedgerEntry returns immediately if no new content
       const result = await ledgerWriter.writeLedgerEntry({
         model,
         workingDirectory,
       });
+
+      // No new content — return early without emitting any events
+      if (!result.written && result.reason === 'no_new_content') {
+        return { written: false, reason: 'no_new_content' };
+      }
+
       if (result.written) {
         memCfg.emitMemoryUpdated({
           sessionId,
@@ -361,13 +367,10 @@ function wireMemoryLedger(
           const entry = formatLedgerAsMemory(result.payload);
           agent.addSessionMemory(entry);
         }
-      } else {
-        memCfg.emitMemoryUpdated({ sessionId, entryType: 'skipped' });
       }
-      return { written: result.written, title: result.title, entryType: result.entryType };
+      return { written: result.written, title: result.title, entryType: result.entryType, reason: result.reason };
     } catch (error) {
       logger.error('Manual ledger update failed', { sessionId, error: (error as Error).message });
-      memCfg.emitMemoryUpdated({ sessionId, entryType: 'skipped' });
       return { written: false };
     }
   };
@@ -405,7 +408,7 @@ export class AgentFactory {
     systemPrompt?: string,
     isSubagent?: boolean,
     toolDenials?: ToolDenialConfig,
-  ): Promise<{ agent: TronAgent; triggerLedgerUpdate?: () => Promise<{ written: boolean; title?: string; entryType?: string }> }> {
+  ): Promise<{ agent: TronAgent; triggerLedgerUpdate?: () => Promise<{ written: boolean; title?: string; entryType?: string; reason?: string }> }> {
     // Get auth for the model (handles Codex OAuth vs standard auth)
     const auth = await this.config.getAuthForProvider(model);
     const providerType = detectProviderFromModel(model);
@@ -635,7 +638,7 @@ export class AgentFactory {
     }
 
     // Register memory ledger hook for non-subagent sessions
-    let triggerLedgerUpdate: (() => Promise<{ written: boolean; title?: string; entryType?: string }>) | undefined;
+    let triggerLedgerUpdate: (() => Promise<{ written: boolean; title?: string; entryType?: string; reason?: string }>) | undefined;
     if (!isSubagent && this.config.memoryConfig) {
       triggerLedgerUpdate = wireMemoryLedger(
         agent, sessionId, model, workingDirectory,

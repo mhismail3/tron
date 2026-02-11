@@ -10,6 +10,31 @@ struct SystemEventView: View {
     var onSubagentResultTap: ((String) -> Void)?
 
     var body: some View {
+        // Memory updating/updated share a single view for smooth in-place animation
+        if event.isMemoryNotification {
+            memoryNotificationView
+        } else {
+            nonMemoryEventView
+        }
+    }
+
+    @ViewBuilder
+    private var memoryNotificationView: some View {
+        let isInProgress = event.memoryIsInProgress
+        let title = event.memoryTitle
+        let entryType = event.memoryEntryType
+        MemoryNotificationView(
+            isInProgress: isInProgress,
+            title: title,
+            entryType: entryType,
+            onTap: isInProgress ? nil : {
+                onMemoryUpdatedTap?(title, entryType)
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var nonMemoryEventView: some View {
         switch event {
         case .modelChange(let from, let to):
             ModelChangeNotificationView(from: from, to: to)
@@ -67,20 +92,11 @@ struct SystemEventView: View {
                 }
             )
 
-        case .memoryUpdating:
-            MemoryUpdatingNotificationView()
-
-        case .memoryUpdated(let title, let entryType):
-            MemoryUpdatedNotificationView(
-                title: title,
-                entryType: entryType,
-                onTap: {
-                    onMemoryUpdatedTap?(title, entryType)
-                }
-            )
-
         case .memoriesLoaded(let count):
             MemoriesLoadedNotificationView(count: count)
+
+        default:
+            EmptyView()
         }
     }
 }

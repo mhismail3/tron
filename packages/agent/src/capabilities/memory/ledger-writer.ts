@@ -80,12 +80,18 @@ export class LedgerWriter {
     try {
       // 1. Get session events to build context for Haiku
       const events = await this.deps.getEventsBySession();
+
+      // 2. Check if there's any meaningful content since the last ledger entry
+      if (!this.hasMeaningfulContent(events)) {
+        return { written: false, reason: 'no_new_content' };
+      }
+
       const context = this.buildEventContext(events);
 
-      // 2. Derive cycle range from persisted events (ground truth)
+      // 3. Derive cycle range from persisted events (ground truth)
       const cycleRange = this.computeCycleRange(events);
 
-      // 3. Spawn Haiku subagent
+      // 4. Spawn Haiku subagent
       const result = await this.deps.spawnSubsession({
         task: context,
         model: SUBAGENT_MODEL,
@@ -96,18 +102,18 @@ export class LedgerWriter {
         timeout: 30_000,
       });
 
-      // 4. Handle failure
+      // 5. Handle failure
       if (!result.success) {
         logger.warn('Ledger subagent failed', { error: result.error });
         return { written: false, reason: result.error ?? 'subagent failed' };
       }
 
-      // 5. Handle empty output
+      // 6. Handle empty output
       if (!result.output) {
         return { written: false, reason: 'empty output from subagent' };
       }
 
-      // 6. Parse response
+      // 7. Parse response
       let parsed: Record<string, unknown>;
       try {
         // Extract JSON from markdown code fences (ignoring any trailing content like emoji)
@@ -121,13 +127,13 @@ export class LedgerWriter {
         return { written: false, reason: 'Failed to parse subagent response as JSON' };
       }
 
-      // 7. Check if Haiku decided to skip
+      // 8. Check if Haiku decided to skip
       if (parsed.skip === true) {
         logger.debug('Ledger subagent decided to skip', { sessionId: this.deps.sessionId });
         return { written: false, reason: 'skipped' };
       }
 
-      // 8. Build payload and persist
+      // 9. Build payload and persist
       const payload: MemoryLedgerPayload = {
         eventRange: { firstEventId: cycleRange.firstEventId, lastEventId: cycleRange.lastEventId },
         turnRange: { firstTurn: cycleRange.firstTurn, lastTurn: cycleRange.lastTurn },
@@ -191,6 +197,30 @@ export class LedgerWriter {
    * By the time this runs (background Stop hook), all cycle events are already
    * persisted to SQLite.
    */
+  private static readonly MEANINGFUL_EVENT_TYPES = new Set([
+    'message.user', 'message.assistant', 'tool.call', 'tool.result',
+    'file.write', 'file.edit', 'worktree.commit',
+  ]);
+
+  private hasMeaningfulContent(events: SessionEvent[]): boolean {
+    // Find the most recent memory.ledger event
+    let boundaryIndex = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.type === 'memory.ledger') {
+        boundaryIndex = i;
+        break;
+      }
+    }
+
+    // Check events after the boundary for anything meaningful
+    for (let i = boundaryIndex + 1; i < events.length; i++) {
+      if (LedgerWriter.MEANINGFUL_EVENT_TYPES.has(events[i]!.type)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private computeCycleRange(events: SessionEvent[]): {
     firstEventId: string; lastEventId: string;
     firstTurn: number; lastTurn: number;
@@ -236,7 +266,17 @@ export class LedgerWriter {
   private buildEventContext(events: SessionEvent[]): string {
     const parts: string[] = ['Analyze these session events and create a ledger entry:\n'];
 
-    for (const event of events) {
+    // Only include events after the last memory.ledger boundary (current cycle)
+    let boundaryIndex = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.type === 'memory.ledger') {
+        boundaryIndex = i;
+        break;
+      }
+    }
+    const cycleEvents = events.slice(boundaryIndex + 1);
+
+    for (const event of cycleEvents) {
       const payload = (event as any).payload;
       switch (event.type) {
         case 'message.user':

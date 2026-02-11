@@ -91,9 +91,12 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
-    func testMemoryUpdatedNotificationCreation() {
-        let view = MemoryUpdatedNotificationView(title: "Test Memory", entryType: "core")
-        XCTAssertNotNil(view)
+    func testMemoryNotificationCreation() {
+        let inProgress = MemoryNotificationView(isInProgress: true)
+        XCTAssertNotNil(inProgress)
+
+        let completed = MemoryNotificationView(isInProgress: false, title: "Test Memory", entryType: "core")
+        XCTAssertNotNil(completed)
     }
 
     func testMemoriesLoadedNotificationCreation() {

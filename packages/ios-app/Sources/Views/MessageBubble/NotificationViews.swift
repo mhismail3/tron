@@ -449,51 +449,53 @@ struct TurnFailedNotificationView: View {
     }
 }
 
-// MARK: - Memory Updating Notification View
+// MARK: - Memory Notification View (unified in-progress → completed)
 
-struct MemoryUpdatingNotificationView: View {
-    var body: some View {
-        NotificationPill(tint: .purple, interactive: true) {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .tint(.purple)
-
-                Text("Retaining memory...")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.purple.opacity(0.9))
-            }
-        }
-    }
-}
-
-// MARK: - Memory Updated Notification View
-
-struct MemoryUpdatedNotificationView: View {
-    let title: String
-    let entryType: String
+struct MemoryNotificationView: View {
+    let isInProgress: Bool
+    var title: String = ""
+    var entryType: String = ""
     var onTap: (() -> Void)? = nil
 
-    var body: some View {
-        NotificationPill(tint: .purple, interactive: true, onTap: onTap) {
-            HStack(spacing: 8) {
-                Image(systemName: "brain.fill")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.purple)
+    private let iconSize: CGFloat = TronTypography.sizeBody2
 
-                Text("Memory updated")
+    var body: some View {
+        NotificationPill(tint: .purple, interactive: true, onTap: isInProgress ? nil : onTap) {
+            HStack(spacing: 8) {
+                ZStack {
+                    if isInProgress {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .tint(.purple)
+                            .transition(.blurReplace)
+                    } else {
+                        Image(systemName: "brain.fill")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.purple)
+                            .transition(.blurReplace)
+                    }
+                }
+                .frame(width: iconSize, height: iconSize)
+
+                Text(isInProgress ? "Retaining memory..." : "Memory updated")
                     .font(TronTypography.filePath)
                     .foregroundStyle(.purple.opacity(0.9))
+                    .contentTransition(.interpolate)
 
-                Text("\u{2022}")
-                    .font(TronTypography.badge)
-                    .foregroundStyle(.purple.opacity(0.5))
+                if !isInProgress && !title.isEmpty {
+                    Text("\u{2022}")
+                        .font(TronTypography.badge)
+                        .foregroundStyle(.purple.opacity(0.5))
+                        .transition(.blurReplace)
 
-                Text(title)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.purple.opacity(0.7))
-                    .lineLimit(1)
+                    Text(title)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.purple.opacity(0.7))
+                        .lineLimit(1)
+                        .transition(.blurReplace)
+                }
             }
+            .animation(.smooth(duration: 0.35), value: isInProgress)
         }
     }
 }

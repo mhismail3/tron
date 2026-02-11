@@ -85,6 +85,32 @@ enum SystemEvent: Equatable {
         }
     }
 
+    /// Whether this is a memory updating or memory updated event (for unified animation)
+    var isMemoryNotification: Bool {
+        switch self {
+        case .memoryUpdating, .memoryUpdated: return true
+        default: return false
+        }
+    }
+
+    /// Whether the memory notification is still in progress
+    var memoryIsInProgress: Bool {
+        if case .memoryUpdating = self { return true }
+        return false
+    }
+
+    /// Title from a memoryUpdated event (empty for in-progress)
+    var memoryTitle: String {
+        if case .memoryUpdated(let title, _) = self { return title }
+        return ""
+    }
+
+    /// Entry type from a memoryUpdated event (empty for in-progress)
+    var memoryEntryType: String {
+        if case .memoryUpdated(_, let entryType) = self { return entryType }
+        return ""
+    }
+
     private static func reasoningLabel(_ level: String) -> String {
         switch level.lowercased() {
         case "low": return "Low"

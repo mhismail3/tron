@@ -261,24 +261,27 @@ extension ChatViewModel {
         if pluginResult.entryType == "skipped" {
             if let inProgressId = memoryUpdatingInProgressMessageId,
                let index = MessageFinder.indexById(inProgressId, in: messages) {
-                messages.remove(at: index)
+                _ = withAnimation(.smooth(duration: 0.3)) {
+                    messages.remove(at: index)
+                }
             }
             memoryUpdatingInProgressMessageId = nil
             return
         }
 
-        let message = ChatMessage.memoryUpdated(
-            title: pluginResult.title,
-            entryType: pluginResult.entryType
-        )
-
-        // Replace in-progress pill if present (two-phase animation)
+        // Mutate content in-place to keep the same message identity → smooth animation
         if let inProgressId = memoryUpdatingInProgressMessageId,
            let index = MessageFinder.indexById(inProgressId, in: messages) {
-            messages[index] = message
+            withAnimation(.smooth(duration: 0.35)) {
+                messages[index].content = .memoryUpdated(title: pluginResult.title, entryType: pluginResult.entryType)
+            }
             memoryUpdatingInProgressMessageId = nil
         } else {
             // No in-progress pill (e.g. reconstruction) — just append
+            let message = ChatMessage.memoryUpdated(
+                title: pluginResult.title,
+                entryType: pluginResult.entryType
+            )
             messages.append(message)
         }
     }
