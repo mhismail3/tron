@@ -697,28 +697,17 @@ cmd_dev() {
 
     # Kill mode - just kill and exit
     if [ "$do_kill" = true ]; then
-        local beta_pid=$(get_beta_pid)
-        if [ -n "$beta_pid" ]; then
-            kill "$beta_pid" 2>/dev/null
-            print_success "Killed beta server (PID: $beta_pid)"
-        else
-            print_warning "No beta server running"
-        fi
+        beta_stop
         return 0
     fi
 
     # Restart mode - kill running server, then continue to build + start
     if [ "$do_restart" = true ]; then
-        local beta_pid=$(get_beta_pid)
-        if [ -n "$beta_pid" ]; then
-            kill "$beta_pid" 2>/dev/null
-            sleep 1
-            print_success "Killed beta server (PID: $beta_pid)"
-        fi
+        beta_stop 2>/dev/null || true
     fi
 
     # Check if beta port is already in use
-    if [ -n "$(get_beta_pid)" ]; then
+    if beta_is_running; then
         print_error "Beta server already running on port $BETA_WS_PORT"
         echo "  Kill it: tron dev -k"
         exit 1
@@ -749,17 +738,16 @@ cmd_dev() {
     # Ensure Playwright browser is available
     setup_browser
 
-    # Set beta environment
-    export TRON_WS_PORT=$BETA_WS_PORT
-    export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
-    export TRON_BUILD_TIER=beta
-    export TRON_EVENT_STORE_DB="$TRON_HOME/database/beta.db"
-    export TRON_REPO_ROOT="$PROJECT_DIR"
-    export LOG_LEVEL="${LOG_LEVEL:-trace}"
-    export NODE_ENV=development
-
     if [ "$do_tail" = true ]; then
-        # Foreground mode (tail logs)
+        # Foreground mode — exec replaces this process, so exports are needed
+        export TRON_WS_PORT=$BETA_WS_PORT
+        export TRON_HEALTH_PORT=$BETA_HEALTH_PORT
+        export TRON_BUILD_TIER=beta
+        export TRON_EVENT_STORE_DB="$TRON_HOME/database/beta.db"
+        export TRON_REPO_ROOT="$PROJECT_DIR"
+        export LOG_LEVEL="${LOG_LEVEL:-trace}"
+        export NODE_ENV=development
+
         echo ""
         echo -e "${CYAN}Starting Beta Server (foreground)${NC}"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -770,26 +758,8 @@ cmd_dev() {
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         exec bun packages/agent/dist/interface/server.js
     else
-        # Background mode (default)
-        echo ""
-        echo -e "${CYAN}Starting Beta Server (background)${NC}"
-
-        bun packages/agent/dist/interface/server.js >/dev/null 2>&1 &
-        local pid=$!
-
-        sleep 2
-
-        if kill -0 $pid 2>/dev/null; then
-            print_success "Beta server started (PID: $pid)"
-            echo "  WebSocket: ws://localhost:$BETA_WS_PORT/ws"
-            echo "  Health:    http://localhost:$BETA_HEALTH_PORT/health"
-            echo ""
-            echo "  Stop with: kill $pid"
-            echo "  Tail logs: tron dev -t (after killing current)"
-        else
-            print_error "Server failed to start"
-            exit 1
-        fi
+        # Background mode — delegate to beta_start()
+        beta_start
     fi
 }
 
@@ -1460,25 +1430,24 @@ cmd_help() {
     echo "Usage: tron <command> [options]"
     echo ""
     echo "Development:"
-    echo "  dev        Start beta server (-b build, -t tail, -k kill, -r restart)"
-    echo "  setup      First-time project setup"
+    echo "  dev             Beta dev workflow (-b build, -t foreground, -k kill, -r restart)"
+    echo "  setup           First-time project setup"
     echo ""
-    echo "Production:"
-    echo "  deploy     Build, test, and deploy (--prepare, --swap, --delay N)"
-    echo "  deploy beta  Build, test, and deploy to beta"
-    echo "  install    Initial production setup (launchd + CLI)"
-    echo "  rollback   Restore previous deployment (--yes, --delay N)"
-    echo "  uninstall  Remove service (preserves data)"
+    echo -e "Service:                              ${DIM}prod (default)    beta${NC}"
+    echo -e "  start [beta]    Start service       ${DIM}launchd           background process${NC}"
+    echo "  stop [beta]     Stop service"
+    echo "  restart [beta]  Restart service"
+    echo "  status          Show all services"
     echo ""
-    echo "Service:"
-    echo "  status       Show service status and health"
-    echo "  start [beta] Start service (prod or beta)"
-    echo "  stop [beta]  Stop service (prod or beta)"
-    echo "  restart [beta] Restart service (prod or beta)"
+    echo "Deployment:"
+    echo -e "  deploy [beta]   Build, test, deploy  ${DIM}(prod: --prepare, --swap, --delay N)${NC}"
+    echo "  install         Initial prod setup (launchd + CLI)"
+    echo "  rollback        Restore previous prod deployment (--yes, --delay N)"
+    echo "  uninstall       Remove prod service (preserves data)"
     echo ""
     echo "Logs:"
-    echo "  logs       Query database logs (use -h for options)"
-    echo "  errors     Show recent errors"
+    echo "  logs [beta]     Query database logs (use -h for options)"
+    echo "  errors [beta]   Show recent errors"
     echo ""
     echo "Dev workflows (use directly):"
     echo "  bun run build       Build all packages"
