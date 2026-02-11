@@ -257,11 +257,13 @@ struct AddedSkillsContainer: View {
 
     @State private var isExpanded = false
 
-    /// Estimated tokens for added skills (full SKILL.md content)
-    /// More substantial than skill references since full content is included
-    private var estimatedTokens: Int {
-        // Rough estimate: ~200 tokens per skill for full SKILL.md
-        skills.count * 200
+    private var totalTokens: Int {
+        let actual = skills.reduce(0) { $0 + ($1.tokens ?? 0) }
+        return actual > 0 ? actual : skills.count * 200
+    }
+
+    private var isEstimate: Bool {
+        !skills.contains { ($0.tokens ?? 0) > 0 }
     }
 
     var body: some View {
@@ -283,7 +285,7 @@ struct AddedSkillsContainer: View {
 
                 Spacer()
 
-                Text("~\(TokenFormatter.format(estimatedTokens))")
+                Text("\(isEstimate ? "~" : "")\(TokenFormatter.format(totalTokens))")
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                     .foregroundStyle(.tronTextSecondary)
 

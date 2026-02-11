@@ -20,6 +20,7 @@ interface TrackedSkill {
   eventId: string;
   source: SkillSource;
   addedVia: SkillAddMethod;
+  contentLength?: number;
 }
 
 /**
@@ -83,6 +84,17 @@ export class SkillTracker {
   }
 
   /**
+   * Set the content length for a tracked skill (used for token calculation).
+   * Called after skill content is loaded.
+   */
+  setContentLength(skillName: string, contentLength: number): void {
+    const skill = this.addedSkills.get(skillName);
+    if (skill) {
+      skill.contentLength = contentLength;
+    }
+  }
+
+  /**
    * Check if a skill is currently added to context
    */
   hasSkill(skillName: string): boolean {
@@ -98,6 +110,7 @@ export class SkillTracker {
       source: info.source,
       addedVia: info.addedVia,
       eventId: info.eventId,
+      tokens: info.contentLength ? Math.ceil(info.contentLength / 4) : 0,
     }));
   }
 

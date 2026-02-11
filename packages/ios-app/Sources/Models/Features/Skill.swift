@@ -106,6 +106,8 @@ struct AddedSkillInfo: Identifiable, Codable, Equatable {
     let addedVia: SkillAddMethod
     /// Event ID for removal tracking
     let eventId: String
+    /// Actual token count (calculated from content length on agent side)
+    let tokens: Int?
 
     var id: String { name }
 }

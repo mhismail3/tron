@@ -48,6 +48,7 @@ export function createContextAdapter(deps: AdapterDependencies): ContextManagerA
           source: s.source,
           addedVia: s.addedVia,
           eventId: s.eventId,
+          tokens: s.tokens,
         })),
         rules,
       };

@@ -76,7 +76,7 @@ describe('ContextAdapter', () => {
       const mockActiveSession = {
         skillTracker: {
           getAddedSkills: vi.fn().mockReturnValue([
-            { name: 'test-skill', source: 'project', addedVia: 'explicit', eventId: 'evt-1' },
+            { name: 'test-skill', source: 'project', addedVia: 'explicit', eventId: 'evt-1', tokens: 150 },
           ]),
         },
         rulesTracker: {
@@ -104,6 +104,7 @@ describe('ContextAdapter', () => {
         source: 'project',
         addedVia: 'explicit',
         eventId: 'evt-1',
+        tokens: 150,
       });
       expect(result.rules).toEqual({
         files: [{ path: '/path/to/CLAUDE.md', relativePath: 'CLAUDE.md', level: 'project', depth: 0 }],

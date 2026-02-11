@@ -229,6 +229,11 @@ The user has explicitly removed these skills and expects you to respond WITHOUT 
     });
     const loadedSkills = await options.skillLoader(Array.from(skillNames));
 
+    // Set content length on tracker for token calculation
+    for (const skill of loadedSkills) {
+      skillTracker.setContentLength(skill.name, skill.content.length);
+    }
+
     logger.info('[SKILL] skillLoader returned', {
       requestedCount: skillNames.size,
       loadedCount: loadedSkills.length,

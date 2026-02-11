@@ -136,6 +136,7 @@ export class ContextOps {
         source: s.source,
         addedVia: s.addedVia,
         eventId: s.eventId,
+        tokens: s.tokens,
       })),
     } as DetailedContextSnapshot & {
       addedSkills: typeof addedSkills;

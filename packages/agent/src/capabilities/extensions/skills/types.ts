@@ -270,4 +270,6 @@ export interface AddedSkillInfo {
   addedVia: SkillAddMethod;
   /** Event ID for removal tracking */
   eventId: string;
+  /** Actual token count (calculated from content length) */
+  tokens: number;
 }

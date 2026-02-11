@@ -46,6 +46,7 @@ function createMockContext(): SkillLoadContext {
       getRemovedSkillNames: vi.fn().mockReturnValue([]),
       getUsedSpellNames: vi.fn().mockReturnValue([]),
       addUsedSpell: vi.fn(),
+      setContentLength: vi.fn(),
     } as any,
     sessionContext: {
       appendEvent: vi.fn().mockResolvedValue({ id: 'evt_test' }),
@@ -382,6 +383,24 @@ describe('SkillLoader — subagent mode routing', () => {
     expect(denials!.tools).not.toContain('Read');
     expect(denials!.tools).not.toContain('Write');
     expect(denials!.tools).toContain('Bash');
+  });
+
+  it('calls setContentLength on skillTracker after loading', async () => {
+    const ctx = createMockContext();
+    ctx.skillTracker.getAddedSkills = vi.fn().mockReturnValue([
+      { name: 'skill-a' },
+      { name: 'skill-b' },
+    ]);
+
+    const skillLoader = makeSkillLoader([
+      { name: 'skill-a', content: 'short content', frontmatter: {} },
+      { name: 'skill-b', content: 'a'.repeat(1000), frontmatter: {} },
+    ]);
+
+    await loader.loadSkillContextForPrompt(ctx, makeOptions({ skillLoader }));
+
+    expect(ctx.skillTracker.setContentLength).toHaveBeenCalledWith('skill-a', 'short content'.length);
+    expect(ctx.skillTracker.setContentLength).toHaveBeenCalledWith('skill-b', 1000);
   });
 
   it('includes removed-skills instruction in skillContext when present', async () => {

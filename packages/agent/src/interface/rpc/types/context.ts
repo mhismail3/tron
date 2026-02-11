@@ -57,6 +57,8 @@ export interface RpcAddedSkillInfo {
   addedVia: 'mention' | 'explicit';
   /** Event ID for removal tracking */
   eventId: string;
+  /** Actual token count (calculated from content length) */
+  tokens: number;
 }
 
 /** Info about a loaded rules file */

@@ -199,9 +199,39 @@ describe('SkillTracker', () => {
 
       expect(skills).toHaveLength(2);
       expect(skills).toEqual(expect.arrayContaining([
-        { name: 'skill-a', source: 'global', addedVia: 'mention', eventId: 'event-1' },
-        { name: 'skill-b', source: 'project', addedVia: 'explicit', eventId: 'event-2' },
+        { name: 'skill-a', source: 'global', addedVia: 'mention', eventId: 'event-1', tokens: 0 },
+        { name: 'skill-b', source: 'project', addedVia: 'explicit', eventId: 'event-2', tokens: 0 },
       ]));
+    });
+  });
+
+  describe('setContentLength', () => {
+    it('sets content length and calculates tokens', () => {
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+      tracker.setContentLength('my-skill', 800);
+
+      const skills = tracker.getAddedSkills();
+      expect(skills[0].tokens).toBe(200); // ceil(800/4)
+    });
+
+    it('returns 0 tokens when content length not set', () => {
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+
+      const skills = tracker.getAddedSkills();
+      expect(skills[0].tokens).toBe(0);
+    });
+
+    it('rounds up token calculation', () => {
+      tracker.addSkill('my-skill', 'global', 'mention', 'event-1');
+      tracker.setContentLength('my-skill', 801);
+
+      const skills = tracker.getAddedSkills();
+      expect(skills[0].tokens).toBe(201); // ceil(801/4)
+    });
+
+    it('ignores setContentLength for non-existent skill', () => {
+      tracker.setContentLength('non-existent', 400);
+      expect(tracker.getAddedSkills()).toHaveLength(0);
     });
   });
 });
@@ -235,6 +265,7 @@ describe('SkillTracker.fromEvents', () => {
       source: 'global',
       addedVia: 'mention',
       eventId: 'event-1',
+      tokens: 0,
     });
   });
 
