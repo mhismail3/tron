@@ -30,6 +30,7 @@ export { CHARS_PER_TOKEN };
 const RULES_HEADER = '# Project Rules\n\n';
 const RULES_HEADER_LENGTH = RULES_HEADER.length;
 
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -274,3 +275,4 @@ export function estimateRulesTokens(rulesContent: string | undefined): number {
   const totalLength = rulesContent.length + RULES_HEADER_LENGTH;
   return Math.ceil(totalLength / CHARS_PER_TOKEN);
 }
+

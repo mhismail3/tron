@@ -20,6 +20,7 @@ final class SettingsState {
     var memoryAutoInject: Bool = false
     var memoryAutoInjectCount: Int = 5
     var maxConcurrentSessions: Int = 10
+    var rulesDiscoverStandaloneFiles: Bool = true
 
     // MARK: - Load State
 
@@ -52,6 +53,7 @@ final class SettingsState {
             memoryAutoInject = settings.memory.autoInject.enabled
             memoryAutoInjectCount = settings.memory.autoInject.count
             maxConcurrentSessions = settings.maxConcurrentSessions
+            rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
@@ -82,6 +84,7 @@ final class SettingsState {
         memoryAutoInject = false
         memoryAutoInjectCount = 5
         maxConcurrentSessions = 10
+        rulesDiscoverStandaloneFiles = true
         quickSessionWorkspace = AppConstants.defaultWorkspace
     }
 
@@ -97,7 +100,8 @@ final class SettingsState {
                 triggerTokenThreshold: 0.70,
                 defaultTurnFallback: 8
                 ),
-                memory: .init(ledger: .init(enabled: true))
+                memory: .init(ledger: .init(enabled: true)),
+                rules: .init(discoverStandaloneFiles: true)
             ),
             tools: .init(web: .init(
                 fetch: .init(timeoutMs: 30000),

@@ -83,6 +83,9 @@ export function createSettingsHandlers(): MethodRegistration[] {
           count: settings.context.memory.autoInject?.count ?? 5,
         },
       },
+      rules: {
+        discoverStandaloneFiles: settings.context.rules?.discoverStandaloneFiles ?? true,
+      },
       tools: {
         web: {
           fetch: { timeoutMs: settings.tools.web.fetch.timeoutMs },

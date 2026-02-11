@@ -134,6 +134,9 @@ describe('Settings Handlers', () => {
           ledger: { enabled: true },
           autoInject: { enabled: false, count: 5 },
         },
+        rules: {
+          discoverStandaloneFiles: true,
+        },
         tools: {
           web: {
             fetch: { timeoutMs: 30000 },
@@ -181,6 +184,9 @@ describe('Settings Handlers', () => {
         memory: {
           ledger: { enabled: true },
           autoInject: { enabled: false, count: 5 },
+        },
+        rules: {
+          discoverStandaloneFiles: true,
         },
         tools: {
           web: {

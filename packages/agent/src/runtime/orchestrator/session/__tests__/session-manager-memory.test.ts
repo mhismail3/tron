@@ -161,6 +161,7 @@ function createMockAgent() {
     addMessage: vi.fn(),
     run: vi.fn(),
     stop: vi.fn(),
+    registerHook: vi.fn(),
     getPendingBackgroundHookCount: vi.fn().mockReturnValue(0),
     getContextManager: vi.fn().mockReturnValue({
       setApiContextTokens: vi.fn(),

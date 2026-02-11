@@ -83,22 +83,21 @@ enum SystemEventHandlers {
     /// Transform rules.loaded event into a ChatMessage.
     ///
     /// Rules loaded events indicate when CLAUDE.md or other rules files were loaded.
+    /// Combines root-level files (totalFiles) with dynamic subfolder files (dynamicRulesCount).
     static func transformRulesLoaded(
         _ payload: [String: AnyCodable],
         timestamp: Date,
         logger: TronLogger = TronLogger.shared
     ) -> ChatMessage? {
-        guard let totalFiles = payload["totalFiles"]?.value as? Int else {
-            logger.warning("rules.loaded event missing totalFiles in payload", category: .events)
-            return nil
-        }
+        let totalFiles = payload["totalFiles"]?.value as? Int ?? 0
+        let dynamicCount = payload["dynamicRulesCount"]?.value as? Int ?? 0
+        let combinedCount = totalFiles + dynamicCount
 
-        // Only show notification if there are rules files
-        guard totalFiles > 0 else { return nil }
+        guard combinedCount > 0 else { return nil }
 
         return ChatMessage(
             role: .system,
-            content: .rulesLoaded(count: totalFiles),
+            content: .rulesLoaded(count: combinedCount),
             timestamp: timestamp
         )
     }

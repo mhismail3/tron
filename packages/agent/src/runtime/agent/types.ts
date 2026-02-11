@@ -89,6 +89,8 @@ export interface RunContext {
   todoContext?: string;
   /** Reasoning effort level for extended thinking models */
   reasoningLevel?: ReasoningLevel;
+  /** Dynamic rules from path-scoped .claude/rules/ files */
+  dynamicRulesContext?: string;
 }
 
 // =============================================================================

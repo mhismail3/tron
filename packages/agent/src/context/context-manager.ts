@@ -70,6 +70,8 @@ export class ContextManager {
   private snapshotBuilder: ContextSnapshotBuilder;
   /** Rules content from AGENTS.md / CLAUDE.md hierarchy */
   private rulesContent: string | undefined;
+  /** Dynamic rules content from rules/*.md files (path-scoped + global) */
+  private dynamicRulesContent: string | undefined;
   /** Memory content (workspace lessons + cross-project recall) */
   private memoryContent: string | undefined;
 
@@ -251,6 +253,21 @@ export class ContextManager {
    */
   getRulesContent(): string | undefined {
     return this.rulesContent;
+  }
+
+  /**
+   * Set dynamic rules content from rules/*.md files.
+   * This is the merged content from global + activated path-scoped rules.
+   */
+  setDynamicRulesContent(content: string | undefined): void {
+    this.dynamicRulesContent = content;
+  }
+
+  /**
+   * Get dynamic rules content from rules/*.md files.
+   */
+  getDynamicRulesContent(): string | undefined {
+    return this.dynamicRulesContent;
   }
 
   /**
@@ -530,7 +547,12 @@ export class ContextManager {
   }
 
   private estimateRulesTokens(): number {
-    return estimateRulesTokensUtil(this.rulesContent);
+    let tokens = estimateRulesTokensUtil(this.rulesContent);
+    if (this.dynamicRulesContent) {
+      // "# Active Rules\n\n" header (18 chars) added by provider
+      tokens += Math.ceil((this.dynamicRulesContent.length + 18) / 4);
+    }
+    return tokens;
   }
 
   private estimateMemoryTokens(): number {

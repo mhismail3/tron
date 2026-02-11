@@ -55,7 +55,7 @@ describe('ContextAdapter', () => {
   });
 
   describe('getDetailedContextSnapshot', () => {
-    it('should return detailed snapshot with skills and rules', () => {
+    it('should pass through detailed snapshot from context-ops', () => {
       const mockSnapshot = {
         currentTokens: 50000,
         contextLimit: 200000,
@@ -70,25 +70,16 @@ describe('ContextAdapter', () => {
         messages: [
           { index: 0, role: 'user', tokens: 100, summary: 'Hello', content: 'Hello' },
         ],
+        addedSkills: [
+          { name: 'test-skill', source: 'project', addedVia: 'explicit', eventId: 'evt-1', tokens: 150 },
+        ],
+        rules: {
+          files: [{ path: '/path/to/CLAUDE.md', relativePath: 'CLAUDE.md', level: 'project', depth: 0 }],
+          totalFiles: 1,
+          tokens: 500,
+        },
       };
       vi.mocked((mockOrchestrator as any).context.getDetailedContextSnapshot).mockReturnValue(mockSnapshot);
-
-      const mockActiveSession = {
-        skillTracker: {
-          getAddedSkills: vi.fn().mockReturnValue([
-            { name: 'test-skill', source: 'project', addedVia: 'explicit', eventId: 'evt-1', tokens: 150 },
-          ]),
-        },
-        rulesTracker: {
-          hasRules: vi.fn().mockReturnValue(true),
-          getRulesFiles: vi.fn().mockReturnValue([
-            { path: '/path/to/CLAUDE.md', relativePath: 'CLAUDE.md', level: 'project', depth: 0 },
-          ]),
-          getTotalFiles: vi.fn().mockReturnValue(1),
-          getMergedTokens: vi.fn().mockReturnValue(500),
-        },
-      };
-      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(mockActiveSession as any);
 
       const adapter = createContextAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -97,42 +88,7 @@ describe('ContextAdapter', () => {
       const result = adapter.getDetailedContextSnapshot('sess-123');
 
       expect((mockOrchestrator as any).context.getDetailedContextSnapshot).toHaveBeenCalledWith('sess-123');
-      expect(mockOrchestrator.getActiveSession).toHaveBeenCalledWith('sess-123');
-      expect(result.addedSkills).toHaveLength(1);
-      expect(result.addedSkills[0]).toEqual({
-        name: 'test-skill',
-        source: 'project',
-        addedVia: 'explicit',
-        eventId: 'evt-1',
-        tokens: 150,
-      });
-      expect(result.rules).toEqual({
-        files: [{ path: '/path/to/CLAUDE.md', relativePath: 'CLAUDE.md', level: 'project', depth: 0 }],
-        totalFiles: 1,
-        tokens: 500,
-      });
-    });
-
-    it('should return empty skills and no rules for inactive session', () => {
-      const mockSnapshot = {
-        currentTokens: 0,
-        contextLimit: 200000,
-        usagePercent: 0,
-        thresholdLevel: 'normal' as const,
-        breakdown: { systemPrompt: 0, tools: 0, rules: 0, messages: 0 },
-        messages: [],
-      };
-      vi.mocked((mockOrchestrator as any).context.getDetailedContextSnapshot).mockReturnValue(mockSnapshot);
-      vi.mocked(mockOrchestrator.getActiveSession!).mockReturnValue(undefined);
-
-      const adapter = createContextAdapter({
-        orchestrator: mockOrchestrator as EventStoreOrchestrator,
-      });
-
-      const result = adapter.getDetailedContextSnapshot('sess-123');
-
-      expect(result.addedSkills).toEqual([]);
-      expect(result.rules).toBeUndefined();
+      expect(result).toBe(mockSnapshot);
     });
   });
 

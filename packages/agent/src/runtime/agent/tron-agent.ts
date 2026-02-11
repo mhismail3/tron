@@ -331,6 +331,10 @@ export class TronAgent {
     this.contextManager.setRulesContent(rulesContent);
   }
 
+  setDynamicRulesContent(content: string | undefined): void {
+    this.contextManager.setDynamicRulesContent(content);
+  }
+
   setMemoryContent(memoryContent: string | undefined): void {
     this.contextManager.setMemoryContent(memoryContent);
   }
@@ -572,6 +576,7 @@ export class TronAgent {
       skillContext: this.currentRunContext.skillContext,
       subagentResultsContext: this.currentRunContext.subagentResults,
       todoContext: this.currentRunContext.todoContext,
+      dynamicRulesContext: this.currentRunContext.dynamicRulesContext,
     });
 
     // Clear subagent results after consuming (one-time injection)

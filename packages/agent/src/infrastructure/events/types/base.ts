@@ -46,6 +46,7 @@ export type EventType =
   | 'skill.removed'
   // Rules tracking
   | 'rules.loaded'
+  | 'rules.indexed'
   // Metadata
   | 'metadata.update'
   | 'metadata.tag'

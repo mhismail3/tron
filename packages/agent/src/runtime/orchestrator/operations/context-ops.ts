@@ -113,17 +113,35 @@ export class ContextOps {
     }
 
     // Include rules data from the session's rules tracker
-    if (active.rulesTracker.hasRules()) {
-      const rulesFiles = active.rulesTracker.getRulesFiles();
+    // Merge static (root CLAUDE.md) and dynamic (subfolder CLAUDE.md/AGENTS.md) rules
+    const rulesFiles = active.rulesTracker.getRulesFiles();
+    const rulesIndex = active.rulesTracker.getRulesIndex();
+
+    // Get ALL indexed rules (global + scoped, regardless of activation state)
+    // so the context audit sheet shows every discovered rule file
+    const indexedGlobal = rulesIndex?.getGlobalRules() ?? [];
+    const indexedScoped = rulesIndex?.getScopedRules() ?? [];
+
+    const allFiles = [
+      ...rulesFiles.map(f => ({
+        path: f.path,
+        relativePath: f.relativePath,
+        level: f.level,
+        depth: f.depth,
+      })),
+      ...[...indexedGlobal, ...indexedScoped].map(r => ({
+        path: r.path,
+        relativePath: r.relativePath,
+        level: 'directory' as const,
+        depth: 1,
+      })),
+    ];
+
+    if (allFiles.length > 0) {
       snapshot.rules = {
-        files: rulesFiles.map(f => ({
-          path: f.path,
-          relativePath: f.relativePath,
-          level: f.level,
-          depth: f.depth,
-        })),
-        totalFiles: rulesFiles.length,
-        tokens: active.rulesTracker.getMergedTokens(),
+        files: allFiles,
+        totalFiles: allFiles.length,
+        tokens: snapshot.breakdown.rules,
       };
     }
 
@@ -223,6 +241,9 @@ export class ContextOps {
 
     // Clear skill tracker (skills don't survive compaction)
     active.skillTracker.clear();
+
+    // Clear dynamic rules activation state (scoped rules re-activate as agent touches files)
+    active.rulesTracker.clearDynamicState();
 
     // Store compaction events in EventStore (linearized via SessionContext)
     const compactionReason = opts?.reason || 'manual';
@@ -327,6 +348,9 @@ export class ContextOps {
 
     // Clear skill tracker (skills don't survive context clear)
     active.skillTracker.clear();
+
+    // Clear dynamic rules activation state
+    active.rulesTracker.clearDynamicState();
 
     // Clear todo tracker and get incomplete tasks for backlogging
     const incompleteTodos = active.todoTracker.clear();

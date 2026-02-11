@@ -255,6 +255,8 @@ export interface Context {
   subagentResultsContext?: string;
   /** Todo context showing current task list (ephemeral, updated per-turn) */
   todoContext?: string;
+  /** Dynamic rules context from path-scoped .claude/rules/ files (changes as agent touches files) */
+  dynamicRulesContext?: string;
 }
 
 // Tool and ToolInputSchema are re-exported from ./tools.js

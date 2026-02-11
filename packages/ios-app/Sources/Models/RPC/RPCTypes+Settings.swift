@@ -8,6 +8,7 @@ struct ServerSettings: Decodable {
     let maxConcurrentSessions: Int
     let compaction: CompactionSettings
     let memory: MemorySettings
+    let rules: RulesSettings
     let tools: ToolSettings
 
     struct CompactionSettings: Decodable {
@@ -31,6 +32,10 @@ struct ServerSettings: Decodable {
             let enabled: Bool
             let count: Int
         }
+    }
+
+    struct RulesSettings: Decodable {
+        let discoverStandaloneFiles: Bool
     }
 
     struct ToolSettings: Decodable {
@@ -66,6 +71,7 @@ struct ServerSettingsUpdate: Encodable {
     struct ContextUpdate: Encodable {
         var compactor: CompactorUpdate?
         var memory: MemoryUpdate?
+        var rules: RulesUpdate?
 
         struct CompactorUpdate: Encodable {
             var preserveRecentCount: Int?
@@ -88,6 +94,10 @@ struct ServerSettingsUpdate: Encodable {
                 var enabled: Bool?
                 var count: Int?
             }
+        }
+
+        struct RulesUpdate: Encodable {
+            var discoverStandaloneFiles: Bool?
         }
     }
 

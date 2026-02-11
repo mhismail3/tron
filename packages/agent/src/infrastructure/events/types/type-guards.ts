@@ -13,7 +13,7 @@ import type { MessageDeletedEvent } from './message-ops.js';
 import type { ContextClearedEvent } from './context.js';
 import type { WorktreeAcquiredEvent, WorktreeCommitEvent, WorktreeReleasedEvent, WorktreeMergedEvent } from './worktree.js';
 import type { ErrorAgentEvent, ErrorToolEvent, ErrorProviderEvent } from './error.js';
-import type { RulesLoadedEvent } from './rules.js';
+import type { RulesLoadedEvent, RulesIndexedEvent } from './rules.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
 import type { TurnFailedEvent } from './turn.js';
@@ -92,6 +92,14 @@ export function isWorktreeMergedEvent(event: SessionEvent): event is WorktreeMer
 
 export function isRulesLoadedEvent(event: SessionEvent): event is RulesLoadedEvent {
   return event.type === 'rules.loaded';
+}
+
+export function isRulesIndexedEvent(event: SessionEvent): event is RulesIndexedEvent {
+  return event.type === 'rules.indexed';
+}
+
+export function isRulesEvent(event: SessionEvent): event is RulesLoadedEvent | RulesIndexedEvent {
+  return event.type === 'rules.loaded' || event.type === 'rules.indexed';
 }
 
 export function isContextClearedEvent(event: SessionEvent): event is ContextClearedEvent {

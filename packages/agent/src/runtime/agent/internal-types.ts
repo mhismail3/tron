@@ -237,6 +237,8 @@ export interface TurnOptions {
   subagentResultsContext?: string;
   /** Todo context showing current task list */
   todoContext?: string;
+  /** Dynamic rules from path-scoped .claude/rules/ files */
+  dynamicRulesContext?: string;
 }
 
 /**

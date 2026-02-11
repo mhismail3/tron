@@ -511,6 +511,13 @@ export class AnthropicProvider {
         });
       }
 
+      if (context.dynamicRulesContext) {
+        systemBlocks.push({
+          type: 'text',
+          text: `# Active Rules\n\n${context.dynamicRulesContext}`,
+        });
+      }
+
       if (context.skillContext) {
         systemBlocks.push({ type: 'text', text: context.skillContext });
       }
@@ -537,6 +544,7 @@ export class AnthropicProvider {
       const parts: string[] = [];
       if (context.systemPrompt) parts.push(context.systemPrompt);
       if (context.rulesContent) parts.push(`# Project Rules\n\n${context.rulesContent}`);
+      if (context.dynamicRulesContext) parts.push(`# Active Rules\n\n${context.dynamicRulesContext}`);
       if (context.memoryContent) parts.push(context.memoryContent);
       if (context.skillContext) parts.push(context.skillContext);
       if (context.subagentResultsContext) parts.push(context.subagentResultsContext);

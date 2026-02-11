@@ -74,6 +74,16 @@ export {
   type RulesTrackingEvent,
 } from './rules-tracker.js';
 
+export {
+  discoverRulesFiles,
+  type DiscoveredRulesFile,
+  type RulesDiscoveryConfig,
+} from './rules-discovery.js';
+
+export {
+  RulesIndex,
+} from './rules-index.js';
+
 // Token estimation utilities
 export {
   estimateBlockTokens,

@@ -189,6 +189,8 @@ export class AgentRunner {
 
       // Phase 4: Build run context, transform content, and execute agent
       const runContext = await this.buildRunContext(active, options);
+      // Update context manager with dynamic rules for accurate token breakdown
+      active.agent.setDynamicRulesContent(runContext.dynamicRulesContext);
       const llmContent = this.config.skillLoader.transformContentForLLM(messageContent);
       const runResult = await active.agent.run(llmContent, runContext);
 
@@ -265,6 +267,16 @@ export class AgentRunner {
       });
     }
 
+    // Dynamic path-scoped rules
+    const dynamicRulesContext = active.rulesTracker.buildDynamicRulesContent();
+    if (dynamicRulesContext) {
+      logger.info('[RULES] Including dynamic rules context', {
+        sessionId: active.sessionId,
+        dynamicRulesLength: dynamicRulesContext.length,
+        activatedCount: active.rulesTracker.getActivatedScopedRulesCount(),
+      });
+    }
+
     // Effective reasoning level: explicit option > sessionContext persisted value
     const reasoningLevel = options.reasoningLevel ?? active.sessionContext.getReasoningLevel();
 
@@ -273,6 +285,7 @@ export class AgentRunner {
       subagentResults: subagentResults ?? undefined,
       todoContext: todoContext ?? undefined,
       reasoningLevel: reasoningLevel as RunContext['reasoningLevel'],
+      dynamicRulesContext,
     };
   }
 

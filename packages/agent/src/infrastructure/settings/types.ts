@@ -310,11 +310,20 @@ export interface MemorySettings {
 }
 
 /**
+ * Rules discovery configuration
+ */
+export interface RulesSettings {
+  /** Discover standalone RULES.md files outside rules/ directories */
+  discoverStandaloneFiles: boolean;
+}
+
+/**
  * Context settings container
  */
 export interface ContextSettings {
   compactor: CompactorSettings;
   memory: MemorySettings;
+  rules: RulesSettings;
 }
 
 // =============================================================================

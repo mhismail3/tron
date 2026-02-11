@@ -150,6 +150,8 @@ export type {
   RulesFileInfo,
   RulesLoadedPayload,
   RulesLoadedEvent,
+  RulesIndexedPayload,
+  RulesIndexedEvent,
 } from './rules.js';
 
 // =============================================================================
@@ -237,6 +239,8 @@ export {
   isWorktreeReleasedEvent,
   isWorktreeMergedEvent,
   isRulesLoadedEvent,
+  isRulesIndexedEvent,
+  isRulesEvent,
   isContextClearedEvent,
   isConfigReasoningLevelEvent,
   isMessageDeletedEvent,

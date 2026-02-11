@@ -212,6 +212,9 @@ export const DEFAULT_SETTINGS: TronSettings = {
         enabled: true,
       },
     },
+    rules: {
+      discoverStandaloneFiles: true,
+    },
   },
 
   // Agent Runtime Configuration

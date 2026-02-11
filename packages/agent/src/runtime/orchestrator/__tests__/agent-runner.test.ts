@@ -33,6 +33,7 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
       messages: [],
       totalTokenUsage: { inputTokens: 100, outputTokens: 50 },
     } as RunResult),
+    setDynamicRulesContent: vi.fn(),
   };
 
   const mockSessionContext = {
@@ -64,12 +65,18 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
     buildSummaryString: vi.fn().mockReturnValue(''),
   };
 
+  const mockRulesTracker = {
+    buildDynamicRulesContent: vi.fn().mockReturnValue(undefined),
+    getActivatedScopedRulesCount: vi.fn().mockReturnValue(0),
+  };
+
   return {
     sessionId: 'sess_test123',
     agent: mockAgent as any,
     sessionContext: mockSessionContext as any,
     skillTracker: mockSkillTracker as any,
     todoTracker: mockTodoTracker as any,
+    rulesTracker: mockRulesTracker as any,
     workingDirectory: '/test/project',
     model: 'claude-sonnet-4-20250514',
     currentTurn: 0,

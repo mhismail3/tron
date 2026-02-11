@@ -22,6 +22,8 @@ import { createRulesTracker } from '@context/rules-tracker.js';
 import { createTodoTracker } from '@capabilities/todos/todo-tracker.js';
 import { createTrackerReconstructor } from './tracker-reconstructor.js';
 import { ContextLoader } from '@context/loader.js';
+import { discoverRulesFiles } from '@context/rules-discovery.js';
+import { RulesIndex } from '@context/rules-index.js';
 import { TronAgent } from '../../agent/tron-agent.js';
 import {
   type SessionId,
@@ -29,11 +31,14 @@ import {
   type EventType,
   type SessionEvent as TronSessionEvent,
   type RulesLoadedPayload,
+  type RulesIndexedPayload,
 } from '@infrastructure/events/types.js';
 import type { WorkingDirectory } from '@platform/session/working-directory.js';
 import { createSessionContext } from './session-context.js';
 import { buildWorktreeInfo } from '../operations/worktree-ops.js';
 import { detectProviderFromModel } from '@llm/providers/factory.js';
+import { extractFilePath } from '@capabilities/extensions/hooks/builtin/post-tool-use.js';
+import type { PostToolHookContext, HookResult } from '@capabilities/extensions/hooks/types.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import { INACTIVE_SESSION_TIMEOUT_MS } from '../../constants.js';
 import type {
@@ -148,14 +153,43 @@ export class SessionManager {
     // Load rules files for the session
     const rulesTracker = createRulesTracker();
     let rulesHeadEventId = result.rootEvent.id;
+    let dynamicRulesCount = 0;
+
+    // Discover scoped CLAUDE.md/AGENTS.md files first (need count for rules.loaded)
+    try {
+      const discoverStandaloneFiles = getSettings().context.rules?.discoverStandaloneFiles ?? true;
+      const rulesFiles = await discoverRulesFiles({
+        projectRoot: workingDir.path,
+        discoverStandaloneFiles,
+        excludeRootLevel: true,
+      });
+      if (rulesFiles.length > 0) {
+        const rulesIndex = new RulesIndex(rulesFiles);
+        rulesTracker.setRulesIndex(rulesIndex);
+        dynamicRulesCount = rulesFiles.length;
+
+        logger.info('Rules files indexed', {
+          sessionId,
+          total: rulesIndex.totalCount,
+          global: rulesIndex.globalCount,
+          scoped: rulesIndex.scopedCount,
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to index rules files', {
+        sessionId,
+        error: (error as Error).message,
+      });
+    }
+
     try {
       const contextLoader = new ContextLoader({
         projectRoot: workingDir.path,
       });
       const loadedContext = await contextLoader.load(workingDir.path);
 
-      // Emit rules.loaded event if any rules files found
-      if (loadedContext.files.length > 0) {
+      // Emit rules.loaded event if any rules files found (root or dynamic)
+      if (loadedContext.files.length > 0 || dynamicRulesCount > 0) {
         const rulesPayload: RulesLoadedPayload = {
           files: loadedContext.files.map(f => ({
             path: f.path,
@@ -165,7 +199,8 @@ export class SessionManager {
             sizeBytes: Buffer.byteLength(f.content, 'utf-8'),
           })),
           totalFiles: loadedContext.files.length,
-          mergedTokens: this.config.estimateTokens(loadedContext.merged),
+          mergedTokens: loadedContext.merged ? this.config.estimateTokens(loadedContext.merged) : 0,
+          dynamicRulesCount,
         };
 
         const rulesEvent = await this.eventStore.append({
@@ -175,20 +210,25 @@ export class SessionManager {
           parentId: result.rootEvent.id,
         });
 
-        rulesTracker.setRules(
-          rulesPayload.files,
-          rulesPayload.mergedTokens,
-          rulesEvent.id,
-          loadedContext.merged
-        );
+        if (loadedContext.files.length > 0) {
+          rulesTracker.setRules(
+            rulesPayload.files,
+            rulesPayload.mergedTokens,
+            rulesEvent.id,
+            loadedContext.merged
+          );
+        }
         rulesHeadEventId = rulesEvent.id;
 
         // Inject rules content into agent for context building
-        agent.setRulesContent(loadedContext.merged);
+        if (loadedContext.merged) {
+          agent.setRulesContent(loadedContext.merged);
+        }
 
         logger.info('Rules loaded', {
           sessionId,
           fileCount: loadedContext.files.length,
+          dynamicRulesCount,
           tokens: rulesPayload.mergedTokens,
         });
       }
@@ -203,6 +243,59 @@ export class SessionManager {
         retryable: structured.retryable,
       });
     }
+
+    // Emit rules.indexed event for the discovered dynamic rules (if any)
+    if (dynamicRulesCount > 0 && rulesTracker.getRulesIndex()) {
+      try {
+        const rulesIndex = rulesTracker.getRulesIndex()!;
+        const indexedPayload: RulesIndexedPayload = {
+          totalRules: rulesIndex.totalCount,
+          globalRules: rulesIndex.globalCount,
+          scopedRules: rulesIndex.scopedCount,
+          files: rulesIndex.getScopedRules().concat(rulesIndex.getGlobalRules()).map(f => ({
+            relativePath: f.relativePath,
+            isGlobal: f.isGlobal,
+            scopeDir: f.scopeDir,
+            sizeBytes: f.sizeBytes,
+          })),
+        };
+
+        const indexedEvent = await this.eventStore.append({
+          sessionId,
+          type: 'rules.indexed' as EventType,
+          payload: indexedPayload as unknown as Record<string, unknown>,
+          parentId: rulesHeadEventId,
+        });
+        rulesHeadEventId = indexedEvent.id;
+      } catch (error) {
+        logger.warn('Failed to emit rules.indexed event', {
+          sessionId,
+          error: (error as Error).message,
+        });
+      }
+    }
+
+    // Register rules-activator hook to feed file touches to the tracker
+    agent.registerHook({
+      name: 'builtin:rules-activator',
+      type: 'PostToolUse',
+      description: 'Activates path-scoped rules based on file touches',
+      priority: 40,
+      handler: async (ctx): Promise<HookResult> => {
+        const context = ctx as PostToolHookContext;
+        const filePath = extractFilePath(
+          context.toolName,
+          context.data as Record<string, unknown>,
+        );
+        if (filePath) {
+          const rel = path.relative(workingDir.path, filePath);
+          if (!rel.startsWith('..')) {
+            rulesTracker.touchPath(rel);
+          }
+        }
+        return { action: 'continue' };
+      },
+    });
 
     // Load and inject workspace memory (conditional on settings)
     // Emit via eventStore.append() (like rules.loaded) so it broadcasts over WebSocket
@@ -411,6 +504,53 @@ export class SessionManager {
         });
       }
     }
+
+    // Re-index scoped CLAUDE.md/AGENTS.md from disk (may have changed since last session)
+    try {
+      const discoverStandaloneFiles = getSettings().context.rules?.discoverStandaloneFiles ?? true;
+      const rulesFiles = await discoverRulesFiles({
+        projectRoot: workingDir.path,
+        discoverStandaloneFiles,
+        excludeRootLevel: true,
+      });
+      if (rulesFiles.length > 0) {
+        const rulesIndex = new RulesIndex(rulesFiles);
+        rulesTracker.setRulesIndex(rulesIndex);
+        logger.info('Rules files re-indexed for resumed session', {
+          sessionId,
+          total: rulesIndex.totalCount,
+          global: rulesIndex.globalCount,
+          scoped: rulesIndex.scopedCount,
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to re-index rules files on resume', {
+        sessionId,
+        error: (error as Error).message,
+      });
+    }
+
+    // Register rules-activator hook
+    agent.registerHook({
+      name: 'builtin:rules-activator',
+      type: 'PostToolUse',
+      description: 'Activates path-scoped rules based on file touches',
+      priority: 40,
+      handler: async (ctx): Promise<HookResult> => {
+        const context = ctx as PostToolHookContext;
+        const filePath = extractFilePath(
+          context.toolName,
+          context.data as Record<string, unknown>,
+        );
+        if (filePath) {
+          const rel = path.relative(workingDir.path, filePath);
+          if (!rel.startsWith('..')) {
+            rulesTracker.touchPath(rel);
+          }
+        }
+        return { action: 'continue' };
+      },
+    });
 
     // Create SessionContext for modular state management
     const sessionContext = createSessionContext({

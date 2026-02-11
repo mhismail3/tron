@@ -20,38 +20,9 @@ export function createContextAdapter(deps: AdapterDependencies): ContextManagerA
     },
 
     getDetailedContextSnapshot(sessionId) {
-      const snapshot = orchestrator.context.getDetailedContextSnapshot(sessionId);
-      const active = orchestrator.getActiveSession(sessionId);
-
-      // Add skill tracking info from session
-      const addedSkills = active?.skillTracker.getAddedSkills() ?? [];
-
-      // Add rules tracking info from session
-      const rulesTracker = active?.rulesTracker;
-      const rules = rulesTracker && rulesTracker.hasRules()
-        ? {
-            files: rulesTracker.getRulesFiles().map(f => ({
-              path: f.path,
-              relativePath: f.relativePath,
-              level: f.level,
-              depth: f.depth,
-            })),
-            totalFiles: rulesTracker.getTotalFiles(),
-            tokens: rulesTracker.getMergedTokens(),
-          }
-        : undefined;
-
-      return {
-        ...snapshot,
-        addedSkills: addedSkills.map(s => ({
-          name: s.name,
-          source: s.source,
-          addedVia: s.addedVia,
-          eventId: s.eventId,
-          tokens: s.tokens,
-        })),
-        rules,
-      };
+      // context-ops.getDetailedContextSnapshot() already assembles addedSkills,
+      // rules, and memory onto the snapshot at runtime
+      return orchestrator.context.getDetailedContextSnapshot(sessionId) as any;
     },
 
     shouldCompact(sessionId) {

@@ -147,7 +147,7 @@ export function createPostToolUseHook(
 /**
  * Extract file path from tool arguments
  */
-function extractFilePath(
+export function extractFilePath(
   toolName: string,
   args: Record<string, unknown>
 ): string | null {

@@ -25,6 +25,9 @@ export interface SettingsGetResult {
     ledger: { enabled: boolean };
     autoInject: { enabled: boolean; count: number };
   };
+  rules: {
+    discoverStandaloneFiles: boolean;
+  };
   tools: {
     web: {
       fetch: { timeoutMs: number };
@@ -49,6 +52,9 @@ export interface SettingsUpdateParams {
       memory?: {
         ledger?: { enabled?: boolean };
         autoInject?: { enabled?: boolean; count?: number };
+      };
+      rules?: {
+        discoverStandaloneFiles?: boolean;
       };
     };
     tools?: {

@@ -112,6 +112,11 @@ struct SettingsView: View {
                     updateServerSetting: updateServerSetting
                 )
 
+                RulesSettingsSection(
+                    discoverStandaloneFiles: Bindable(settingsState).rulesDiscoverStandaloneFiles,
+                    updateServerSetting: updateServerSetting
+                )
+
                 if #available(iOS 26.0, *) {
                     AppearanceSection()
                 }
