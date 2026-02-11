@@ -12,6 +12,7 @@ import * as path from 'path';
 // Direct imports to avoid circular dependencies through index.js
 import { createLogger, categorizeError, LogErrorCategory } from '@infrastructure/logging/index.js';
 import { SessionError } from '@core/utils/errors.js';
+import { MaxSessionsReachedError } from '@core/errors/rpc-errors.js';
 import type { Message as CoreMessage } from '@core/types/messages.js';
 import { EventStore } from '@infrastructure/events/event-store.js';
 import { WorktreeCoordinator } from '@platform/session/worktree-coordinator.js';
@@ -104,9 +105,9 @@ export class SessionManager {
   // ===========================================================================
 
   async createSession(options: CreateSessionOptions): Promise<SessionInfo> {
-    const maxSessions = this.config.maxConcurrentSessions ?? 10;
+    const maxSessions = getSettings().server.maxConcurrentSessions;
     if (this.config.sessionStore.size >= maxSessions) {
-      throw new Error(`Maximum concurrent sessions (${maxSessions}) reached`);
+      throw new MaxSessionsReachedError(maxSessions);
     }
 
     const model = options.model ?? this.config.defaultModel;

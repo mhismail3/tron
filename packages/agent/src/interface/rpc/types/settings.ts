@@ -12,6 +12,7 @@
 export interface SettingsGetResult {
   defaultModel: string;
   defaultWorkspace?: string;
+  maxConcurrentSessions: number;
   compaction: {
     preserveRecentTurns: number;
     forceAlways: boolean;
@@ -34,7 +35,7 @@ export interface SettingsGetResult {
 /** Params for settings.update */
 export interface SettingsUpdateParams {
   settings: {
-    server?: { defaultModel?: string; defaultWorkspace?: string };
+    server?: { defaultModel?: string; defaultWorkspace?: string; maxConcurrentSessions?: number };
     context?: {
       compactor?: {
         preserveRecentCount?: number;

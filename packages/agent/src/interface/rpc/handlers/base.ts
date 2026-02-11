@@ -27,6 +27,7 @@ export {
   InternalError,
   BrowserError,
   SkillError,
+  MaxSessionsReachedError,
 } from '@core/errors/rpc-errors.js';
 
 // =============================================================================

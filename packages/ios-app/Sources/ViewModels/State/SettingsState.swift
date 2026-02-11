@@ -18,6 +18,7 @@ final class SettingsState {
     var defaultTurnFallback: Int = 8
     var memoryAutoInject: Bool = false
     var memoryAutoInjectCount: Int = 5
+    var maxConcurrentSessions: Int = 10
 
     // MARK: - Load State
 
@@ -48,6 +49,7 @@ final class SettingsState {
             defaultTurnFallback = settings.compaction.defaultTurnFallback
             memoryAutoInject = settings.memory.autoInject.enabled
             memoryAutoInjectCount = settings.memory.autoInject.count
+            maxConcurrentSessions = settings.maxConcurrentSessions
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }
@@ -76,6 +78,7 @@ final class SettingsState {
         defaultTurnFallback = 8
         memoryAutoInject = false
         memoryAutoInjectCount = 5
+        maxConcurrentSessions = 10
         quickSessionWorkspace = AppConstants.defaultWorkspace
     }
 
@@ -83,7 +86,7 @@ final class SettingsState {
 
     func buildResetUpdate() -> ServerSettingsUpdate {
         ServerSettingsUpdate(
-            server: .init(defaultWorkspace: AppConstants.defaultWorkspace),
+            server: .init(defaultWorkspace: AppConstants.defaultWorkspace, maxConcurrentSessions: 10),
             context: .init(compactor: .init(
                 preserveRecentCount: 5,
                 forceAlways: false,

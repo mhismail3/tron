@@ -136,6 +136,22 @@ describe('Session Handlers', () => {
       expect(response.error?.message).toContain('workingDirectory');
     });
 
+    it('should return MAX_SESSIONS_REACHED when session limit hit', async () => {
+      const { MaxSessionsReachedError } = await import('@core/errors/rpc-errors.js');
+      mockCreateSession.mockRejectedValueOnce(new MaxSessionsReachedError(10));
+
+      const request: RpcRequest = {
+        id: 'max-1',
+        method: 'session.create',
+        params: { workingDirectory: '/projects/myapp' },
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('MAX_SESSIONS_REACHED');
+      expect(response.error?.message).toContain('Maximum concurrent sessions');
+    });
+
     it('should return NOT_AVAILABLE without sessionManager', async () => {
       const request: RpcRequest = {
         id: '1',

@@ -15,6 +15,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.defaultTurnFallback, 8)
         XCTAssertFalse(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
+        XCTAssertEqual(state.maxConcurrentSessions, 10)
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
         XCTAssertFalse(state.isLoadingModels)
@@ -33,6 +34,7 @@ final class SettingsStateTests: XCTestCase {
         state.defaultTurnFallback = 15
         state.memoryAutoInject = true
         state.memoryAutoInjectCount = 8
+        state.maxConcurrentSessions = 25
         state.quickSessionWorkspace = "/some/other/path"
 
         // Reset
@@ -45,6 +47,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.defaultTurnFallback, 8)
         XCTAssertFalse(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
+        XCTAssertEqual(state.maxConcurrentSessions, 10)
     }
 
     // MARK: - Build Update
@@ -66,6 +69,7 @@ final class SettingsStateTests: XCTestCase {
 
         // Verify all sections are populated
         XCTAssertNotNil(update.server)
+        XCTAssertEqual(update.server?.maxConcurrentSessions, 10)
         XCTAssertNotNil(update.context?.compactor)
         XCTAssertNotNil(update.tools?.web)
     }

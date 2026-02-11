@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DataSection: View {
     @Binding var confirmArchive: Bool
+    @Binding var maxConcurrentSessions: Int
+    let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
     let sessionCount: Int
     let hasActiveSessions: Bool
     let isArchivingAll: Bool
@@ -9,6 +11,23 @@ struct DataSection: View {
 
     var body: some View {
         Section {
+            HStack {
+                Label("Max Sessions", systemImage: "square.stack.3d.up")
+                    .font(TronTypography.subheadline)
+                Spacer()
+                Text("\(maxConcurrentSessions)")
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronEmerald)
+                    .monospacedDigit()
+                    .frame(minWidth: 20)
+                TronStepper(value: $maxConcurrentSessions, range: 1...50)
+            }
+            .onChange(of: maxConcurrentSessions) { _, newValue in
+                updateServerSetting {
+                    ServerSettingsUpdate(server: .init(maxConcurrentSessions: newValue))
+                }
+            }
+
             Toggle(isOn: $confirmArchive) {
                 Label("Confirm before archiving", systemImage: "questionmark.circle")
                     .font(TronTypography.subheadline)

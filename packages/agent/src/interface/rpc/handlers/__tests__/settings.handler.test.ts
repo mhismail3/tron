@@ -120,6 +120,7 @@ describe('Settings Handlers', () => {
       expect(response.result).toEqual({
         defaultModel: 'claude-sonnet-4-20250514',
         defaultWorkspace: '/Users/test/projects',
+        maxConcurrentSessions: 10,
         compaction: {
           preserveRecentTurns: 5,
           forceAlways: false,
@@ -166,6 +167,7 @@ describe('Settings Handlers', () => {
       expect(response.result).toEqual({
         defaultModel: 'claude-opus-4-6',
         defaultWorkspace: undefined,
+        maxConcurrentSessions: 10,
         compaction: {
           preserveRecentTurns: 3,
           forceAlways: true,
@@ -211,6 +213,16 @@ describe('Settings Handlers', () => {
 
       expect(result.memory.autoInject.enabled).toBe(true);
       expect(result.memory.autoInject.count).toBe(7);
+    });
+
+    it('should return custom maxConcurrentSessions', async () => {
+      mockGetSettings.mockReturnValue(createMockSettings({
+        server: { maxConcurrentSessions: 25 },
+      }));
+
+      const request: RpcRequest = { id: 'mcs-1', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      expect((response.result as any).maxConcurrentSessions).toBe(25);
     });
 
     it('should return web tool settings', async () => {
@@ -339,6 +351,26 @@ describe('Settings Handlers', () => {
 
       const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
       expect(savedArg.tools.web.fetch.timeoutMs).toBe(60000);
+    });
+
+    it('should update maxConcurrentSessions', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        server: { maxConcurrentSessions: 10 },
+      });
+
+      const request: RpcRequest = {
+        id: 'mcs-2',
+        method: 'settings.update',
+        params: {
+          settings: {
+            server: { maxConcurrentSessions: 20 },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.server.maxConcurrentSessions).toBe(20);
     });
 
     it('should update compaction trigger settings', async () => {

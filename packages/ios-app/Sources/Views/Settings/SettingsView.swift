@@ -117,6 +117,8 @@ struct SettingsView: View {
 
                 DataSection(
                     confirmArchive: $confirmArchive,
+                    maxConcurrentSessions: Bindable(settingsState).maxConcurrentSessions,
+                    updateServerSetting: updateServerSetting,
                     sessionCount: eventStoreManager.sessions.count,
                     hasActiveSessions: !eventStoreManager.sessions.isEmpty,
                     isArchivingAll: isArchivingAll,

@@ -19,6 +19,7 @@ export const RpcErrorCode = {
   // Session
   SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
   SESSION_NOT_ACTIVE: 'SESSION_NOT_ACTIVE',
+  MAX_SESSIONS_REACHED: 'MAX_SESSIONS_REACHED',
   // Filesystem
   FILE_NOT_FOUND: 'FILE_NOT_FOUND',
   FILE_ERROR: 'FILE_ERROR',
@@ -72,6 +73,16 @@ export class SessionNotFoundError extends RpcError {
 export class SessionNotActiveError extends RpcError {
   constructor(sessionId: string) {
     super(RpcErrorCode.SESSION_NOT_ACTIVE, `Session is not active: ${sessionId}`);
+  }
+}
+
+/**
+ * Max sessions reached error
+ */
+export class MaxSessionsReachedError extends RpcError {
+  constructor(maxSessions: number) {
+    super(RpcErrorCode.MAX_SESSIONS_REACHED,
+      `Maximum concurrent sessions (${maxSessions}) reached. Close an existing session or increase the limit in Settings.`);
   }
 }
 

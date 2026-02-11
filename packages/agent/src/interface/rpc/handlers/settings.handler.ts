@@ -65,6 +65,7 @@ export function createSettingsHandlers(): MethodRegistration[] {
     const result: SettingsGetResult = {
       defaultModel: settings.server.defaultModel,
       defaultWorkspace: settings.server.defaultWorkspace,
+      maxConcurrentSessions: settings.server.maxConcurrentSessions,
       compaction: {
         preserveRecentTurns: settings.context.compactor.preserveRecentCount,
         forceAlways: settings.context.compactor.forceAlways ?? false,

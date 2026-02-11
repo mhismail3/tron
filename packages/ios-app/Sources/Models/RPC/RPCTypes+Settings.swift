@@ -5,6 +5,7 @@ import Foundation
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
+    let maxConcurrentSessions: Int
     let compaction: CompactionSettings
     let memory: MemorySettings
     let tools: ToolSettings
@@ -54,6 +55,7 @@ struct ServerSettingsUpdate: Encodable {
     struct ServerUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
+        var maxConcurrentSessions: Int?
     }
 
     struct ContextUpdate: Encodable {
