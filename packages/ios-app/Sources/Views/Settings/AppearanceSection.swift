@@ -17,9 +17,9 @@ struct AppearanceSection: View {
             }
             .pickerStyle(.segmented)
 
-            thinkingIndicatorPickerRow
-
             fontPickerRow
+
+            thinkingIndicatorPickerRow
 
             axisSliders
         } header: {
