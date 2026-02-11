@@ -9,26 +9,23 @@ struct ThinkingIndicatorStyleTests {
 
     @Test func rawValues() {
         #expect(ThinkingIndicatorStyle.neuralSpark.rawValue == "neuralSpark")
-        #expect(ThinkingIndicatorStyle.fluidMercury.rawValue == "fluidMercury")
         #expect(ThinkingIndicatorStyle.phaseWaves.rawValue == "phaseWaves")
         #expect(ThinkingIndicatorStyle.orbitingParticles.rawValue == "orbitingParticles")
     }
 
     @Test func allCasesOrder() {
-        #expect(ThinkingIndicatorStyle.allCases == [.neuralSpark, .fluidMercury, .phaseWaves, .orbitingParticles])
-        #expect(ThinkingIndicatorStyle.allCases.count == 4)
+        #expect(ThinkingIndicatorStyle.allCases == [.neuralSpark, .phaseWaves, .orbitingParticles])
+        #expect(ThinkingIndicatorStyle.allCases.count == 3)
     }
 
     @Test func displayNames() {
         #expect(ThinkingIndicatorStyle.neuralSpark.displayName == "Neural Spark")
-        #expect(ThinkingIndicatorStyle.fluidMercury.displayName == "Fluid Mercury")
         #expect(ThinkingIndicatorStyle.phaseWaves.displayName == "Phase Waves")
         #expect(ThinkingIndicatorStyle.orbitingParticles.displayName == "Orbiting Particles")
     }
 
     @Test func icons() {
         #expect(ThinkingIndicatorStyle.neuralSpark.icon == "waveform.path")
-        #expect(ThinkingIndicatorStyle.fluidMercury.icon == "drop.fill")
         #expect(ThinkingIndicatorStyle.phaseWaves.icon == "waveform")
         #expect(ThinkingIndicatorStyle.orbitingParticles.icon == "smallcircle.filled.circle")
     }
@@ -56,9 +53,6 @@ struct ThinkingIndicatorStyleTests {
     @Test func persistsToUserDefaults() {
         let settings = AppearanceSettings.shared
         let originalStyle = settings.thinkingIndicatorStyle
-
-        settings.thinkingIndicatorStyle = .fluidMercury
-        #expect(UserDefaults.standard.string(forKey: "thinkingIndicatorStyle") == "fluidMercury")
 
         settings.thinkingIndicatorStyle = .phaseWaves
         #expect(UserDefaults.standard.string(forKey: "thinkingIndicatorStyle") == "phaseWaves")

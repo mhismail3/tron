@@ -9,8 +9,6 @@ struct AnimatedThinkingLine: View {
         switch appearanceSettings.thinkingIndicatorStyle {
         case .neuralSpark:
             NeuralSparkIndicator()
-        case .fluidMercury:
-            FluidMercuryIndicator()
         case .phaseWaves:
             PhaseWaveIndicator()
         case .orbitingParticles:

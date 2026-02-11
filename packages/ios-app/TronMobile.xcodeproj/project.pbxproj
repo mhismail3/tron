@@ -40,7 +40,6 @@
 		103540225CF7453441997AD4 /* ChatEventContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BF7B2CD7A1B5122CCE1331 /* ChatEventContext.swift */; };
 		1192E3F84F3AAE4245D0581E /* ChatViewModel+Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07B83EBDF1E49D2E340DC9E3 /* ChatViewModel+Events.swift */; };
 		11AFA5645D976D4D73E39CB1 /* ContextStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D0FBFA601E6C8A35615110 /* ContextStateTests.swift */; };
-		1207BFA8C4419790DB32A9B5 /* FluidMercuryIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A99400A14BCB9B9179C546FA /* FluidMercuryIndicator.swift */; };
 		120A1418F8CC6475A2558B3F /* ReasoningLevelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C350275A9F1CBDCF87D15E0 /* ReasoningLevelPicker.swift */; };
 		12E54E0F1CE0864B43C71B4C /* CameraPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8CD0FB1CEAF0AD3FCB8F7C /* CameraPicker.swift */; };
 		130A07335CF3919D7624336B /* MemorySectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435D78E0062E27E54F855430 /* MemorySectionViews.swift */; };
@@ -810,7 +809,6 @@
 		A78B5797B885EDB71E2BF6B4 /* ErrorHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorHandlers.swift; sourceTree = "<group>"; };
 		A86CDFE588E9C4A56E401D39 /* MultiLineTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiLineTextView.swift; sourceTree = "<group>"; };
 		A88530585935932D2156CF13 /* BrowserStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStateTests.swift; sourceTree = "<group>"; };
-		A99400A14BCB9B9179C546FA /* FluidMercuryIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluidMercuryIndicator.swift; sourceTree = "<group>"; };
 		AB4071D0B8C943D30748238A /* Date+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Extensions.swift"; sourceTree = "<group>"; };
 		ABD345A78C7D80B1406300BF /* ThinkingDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingDetailSheet.swift; sourceTree = "<group>"; };
 		ACB7C2F9DF7FD3FAC967923B /* BrowserClosedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserClosedPlugin.swift; sourceTree = "<group>"; };
@@ -1173,7 +1171,6 @@
 		2480FF728F118AA0739D2730 /* Indicators */ = {
 			isa = PBXGroup;
 			children = (
-				A99400A14BCB9B9179C546FA /* FluidMercuryIndicator.swift */,
 				C1AA2B192A0A4BFDA833548B /* NeuralSparkIndicator.swift */,
 				0ECE8FC4D90D15B273B17FD8 /* OrbitingParticleIndicator.swift */,
 				0C744F44F66B2B74CD5513B7 /* PhaseWaveIndicator.swift */,
@@ -2589,7 +2586,6 @@
 				2DDA522D924AEFF85A95D895 /* FilesystemClient.swift in Sources */,
 				F4F12AF33CD2A244FA5EAB8E /* FloatingBrowserView.swift in Sources */,
 				3DCA57E6CB7A8340CEFA123B /* FloatingVoiceNotesButton.swift in Sources */,
-				1207BFA8C4419790DB32A9B5 /* FluidMercuryIndicator.swift in Sources */,
 				940DB8344C725AB4A208846A /* FolderNameValidator.swift in Sources */,
 				8833F5D26556DFA720E9A7E7 /* FontFamily.swift in Sources */,
 				946C51267F3836E6BB6B7115 /* FontSettings.swift in Sources */,

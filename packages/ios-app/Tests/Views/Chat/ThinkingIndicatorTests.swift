@@ -18,17 +18,6 @@ final class AnimatedThinkingLineTests: XCTestCase {
         settings.thinkingIndicatorStyle = originalStyle
     }
 
-    func testInstantiationFluidMercury() {
-        let settings = AppearanceSettings.shared
-        let originalStyle = settings.thinkingIndicatorStyle
-        settings.thinkingIndicatorStyle = .fluidMercury
-
-        let view = AnimatedThinkingLine()
-        XCTAssertNotNil(view)
-
-        settings.thinkingIndicatorStyle = originalStyle
-    }
-
     func testInstantiationPhaseWaves() {
         let settings = AppearanceSettings.shared
         let originalStyle = settings.thinkingIndicatorStyle
@@ -55,11 +44,6 @@ final class AnimatedThinkingLineTests: XCTestCase {
 
     func testNeuralSparkIndicatorInstantiates() {
         let view = NeuralSparkIndicator()
-        XCTAssertNotNil(view)
-    }
-
-    func testFluidMercuryIndicatorInstantiates() {
-        let view = FluidMercuryIndicator()
         XCTAssertNotNil(view)
     }
 
