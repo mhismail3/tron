@@ -137,11 +137,13 @@ struct MemoryDetailSheet: View {
     // MARK: - Raw Payload
 
     private func rawPayloadSection(_ payload: [String: AnyCodable]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            // Section header (outside the card)
             Text("Ledger Entry")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
 
+            // Card content
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(prettyPrintPayload(payload))
                     .font(TronTypography.mono(size: 11))
@@ -151,11 +153,7 @@ struct MemoryDetailSheet: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.purple.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
+            .sectionFill(.purple)
         }
     }
 
