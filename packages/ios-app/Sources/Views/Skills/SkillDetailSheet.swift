@@ -225,12 +225,11 @@ struct SkillDetailSheet: View {
                     Spacer()
                 }
 
-                // Markdown content
-                Text(TextContentView.markdownAttributedString(from: metadata.content))
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(tint.body)
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
+                // Markdown content (block-level rendering)
+                let blocks = MarkdownBlockParser.parse(metadata.content)
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    MarkdownBlockView(block: block, textColor: tint.body)
+                }
             }
             .padding(14)
             .sectionFill(accentColor)

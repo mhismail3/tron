@@ -96,11 +96,14 @@ struct NotifyAppDetailSheet: View {
                 Spacer()
             }
 
-            // Markdown content
-            Text(TextContentView.markdownAttributedString(from: content))
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .regular))
-                .foregroundStyle(.tronTextSecondary)
-                .textSelection(.enabled)
+            // Markdown content (block-level rendering)
+            VStack(alignment: .leading, spacing: 8) {
+                let blocks = MarkdownBlockParser.parse(content)
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    MarkdownBlockView(block: block, textColor: .tronTextSecondary)
+                }
+            }
+            .textSelection(.enabled)
         }
     }
 
@@ -160,10 +163,13 @@ struct NotifyAppDetailSheetFallback: View {
                     // Sheet content (markdown)
                     if let sheetContent = data.sheetContent, !sheetContent.isEmpty {
                         Divider()
-                        Text(TextContentView.markdownAttributedString(from: sheetContent))
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                            .foregroundStyle(.tronTextSecondary)
-                            .textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 8) {
+                            let blocks = MarkdownBlockParser.parse(sheetContent)
+                            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                                MarkdownBlockView(block: block, textColor: .tronTextSecondary)
+                            }
+                        }
+                        .textSelection(.enabled)
                     }
 
                     // Delivery status

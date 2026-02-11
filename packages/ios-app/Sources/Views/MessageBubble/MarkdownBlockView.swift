@@ -45,6 +45,8 @@ func inlineMarkdown(from content: String, size: CGFloat = TronTypography.sizeBod
 
 struct MarkdownBlockView: View {
     let block: MarkdownBlock
+    var textColor: Color = .assistantMessageText
+    var codeBlockBackground: Color = .tronSurfaceElevated
     @Environment(\.textSelectionDisabled) private var textSelectionDisabled
 
     var body: some View {
@@ -74,7 +76,7 @@ struct MarkdownBlockView: View {
     private func headerView(level: Int, content: String) -> some View {
         let (size, weight, topPadding) = headerStyle(for: level)
         Text(inlineMarkdown(from: content, size: size, weight: weight))
-            .foregroundStyle(.assistantMessageText)
+            .foregroundStyle(textColor)
             .selectableText(!textSelectionDisabled)
             .lineSpacing(2)
             .padding(.top, topPadding)
@@ -95,7 +97,7 @@ struct MarkdownBlockView: View {
     @ViewBuilder
     private func paragraphView(content: String) -> some View {
         Text(inlineMarkdown(from: content))
-            .foregroundStyle(.assistantMessageText)
+            .foregroundStyle(textColor)
             .selectableText(!textSelectionDisabled)
             .lineSpacing(4)
     }
@@ -115,15 +117,15 @@ struct MarkdownBlockView: View {
             }
 
             Text(code)
-                .font(TronTypography.codeBlock)
-                .foregroundStyle(.assistantMessageText)
+                .font(TronTypography.code(size: TronTypography.sizeBody3))
+                .foregroundStyle(textColor)
                 .selectableText(!textSelectionDisabled)
                 .lineSpacing(3)
                 .padding(.horizontal, 12)
                 .padding(.vertical, language != nil ? 8 : 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.tronSurfaceElevated)
+        .background(codeBlockBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
@@ -155,7 +157,7 @@ struct MarkdownBlockView: View {
                         .font(Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular)))
                         .foregroundStyle(.tronTextSecondary)
                     Text(inlineMarkdown(from: item))
-                        .foregroundStyle(.assistantMessageText)
+                        .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)
                         .lineSpacing(4)
                 }
@@ -176,7 +178,7 @@ struct MarkdownBlockView: View {
                         .foregroundStyle(.tronTextSecondary)
                         .frame(minWidth: 20, alignment: .trailing)
                     Text(inlineMarkdown(from: item))
-                        .foregroundStyle(.assistantMessageText)
+                        .foregroundStyle(textColor)
                         .selectableText(!textSelectionDisabled)
                         .lineSpacing(4)
                 }

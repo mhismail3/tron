@@ -10,13 +10,16 @@ struct ThinkingDetailSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(TextContentView.markdownAttributedString(from: content))
-                    .font(TronTypography.messageBody)
-                    .foregroundStyle(.tronTextPrimary)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 24)
+                VStack(alignment: .leading, spacing: 8) {
+                    let blocks = MarkdownBlockParser.parse(content)
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                        MarkdownBlockView(block: block, textColor: .tronTextPrimary)
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 24)
             }
             .scrollBounceBehavior(.basedOnSize)
             .navigationBarTitleDisplayMode(.inline)
@@ -43,13 +46,16 @@ struct ThinkingDetailSheetFallback: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(TextContentView.markdownAttributedString(from: content))
-                    .font(TronTypography.messageBody)
-                    .foregroundStyle(.tronTextPrimary)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    .padding(.bottom, 24)
+                VStack(alignment: .leading, spacing: 8) {
+                    let blocks = MarkdownBlockParser.parse(content)
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                        MarkdownBlockView(block: block, textColor: .tronTextPrimary)
+                    }
+                }
+                .textSelection(.enabled)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 24)
             }
             .background(Color.tronBackground)
             .navigationTitle("Thinking")
