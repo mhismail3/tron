@@ -100,21 +100,19 @@ struct SkillDetailSheet: View {
     }
 
     private func contentView(_ metadata: SkillMetadata) -> some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 16) {
-                // Description section
-                descriptionSection(metadata)
-                    .padding(.horizontal)
-
-                // Content section
-                contentSection(metadata)
-                    .padding(.horizontal)
-
-                // Additional files section (always shown)
-                additionalFilesSection(metadata)
-                    .padding(.horizontal)
+        GeometryReader { geometry in
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 16) {
+                    descriptionSection(metadata)
+                        .padding(.horizontal)
+                    contentSection(metadata)
+                        .padding(.horizontal)
+                    additionalFilesSection(metadata)
+                        .padding(.horizontal)
+                }
+                .padding(.vertical)
+                .frame(width: geometry.size.width)
             }
-            .padding(.vertical)
         }
     }
 
