@@ -65,6 +65,17 @@ struct ChatView: View {
     var body: some View {
         // Main content
         messagesScrollView
+            .overlay {
+                if viewModel.inputBarState.isMentionPopupVisible {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.tronStandard) {
+                                viewModel.inputBarState.isMentionPopupVisible = false
+                            }
+                        }
+                }
+            }
             .environment(\.textSelectionDisabled, isDisappearing)
             .background(
                 NavigationWillDisappearObserver {

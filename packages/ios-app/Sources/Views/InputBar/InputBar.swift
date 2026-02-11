@@ -230,6 +230,20 @@ struct InputBar: View {
             detectSkillMention(in: newText)
             detectSpellMention(in: newText)
         }
+        // Sync mention popup visibility to shared state
+        .onChange(of: showSkillMentionPopup) { _, _ in
+            state.isMentionPopupVisible = showSkillMentionPopup || showSpellMentionPopup
+        }
+        .onChange(of: showSpellMentionPopup) { _, _ in
+            state.isMentionPopupVisible = showSkillMentionPopup || showSpellMentionPopup
+        }
+        // External dismiss (tap outside)
+        .onChange(of: state.isMentionPopupVisible) { _, visible in
+            if !visible {
+                if showSkillMentionPopup { dismissSkillMentionPopup() }
+                if showSpellMentionPopup { dismissSpellMentionPopup() }
+            }
+        }
         // Sheets
         .sheet(isPresented: $showCamera) {
             CameraCaptureSheet { capturedImage in

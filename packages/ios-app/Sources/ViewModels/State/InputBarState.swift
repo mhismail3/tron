@@ -17,6 +17,9 @@ final class InputBarState {
     var selectedSkills: [Skill] = []
     var selectedSpells: [Skill] = []
 
+    // MARK: - Mention Popups
+    var isMentionPopupVisible: Bool = false
+
     // MARK: - Recording
     var reasoningLevel: String = "medium"
 
