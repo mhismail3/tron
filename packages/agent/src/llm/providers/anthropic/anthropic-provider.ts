@@ -26,6 +26,7 @@ import type { AnthropicConfig, StreamOptions, SystemPromptBlock, AnthropicProvid
 import { CLAUDE_MODELS } from './types.js';
 import { convertMessages, convertTools, convertResponse } from './message-converter.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '@runtime/constants.js';
+import { composeContextParts } from '../base/context-composition.js';
 
 const logger = createLogger('anthropic');
 
@@ -485,53 +486,13 @@ export class AnthropicProvider {
       hasMemoryContent: !!context.memoryContent,
     });
 
+    const parts = composeContextParts(context);
+
     if (this.isOAuth) {
-      const systemBlocks: SystemPromptBlock[] = [];
-
-      systemBlocks.push({
-        type: 'text',
-        text: this.providerSettings.api.systemPromptPrefix,
-      });
-
-      if (context.systemPrompt) {
-        systemBlocks.push({ type: 'text', text: context.systemPrompt });
-      }
-
-      if (context.rulesContent) {
-        systemBlocks.push({
-          type: 'text',
-          text: `# Project Rules\n\n${context.rulesContent}`,
-        });
-      }
-
-      if (context.memoryContent) {
-        systemBlocks.push({
-          type: 'text',
-          text: context.memoryContent,
-        });
-      }
-
-      if (context.dynamicRulesContext) {
-        systemBlocks.push({
-          type: 'text',
-          text: `# Active Rules\n\n${context.dynamicRulesContext}`,
-        });
-      }
-
-      if (context.skillContext) {
-        systemBlocks.push({ type: 'text', text: context.skillContext });
-      }
-
-      if (context.subagentResultsContext) {
-        systemBlocks.push({ type: 'text', text: context.subagentResultsContext });
-      }
-
-      if (context.todoContext) {
-        systemBlocks.push({
-          type: 'text',
-          text: `<current-todos>\n${context.todoContext}\n</current-todos>`,
-        });
-      }
+      const systemBlocks: SystemPromptBlock[] = [
+        { type: 'text', text: this.providerSettings.api.systemPromptPrefix },
+        ...parts.map(text => ({ type: 'text' as const, text })),
+      ];
 
       // Add cache control to last block
       const lastBlock = systemBlocks[systemBlocks.length - 1];
@@ -541,14 +502,6 @@ export class AnthropicProvider {
 
       return systemBlocks;
     } else {
-      const parts: string[] = [];
-      if (context.systemPrompt) parts.push(context.systemPrompt);
-      if (context.rulesContent) parts.push(`# Project Rules\n\n${context.rulesContent}`);
-      if (context.dynamicRulesContext) parts.push(`# Active Rules\n\n${context.dynamicRulesContext}`);
-      if (context.memoryContent) parts.push(context.memoryContent);
-      if (context.skillContext) parts.push(context.skillContext);
-      if (context.subagentResultsContext) parts.push(context.subagentResultsContext);
-      if (context.todoContext) parts.push(`<current-todos>\n${context.todoContext}\n</current-todos>`);
       return parts.length > 0 ? parts.join('\n\n') : undefined;
     }
   }

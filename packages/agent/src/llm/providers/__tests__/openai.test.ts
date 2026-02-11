@@ -720,4 +720,131 @@ describe('OpenAI Provider', () => {
       expect(result.content).toBeDefined();
     });
   });
+
+  describe('Context Composition', () => {
+    it('should inject developer message with all context fields', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+        systemPrompt: 'You are Tron.',
+        rulesContent: 'Always use TypeScript.',
+        memoryContent: '# Memory\n\nLesson 1',
+        dynamicRulesContext: 'Use snake_case.',
+        skillContext: '<skill>commit</skill>',
+        subagentResultsContext: 'Sub-agent result: tests pass',
+        taskContext: '1 task in progress',
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      // Find the developer message in input
+      const developerMsg = requestBody.input.find(
+        (item: any) => item.type === 'message' && item.role === 'developer'
+      );
+      expect(developerMsg).toBeDefined();
+
+      const text = developerMsg.content[0].text;
+      expect(text).toContain('You are Tron.');
+      expect(text).toContain('# Project Rules');
+      expect(text).toContain('Always use TypeScript.');
+      expect(text).toContain('# Memory');
+      expect(text).toContain('# Active Rules');
+      expect(text).toContain('Use snake_case.');
+      expect(text).toContain('<skill>commit</skill>');
+      expect(text).toContain('Sub-agent result: tests pass');
+      expect(text).toContain('<task-context>');
+      expect(text).toContain('1 task in progress');
+    });
+
+    it('should not inject developer message when no context fields present', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      const developerMsg = requestBody.input.find(
+        (item: any) => item.type === 'message' && item.role === 'developer'
+      );
+      expect(developerMsg).toBeUndefined();
+    });
+
+    it('should place developer message before tool clarification', async () => {
+      const provider = new OpenAIProvider({
+        model: 'gpt-5.2-codex',
+        auth: createMockAuth(),
+        retry: false,
+      });
+
+      const mockStreamData = [
+        'data: {"type":"response.completed","response":{"id":"resp-123","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}\n\n',
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: createMockStream(mockStreamData),
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Read the file' }],
+        systemPrompt: 'You are Tron.',
+        tools: [{
+          name: 'read',
+          description: 'Read a file',
+          parameters: { type: 'object' as const, properties: { path: { type: 'string' as const } }, required: ['path'] },
+        }],
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      // Developer message should be first
+      expect(requestBody.input[0].role).toBe('developer');
+      // Tool clarification user message should follow
+      expect(requestBody.input[1].role).toBe('user');
+    });
+  });
 });

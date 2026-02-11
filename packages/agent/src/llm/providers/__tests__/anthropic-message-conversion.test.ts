@@ -453,13 +453,13 @@ describe('Anthropic Message Conversion', () => {
       expect(context.subagentResultsContext).toContain('Subagent Result');
     });
 
-    it('should accept todo context', () => {
+    it('should accept task context', () => {
       const context = {
         messages: [{ role: 'user' as const, content: 'Hello' }],
-        todoContext: '- [x] Task 1\n- [ ] Task 2',
+        taskContext: 'Active: 1 in progress, 2 pending',
       };
 
-      expect(context.todoContext).toContain('Task 1');
+      expect(context.taskContext).toContain('in progress');
     });
   });
 

@@ -901,6 +901,167 @@ describe('Google Gemini Provider', () => {
   });
 
   // ===========================================================================
+  // Context Composition Tests
+  // ===========================================================================
+
+  describe('Context Composition', () => {
+    it('should compose all context fields into systemInstruction parts (API key)', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-2.5-pro',
+      });
+
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+        systemPrompt: 'You are Tron.',
+        rulesContent: 'Always use TypeScript.',
+        memoryContent: '# Memory\n\nLesson 1',
+        dynamicRulesContext: 'Use snake_case.',
+        skillContext: '<skill>commit</skill>',
+        subagentResultsContext: 'Sub-agent: tests pass',
+        taskContext: '1 task in progress',
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      expect(requestBody.systemInstruction).toBeDefined();
+      const parts = requestBody.systemInstruction.parts;
+      expect(parts.length).toBe(7);
+
+      // Verify order and content
+      expect(parts[0].text).toBe('You are Tron.');
+      expect(parts[1].text).toContain('# Project Rules');
+      expect(parts[1].text).toContain('Always use TypeScript.');
+      expect(parts[2].text).toContain('# Memory');
+      expect(parts[3].text).toContain('# Active Rules');
+      expect(parts[4].text).toContain('<skill>commit</skill>');
+      expect(parts[5].text).toContain('Sub-agent: tests pass');
+      expect(parts[6].text).toContain('<task-context>');
+    });
+
+    it('should omit systemInstruction when no context fields present', async () => {
+      const provider = new GoogleProvider({
+        auth: createApiKeyAuth(),
+        model: 'gemini-2.5-pro',
+      });
+
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      expect(requestBody.systemInstruction).toBeUndefined();
+    });
+
+    it('should compose context fields into systemInstruction for OAuth endpoint', async () => {
+      const provider = new GoogleProvider({
+        auth: { ...createOAuthAuth(), endpoint: 'cloud-code-assist' as const, projectId: 'test-project-123' },
+        model: 'gemini-2.5-pro',
+      });
+
+      const mockStreamData = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":1,"totalTokenCount":11}}\n\n',
+      ];
+
+      const encoder = new TextEncoder();
+      let dataIndex = 0;
+
+      const mockReadableStream = new ReadableStream({
+        pull(controller) {
+          if (dataIndex < mockStreamData.length) {
+            controller.enqueue(encoder.encode(mockStreamData[dataIndex]));
+            dataIndex++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: mockReadableStream,
+      });
+
+      const context = {
+        messages: [{ role: 'user' as const, content: 'Hello' }],
+        systemPrompt: 'You are Tron.',
+        rulesContent: 'Follow rules.',
+      };
+
+      for await (const _ of provider.stream(context)) {
+        // consume stream
+      }
+
+      const fetchCall = (global.fetch as any).mock.calls[0];
+      const requestBody = JSON.parse(fetchCall[1].body);
+
+      // For Cloud Code Assist OAuth, the inner request is at top level (non-antigravity)
+      const sysInstruction = requestBody.systemInstruction;
+      expect(sysInstruction).toBeDefined();
+      expect(sysInstruction.parts.length).toBe(2);
+      expect(sysInstruction.parts[0].text).toBe('You are Tron.');
+      expect(sysInstruction.parts[1].text).toContain('# Project Rules');
+    });
+  });
+
+  // ===========================================================================
   // Safety Handling Tests
   // ===========================================================================
 

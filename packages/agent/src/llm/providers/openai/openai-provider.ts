@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import type { AssistantMessage, Context, StreamEvent } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { getSettings } from '@infrastructure/settings/index.js';
-import { withProviderRetry, type StreamRetryConfig } from '../base/index.js';
+import { withProviderRetry, composeContextParts, type StreamRetryConfig } from '../base/index.js';
 import type {
   OpenAIConfig,
   OpenAIStreamOptions,
@@ -180,6 +180,17 @@ export class OpenAIProvider {
         });
         logger.debug('Prepended tool clarification message (first turn)', {
           workingDirectory: context.workingDirectory,
+        });
+      }
+
+      // Inject context fields as developer message (rules, memory, skills, tasks, etc.)
+      // Placed after tool clarification unshift so developer message is first in input
+      const contextParts = composeContextParts(context);
+      if (contextParts.length > 0) {
+        input.unshift({
+          type: 'message',
+          role: 'developer',
+          content: [{ type: 'input_text', text: contextParts.join('\n\n') }],
         });
       }
 

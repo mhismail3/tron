@@ -23,6 +23,7 @@ import type {
 import { createLogger } from '@infrastructure/logging/index.js';
 import {
   withProviderRetry,
+  composeContextParts,
   type StreamRetryConfig,
 } from '../base/index.js';
 import {
@@ -424,9 +425,10 @@ export class GoogleProvider {
       safetySettings: this.config.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
     };
 
-    if (context.systemPrompt) {
+    const contextParts = composeContextParts(context);
+    if (contextParts.length > 0) {
       innerRequest.systemInstruction = {
-        parts: [{ text: context.systemPrompt }],
+        parts: contextParts.map(text => ({ text })),
       };
     }
 
@@ -467,9 +469,10 @@ export class GoogleProvider {
       safetySettings: this.config.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
     };
 
-    if (context.systemPrompt) {
+    const contextParts = composeContextParts(context);
+    if (contextParts.length > 0) {
       body.systemInstruction = {
-        parts: [{ text: context.systemPrompt }],
+        parts: contextParts.map(text => ({ text })),
       };
     }
 

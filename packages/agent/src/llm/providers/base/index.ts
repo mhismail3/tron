@@ -55,3 +55,6 @@ export { parseSSELines, parseSSEData } from './sse-parser.js';
 // Tool call parsing utilities
 export type { ToolCallContext } from './tool-parsing.js';
 export { parseToolCallArguments, isValidToolCallArguments } from './tool-parsing.js';
+
+// Context composition utilities
+export { composeContextParts } from './context-composition.js';
