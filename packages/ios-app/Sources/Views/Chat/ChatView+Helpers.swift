@@ -82,9 +82,8 @@ extension ChatView {
 
     // MARK: - Message Visibility Animation
 
-    /// Handle initial message visibility with bottom-up cascade animation.
-    /// Scrolls to bottom first, then animates messages from newest to oldest.
-    /// Also sets `initialLoadComplete` at the correct moment to prevent flash.
+    /// Handle initial message visibility on session load.
+    /// Scrolls to bottom while content is hidden, then fades everything in.
     func handleInitialMessageVisibility() async {
         guard viewModel.messages.count > 0 else {
             // No messages - just mark load complete
@@ -104,30 +103,24 @@ extension ChatView {
             return
         }
 
-        // Normal load: bottom-up cascade
-        // CRITICAL: initialLoadComplete must be set AFTER cascade starts to prevent flash
+        // Normal load: scroll to bottom while hidden, then fade in.
+        // While !initialLoadComplete and cascadeProgress=0, all messages are at opacity 0.
+        // Two scrolls ensure LazyVStack materializes bottom cells with real heights.
 
-        // STEP 1: Scroll to bottom FIRST (messages at opacity 0 via !initialLoadComplete)
+        // STEP 1: Scroll to bottom (estimated heights — may be slightly off)
         scrollProxy?.scrollTo("bottom", anchor: .bottom)
+        try? await Task.sleep(nanoseconds: 16_000_000)  // 1 frame for initial layout
 
-        // Minimal delay for scroll position to settle (one frame)
-        try? await Task.sleep(nanoseconds: 16_000_000)  // ~16ms (1 frame at 60fps)
+        // STEP 2: Re-scroll now that cells near the bottom have real heights
+        scrollProxy?.scrollTo("bottom", anchor: .bottom)
+        try? await Task.sleep(nanoseconds: 50_000_000)  // Layout settle
 
-        // STEP 2: Start cascade with CURRENT message count (may have changed during scroll/sleep)
-        // startBottomUpCascade() synchronously sets isCascading=true, so after this call
-        // messageIsVisible() will use coordinator visibility (not return true for all)
-        let currentMessageCount = viewModel.messages.count
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            viewModel.animationCoordinator.startBottomUpCascade(
-                totalMessages: currentMessageCount,
-                onComplete: {
-                    continuation.resume()
-                }
-            )
-            // NOW it's safe: isCascading is true, so messageIsVisible uses coordinator
+        // STEP 3: Fade in all messages from the correct scroll position
+        withAnimation(.easeOut(duration: 0.3)) {
+            viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
             initialLoadComplete = true
         }
 
-        logger.debug("Bottom-up cascade complete for \(currentMessageCount) messages", category: .session)
+        logger.debug("Session loaded with \(viewModel.messages.count) messages", category: .session)
     }
 }
