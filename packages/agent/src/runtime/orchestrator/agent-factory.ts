@@ -342,17 +342,12 @@ function wireMemoryLedger(
   }));
 
   const triggerLedgerUpdate = async () => {
+    memCfg.emitMemoryUpdating({ sessionId });
     try {
-      // Pre-flight check: writeLedgerEntry returns immediately if no new content
       const result = await ledgerWriter.writeLedgerEntry({
         model,
         workingDirectory,
       });
-
-      // No new content — return early without emitting any events
-      if (!result.written && result.reason === 'no_new_content') {
-        return { written: false, reason: 'no_new_content' };
-      }
 
       if (result.written) {
         memCfg.emitMemoryUpdated({
@@ -367,10 +362,13 @@ function wireMemoryLedger(
           const entry = formatLedgerAsMemory(result.payload);
           agent.addSessionMemory(entry);
         }
+      } else {
+        memCfg.emitMemoryUpdated({ sessionId, entryType: 'skipped' });
       }
       return { written: result.written, title: result.title, entryType: result.entryType, reason: result.reason };
     } catch (error) {
       logger.error('Manual ledger update failed', { sessionId, error: (error as Error).message });
+      memCfg.emitMemoryUpdated({ sessionId, entryType: 'skipped' });
       return { written: false };
     }
   };
