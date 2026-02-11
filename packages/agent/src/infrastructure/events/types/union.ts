@@ -19,6 +19,7 @@ import type { ErrorAgentEvent, ErrorToolEvent, ErrorProviderEvent } from './erro
 import type { RulesLoadedEvent, RulesIndexedEvent } from './rules.js';
 import type { SubagentSpawnedEvent, SubagentStatusUpdateEvent, SubagentCompletedEvent, SubagentFailedEvent } from './subagent.js';
 import type { TodoWriteEvent } from './todo.js';
+import type { TaskCreatedEvent, TaskUpdatedEvent, TaskDeletedEvent, ProjectUpdatedEvent } from './task.js';
 import type { TurnFailedEvent } from './turn.js';
 import type { SkillAddedEvent, SkillRemovedEvent } from './skill.js';
 import type {
@@ -81,8 +82,13 @@ export type SessionEvent =
   | SubagentStatusUpdateEvent
   | SubagentCompletedEvent
   | SubagentFailedEvent
-  // Todos
+  // Todos (legacy)
   | TodoWriteEvent
+  // Tasks
+  | TaskCreatedEvent
+  | TaskUpdatedEvent
+  | TaskDeletedEvent
+  | ProjectUpdatedEvent
   // Skills
   | SkillAddedEvent
   | SkillRemovedEvent

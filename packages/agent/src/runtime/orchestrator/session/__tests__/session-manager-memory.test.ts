@@ -39,10 +39,6 @@ vi.mock('@capabilities/tools/subagent/subagent-tracker.js', () => ({
   createSubAgentTracker: vi.fn(),
 }));
 
-vi.mock('@capabilities/todos/todo-tracker.js', () => ({
-  createTodoTracker: vi.fn(),
-}));
-
 vi.mock('../tracker-reconstructor.js', () => ({
   createTrackerReconstructor: vi.fn(),
 }));
@@ -67,7 +63,6 @@ import { detectProviderFromModel } from '@llm/providers/factory.js';
 import { createRulesTracker } from '@context/rules-tracker.js';
 import { createSkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
 import { createSubAgentTracker } from '@capabilities/tools/subagent/subagent-tracker.js';
-import { createTodoTracker } from '@capabilities/todos/todo-tracker.js';
 import { createTrackerReconstructor } from '../tracker-reconstructor.js';
 import { createSessionContext } from '../session-context.js';
 import { buildWorktreeInfo } from '../../operations/worktree-ops.js';
@@ -122,9 +117,6 @@ beforeEach(() => {
   (createSubAgentTracker as ReturnType<typeof vi.fn>).mockReturnValue({
     getResults: vi.fn().mockReturnValue([]),
   });
-  (createTodoTracker as ReturnType<typeof vi.fn>).mockReturnValue({
-    getTodos: vi.fn().mockReturnValue([]),
-  });
   (createTrackerReconstructor as ReturnType<typeof vi.fn>).mockReturnValue({
     reconstruct: vi.fn().mockReturnValue({
       skillTracker: { count: 0, getSkills: vi.fn().mockReturnValue([]) },
@@ -135,7 +127,6 @@ beforeEach(() => {
         getRulesContent: vi.fn().mockReturnValue(''),
       },
       subagentTracker: { count: 0, activeCount: 0, getResults: vi.fn().mockReturnValue([]) },
-      todoTracker: { count: 0, hasIncompleteTasks: false, getTodos: vi.fn().mockReturnValue([]) },
       apiTokenCount: undefined,
     }),
   });

@@ -26,7 +26,7 @@ import {
   SpawnSubagentTool,
   QueryAgentTool,
   WaitForAgentsTool,
-  TodoWriteTool,
+  TaskManagerTool,
   NotifyAppTool,
   WebFetchTool,
   UnifiedSearchTool,
@@ -50,7 +50,7 @@ import {
 import type { TronTool } from '@core/types/tools.js';
 import type { SessionId } from '@infrastructure/events/types.js';
 import type { TronEvent } from '@core/types/events.js';
-import type { TodoItem } from '@capabilities/todos/types.js';
+import type { TaskService } from '@capabilities/tasks/task-service.js';
 import { detectProviderFromModel, getModelCapabilities, type UnifiedAuth } from '@llm/providers/factory.js';
 import type { ServerAuth } from '@infrastructure/auth/types.js';
 import { WEB_CONTENT_SUMMARIZER_PROMPT } from '@context/system-prompts.js';
@@ -117,13 +117,8 @@ export interface AgentFactoryConfig {
   };
   /** Forward agent event to orchestrator */
   forwardAgentEvent: (sessionId: SessionId, event: TronEvent) => void;
-  /** Todo management callbacks */
-  todos: {
-    /** Callback when todos are updated via TodoWrite tool */
-    onUpdated: (sessionId: string, todos: TodoItem[]) => Promise<void>;
-    /** Generate unique ID for todos */
-    generateId: () => string;
-  };
+  /** Task management service (persistent, SQLite-backed) */
+  taskService: TaskService;
   /** Path to shared SQLite database (for tmux mode agent spawning) */
   dbPath: string;
   /** Anthropic API key for WebFetch summarizer (optional - enables WebFetch if provided) */
@@ -435,9 +430,10 @@ export class AgentFactory {
       new AskUserQuestionTool({ workingDirectory }),
       new OpenURLTool({ workingDirectory }),
       new RenderAppUITool({ workingDirectory }),
-      new TodoWriteTool({
-        generateId: () => this.config.todos.generateId(),
-        onTodosUpdated: (todos) => this.config.todos.onUpdated(sessionId, todos),
+      new TaskManagerTool({
+        service: this.config.taskService,
+        getSessionId: () => sessionId,
+        getWorkspaceId: () => this.config.memoryConfig?.getWorkspaceId?.(sessionId),
       }),
       new RememberTool({
         dbPath: this.config.dbPath,

@@ -235,8 +235,8 @@ export interface TurnOptions {
   skillContext?: string;
   /** Context about completed sub-agents and their results */
   subagentResultsContext?: string;
-  /** Todo context showing current task list */
-  todoContext?: string;
+  /** Task context showing current task list */
+  taskContext?: string;
   /** Dynamic rules from path-scoped .claude/rules/ files */
   dynamicRulesContext?: string;
 }

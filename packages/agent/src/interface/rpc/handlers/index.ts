@@ -38,6 +38,6 @@ export { createToolHandlers } from './tool.handler.js';
 export { createGitHandlers } from './git.handler.js';
 export { createVoiceNotesHandlers } from './voiceNotes.handler.js';
 export { createCanvasHandlers } from './canvas.handler.js';
-export { createTodoHandlers } from './todo.handler.js';
+export { createTaskHandlers } from './task.handler.js';
 export { getDeviceHandlers } from './device.handler.js';
 export { createSettingsHandlers } from './settings.handler.js';

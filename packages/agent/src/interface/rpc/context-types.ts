@@ -66,8 +66,8 @@ export interface RpcContext {
   toolCallTracker?: ToolCallTrackerManager;
   /** Canvas manager for UI artifact persistence (optional) */
   canvasManager?: CanvasRpcManager;
-  /** Todo manager for task tracking (optional) */
-  todoManager?: TodoRpcManager;
+  /** Task manager for persistent task management (optional) */
+  taskManager?: TaskRpcManager;
   /** Device token manager for push notifications (optional) */
   deviceManager?: DeviceTokenRpcManager;
   /** Sandbox manager for container operations (optional) */
@@ -126,51 +126,31 @@ export interface ContextRpcManager {
 }
 
 /**
- * Todo item for RPC responses
+ * Task manager interface for RPC operations
  */
-export interface RpcTodoItem {
-  id: string;
-  content: string;
-  activeForm: string;
-  status: 'pending' | 'in_progress' | 'completed';
-  source: 'agent' | 'user' | 'skill';
-  createdAt: string;
-  completedAt?: string;
-  metadata?: Record<string, unknown>;
-}
-
-/**
- * Backlogged todo item for RPC responses
- */
-export interface RpcBackloggedTask extends RpcTodoItem {
-  /** When moved to backlog */
-  backloggedAt: string;
-  /** Why it was backlogged */
-  backlogReason: 'session_clear' | 'context_compact' | 'session_end';
-  /** Session it came from */
-  sourceSessionId: string;
-  /** Workspace for scoping */
-  workspaceId: string;
-  /** Session ID if restored */
-  restoredToSessionId?: string;
-  /** When restored */
-  restoredAt?: string;
-}
-
-/**
- * Todo manager interface for RPC operations
- */
-export interface TodoRpcManager {
-  /** Get todos for a session */
-  getTodos(sessionId: string): RpcTodoItem[];
-  /** Get todo summary string for a session */
-  getTodoSummary(sessionId: string): string;
-  /** Get backlogged tasks for a workspace */
-  getBacklog(workspaceId: string, options?: { includeRestored?: boolean; limit?: number }): RpcBackloggedTask[];
-  /** Restore tasks from backlog to a session */
-  restoreFromBacklog(sessionId: string, taskIds: string[]): Promise<RpcTodoItem[]>;
-  /** Get count of unrestored backlogged tasks for a workspace */
-  getBacklogCount(workspaceId: string): number;
+export interface TaskRpcManager {
+  /** List tasks with optional filters */
+  listTasks(filter?: Record<string, unknown>): unknown;
+  /** Get a task by ID */
+  getTask(taskId: string): unknown;
+  /** Create a task */
+  createTask(params: Record<string, unknown>): unknown;
+  /** Update a task */
+  updateTask(taskId: string, params: Record<string, unknown>): unknown;
+  /** Delete a task */
+  deleteTask(taskId: string): unknown;
+  /** Search tasks */
+  searchTasks(query: string, limit?: number): unknown;
+  /** Get task activity */
+  getActivity(taskId: string, limit?: number): unknown;
+  /** List projects */
+  listProjects(filter?: Record<string, unknown>): unknown;
+  /** Get a project */
+  getProject(projectId: string): unknown;
+  /** Create a project */
+  createProject(params: Record<string, unknown>): unknown;
+  /** Update a project */
+  updateProject(projectId: string, params: Record<string, unknown>): unknown;
 }
 
 /**

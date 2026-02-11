@@ -68,7 +68,7 @@ export interface SubagentSkillRequest {
 const AVAILABLE_TOOL_NAMES = [
   'Read', 'Write', 'Edit', 'Bash', 'Search', 'Find',
   'BrowseTheWeb', 'AskUserQuestion', 'OpenURL', 'RenderAppUI',
-  'SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'TodoWrite',
+  'SpawnSubagent', 'QueryAgent', 'WaitForAgents', 'TaskManager',
   'NotifyApp', 'WebFetch', 'WebSearch', 'Remember',
 ];
 

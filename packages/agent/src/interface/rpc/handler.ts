@@ -18,9 +18,7 @@ export type {
   ToolCallTrackerManager,
   WorktreeRpcManager,
   ContextRpcManager,
-  TodoRpcManager,
-  RpcTodoItem,
-  RpcBackloggedTask,
+  TaskRpcManager,
   EventStoreManager,
   SessionManager,
   SessionInfo,
@@ -62,7 +60,7 @@ import { createFileHandlers } from './handlers/file.handler.js';
 import { createToolHandlers } from './handlers/tool.handler.js';
 import { createVoiceNotesHandlers } from './handlers/voiceNotes.handler.js';
 import { createCanvasHandlers } from './handlers/canvas.handler.js';
-import { createTodoHandlers } from './handlers/todo.handler.js';
+import { createTaskHandlers } from './handlers/task.handler.js';
 import { getDeviceHandlers } from './handlers/device.handler.js';
 import { createLogsHandlers } from './handlers/logs.handler.js';
 import { createSettingsHandlers } from './handlers/settings.handler.js';
@@ -99,7 +97,7 @@ export class RpcHandler extends EventEmitter {
     this.registry.registerAll(createToolHandlers());
     this.registry.registerAll(createVoiceNotesHandlers());
     this.registry.registerAll(createCanvasHandlers());
-    this.registry.registerAll(createTodoHandlers());
+    this.registry.registerAll(createTaskHandlers());
     this.registry.registerAll(getDeviceHandlers());
     this.registry.registerAll(createLogsHandlers());
     this.registry.registerAll(createSettingsHandlers());

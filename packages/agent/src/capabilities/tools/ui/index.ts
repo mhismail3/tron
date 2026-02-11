@@ -10,11 +10,9 @@ export {
 } from './ask-user-question.js';
 
 export {
-  TodoWriteTool,
-  type TodoWriteToolConfig,
-  type TodoWriteParams,
-  type TodoWriteDetails,
-} from './todo-write.js';
+  TaskManagerTool,
+  type TaskManagerToolConfig,
+} from './task-manager.js';
 
 export {
   NotifyAppTool,

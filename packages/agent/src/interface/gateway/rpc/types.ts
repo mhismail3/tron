@@ -17,7 +17,7 @@ import type {
   ContextRpcManager,
   BrowserRpcManager,
   SkillRpcManager,
-  TodoRpcManager,
+  TaskRpcManager,
 } from '../../rpc/context-types.js';
 
 // =============================================================================
@@ -81,9 +81,9 @@ export type BrowserManagerAdapter = BrowserRpcManager;
 export type SkillManagerAdapter = SkillRpcManager;
 
 /**
- * Todo manager interface - task tracking operations
+ * Task manager interface - persistent task management
  */
-export type TodoManagerAdapter = TodoRpcManager;
+export type TaskManagerAdapter = TaskRpcManager;
 
 // =============================================================================
 // Helper Types

@@ -252,19 +252,6 @@ export type {
   CanvasGetResult,
 } from './canvas.js';
 
-// Todo types
-export type {
-  TodoListParams,
-  TodoListResult,
-  RpcTodoItemResult,
-  TodoGetBacklogParams,
-  TodoGetBacklogResult,
-  RpcBackloggedTaskResult,
-  TodoRestoreParams,
-  TodoRestoreResult,
-  TodoGetBacklogCountParams,
-  TodoGetBacklogCountResult,
-} from './todo.js';
 
 // =============================================================================
 // Type Guards

@@ -162,6 +162,14 @@ export class SQLiteEventStore {
   }
 
   /**
+   * Get the DatabaseConnection wrapper.
+   * Used by repositories that extend BaseRepository.
+   */
+  getDatabaseConnection(): DatabaseConnection {
+    return this.connection;
+  }
+
+  /**
    * Get the underlying database instance
    * @deprecated Use getDatabase() instead
    */

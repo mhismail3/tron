@@ -17,5 +17,5 @@ export { createEventStoreAdapter, getEventSummary, getEventDepth } from './event
 export { createSessionAdapter } from './session.adapter.js';
 export { createSkillAdapter } from './skill.adapter.js';
 export { createAgentAdapter } from './agent.adapter.js';
-export { createTodoAdapter } from './todo.adapter.js';
+export { createTaskAdapter } from './task.adapter.js';
 export { createDeviceAdapter } from './device.adapter.js';

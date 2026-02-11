@@ -56,7 +56,6 @@
  * agent messages would chain from a stale head.
  */
 import { EventEmitter } from 'events';
-import * as crypto from 'crypto';
 import * as path from 'path';
 import * as os from 'os';
 // Direct imports to avoid circular dependencies through index.js
@@ -125,10 +124,9 @@ import {
   type ForkResult,
   type WorktreeInfo,
 } from '../types.js';
-import {
-  TodoController,
-  createTodoController,
-} from '../controllers/todo-controller.js';
+import { TaskRepository } from '@capabilities/tasks/task-repository.js';
+import { TaskService } from '@capabilities/tasks/task-service.js';
+import { TaskContextBuilder } from '@capabilities/tasks/task-context-builder.js';
 import {
   NotificationController,
   createNotificationController,
@@ -218,8 +216,8 @@ export class EventStoreOrchestrator extends EventEmitter {
   /** Context management and compaction */
   readonly context: ContextOps;
 
-  /** Todo and backlog management */
-  readonly todos: TodoController;
+  /** Task management service (persistent, SQLite-backed) */
+  readonly taskService: TaskService;
 
   /** Model switching */
   readonly models: ModelController;
@@ -321,6 +319,13 @@ export class EventStoreOrchestrator extends EventEmitter {
       logger.info('APNS service initialized for push notifications');
     }
 
+    // Initialize Task management (persistent, SQLite-backed)
+    // Must be before createAgentFactory since it references this.taskService
+    const dbConnection = this.eventStore.getDatabaseConnection();
+    const taskRepo = new TaskRepository(dbConnection);
+    this.taskService = new TaskService(taskRepo);
+    const taskContextBuilder = new TaskContextBuilder(taskRepo);
+
     // Initialize AgentFactory (delegated module)
     // Load external service API keys from ~/.tron/auth.json
     const braveAuth = getServiceAuthSync('brave');
@@ -337,10 +342,7 @@ export class EventStoreOrchestrator extends EventEmitter {
         getTracker: (sessionId) => this.activeSessions.get(sessionId)?.subagentTracker,
       },
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
-      todos: {
-        onUpdated: async (sessionId, todos) => this.todos.handleTodosUpdated(sessionId, todos),
-        generateId: () => `todo_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`,
-      },
+      taskService: this.taskService,
       dbPath: this.eventStore.dbPath,
       get embeddingService() { return self.embeddings.getEmbeddingService() ?? undefined; },
       get vectorRepo() { return self.embeddings.getVectorRepo() ?? undefined; },
@@ -419,13 +421,6 @@ export class EventStoreOrchestrator extends EventEmitter {
       this.emit('browser.closed', sessionId);
     });
 
-    // Initialize TodoController (delegated module)
-    this.todos = createTodoController({
-      sessionStore: this.activeSessions,
-      eventStore: this.eventStore,
-      emit: (event, data) => this.emit(event, data),
-    });
-
     // Initialize NotificationController (delegated module)
     this.notificationController = createNotificationController({
       apnsService: this.apnsService,
@@ -447,6 +442,7 @@ export class EventStoreOrchestrator extends EventEmitter {
           blocking: false,
         });
       },
+      taskContextBuilder,
     });
 
     // Initialize ModelController (extracted model switching coordinator)

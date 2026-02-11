@@ -8,8 +8,7 @@
  * 1. Reconstruct SkillTracker from skill events
  * 2. Reconstruct RulesTracker from rules events
  * 3. Reconstruct SubAgentTracker from subagent events
- * 4. Reconstruct TodoTracker from todo events
- * 5. Extract API token count from last turn_end event
+ * 4. Extract API token count from last turn_end event
  * 6. Handle empty event arrays
  * 7. Handle mixed event types correctly
  */
@@ -34,7 +33,6 @@ describe('TrackerReconstructor', () => {
       expect(result.skillTracker.count).toBe(0);
       expect(result.rulesTracker.getTotalFiles()).toBe(0);
       expect(result.subagentTracker.count).toBe(0);
-      expect(result.todoTracker.count).toBe(0);
       expect(result.apiTokenCount).toBeUndefined();
     });
   });
@@ -169,48 +167,6 @@ describe('TrackerReconstructor', () => {
     });
   });
 
-  describe('TodoTracker reconstruction', () => {
-    it('should reconstruct todo tracker from todo.write events', () => {
-      const events = [
-        createEvent('todo.write', {
-          todos: [
-            createTodoItem('todo_1', 'First task', 'pending'),
-            createTodoItem('todo_2', 'Second task', 'pending'),
-          ],
-          trigger: 'tool',
-        }),
-      ] as SessionEvent[];
-
-      const result = reconstructor.reconstruct(events);
-
-      expect(result.todoTracker.count).toBe(2);
-      expect(result.todoTracker.hasIncompleteTasks).toBe(true);
-    });
-
-    it('should handle multiple todo.write events (latest wins)', () => {
-      const events = [
-        createEvent('todo.write', {
-          todos: [
-            createTodoItem('todo_1', 'Task', 'pending'),
-          ],
-          trigger: 'tool',
-        }),
-        createEvent('todo.write', {
-          todos: [
-            createTodoItem('todo_1', 'Task', 'completed'),
-            createTodoItem('todo_2', 'Task 2', 'pending'),
-          ],
-          trigger: 'tool',
-        }),
-      ] as SessionEvent[];
-
-      const result = reconstructor.reconstruct(events);
-
-      expect(result.todoTracker.count).toBe(2);
-      expect(result.todoTracker.hasIncompleteTasks).toBe(true);
-    });
-  });
-
   describe('API token count extraction', () => {
     it('should extract API token count from last turn_end event', () => {
       const events = [
@@ -274,10 +230,6 @@ describe('TrackerReconstructor', () => {
           model: 'claude-sonnet-4-20250514',
           workingDirectory: '/project',
         }),
-        createEvent('todo.write', {
-          todos: [createTodoItem('todo_1', 'Task', 'pending')],
-          trigger: 'tool',
-        }),
         createEvent('stream.turn_end', {
           tokenRecord: createMockTokenRecord(8000),
         }),
@@ -288,7 +240,6 @@ describe('TrackerReconstructor', () => {
       expect(result.skillTracker.count).toBe(1);
       expect(result.rulesTracker.getTotalFiles()).toBe(1);
       expect(result.subagentTracker.count).toBe(1);
-      expect(result.todoTracker.count).toBe(1);
       expect(result.apiTokenCount).toBe(8000);
     });
   });
@@ -308,25 +259,6 @@ describe('TrackerReconstructor', () => {
       // SkillTracker clears on compact.boundary, so only post-compaction skills remain
       expect(result.skillTracker.hasSkill('old-skill')).toBe(false);
       expect(result.skillTracker.hasSkill('new-skill')).toBe(true);
-    });
-
-    it('should clear todo tracker on compact.boundary', () => {
-      const events = [
-        createEvent('todo.write', {
-          todos: [createTodoItem('todo_1', 'Old task', 'pending')],
-          trigger: 'tool',
-        }),
-        createEvent('compact.boundary', { reason: 'context_limit' }),
-        createEvent('todo.write', {
-          todos: [createTodoItem('todo_2', 'New task', 'pending')],
-          trigger: 'tool',
-        }),
-      ] as SessionEvent[];
-
-      const result = reconstructor.reconstruct(events);
-
-      // TodoTracker clears on compact.boundary
-      expect(result.todoTracker.count).toBe(1);
     });
 
     it('should preserve API token count through compaction when turn_end follows', () => {
@@ -385,13 +317,11 @@ describe('TrackerReconstructor', () => {
       const skillCount: number = result.skillTracker.count;
       const hasRules: boolean = result.rulesTracker.hasRules();
       const subagentCount: number = result.subagentTracker.count;
-      const todoCount: number = result.todoTracker.count;
       const tokenCount: number | undefined = result.apiTokenCount;
 
       expect(typeof skillCount).toBe('number');
       expect(typeof hasRules).toBe('boolean');
       expect(typeof subagentCount).toBe('number');
-      expect(typeof todoCount).toBe('number');
       expect(tokenCount === undefined || typeof tokenCount === 'number').toBe(true);
     });
   });
@@ -435,14 +365,3 @@ function createEvent(type: string, payload: Record<string, unknown>): SessionEve
   } as unknown as SessionEvent;
 }
 
-// Helper to create properly structured todo items
-function createTodoItem(id: string, content: string, status: 'pending' | 'in_progress' | 'completed') {
-  return {
-    id,
-    content,
-    activeForm: `${content}ing`,
-    status,
-    source: 'agent' as const,
-    createdAt: new Date().toISOString(),
-  };
-}

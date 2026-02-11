@@ -1,22 +1,8 @@
 /**
- * @fileoverview Todo domain - Task management
+ * @fileoverview Task domain - Persistent task management
  *
- * Handles todo listing, summaries, backlog, and restoration.
+ * Handles task listing, creation, updates, search, and project management.
  */
 
 // Re-export handler factory
-export { createTodoHandlers } from '@interface/rpc/handlers/todo.handler.js';
-
-// Re-export types
-export type {
-  TodoListParams,
-  TodoListResult,
-  RpcTodoItemResult,
-  TodoGetBacklogParams,
-  TodoGetBacklogResult,
-  RpcBackloggedTaskResult,
-  TodoRestoreParams,
-  TodoRestoreResult,
-  TodoGetBacklogCountParams,
-  TodoGetBacklogCountResult,
-} from '@interface/rpc/types/todo.js';
+export { createTaskHandlers } from '@interface/rpc/handlers/task.handler.js';

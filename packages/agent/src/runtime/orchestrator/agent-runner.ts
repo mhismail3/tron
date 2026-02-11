@@ -3,7 +3,7 @@
  *
  * Extracted from EventStoreOrchestrator as part of modular refactoring.
  * Handles the complete agent execution flow including:
- * - Context injection (skills, subagents, todos)
+ * - Context injection (skills, subagents, tasks)
  * - User content building (text, images, documents)
  * - Agent execution coordination
  * - Interrupt handling and partial content persistence
@@ -67,6 +67,9 @@ export interface AgentRunnerConfig {
     skill: SubagentSkillRequest,
     userPrompt: string,
   ) => Promise<void>;
+
+  /** Task context builder for per-turn summary */
+  taskContextBuilder: { buildSummary(workspaceId?: string): string | undefined };
 }
 
 /**
@@ -256,14 +259,12 @@ export class AgentRunner {
       });
     }
 
-    // Todo context
-    const todoContext = active.todoTracker.buildContextString();
-    if (todoContext) {
-      logger.info('[TODO] Including todo context in run', {
+    // Task context (persistent, from SQLite)
+    const taskContext = this.config.taskContextBuilder.buildSummary();
+    if (taskContext) {
+      logger.info('[TASK] Including task context in run', {
         sessionId: active.sessionId,
-        contextLength: todoContext.length,
-        todoCount: active.todoTracker.count,
-        summary: active.todoTracker.buildSummaryString(),
+        contextLength: taskContext.length,
       });
     }
 
@@ -283,7 +284,7 @@ export class AgentRunner {
     return {
       skillContext: skillContext || undefined,
       subagentResults: subagentResults ?? undefined,
-      todoContext: todoContext ?? undefined,
+      taskContext: taskContext ?? undefined,
       reasoningLevel: reasoningLevel as RunContext['reasoningLevel'],
       dynamicRulesContext,
     };

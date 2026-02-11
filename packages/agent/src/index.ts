@@ -60,8 +60,8 @@ export * from './capabilities/extensions/skills/index.js';
 // Re-export events (Event Sourcing system)
 export * from './infrastructure/events/index.js';
 
-// Re-export todos (Task management)
-export * from './capabilities/todos/index.js';
+// Task management types are available via @capabilities/tasks/index.js
+// Not re-exported from root to avoid naming conflict with platform/productivity Task
 
 // Re-export guardrails
 export * from './capabilities/guardrails/index.js';

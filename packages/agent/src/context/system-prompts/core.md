@@ -210,11 +210,13 @@ Both queried by default. Use `providers` to target one.
 
 ### Task management
 
-**TodoWrite** tracks your work as a visible task list. **Use for any non-trivial multi-step work** (3+ steps).
-- Create the list IMMEDIATELY when receiving a multi-step request
-- Mark tasks `completed` right after finishing each one — don't batch
+**TaskManager** tracks your work as a persistent task list. **Use for any non-trivial multi-step work** (3+ steps).
+- Create tasks IMMEDIATELY when receiving a multi-step request (`action: "create"`)
+- Mark tasks `completed` right after finishing each one — don't batch (`action: "update"`)
 - Only ONE task `in_progress` at a time
-- Each todo needs `content` (imperative: "Run tests"), `status`, and `activeForm` (continuous: "Running tests")
+- Each task needs `title` (imperative: "Run tests") and `activeForm` (continuous: "Running tests")
+- Use projects to group related tasks across sessions
+- Tasks persist across sessions — check for existing tasks before creating duplicates
 - Skip for trivial single-step tasks or pure Q&A
 
 ### Sub-agents

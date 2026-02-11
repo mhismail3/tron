@@ -19,7 +19,6 @@ import { WorktreeCoordinator } from '@platform/session/worktree-coordinator.js';
 import { createSkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
 import { createSubAgentTracker } from '@capabilities/tools/subagent/subagent-tracker.js';
 import { createRulesTracker } from '@context/rules-tracker.js';
-import { createTodoTracker } from '@capabilities/todos/todo-tracker.js';
 import { createTrackerReconstructor } from './tracker-reconstructor.js';
 import { ContextLoader } from '@context/loader.js';
 import { discoverRulesFiles } from '@context/rules-discovery.js';
@@ -361,8 +360,6 @@ export class SessionManager {
       sessionContext,
       // Initialize empty subagent tracker (new sessions have no subagents)
       subagentTracker: createSubAgentTracker(),
-      // Initialize empty todo tracker (new sessions have no todos)
-      todoTracker: createTodoTracker(),
     };
 
     this.config.sessionStore.set(sessionId, activeSession);
@@ -468,7 +465,7 @@ export class SessionManager {
       });
     }
 
-    const { skillTracker, rulesTracker, subagentTracker, todoTracker } = trackers;
+    const { skillTracker, rulesTracker, subagentTracker } = trackers;
 
     logger.info('Trackers reconstructed from events', {
       sessionId,
@@ -476,8 +473,6 @@ export class SessionManager {
       rulesFileCount: rulesTracker.getTotalFiles(),
       subagentCount: subagentTracker.count,
       activeSubagents: subagentTracker.activeCount,
-      todoCount: todoTracker.count,
-      incompleteTasks: todoTracker.hasIncompleteTasks,
     });
 
     // Re-load rules content from disk for the agent
@@ -606,7 +601,6 @@ export class SessionManager {
       rulesTracker,
       sessionContext,
       subagentTracker,
-      todoTracker,
     };
 
     this.config.sessionStore.set(sessionId, activeSession);

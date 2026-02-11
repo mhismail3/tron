@@ -151,12 +151,6 @@ export {
   type NotificationPayload,
 } from './controllers/index.js';
 
-// Todo and backlog management
-export {
-  TodoController,
-  createTodoController,
-  type TodoControllerConfig,
-} from './controllers/index.js';
 
 // Embedding and vector search
 export {

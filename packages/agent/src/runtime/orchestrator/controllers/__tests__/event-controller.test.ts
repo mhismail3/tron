@@ -104,7 +104,6 @@ describe('EventController', () => {
       skillTracker: {} as any,
       rulesTracker: {} as any,
       subagentTracker: {} as any,
-      todoTracker: {} as any,
       workingDirectory: '/tmp/test',
       model: 'claude-sonnet-4-20250514',
     };

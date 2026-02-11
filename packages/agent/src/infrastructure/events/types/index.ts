@@ -167,10 +167,16 @@ export type {
 } from './subagent.js';
 
 // =============================================================================
-// Todo Events
+// Todo Events (legacy, kept for event reconstruction)
 // =============================================================================
 
 export type { TodoItemPayload, TodoWriteEvent } from './todo.js';
+
+// =============================================================================
+// Task Events (broadcast only)
+// =============================================================================
+
+export type { TaskCreatedEvent, TaskUpdatedEvent, TaskDeletedEvent, ProjectUpdatedEvent } from './task.js';
 
 // =============================================================================
 // Turn Events

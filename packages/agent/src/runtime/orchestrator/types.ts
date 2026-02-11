@@ -13,7 +13,6 @@ import type { WorktreeCoordinatorConfig } from '@platform/session/worktree-coord
 import type { SkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
 import type { RulesTracker } from '@context/rules-tracker.js';
 import type { SubAgentTracker } from '@capabilities/tools/subagent/subagent-tracker.js';
-import type { TodoTracker } from '@capabilities/todos/todo-tracker.js';
 import type { SessionContext } from './session/session-context.js';
 import type { ReasoningLevel } from '../agent/types.js';
 import type { SkillFrontmatter } from '@capabilities/extensions/skills/types.js';
@@ -112,7 +111,6 @@ export interface SessionTracking {
   skillTracker: SkillTracker;
   rulesTracker: RulesTracker;
   subagentTracker: SubAgentTracker;
-  todoTracker: TodoTracker;
 }
 
 /**

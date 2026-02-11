@@ -69,7 +69,7 @@ export class AgentTurnRunner implements ITurnRunner {
    */
   async execute(options: TurnOptions): Promise<TurnResult> {
     const turnStartTime = Date.now();
-    const { turn, reasoningLevel, skillContext, subagentResultsContext, todoContext, dynamicRulesContext } = options;
+    const { turn, reasoningLevel, skillContext, subagentResultsContext, taskContext, dynamicRulesContext } = options;
 
     // Reset streaming content for new turn
     this.streamProcessor.resetStreamingContent();
@@ -110,7 +110,7 @@ export class AgentTurnRunner implements ITurnRunner {
 
     try {
       // Build context for provider
-      const context = this.buildContext(skillContext, subagentResultsContext, todoContext, dynamicRulesContext);
+      const context = this.buildContext(skillContext, subagentResultsContext, taskContext, dynamicRulesContext);
 
       // Log context being sent
       logger.info('[AGENT] Building context for turn', {
@@ -339,7 +339,7 @@ export class AgentTurnRunner implements ITurnRunner {
   /**
    * Build context for the provider
    */
-  private buildContext(skillContext?: string, subagentResultsContext?: string, todoContext?: string, dynamicRulesContext?: string): Context {
+  private buildContext(skillContext?: string, subagentResultsContext?: string, taskContext?: string, dynamicRulesContext?: string): Context {
     const messages = this.contextManager.getMessages();
 
     return {
@@ -355,7 +355,7 @@ export class AgentTurnRunner implements ITurnRunner {
       memoryContent: this.contextManager.getFullMemoryContent(),
       skillContext,
       subagentResultsContext,
-      todoContext,
+      taskContext,
       dynamicRulesContext,
     };
   }

@@ -7,7 +7,7 @@
  * - browser/       - Browser automation (open-url, browse-the-web)
  * - system/        - System commands (bash)
  * - search/        - Code search (unified text + AST search)
- * - ui/            - User interaction (ask-user-question, todo-write, notify-app, render-app-ui)
+ * - ui/            - User interaction (ask-user-question, task-manager, notify-app, render-app-ui)
  * - web/           - Web fetching and searching (web-fetch, web-search)
  * - communication/ - Inter-agent messaging (send-message, receive-messages)
  * - sandbox/       - Container runner utilities (used by RPC adapter)
@@ -91,10 +91,8 @@ export {
 export {
   AskUserQuestionTool,
   type AskUserQuestionConfig,
-  TodoWriteTool,
-  type TodoWriteToolConfig,
-  type TodoWriteParams,
-  type TodoWriteDetails,
+  TaskManagerTool,
+  type TaskManagerToolConfig,
   NotifyAppTool,
   type NotifyAppToolConfig,
   type NotifyAppParams,

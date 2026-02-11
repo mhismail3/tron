@@ -594,7 +594,7 @@ export class TronAgent {
       reasoningLevel: this.currentRunContext.reasoningLevel,
       skillContext: this.currentRunContext.skillContext,
       subagentResultsContext: this.currentRunContext.subagentResults,
-      todoContext: this.currentRunContext.todoContext,
+      taskContext: this.currentRunContext.taskContext,
       dynamicRulesContext: this.currentRunContext.dynamicRulesContext,
     });
 

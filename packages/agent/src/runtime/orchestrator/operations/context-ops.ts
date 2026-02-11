@@ -366,14 +366,8 @@ export class ContextOps {
     // Clear dynamic rules activation state
     active.rulesTracker.clearDynamicState();
 
-    // Clear todo tracker and get incomplete tasks for backlogging
-    const incompleteTodos = active.todoTracker.clear();
-    const clearedTodos = incompleteTodos.map(t => ({
-      id: t.id,
-      content: t.content,
-      status: t.status,
-      source: t.source,
-    }));
+    // Tasks are now persistent in SQLite — no need to clear or backlog
+    const clearedTodos: Array<{ id: string; content: string; status: string; source: string }> = [];
 
     const tokensAfter = cm.getCurrentTokens();
 

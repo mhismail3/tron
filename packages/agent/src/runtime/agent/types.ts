@@ -85,8 +85,8 @@ export interface RunContext {
   skillContext?: string;
   /** Pending subagent results to inject (consumed once, cleared after first turn) */
   subagentResults?: string;
-  /** Todo list to inject into system prompt */
-  todoContext?: string;
+  /** Task list to inject into system prompt */
+  taskContext?: string;
   /** Reasoning effort level for extended thinking models */
   reasoningLevel?: ReasoningLevel;
   /** Dynamic rules from path-scoped .claude/rules/ files */

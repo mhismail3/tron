@@ -68,8 +68,13 @@ export type EventType =
   | 'subagent.status_update'
   | 'subagent.completed'
   | 'subagent.failed'
-  // Todo tracking
+  // Todo tracking (legacy, kept for event reconstruction)
   | 'todo.write'
+  // Task management (broadcast only, not sourced)
+  | 'task.created'
+  | 'task.updated'
+  | 'task.deleted'
+  | 'project.updated'
   // Turn events
   | 'turn.failed'
   // Hook events

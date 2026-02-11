@@ -57,12 +57,6 @@ function createMockActiveSession(): ActiveSession {
     clear: vi.fn(),
   };
 
-  const mockTodoTracker = {
-    buildContextString: vi.fn().mockReturnValue(undefined),
-    count: 0,
-    buildSummaryString: vi.fn().mockReturnValue(''),
-  };
-
   const mockRulesTracker = {
     buildDynamicRulesContent: vi.fn().mockReturnValue(undefined),
     getActivatedScopedRulesCount: vi.fn().mockReturnValue(0),
@@ -73,7 +67,6 @@ function createMockActiveSession(): ActiveSession {
     agent: mockAgent as any,
     sessionContext: mockSessionContext as any,
     skillTracker: mockSkillTracker as any,
-    todoTracker: mockTodoTracker as any,
     rulesTracker: mockRulesTracker as any,
     workingDirectory: '/test/project',
     model: 'claude-sonnet-4-20250514',
@@ -93,6 +86,7 @@ function createMockConfig(): AgentRunnerConfig {
     emit: vi.fn(),
     buildSubagentResultsContext: vi.fn().mockReturnValue(undefined),
     spawnSkillSubagent: vi.fn().mockResolvedValue(undefined),
+    taskContextBuilder: { buildSummary: vi.fn().mockReturnValue(undefined) },
   };
 }
 

@@ -48,7 +48,7 @@ import { createWorktreeAdapter } from './adapters/worktree.adapter.js';
 import { createContextAdapter } from './adapters/context.adapter.js';
 import { createBrowserAdapter } from './adapters/browser.adapter.js';
 import { createSkillAdapter } from './adapters/skill.adapter.js';
-import { createTodoAdapter } from './adapters/todo.adapter.js';
+import { createTaskAdapter } from './adapters/task.adapter.js';
 import { createDeviceAdapter } from './adapters/device.adapter.js';
 
 // Standalone adapters (no orchestrator dependency)
@@ -120,7 +120,7 @@ export function createRpcContext(
     context.contextManager = createContextAdapter(deps);
     context.browserManager = createBrowserAdapter(deps);
     context.skillManager = createSkillAdapter(deps);
-    context.todoManager = createTodoAdapter(deps);
+    context.taskManager = createTaskAdapter(deps);
     context.deviceManager = createDeviceAdapter(deps);
 
     // Canvas manager is standalone (no orchestrator dependency)

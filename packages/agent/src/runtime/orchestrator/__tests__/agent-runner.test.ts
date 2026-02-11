@@ -4,7 +4,7 @@
  * Tests for the AgentRunner class extracted from EventStoreOrchestrator.
  *
  * Contract:
- * 1. Pre-execution: Flush events, inject skill/subagent/todo contexts
+ * 1. Pre-execution: Flush events, inject skill/subagent/task contexts
  * 2. User message: Build content from prompt/attachments, record message.user event
  * 3. Reasoning level: Handle reasoning level changes with config.reasoning_level event
  * 4. Execution: Transform content, run agent
@@ -59,12 +59,6 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
     clear: vi.fn(),
   };
 
-  const mockTodoTracker = {
-    buildContextString: vi.fn().mockReturnValue(undefined),
-    count: 0,
-    buildSummaryString: vi.fn().mockReturnValue(''),
-  };
-
   const mockRulesTracker = {
     buildDynamicRulesContent: vi.fn().mockReturnValue(undefined),
     getActivatedScopedRulesCount: vi.fn().mockReturnValue(0),
@@ -75,7 +69,6 @@ function createMockActiveSession(overrides: Partial<ActiveSession> = {}): Active
     agent: mockAgent as any,
     sessionContext: mockSessionContext as any,
     skillTracker: mockSkillTracker as any,
-    todoTracker: mockTodoTracker as any,
     rulesTracker: mockRulesTracker as any,
     workingDirectory: '/test/project',
     model: 'claude-sonnet-4-20250514',
@@ -99,6 +92,7 @@ function createMockConfig(overrides: Partial<AgentRunnerConfig> = {}): AgentRunn
     emit: vi.fn(),
     buildSubagentResultsContext: vi.fn().mockReturnValue(undefined),
     spawnSkillSubagent: vi.fn().mockResolvedValue(undefined),
+    taskContextBuilder: { buildSummary: vi.fn().mockReturnValue(undefined) },
     ...overrides,
   };
 }
@@ -319,8 +313,9 @@ describe('AgentRunner', () => {
       );
     });
 
-    it('passes todo context via RunContext', async () => {
-      (active.todoTracker.buildContextString as Mock).mockReturnValue('Todo: Fix bug');
+    it('passes task context via RunContext', async () => {
+      config.taskContextBuilder = { buildSummary: vi.fn().mockReturnValue('Active: 1 in progress') };
+      runner = new AgentRunner(config);
       const options = createRunOptions();
 
       await runner.run(active, options);
@@ -328,13 +323,14 @@ describe('AgentRunner', () => {
       expect(active.agent.run).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          todoContext: 'Todo: Fix bug',
+          taskContext: 'Active: 1 in progress',
         })
       );
     });
 
-    it('passes undefined todoContext when not available', async () => {
-      (active.todoTracker.buildContextString as Mock).mockReturnValue(undefined);
+    it('passes undefined taskContext when no tasks exist', async () => {
+      config.taskContextBuilder = { buildSummary: vi.fn().mockReturnValue(undefined) };
+      runner = new AgentRunner(config);
       const options = createRunOptions();
 
       await runner.run(active, options);
@@ -342,7 +338,7 @@ describe('AgentRunner', () => {
       expect(active.agent.run).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          todoContext: undefined,
+          taskContext: undefined,
         })
       );
     });

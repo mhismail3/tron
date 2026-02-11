@@ -253,8 +253,8 @@ export interface Context {
   skillContext?: string;
   /** Sub-agent results context to inform agent of completed sub-agent tasks */
   subagentResultsContext?: string;
-  /** Todo context showing current task list (ephemeral, updated per-turn) */
-  todoContext?: string;
+  /** Task context showing current task list (ephemeral, updated per-turn) */
+  taskContext?: string;
   /** Dynamic rules context from path-scoped .claude/rules/ files (changes as agent touches files) */
   dynamicRulesContext?: string;
 }

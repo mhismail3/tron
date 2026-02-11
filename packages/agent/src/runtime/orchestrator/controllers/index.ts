@@ -9,7 +9,6 @@
  * - AgentController: Agent execution
  * - ModelController: Model switching and configuration
  * - NotificationController: Push notification delivery
- * - TodoController: Todo and backlog management
  */
 
 // Event query and mutation
@@ -64,12 +63,6 @@ export {
   type NotificationPayload,
 } from './notification-controller.js';
 
-// Todo and backlog management
-export {
-  TodoController,
-  createTodoController,
-  type TodoControllerConfig,
-} from './todo-controller.js';
 
 // Embedding and vector search
 export {

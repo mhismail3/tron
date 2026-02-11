@@ -121,6 +121,14 @@ export class EventStore {
     return this.backend.getDatabase();
   }
 
+  /**
+   * Get the DatabaseConnection wrapper.
+   * Used by repositories that extend BaseRepository (e.g., TaskRepository).
+   */
+  getDatabaseConnection(): import('./sqlite/database.js').DatabaseConnection {
+    return this.backend.getDatabaseConnection();
+  }
+
   // ===========================================================================
   // Session Creation
   // ===========================================================================

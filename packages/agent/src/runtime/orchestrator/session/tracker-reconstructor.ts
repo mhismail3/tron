@@ -9,7 +9,6 @@
  * - Reconstruct SkillTracker from skill events
  * - Reconstruct RulesTracker from rules events
  * - Reconstruct SubAgentTracker from subagent events
- * - Reconstruct TodoTracker from todo events
  * - Extract API token count from last turn_end event
  *
  * ## Usage
@@ -24,7 +23,6 @@
  *   skillTracker: trackers.skillTracker,
  *   rulesTracker: trackers.rulesTracker,
  *   subagentTracker: trackers.subagentTracker,
- *   todoTracker: trackers.todoTracker,
  * };
  *
  * // Restore API token count
@@ -37,8 +35,6 @@ import { createLogger } from '@infrastructure/logging/index.js';
 import { SkillTracker, type SkillTrackingEvent } from '@capabilities/extensions/skills/skill-tracker.js';
 import { RulesTracker, type RulesTrackingEvent } from '@context/rules-tracker.js';
 import { SubAgentTracker, type SubagentTrackingEvent } from '@capabilities/tools/subagent/subagent-tracker.js';
-import { TodoTracker } from '@capabilities/todos/todo-tracker.js';
-import type { TodoTrackingEvent } from '@capabilities/todos/types.js';
 import type { SessionEvent } from '@infrastructure/events/types.js';
 
 const logger = createLogger('tracker-reconstructor');
@@ -57,8 +53,6 @@ export interface ReconstructedTrackers {
   rulesTracker: RulesTracker;
   /** Reconstructed subagent tracker */
   subagentTracker: SubAgentTracker;
-  /** Reconstructed todo tracker */
-  todoTracker: TodoTracker;
   /** API token count from last turn_end event (undefined if no turn_end events) */
   apiTokenCount?: number;
 }
@@ -86,7 +80,6 @@ export class TrackerReconstructor {
     const skillTracker = SkillTracker.fromEvents(events as SkillTrackingEvent[]);
     const rulesTracker = RulesTracker.fromEvents(events as RulesTrackingEvent[]);
     const subagentTracker = SubAgentTracker.fromEvents(events as SubagentTrackingEvent[]);
-    const todoTracker = TodoTracker.fromEvents(events as TodoTrackingEvent[]);
 
     // Extract API token count from last turn_end event
     const apiTokenCount = this.extractApiTokenCount(events);
@@ -97,7 +90,6 @@ export class TrackerReconstructor {
       rulesFiles: rulesTracker.getTotalFiles(),
       subagentCount: subagentTracker.count,
       activeSubagents: subagentTracker.activeCount,
-      todoCount: todoTracker.count,
       hasApiTokenCount: apiTokenCount !== undefined,
     });
 
@@ -105,7 +97,6 @@ export class TrackerReconstructor {
       skillTracker,
       rulesTracker,
       subagentTracker,
-      todoTracker,
       apiTokenCount,
     };
   }
