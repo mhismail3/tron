@@ -30,26 +30,21 @@ extension View {
     }
 }
 
-// MARK: - Text Segment Types
+// MARK: - Table Types
 
-enum TextSegment {
-    case text(String)
-    case table(MarkdownTable)
-}
-
-struct MarkdownTable {
+struct MarkdownTable: Equatable {
     let headers: [String]
     let rows: [[String]]
     let alignments: [TableAlignment]
 }
 
-enum TableAlignment {
+enum TableAlignment: Equatable {
     case left
     case center
     case right
 }
 
-// MARK: - Text Content View (Terminal-style with Table Support)
+// MARK: - Text Content View (Terminal-style with Block Markdown)
 
 struct TextContentView: View {
     let text: String
@@ -58,20 +53,19 @@ struct TextContentView: View {
 
     private var isUser: Bool { role == .user }
 
-    /// Eagerly parse markdown into AttributedString.
-    /// Falls back to plain text if markdown parsing fails.
+    /// Inline-only markdown with bold fix. Used by other views (ThinkingContentView, etc.)
+    @MainActor
     static func markdownAttributedString(from content: String) -> AttributedString {
-        (try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(content)
+        inlineMarkdown(from: content)
     }
 
-    /// Parse text into segments (tables and normal text)
-    private var segments: [TextSegment] {
-        MarkdownTableParser.parseSegments(text)
+    /// Parse text into block-level markdown segments
+    private var blocks: [MarkdownBlock] {
+        MarkdownBlockParser.parse(text)
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            // Green vertical accent line for assistant messages (matching web UI)
             if role == .assistant {
                 Rectangle()
                     .fill(Color.tronEmerald)
@@ -79,27 +73,16 @@ struct TextContentView: View {
                     .padding(.trailing, 12)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                    switch segment {
-                    case .text(let content):
-                        if !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            if isUser {
-                                StyledSkillMentionText(text: content)
-                                    .font(TronTypography.messageBody)
-                                    .foregroundStyle(.userMessageText)
-                                    .selectableText(!textSelectionDisabled)
-                                    .lineSpacing(4)
-                            } else {
-                                Text(Self.markdownAttributedString(from: content))
-                                    .font(TronTypography.messageBody)
-                                    .foregroundStyle(.assistantMessageText)
-                                    .selectableText(!textSelectionDisabled)
-                                    .lineSpacing(4)
-                            }
-                        }
-                    case .table(let table):
-                        MarkdownTableView(table: table)
+            if isUser {
+                StyledSkillMentionText(text: text)
+                    .font(TronTypography.messageBody)
+                    .foregroundStyle(.userMessageText)
+                    .selectableText(!textSelectionDisabled)
+                    .lineSpacing(4)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                        MarkdownBlockView(block: block)
                     }
                 }
             }
@@ -174,63 +157,6 @@ struct StyledSkillMentionText: View {
 // MARK: - Markdown Table Parser
 
 struct MarkdownTableParser {
-    /// Parse text into alternating segments of regular text and tables
-    static func parseSegments(_ text: String) -> [TextSegment] {
-        var segments: [TextSegment] = []
-        let lines = text.components(separatedBy: "\n")
-        var currentText = ""
-        var tableLines: [String] = []
-        var inTable = false
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if isTableLine(trimmed) {
-                if !inTable {
-                    // Starting a new table, save any preceding text
-                    if !currentText.isEmpty {
-                        segments.append(.text(currentText))
-                        currentText = ""
-                    }
-                    inTable = true
-                }
-                tableLines.append(trimmed)
-            } else {
-                if inTable {
-                    // End of table, parse and save it
-                    if let table = parseTable(tableLines) {
-                        segments.append(.table(table))
-                    } else {
-                        // Failed to parse as table, treat as regular text
-                        currentText += tableLines.joined(separator: "\n") + "\n"
-                    }
-                    tableLines = []
-                    inTable = false
-                }
-                currentText += line + "\n"
-            }
-        }
-
-        // Handle any remaining content
-        if inTable && !tableLines.isEmpty {
-            if let table = parseTable(tableLines) {
-                segments.append(.table(table))
-            } else {
-                currentText += tableLines.joined(separator: "\n")
-            }
-        }
-
-        if !currentText.isEmpty {
-            // Remove trailing newline
-            let trimmed = currentText.hasSuffix("\n") ? String(currentText.dropLast()) : currentText
-            if !trimmed.isEmpty {
-                segments.append(.text(trimmed))
-            }
-        }
-
-        return segments
-    }
-
     /// Check if a line looks like part of a markdown table
     static func isTableLine(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
