@@ -18,6 +18,7 @@ import type {
 } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { shouldRefreshTokens, refreshOAuthToken, type OAuthTokens } from '@infrastructure/auth/oauth.js';
+import { saveAccountOAuthTokens, saveProviderOAuthTokens } from '@infrastructure/auth/unified.js';
 import { parseError, formatError } from '@core/utils/errors.js';
 import { calculateBackoffDelay, extractRetryAfterFromError, sleepWithAbort, type RetryConfig } from '@core/utils/retry.js';
 import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
@@ -148,6 +149,14 @@ export class AnthropicProvider {
     if (shouldRefreshTokens(this.tokens)) {
       logger.info('Refreshing expired OAuth tokens');
       this.tokens = await refreshOAuthToken(this.tokens.refreshToken);
+
+      // Persist refreshed tokens to the correct location
+      const accountLabel = this.config.auth.type === 'oauth' ? this.config.auth.accountLabel : undefined;
+      if (accountLabel) {
+        await saveAccountOAuthTokens('anthropic', accountLabel, this.tokens);
+      } else {
+        await saveProviderOAuthTokens('anthropic', this.tokens);
+      }
 
       this.client = new Anthropic({
         apiKey: null as unknown as string,

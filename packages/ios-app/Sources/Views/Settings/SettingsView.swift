@@ -88,6 +88,14 @@ struct SettingsView: View {
                     }
                 )
 
+                if settingsState.anthropicAccounts.count > 1 {
+                    AccountSection(
+                        accounts: settingsState.anthropicAccounts,
+                        selectedAccount: Bindable(settingsState).selectedAnthropicAccount,
+                        updateServerSetting: updateServerSetting
+                    )
+                }
+
                 if #available(iOS 26.0, *) {
                     QuickSessionSection(
                         displayWorkspace: settingsState.displayQuickSessionWorkspace,

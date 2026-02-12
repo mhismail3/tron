@@ -10,7 +10,7 @@ import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { createLogger, categorizeError, LogErrorCategory } from '../logging/index.js';
 import { getTronDataDir } from '../settings/index.js';
-import type { AuthStorage, ProviderAuth, ProviderId, ServiceAuth, ServiceId, OAuthTokens } from './types.js';
+import type { AuthStorage, ProviderAuth, ProviderId, ServiceAuth, ServiceId, OAuthTokens, AccountEntry } from './types.js';
 
 const logger = createLogger('unified-auth');
 
@@ -290,6 +290,47 @@ export async function saveProviderApiKey(
     ...existing,
     apiKey,
   });
+}
+
+// =============================================================================
+// Multi-Account Functions
+// =============================================================================
+
+/**
+ * Save OAuth tokens for a specific named account within a provider.
+ * Updates the matching account entry in the accounts[] array.
+ */
+export async function saveAccountOAuthTokens(
+  provider: ProviderId,
+  label: string,
+  tokens: OAuthTokens
+): Promise<void> {
+  const auth = (await loadAuthStorage()) ?? createEmptyAuthStorage();
+  const providerAuth = auth.providers[provider] ?? {};
+
+  const accounts: AccountEntry[] = providerAuth.accounts ?? [];
+  const idx = accounts.findIndex((a) => a.label === label);
+  if (idx >= 0) {
+    accounts[idx] = { label, oauth: tokens };
+  } else {
+    accounts.push({ label, oauth: tokens });
+  }
+
+  auth.providers[provider] = { ...providerAuth, accounts };
+  await saveAuthStorage(auth);
+  logger.info('Saved account OAuth tokens', { provider, label });
+}
+
+/**
+ * Get the list of account labels for a provider.
+ * Returns an empty array if no accounts are configured.
+ */
+export function getAccountLabels(provider: ProviderId): string[] {
+  const providerAuth = getProviderAuthSync(provider);
+  if (!providerAuth?.accounts?.length) {
+    return [];
+  }
+  return providerAuth.accounts.map((a) => a.label);
 }
 
 // =============================================================================

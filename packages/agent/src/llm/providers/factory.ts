@@ -44,7 +44,7 @@ export type ProviderType = 'anthropic' | 'openai' | 'openai-codex' | 'google';
  */
 export type UnifiedAuth =
   | { type: 'api_key'; apiKey: string }
-  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number };
+  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number; accountLabel?: string };
 
 /**
  * Unified provider configuration

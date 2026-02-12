@@ -306,8 +306,8 @@ export function isOAuthToken(token: string): boolean {
 // Server-side Auth Loading
 // =============================================================================
 
-import { loadAuthStorage, saveProviderOAuthTokens } from './unified.js';
-import type { ServerAuth } from './types.js';
+import { loadAuthStorage, saveProviderOAuthTokens, saveAccountOAuthTokens } from './unified.js';
+import type { ServerAuth, AccountEntry } from './types.js';
 
 // Re-export ServerAuth for backward compatibility
 export type { ServerAuth };
@@ -355,7 +355,46 @@ export async function loadServerAuth(): Promise<ServerAuth | null> {
     return null;
   }
 
-  // Check OAuth tokens first (preferred for Claude Max)
+  // Multi-account support: if accounts[] exists, select the right one
+  if (anthropicAuth.accounts && anthropicAuth.accounts.length > 0) {
+    const selectedLabel = getSettings().server.anthropicAccount;
+    const account: AccountEntry = (selectedLabel
+      ? anthropicAuth.accounts.find((a) => a.label === selectedLabel)
+      : undefined) ?? anthropicAuth.accounts[0]!;
+
+    const tokens = account.oauth;
+    const accountLabel = account.label;
+    const expiryBuffer = getExpiryBuffer() * 1000;
+
+    if (tokens.expiresAt - expiryBuffer < Date.now()) {
+      logger.info('Account OAuth tokens expired, refreshing...', { accountLabel });
+      try {
+        const newTokens = await refreshOAuthToken(tokens.refreshToken);
+        await saveAccountOAuthTokens('anthropic', accountLabel, newTokens);
+
+        return {
+          type: 'oauth',
+          accessToken: newTokens.accessToken,
+          refreshToken: newTokens.refreshToken,
+          expiresAt: newTokens.expiresAt,
+          accountLabel,
+        };
+      } catch (error) {
+        logger.error('Failed to refresh account OAuth tokens', { error, accountLabel });
+        return null;
+      }
+    }
+
+    return {
+      type: 'oauth',
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: tokens.expiresAt,
+      accountLabel,
+    };
+  }
+
+  // Legacy single OAuth tokens (no accounts array)
   if (anthropicAuth.oauth) {
     const tokens = anthropicAuth.oauth;
     // Check if tokens need refresh (with 5 min buffer)

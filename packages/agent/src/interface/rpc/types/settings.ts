@@ -13,6 +13,8 @@ export interface SettingsGetResult {
   defaultModel: string;
   defaultWorkspace?: string;
   maxConcurrentSessions: number;
+  anthropicAccounts?: string[];
+  anthropicAccount?: string;
   compaction: {
     preserveRecentTurns: number;
     forceAlways: boolean;
@@ -39,7 +41,7 @@ export interface SettingsGetResult {
 /** Params for settings.update */
 export interface SettingsUpdateParams {
   settings: {
-    server?: { defaultModel?: string; defaultWorkspace?: string; maxConcurrentSessions?: number };
+    server?: { defaultModel?: string; defaultWorkspace?: string; maxConcurrentSessions?: number; anthropicAccount?: string };
     context?: {
       compactor?: {
         preserveRecentCount?: number;

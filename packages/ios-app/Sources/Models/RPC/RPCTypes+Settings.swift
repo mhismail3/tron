@@ -6,6 +6,8 @@ struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
     let maxConcurrentSessions: Int
+    let anthropicAccounts: [String]?
+    let anthropicAccount: String?
     let compaction: CompactionSettings
     let memory: MemorySettings
     let rules: RulesSettings
@@ -66,6 +68,7 @@ struct ServerSettingsUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
         var maxConcurrentSessions: Int?
+        var anthropicAccount: String?
     }
 
     struct ContextUpdate: Encodable {

@@ -88,7 +88,8 @@ export function normalizeToUnifiedAuth(auth: ServerAuth | GoogleAuth): UnifiedAu
     if (!accessToken || !refreshToken || expiresAt === undefined) {
       throw new Error('OAuth auth missing required fields');
     }
-    return { type: 'oauth', accessToken, refreshToken, expiresAt };
+    const accountLabel = 'accountLabel' in auth ? (auth as { accountLabel?: string }).accountLabel : undefined;
+    return { type: 'oauth', accessToken, refreshToken, expiresAt, accountLabel };
   }
 }
 

@@ -11,6 +11,7 @@
 #   setup      First-time project setup
 #   status     Show service status and health
 #   start/stop/restart  Manage service (append 'beta' for beta)
+#   login      OAuth login for Claude (--label for multi-account)
 #   logs       Query database logs
 #   errors     Show recent errors
 #   uninstall  Remove service (preserves data)
@@ -1493,6 +1494,211 @@ cmd_uninstall() {
     echo ""
 }
 
+# =============================================================================
+# Login Command
+# OAuth PKCE login for Anthropic (Claude) accounts
+# =============================================================================
+
+AUTH_FILE="$TRON_HOME/auth.json"
+OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
+OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
+OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
+OAUTH_SCOPES="org:create_api_key user:profile user:inference"
+
+base64url_encode() {
+    openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+cmd_login() {
+    local label=""
+
+    # Parse args
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --label) label="$2"; shift 2 ;;
+            --status) cmd_login_status; return ;;
+            -h|--help)
+                echo ""
+                echo "Usage: tron login [--label <name>] [--status]"
+                echo ""
+                echo "  --label <name>   Save as named account (for multi-account switching)"
+                echo "  --status         Show current auth status"
+                echo ""
+                echo "Examples:"
+                echo "  tron login                    Login with default (single) account"
+                echo "  tron login --label Personal   Login and save as \"Personal\" account"
+                echo "  tron login --label Work       Login and save as \"Work\" account"
+                echo ""
+                return ;;
+            *) print_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    # Generate PKCE
+    local code_verifier
+    code_verifier=$(openssl rand 32 | base64url_encode)
+    local code_challenge
+    code_challenge=$(printf '%s' "$code_verifier" | openssl dgst -sha256 -binary | base64url_encode)
+
+    # Build authorization URL
+    local auth_url="${OAUTH_AUTH_ENDPOINT}?code=true&client_id=${OAUTH_CLIENT_ID}&response_type=code&redirect_uri=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${OAUTH_REDIRECT_URI}'))")&scope=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${OAUTH_SCOPES}'))")&code_challenge=${code_challenge}&code_challenge_method=S256&state=${code_verifier}"
+
+    echo ""
+    print_status "Opening browser for authentication..."
+    if [[ -n "$label" ]]; then
+        echo -e "  Account label: ${BOLD}${label}${NC}"
+    fi
+    echo ""
+    echo "If browser doesn't open, visit:"
+    echo "$auth_url"
+    echo ""
+
+    open "$auth_url"
+
+    # Prompt for code
+    printf "Paste the authorization code: "
+    read -r auth_code
+    echo ""
+
+    if [[ -z "$auth_code" ]]; then
+        print_error "No authorization code provided"
+        return 1
+    fi
+
+    # Parse code#state
+    local code="${auth_code%%#*}"
+    local state="${auth_code#*#}"
+
+    print_status "Exchanging authorization code..."
+
+    # Exchange code for tokens
+    local response
+    response=$(curl -s -w "\n%{http_code}" -X POST "$OAUTH_TOKEN_ENDPOINT" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"grant_type\": \"authorization_code\",
+            \"client_id\": \"${OAUTH_CLIENT_ID}\",
+            \"code\": \"${code}\",
+            \"state\": \"${state}\",
+            \"redirect_uri\": \"${OAUTH_REDIRECT_URI}\",
+            \"code_verifier\": \"${code_verifier}\"
+        }")
+
+    local http_code
+    http_code=$(echo "$response" | tail -1)
+    local body
+    body=$(echo "$response" | sed '$d')
+
+    if [[ "$http_code" != "200" ]]; then
+        print_error "Token exchange failed (HTTP $http_code): $body"
+        return 1
+    fi
+
+    local access_token refresh_token expires_in expires_at
+    access_token=$(echo "$body" | jq -r '.access_token')
+    refresh_token=$(echo "$body" | jq -r '.refresh_token')
+    expires_in=$(echo "$body" | jq -r '.expires_in')
+    expires_at=$(( $(date +%s) * 1000 + expires_in * 1000 ))
+
+    # Update auth.json
+    if [[ ! -f "$AUTH_FILE" ]]; then
+        echo '{"version":1,"providers":{}}' > "$AUTH_FILE"
+        chmod 600 "$AUTH_FILE"
+    fi
+
+    local tmp_file="${AUTH_FILE}.tmp"
+
+    if [[ -n "$label" ]]; then
+        # Save as named account in accounts[] array
+        jq --arg label "$label" \
+           --arg at "$access_token" \
+           --arg rt "$refresh_token" \
+           --argjson ea "$expires_at" \
+           '
+           .providers.anthropic.accounts //= [] |
+           (.providers.anthropic.accounts | map(.label) | index($label)) as $idx |
+           if $idx != null then
+               .providers.anthropic.accounts[$idx].oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea}
+           else
+               .providers.anthropic.accounts += [{label: $label, oauth: {accessToken: $at, refreshToken: $rt, expiresAt: $ea}}]
+           end |
+           .lastUpdated = (now | todate)
+           ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
+        chmod 600 "$AUTH_FILE"
+
+        print_success "Saved tokens for account \"${label}\""
+    else
+        # Save as legacy single oauth
+        jq --arg at "$access_token" \
+           --arg rt "$refresh_token" \
+           --argjson ea "$expires_at" \
+           '
+           .providers.anthropic.oauth = {accessToken: $at, refreshToken: $rt, expiresAt: $ea} |
+           .lastUpdated = (now | todate)
+           ' "$AUTH_FILE" > "$tmp_file" && mv "$tmp_file" "$AUTH_FILE"
+        chmod 600 "$AUTH_FILE"
+
+        print_success "Saved OAuth tokens"
+    fi
+
+    local hours_left=$(( expires_in / 3600 ))
+    echo -e "  ${DIM}Token expires in ~${hours_left}h${NC}"
+    echo ""
+}
+
+cmd_login_status() {
+    if [[ ! -f "$AUTH_FILE" ]]; then
+        echo ""
+        print_warning "No auth file found"
+        echo ""
+        return
+    fi
+
+    echo ""
+    print_status "Anthropic auth status:"
+    echo ""
+
+    local now_ms=$(( $(date +%s) * 1000 ))
+
+    # Named accounts
+    local account_count
+    account_count=$(jq -r '.providers.anthropic.accounts // [] | length' "$AUTH_FILE" 2>/dev/null)
+    if [[ "$account_count" -gt 0 ]]; then
+        jq -r --argjson now "$now_ms" '
+            .providers.anthropic.accounts[] |
+            .label as $l |
+            .oauth.expiresAt as $e |
+            .oauth.accessToken[0:20] as $t |
+            if $e > $now then
+                "  \(.label): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
+            else
+                "  \(.label): \u001b[31mexpired\u001b[0m  \($t)..."
+            end
+        ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
+    fi
+
+    # Legacy oauth
+    local has_oauth
+    has_oauth=$(jq -r '.providers.anthropic.oauth // empty | .accessToken' "$AUTH_FILE" 2>/dev/null)
+    if [[ -n "$has_oauth" ]]; then
+        local label="(default)"
+        [[ "$account_count" -gt 0 ]] && label="(legacy)"
+        jq -r --argjson now "$now_ms" --arg label "$label" '
+            .providers.anthropic.oauth |
+            .expiresAt as $e |
+            .accessToken[0:20] as $t |
+            if $e > $now then
+                "  \($label): \u001b[32mvalid\u001b[0m (~\(($e - $now) / 3600000 | floor)h)  \($t)..."
+            else
+                "  \($label): \u001b[31mexpired\u001b[0m  \($t)..."
+            end
+        ' "$AUTH_FILE" 2>/dev/null | while IFS= read -r line; do echo -e "$line"; done
+    fi
+
+    echo ""
+}
+
 cmd_help() {
     echo ""
     echo -e "${CYAN}Tron - Persistent Coding Agent${NC}"
@@ -1514,6 +1720,9 @@ cmd_help() {
     echo "  install         Initial prod setup (launchd + CLI)"
     echo "  rollback        Restore previous prod deployment (--yes, --delay N)"
     echo "  uninstall       Remove prod service (preserves data)"
+    echo ""
+    echo "Auth:"
+    echo "  login           Authenticate with Claude (--label <name> for multi-account)"
     echo ""
     echo "Logs:"
     echo "  logs [beta]     Query database logs (use -h for options)"
@@ -1546,6 +1755,7 @@ case "${1:-help}" in
     restart)   shift; cmd_restart "$@" ;;
     logs)      shift; query_logs "$@" ;;
     errors)    cmd_errors "${2:-}" ;;
+    login)     shift; cmd_login "$@" ;;
     uninstall) cmd_uninstall ;;
     help|--help|-h)
         cmd_help

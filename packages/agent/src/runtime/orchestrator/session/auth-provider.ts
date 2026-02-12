@@ -14,6 +14,7 @@ import { loadServerAuth } from '@infrastructure/auth/oauth.js';
 import { loadGoogleServerAuth, type GoogleAuth } from '@infrastructure/auth/google-oauth.js';
 import { loadOpenAIServerAuth } from '@infrastructure/auth/openai-auth.js';
 import { detectProviderFromModel } from '@llm/providers/factory.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import type { ServerAuth } from '@infrastructure/auth/types.js';
 
 const logger = createLogger('auth-provider');
@@ -33,9 +34,13 @@ export interface AuthProviderConfig {
 
 export class AuthProvider {
   private cachedAuth: ServerAuth | null;
+  private cachedAccountLabel: string | undefined;
 
   constructor(config?: AuthProviderConfig) {
     this.cachedAuth = config?.initialAuth ?? null;
+    this.cachedAccountLabel = this.cachedAuth?.type === 'oauth'
+      ? this.cachedAuth.accountLabel
+      : undefined;
   }
 
   /**
@@ -86,9 +91,21 @@ export class AuthProvider {
     }
 
     // Use cached auth from ~/.tron/auth.json (supports Claude Max OAuth)
-    // Refresh cache if needed (OAuth tokens expire)
-    if (!this.cachedAuth || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
+    // Refresh cache if needed (OAuth tokens expire or account switched)
+    const currentAccountSetting = getSettings().server.anthropicAccount;
+    const accountSwitched = currentAccountSetting !== this.cachedAccountLabel;
+
+    if (!this.cachedAuth || accountSwitched || (this.cachedAuth.type === 'oauth' && this.cachedAuth.expiresAt < Date.now())) {
+      if (accountSwitched) {
+        logger.info('Anthropic account switched, refreshing auth', {
+          from: this.cachedAccountLabel,
+          to: currentAccountSetting,
+        });
+      }
       this.cachedAuth = await loadServerAuth();
+      this.cachedAccountLabel = this.cachedAuth?.type === 'oauth'
+        ? this.cachedAuth.accountLabel
+        : undefined;
     }
 
     if (!this.cachedAuth) {

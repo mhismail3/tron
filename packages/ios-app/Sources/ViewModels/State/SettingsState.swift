@@ -22,6 +22,11 @@ final class SettingsState {
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
 
+    // MARK: - Account Settings
+
+    var anthropicAccounts: [String] = []
+    var selectedAnthropicAccount: String?
+
     // MARK: - Load State
 
     var isLoaded = false
@@ -54,6 +59,8 @@ final class SettingsState {
             memoryAutoInjectCount = settings.memory.autoInject.count
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
+            anthropicAccounts = settings.anthropicAccounts ?? []
+            selectedAnthropicAccount = settings.anthropicAccount
             if let workspace = settings.defaultWorkspace {
                 quickSessionWorkspace = workspace
             }

@@ -13,6 +13,7 @@ import {
   reloadSettings,
 } from '@infrastructure/settings/index.js';
 import type { UserSettings } from '@infrastructure/settings/index.js';
+import { getAccountLabels } from '@infrastructure/auth/unified.js';
 import type { SettingsGetResult, SettingsUpdateParams } from '../types/settings.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
 
@@ -62,10 +63,13 @@ function deepMergeSettings(
 export function createSettingsHandlers(): MethodRegistration[] {
   const getHandler: MethodHandler = async () => {
     const settings = getSettings();
+    const accountLabels = getAccountLabels('anthropic');
     const result: SettingsGetResult = {
       defaultModel: settings.server.defaultModel,
       defaultWorkspace: settings.server.defaultWorkspace,
       maxConcurrentSessions: settings.server.maxConcurrentSessions,
+      anthropicAccounts: accountLabels.length > 0 ? accountLabels : undefined,
+      anthropicAccount: settings.server.anthropicAccount,
       compaction: {
         preserveRecentTurns: settings.context.compactor.preserveRecentCount,
         forceAlways: settings.context.compactor.forceAlways ?? false,

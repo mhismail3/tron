@@ -19,12 +19,23 @@ export interface OAuthTokens {
 }
 
 /**
+ * Named account entry for multi-account support.
+ * Stored in auth.json providers.anthropic.accounts[]
+ */
+export interface AccountEntry {
+  label: string;
+  oauth: OAuthTokens;
+}
+
+/**
  * Provider-specific authentication data
  * Each provider can have OAuth tokens and/or an API key
  */
 export interface ProviderAuth {
   oauth?: OAuthTokens;
   apiKey?: string;
+  /** Named accounts for multi-account support (takes priority over legacy oauth field) */
+  accounts?: AccountEntry[];
 }
 
 /**
@@ -85,6 +96,6 @@ export interface AuthStorage {
  * Uses a discriminated union for type safety at runtime
  */
 export type ServerAuth =
-  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number }
+  | { type: 'oauth'; accessToken: string; refreshToken: string; expiresAt: number; accountLabel?: string }
   | { type: 'api_key'; apiKey: string };
 

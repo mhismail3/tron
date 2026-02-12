@@ -18,6 +18,10 @@ vi.mock('@infrastructure/settings/index.js', () => ({
   reloadSettings: vi.fn(),
 }));
 
+vi.mock('@infrastructure/auth/unified.js', () => ({
+  getAccountLabels: vi.fn(),
+}));
+
 // Import mocked functions
 import {
   getSettings,
@@ -26,10 +30,13 @@ import {
   reloadSettings,
 } from '@infrastructure/settings/index.js';
 
+import { getAccountLabels } from '@infrastructure/auth/unified.js';
+
 const mockGetSettings = vi.mocked(getSettings);
 const mockLoadUserSettings = vi.mocked(loadUserSettings);
 const mockSaveSettings = vi.mocked(saveSettings);
 const mockReloadSettings = vi.mocked(reloadSettings);
+const mockGetAccountLabels = vi.mocked(getAccountLabels);
 
 function createMockSettings(overrides: Record<string, any> = {}) {
   return {
@@ -102,6 +109,7 @@ describe('Settings Handlers', () => {
     };
 
     mockGetSettings.mockReturnValue(createMockSettings());
+    mockGetAccountLabels.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -252,6 +260,31 @@ describe('Settings Handlers', () => {
       const request: RpcRequest = { id: 'mcs-1', method: 'settings.get' };
       const response = await registry.dispatch(request, mockContext);
       expect((response.result as any).maxConcurrentSessions).toBe(25);
+    });
+
+    it('should return anthropicAccounts when accounts exist', async () => {
+      mockGetAccountLabels.mockReturnValue(['Personal', 'Work']);
+      mockGetSettings.mockReturnValue(createMockSettings({
+        server: { anthropicAccount: 'Work' },
+      }));
+
+      const request: RpcRequest = { id: 'acc-1', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.anthropicAccounts).toEqual(['Personal', 'Work']);
+      expect(result.anthropicAccount).toBe('Work');
+    });
+
+    it('should omit anthropicAccounts when no accounts configured', async () => {
+      mockGetAccountLabels.mockReturnValue([]);
+
+      const request: RpcRequest = { id: 'acc-2', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.anthropicAccounts).toBeUndefined();
+      expect(result.anthropicAccount).toBeUndefined();
     });
 
     it('should return web tool settings', async () => {
@@ -464,6 +497,28 @@ describe('Settings Handlers', () => {
 
       const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
       expect(savedArg.context.memory.ledger.enabled).toBe(false);
+    });
+
+    it('should update anthropicAccount', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        server: { defaultModel: 'claude-opus-4-6' },
+      });
+
+      const request: RpcRequest = {
+        id: 'acc-update',
+        method: 'settings.update',
+        params: {
+          settings: {
+            server: { anthropicAccount: 'Work' },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.server.anthropicAccount).toBe('Work');
+      expect(savedArg.server.defaultModel).toBe('claude-opus-4-6');
     });
 
     it('should update memory autoInject count', async () => {

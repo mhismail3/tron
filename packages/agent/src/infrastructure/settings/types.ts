@@ -390,6 +390,8 @@ export interface ServerSettings {
   defaultProvider: string;
   /** Default workspace directory for quick session creation */
   defaultWorkspace?: string;
+  /** Selected Anthropic account label (multi-account support) */
+  anthropicAccount?: string;
   /** Audio transcription settings */
   transcription: TranscriptionSettings;
 }

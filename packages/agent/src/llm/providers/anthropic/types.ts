@@ -26,6 +26,7 @@ export interface OAuthAuth {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
+  accountLabel?: string;
 }
 
 /**

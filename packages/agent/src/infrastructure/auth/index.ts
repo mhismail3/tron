@@ -64,6 +64,7 @@ export type {
   ServiceAuth,
   AuthStorage,
   ServerAuth,
+  AccountEntry,
 } from './types.js';
 
 // Unified auth functions
@@ -83,6 +84,8 @@ export {
   saveProviderAuthSync,
   saveProviderOAuthTokens,
   saveProviderApiKey,
+  saveAccountOAuthTokens,
+  getAccountLabels,
   clearProviderAuth,
   clearAllAuth,
 } from './unified.js';
