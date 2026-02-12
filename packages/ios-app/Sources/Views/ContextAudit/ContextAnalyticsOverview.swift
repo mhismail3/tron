@@ -6,12 +6,6 @@ import SwiftUI
 struct AnalyticsSection: View {
     let sessionId: String
     let events: [SessionEvent]
-    let inputTokens: Int
-    let outputTokens: Int
-    let cacheReadTokens: Int
-    let cacheCreationTokens: Int
-
-    @State private var showCopied = false
 
     private var analytics: ConsolidatedAnalytics {
         ConsolidatedAnalytics(from: events)
@@ -19,7 +13,6 @@ struct AnalyticsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Section header
             VStack(alignment: .leading, spacing: 2) {
                 Text("Analytics")
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
@@ -29,21 +22,19 @@ struct AnalyticsSection: View {
                     .foregroundStyle(.tronTextDisabled)
             }
 
-            // Session ID (tappable to copy)
             SessionIdRow(sessionId: sessionId)
 
-            // Session Tokens (accumulated across all turns for billing)
             SessionTokensCard(
-                inputTokens: inputTokens,
-                outputTokens: outputTokens,
-                cacheReadTokens: cacheReadTokens,
-                cacheCreationTokens: cacheCreationTokens
+                inputTokens: analytics.totalInputTokens,
+                outputTokens: analytics.totalOutputTokens,
+                cacheReadTokens: analytics.totalCacheReadTokens,
+                cacheCreationTokens: analytics.totalCacheCreationTokens,
+                cacheCreation5mTokens: analytics.totalCacheCreation5mTokens,
+                cacheCreation1hTokens: analytics.totalCacheCreation1hTokens
             )
 
-            // Cost Summary
             CostSummaryCard(analytics: analytics)
 
-            // Turn Breakdown
             TurnBreakdownContainer(turns: analytics.turns)
         }
         .padding(.top, 8)

@@ -26,9 +26,6 @@ struct ContextAuditView: View {
     // Optimistic deletion state - skills being deleted animate out immediately
     @State private var pendingSkillDeletions: Set<String> = []
 
-    // Cached token usage to avoid recomputation on every body evaluation
-    @State private var cachedTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) = (0, 0, 0, 0)
-
     // Manual memory update state
     @State private var isAutoLedgerEnabled: Bool = true
     @State private var isUpdatingLedger: Bool = false
@@ -107,21 +104,6 @@ struct ContextAuditView: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-    }
-
-    /// Get session token usage from cached values (populated during loadContext)
-    private var sessionTokenUsage: (input: Int, output: Int, cacheRead: Int, cacheCreation: Int) {
-        cachedTokenUsage
-    }
-
-    /// Calculate and cache token usage (called during data loading)
-    /// Now uses session-level totals directly instead of iterating through events
-    private func updateCachedTokenUsage() {
-        guard let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) else {
-            cachedTokenUsage = (0, 0, 0, 0)
-            return
-        }
-        cachedTokenUsage = (session.inputTokens, session.outputTokens, session.cacheReadTokens, session.cacheCreationTokens)
     }
 
     private var contentView: some View {
@@ -368,11 +350,7 @@ struct ContextAuditView: View {
                             // Analytics Section
                             AnalyticsSection(
                                 sessionId: sessionId,
-                                events: sessionEvents,
-                                inputTokens: sessionTokenUsage.input,
-                                outputTokens: sessionTokenUsage.output,
-                                cacheReadTokens: sessionTokenUsage.cacheRead,
-                                cacheCreationTokens: sessionTokenUsage.cacheCreation
+                                events: sessionEvents
                             )
                             .padding(.horizontal)
                         }
@@ -407,7 +385,6 @@ struct ContextAuditView: View {
 
             detailedSnapshot = try await snapshotTask
             sessionEvents = events
-            updateCachedTokenUsage()
 
             // Check if auto-ledger is enabled
             if let settings = try? await rpcClient.settings.get() {
@@ -428,7 +405,6 @@ struct ContextAuditView: View {
 
             detailedSnapshot = try await snapshotTask
             sessionEvents = events
-            updateCachedTokenUsage()
 
             // Clear any pending deletions since we now have fresh data
             pendingSkillDeletions.removeAll()

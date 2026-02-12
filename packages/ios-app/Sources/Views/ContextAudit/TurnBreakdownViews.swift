@@ -79,14 +79,6 @@ struct TurnRow: View {
     let turn: ConsolidatedAnalytics.TurnData
     @State private var isExpanded = false
 
-    private func formatCost(_ cost: Double) -> String {
-        if cost < 0.00001 { return "$0.00" }
-        if cost < 0.0001 { return String(format: "$%.5f", cost) }
-        if cost < 0.001 { return String(format: "$%.4f", cost) }
-        if cost < 0.01 { return String(format: "$%.3f", cost) }
-        return String(format: "$%.2f", cost)
-    }
-
     private func formatLatency(_ ms: Int) -> String {
         if ms == 0 { return "-" }
         if ms < 1000 {
@@ -210,7 +202,18 @@ struct TurnRow: View {
                                             .font(TronTypography.codeSM)
                                             .foregroundStyle(.tronAmberLight)
                                     }
-                                    if turn.cacheCreationTokens > 0 {
+                                    if turn.hasPerTTLBreakdown {
+                                        if turn.cacheCreation5mTokens > 0 {
+                                            Text("↑5m:\(TokenFormatter.format(turn.cacheCreation5mTokens))")
+                                                .font(TronTypography.codeSM)
+                                                .foregroundStyle(.tronAmberLight)
+                                        }
+                                        if turn.cacheCreation1hTokens > 0 {
+                                            Text("↑1h:\(TokenFormatter.format(turn.cacheCreation1hTokens))")
+                                                .font(TronTypography.codeSM)
+                                                .foregroundStyle(.tronAmberLight)
+                                        }
+                                    } else if turn.cacheCreationTokens > 0 {
                                         Text("↑\(TokenFormatter.format(turn.cacheCreationTokens))")
                                             .font(TronTypography.codeSM)
                                             .foregroundStyle(.tronAmberLight)
@@ -221,6 +224,9 @@ struct TurnRow: View {
 
                         Spacer()
                     }
+
+                    // Per-component cost breakdown
+                    TurnCostBreakdownRow(turn: turn)
 
                     // Tools used
                     if !turn.tools.isEmpty {
@@ -265,6 +271,43 @@ struct TurnRow: View {
         }
         .sectionFill(.tronAmberLight, cornerRadius: 8, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+// MARK: - Turn Cost Breakdown Row
+
+@available(iOS 26.0, *)
+private struct TurnCostBreakdownRow: View {
+    let turn: ConsolidatedAnalytics.TurnData
+
+    var body: some View {
+        let cb = ConsolidatedAnalytics.turnCostBreakdown(for: turn)
+
+        HStack(spacing: 4) {
+            Text("Cost:")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextMuted)
+
+            Text("in \(formatCost(cb.inputCost))")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+
+            Text("+ out \(formatCost(cb.outputCost))")
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronTextSecondary)
+
+            if turn.cacheReadTokens > 0 {
+                Text("+ ↓\(formatCost(cb.cacheReadCost))")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+
+            if cb.cacheWriteCost > 0 {
+                Text("+ ↑\(formatCost(cb.cacheWriteCost))")
+                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+        }
     }
 }
 

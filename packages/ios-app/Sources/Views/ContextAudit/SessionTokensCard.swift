@@ -8,6 +8,8 @@ struct SessionTokensCard: View {
     let outputTokens: Int
     let cacheReadTokens: Int
     let cacheCreationTokens: Int
+    let cacheCreation5mTokens: Int
+    let cacheCreation1hTokens: Int
 
     private var totalTokens: Int {
         inputTokens + outputTokens
@@ -16,6 +18,11 @@ struct SessionTokensCard: View {
     /// Whether any cache tokens exist (hides cache section if none)
     private var hasCacheTokens: Bool {
         cacheReadTokens > 0 || cacheCreationTokens > 0
+    }
+
+    /// Whether per-TTL breakdown is available
+    private var hasPerTTLBreakdown: Bool {
+        cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0
     }
 
     private func formatTokenCount(_ count: Int) -> String {
@@ -106,23 +113,60 @@ struct SessionTokensCard: View {
                     .padding(10)
                     .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
 
-                    // Cache creation tokens
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "memorychip.fill")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    if hasPerTTLBreakdown {
+                        // Per-TTL cache write breakdown
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "memorychip.fill")
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronAmber)
+                                Text("Cache 5m ↑")
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+                            Text(formatTokenCount(cacheCreation5mTokens))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronAmber)
-                            Text("Cache Write")
-                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                                .foregroundStyle(.tronTextMuted)
                         }
-                        Text(formatTokenCount(cacheCreationTokens))
-                            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                            .foregroundStyle(.tronAmber)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "memorychip.fill")
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronAmber)
+                                Text("Cache 1h ↑")
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+                            Text(formatTokenCount(cacheCreation1hTokens))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronAmber)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
+                    } else {
+                        // Single cache write card (no per-TTL data)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "memorychip.fill")
+                                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronAmber)
+                                Text("Cache Write")
+                                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                    .foregroundStyle(.tronTextMuted)
+                            }
+                            Text(formatTokenCount(cacheCreationTokens))
+                                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                                .foregroundStyle(.tronAmber)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .sectionFill(.tronAmber, cornerRadius: 8, subtle: true)
                 }
             }
 
