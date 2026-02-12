@@ -105,17 +105,26 @@ extension ChatView {
 
         // Normal load: scroll to bottom while hidden, then fade in.
         // While !initialLoadComplete and cascadeProgress=0, all messages are at opacity 0.
-        // Two scrolls ensure LazyVStack materializes bottom cells with real heights.
+        // Multiple scrolls let LazyVStack materialize bottom cells and settle real heights.
+        // For long sessions, estimated heights can be wildly off — each scroll gets closer
+        // as LazyVStack replaces estimates with measured heights for materialized cells.
 
-        // STEP 1: Scroll to bottom (estimated heights — may be slightly off)
+        for i in 0..<4 {
+            scrollProxy?.scrollTo("bottom", anchor: .bottom)
+            // Exponential backoff: 16ms, 50ms, 100ms, 150ms — gives layout time to settle
+            let delay: UInt64 = switch i {
+            case 0: 16_000_000
+            case 1: 50_000_000
+            case 2: 100_000_000
+            default: 150_000_000
+            }
+            try? await Task.sleep(nanoseconds: delay)
+        }
+
+        // Final scroll after all layout settling
         scrollProxy?.scrollTo("bottom", anchor: .bottom)
-        try? await Task.sleep(nanoseconds: 16_000_000)  // 1 frame for initial layout
 
-        // STEP 2: Re-scroll now that cells near the bottom have real heights
-        scrollProxy?.scrollTo("bottom", anchor: .bottom)
-        try? await Task.sleep(nanoseconds: 50_000_000)  // Layout settle
-
-        // STEP 3: Fade in all messages from the correct scroll position
+        // Fade in all messages from the correct scroll position
         withAnimation(.easeOut(duration: 0.3)) {
             viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
             initialLoadComplete = true

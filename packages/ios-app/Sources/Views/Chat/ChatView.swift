@@ -502,12 +502,14 @@ struct ChatView: View {
                 .onScrollPhaseChange { oldPhase, newPhase in
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
                 }
-                // Track near-bottom geometry — simple boolean, no inference
+                // Track near-bottom geometry — fires only when the Bool changes.
+                // Threshold includes contentInsets.bottom to account for the input
+                // bar + safe area that sits between the content edge and the viewport.
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     let distanceFromBottom = geometry.contentSize.height
                         - geometry.contentOffset.y
                         - geometry.containerSize.height
-                    return distanceFromBottom < 100
+                    return distanceFromBottom < (100 + geometry.contentInsets.bottom)
                 } action: { _, isNearBottom in
                     guard initialLoadComplete else { return }
                     scrollCoordinator.geometryChanged(isNearBottom: isNearBottom)
@@ -525,28 +527,29 @@ struct ChatView: View {
 
                     guard initialLoadComplete else { return }
 
+                    scrollCoordinator.contentDidArrive()
                     if scrollCoordinator.shouldAutoScroll {
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("bottom", anchor: .bottom)
                         }
                     }
                 }
-                // Auto-scroll during streaming
+                // Auto-scroll during streaming — no withAnimation to avoid overlapping
+                // .animating phases at 30fps that block user touch recognition
                 .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
                     guard initialLoadComplete else { return }
-
+                    scrollCoordinator.contentDidArrive()
                     if scrollCoordinator.shouldAutoScroll {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
                 // Auto-scroll when processing state changes
                 .onChange(of: viewModel.isProcessing) { _, _ in
                     guard initialLoadComplete else { return }
-                    guard scrollCoordinator.shouldAutoScroll else { return }
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                    if scrollCoordinator.shouldAutoScroll {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
                 }
                 // Auto-scroll when ConnectionStatusPill appears/disappears
@@ -555,8 +558,10 @@ struct ChatView: View {
                     guard scrollCoordinator.shouldAutoScroll else { return }
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(100))
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                        if scrollCoordinator.shouldAutoScroll {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -574,21 +579,23 @@ struct ChatView: View {
 
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(50))
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
+                        if scrollCoordinator.shouldAutoScroll {
+                            withAnimation(.easeOut(duration: 0.25)) {
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
                         }
                     }
                 }
             }
 
-            // Floating "New Content" pill — only during active streaming when user scrolled away
-            if scrollCoordinator.shouldShowNewContentPill && viewModel.isProcessing {
+            // Floating "New Content" pill — shows when user scrolled away and new content arrived
+            if scrollCoordinator.shouldShowNewContentPill {
                 scrollToBottomButton
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                     .padding(.bottom, 16)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill && viewModel.isProcessing)
+        .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
     }
 
     // MARK: - Scroll to Bottom Button
