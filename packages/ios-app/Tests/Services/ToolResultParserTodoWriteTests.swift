@@ -47,19 +47,20 @@ struct ToolResultParserTaskManagerTests {
 
     @Test("Task create shows verb type name format")
     func testParseTaskManagerCompletedCreateWithTitle() {
+        let result = "Created task task_abc: Fix bug [pending]\n\n# Fix bug\nID: task_abc | Status: pending | Priority: medium\nSource: agent\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         let tool = ToolUseData(
             toolName: "TaskManager",
             toolCallId: "call_3",
             arguments: "{\"action\":\"create\",\"title\":\"Fix bug\"}",
             status: .success,
-            result: "Created task task_abc: Fix bug [pending]"
+            result: result
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
         #expect(chipData != nil)
         #expect(chipData?.status == .completed)
         #expect(chipData?.chipSummary == "Created task \"Fix bug\"")
-        #expect(chipData?.fullResult == "Created task task_abc: Fix bug [pending]")
+        #expect(chipData?.fullResult == result)
     }
 
     @Test("Task update extracts name from result")
@@ -69,7 +70,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_upd",
             arguments: "{\"action\":\"update\",\"taskId\":\"task_abc\",\"status\":\"completed\"}",
             status: .success,
-            result: "Updated task task_abc: Fix bug [completed]"
+            result: "Updated task task_abc: Fix bug [completed]\n\n# Fix bug\nID: task_abc | Status: completed | Priority: medium\nSource: agent\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
@@ -83,7 +84,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_del",
             arguments: "{\"action\":\"delete\",\"taskId\":\"task_abc\"}",
             status: .success,
-            result: "Deleted task task_abc: Fix bug"
+            result: "Deleted task task_abc: Fix bug\n\n# Fix bug\nID: task_abc | Status: pending | Priority: medium\nSource: agent\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
@@ -113,7 +114,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_cp",
             arguments: "{\"action\":\"create_project\",\"projectTitle\":\"Auth Refactor\"}",
             status: .success,
-            result: "Created project proj_abc: Auth Refactor"
+            result: "Created project proj_abc: Auth Refactor\n\n# Auth Refactor\nID: proj_abc | Status: active | 0/0 tasks\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
@@ -127,7 +128,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_dp",
             arguments: "{\"action\":\"delete_project\",\"projectId\":\"proj_abc\"}",
             status: .success,
-            result: "Deleted project proj_abc: Auth Refactor"
+            result: "Deleted project proj_abc: Auth Refactor\n\n# Auth Refactor\nID: proj_abc | Status: active | 0/0 tasks\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
@@ -157,7 +158,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_ca",
             arguments: "{\"action\":\"create_area\",\"areaTitle\":\"Security\"}",
             status: .success,
-            result: "Created area area_abc: Security [active]"
+            result: "Created area area_abc: Security [active]\n\n# Security\nID: area_abc | Status: active\n0 projects, 0 tasks (0 active)\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
@@ -171,7 +172,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_da",
             arguments: "{\"action\":\"delete_area\",\"areaId\":\"area_abc\"}",
             status: .success,
-            result: "Deleted area area_abc: Security"
+            result: "Deleted area area_abc: Security\n\n# Security\nID: area_abc | Status: active\n0 projects, 0 tasks (0 active)\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
@@ -336,7 +337,7 @@ struct ToolResultParserTaskManagerTests {
             toolCallId: "call_10",
             arguments: "{\"action\":\"create_project\",\"projectTitle\":\"\(longTitle)\"}",
             status: .success,
-            result: "Created project proj_abc: \(longTitle)"
+            result: "Created project proj_abc: \(longTitle)\n\n# \(longTitle)\nID: proj_abc | Status: active | 0/0 tasks\nCreated: 2026-02-11T10:00:00Z\nUpdated: 2026-02-11T10:00:00Z"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)

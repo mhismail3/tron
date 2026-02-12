@@ -80,17 +80,13 @@ struct ChatSheetContent: View {
             UICanvasSheet(state: viewModel.uiCanvasState)
 
         case .taskList:
-            TaskDetailSheet(
+            TaskListSheet(
                 rpcClient: rpcClient,
                 taskState: viewModel.taskState
             )
 
         case .taskDetail(let data):
-            TaskDetailSheet(
-                rpcClient: rpcClient,
-                taskState: viewModel.taskState,
-                chipData: data
-            )
+            taskDetailSheet(fallback: data)
 
         case .notifyApp(let data):
             NotifyAppDetailSheet(data: data)
@@ -117,6 +113,20 @@ struct ChatSheetContent: View {
     }
 
     // MARK: - Sheet Builders
+
+    @ViewBuilder
+    private func taskDetailSheet(fallback: TaskManagerChipData) -> some View {
+        // Look up live data from viewModel.messages so streaming output updates in real-time
+        let liveData: TaskManagerChipData = {
+            if let index = MessageFinder.lastIndexOfToolUse(toolCallId: fallback.toolCallId, in: viewModel.messages),
+               case .toolUse(let tool) = viewModel.messages[index].content,
+               let parsed = ToolResultParser.parseTaskManager(from: tool) {
+                return parsed
+            }
+            return fallback
+        }()
+        TaskDetailSheet(chipData: liveData)
+    }
 
     @ViewBuilder
     private func commandToolDetailSheet(fallback: CommandToolChipData) -> some View {

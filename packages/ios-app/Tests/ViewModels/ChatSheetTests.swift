@@ -182,6 +182,7 @@ struct ChatSheetTests {
             chipSummary: "Created \"Task 1\"",
             fullResult: "Created task task_1: Task 1 [pending]",
             arguments: "{}",
+            entityDetail: nil,
             status: .completed
         )
         let data2 = TaskManagerChipData(
@@ -191,6 +192,7 @@ struct ChatSheetTests {
             chipSummary: "3 tasks",
             fullResult: "Tasks (3/3):",
             arguments: "{}",
+            entityDetail: nil,
             status: .completed
         )
 
@@ -239,6 +241,7 @@ struct ChatSheetTests {
             chipSummary: "Created \"Test\"",
             fullResult: "Created task task_1: Test [pending]",
             arguments: "{}",
+            entityDetail: nil,
             status: .completed
         )
 
@@ -562,6 +565,7 @@ struct SheetCoordinatorTests {
             chipSummary: "Created \"Fix bug\"",
             fullResult: "Created task task_abc: Fix bug [pending]",
             arguments: "{\"action\":\"create\",\"title\":\"Fix bug\"}",
+            entityDetail: nil,
             status: .completed
         )
 

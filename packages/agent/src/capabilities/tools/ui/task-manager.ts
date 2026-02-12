@@ -12,6 +12,9 @@ import type {
   TaskPriority,
   ProjectStatus,
   AreaStatus,
+  TaskWithDetails,
+  ProjectWithDetails,
+  AreaWithCounts,
 } from '../../tasks/types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
@@ -232,6 +235,116 @@ backlog → pending → in_progress → completed/cancelled
   }
 
   // ===========================================================================
+  // Format Helpers — Rich Entity Snapshots
+  // ===========================================================================
+
+  private formatTaskDetail(details: TaskWithDetails): string {
+    const lines: string[] = [
+      `# ${details.title}`,
+      `ID: ${details.id} | Status: ${details.status} | Priority: ${details.priority}`,
+    ];
+
+    if (details.description) lines.push(`\n${details.description}`);
+    if (details.activeForm) lines.push(`Active form: ${details.activeForm}`);
+
+    // Resolve project name
+    if (details.projectId) {
+      const project = this.config.service.getProjectWithDetails(details.projectId);
+      if (project) {
+        lines.push(`Project: ${project.title} (${project.id})`);
+      } else {
+        lines.push(`Project: ${details.projectId}`);
+      }
+    }
+
+    // Resolve area name
+    if (details.areaId) {
+      const area = this.config.service.getArea(details.areaId);
+      if (area) {
+        lines.push(`Area: ${area.title} (${area.id})`);
+      } else {
+        lines.push(`Area: ${details.areaId}`);
+      }
+    }
+
+    if (details.parentTaskId) lines.push(`Parent: ${details.parentTaskId}`);
+    if (details.dueDate) lines.push(`Due: ${details.dueDate}`);
+    if (details.deferredUntil) lines.push(`Deferred until: ${details.deferredUntil}`);
+    if (details.estimatedMinutes) lines.push(`Time: ${details.actualMinutes}/${details.estimatedMinutes}min`);
+    if (details.tags.length > 0) lines.push(`Tags: ${details.tags.join(', ')}`);
+    lines.push(`Source: ${details.source}`);
+    if (details.startedAt) lines.push(`Started: ${details.startedAt}`);
+    if (details.completedAt) lines.push(`Completed: ${details.completedAt}`);
+    lines.push(`Created: ${details.createdAt}`);
+    lines.push(`Updated: ${details.updatedAt}`);
+
+    if (details.notes) lines.push(`\nNotes:\n${details.notes}`);
+
+    if (details.subtasks.length > 0) {
+      lines.push(`\nSubtasks (${details.subtasks.length}):`);
+      for (const sub of details.subtasks) {
+        const mark = sub.status === 'completed' ? 'x' : sub.status === 'in_progress' ? '>' : ' ';
+        lines.push(`  [${mark}] ${sub.id}: ${sub.title}`);
+      }
+    }
+
+    if (details.blockedBy.length > 0) {
+      lines.push(`\nBlocked by: ${details.blockedBy.map(d => d.blockerTaskId).join(', ')}`);
+    }
+    if (details.blocks.length > 0) {
+      lines.push(`Blocks: ${details.blocks.map(d => d.blockedTaskId).join(', ')}`);
+    }
+
+    if (details.recentActivity.length > 0) {
+      lines.push(`\nRecent activity:`);
+      for (const act of details.recentActivity.slice(0, 5)) {
+        lines.push(`  ${act.timestamp.split('T')[0]}: ${act.action}${act.detail ? ` - ${act.detail}` : ''}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatProjectDetail(details: ProjectWithDetails): string {
+    const lines: string[] = [
+      `# ${details.title}`,
+      `ID: ${details.id} | Status: ${details.status} | ${details.completedTaskCount}/${details.taskCount} tasks`,
+    ];
+
+    if (details.description) lines.push(`\n${details.description}`);
+    if (details.area) lines.push(`Area: ${details.area.title} (${details.area.id})`);
+    if (details.tags.length > 0) lines.push(`Tags: ${details.tags.join(', ')}`);
+    lines.push(`Created: ${details.createdAt}`);
+    lines.push(`Updated: ${details.updatedAt}`);
+
+    if (details.tasks.length > 0) {
+      lines.push(`\nTasks (${details.tasks.length}):`);
+      for (const task of details.tasks) {
+        const mark = task.status === 'completed' ? 'x' : task.status === 'in_progress' ? '>' : ' ';
+        const prioritySuffix = task.priority !== 'medium' ? ` [${task.priority}]` : '';
+        lines.push(`  [${mark}] ${task.id}: ${task.title}${prioritySuffix}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  private formatAreaDetail(area: AreaWithCounts): string {
+    const lines: string[] = [
+      `# ${area.title}`,
+      `ID: ${area.id} | Status: ${area.status}`,
+      `${area.projectCount} project${area.projectCount !== 1 ? 's' : ''}, ${area.taskCount} task${area.taskCount !== 1 ? 's' : ''} (${area.activeTaskCount} active)`,
+    ];
+
+    if (area.description) lines.push(`\n${area.description}`);
+    if (area.tags.length > 0) lines.push(`Tags: ${area.tags.join(', ')}`);
+    lines.push(`Created: ${area.createdAt}`);
+    lines.push(`Updated: ${area.updatedAt}`);
+
+    return lines.join('\n');
+  }
+
+  // ===========================================================================
   // Action Handlers
   // ===========================================================================
 
@@ -255,8 +368,11 @@ backlog → pending → in_progress → completed/cancelled
       workspaceId: this.config.getWorkspaceId(),
     });
 
+    const details = this.config.service.getTask(task.id)!;
+    const actionLine = `Created task ${task.id}: ${task.title} [${task.status}]`;
+
     return {
-      content: `Created task ${task.id}: ${task.title} [${task.status}]`,
+      content: `${actionLine}\n\n${this.formatTaskDetail(details)}`,
       isError: false,
     };
   }
@@ -304,8 +420,11 @@ backlog → pending → in_progress → completed/cancelled
       }
     }
 
+    const details = this.config.service.getTask(args.taskId)!;
+    const actionLine = `Updated task ${task.id}: ${task.title} [${task.status}]`;
+
     return {
-      content: `Updated task ${task.id}: ${task.title} [${task.status}]`,
+      content: `${actionLine}\n\n${this.formatTaskDetail(details)}`,
       isError: false,
     };
   }
@@ -316,44 +435,7 @@ backlog → pending → in_progress → completed/cancelled
     const details = this.config.service.getTask(args.taskId);
     if (!details) return { content: `Task not found: ${args.taskId}`, isError: true };
 
-    const lines: string[] = [
-      `# ${details.title}`,
-      `ID: ${details.id} | Status: ${details.status} | Priority: ${details.priority}`,
-    ];
-
-    if (details.description) lines.push(`\n${details.description}`);
-    if (details.activeForm) lines.push(`Active form: ${details.activeForm}`);
-    if (details.projectId) lines.push(`Project: ${details.projectId}`);
-    if (details.parentTaskId) lines.push(`Parent: ${details.parentTaskId}`);
-    if (details.dueDate) lines.push(`Due: ${details.dueDate}`);
-    if (details.deferredUntil) lines.push(`Deferred until: ${details.deferredUntil}`);
-    if (details.estimatedMinutes) lines.push(`Time: ${details.actualMinutes}/${details.estimatedMinutes}min`);
-    if (details.tags.length > 0) lines.push(`Tags: ${details.tags.join(', ')}`);
-    if (details.notes) lines.push(`\nNotes:\n${details.notes}`);
-
-    if (details.subtasks.length > 0) {
-      lines.push(`\nSubtasks (${details.subtasks.length}):`);
-      for (const sub of details.subtasks) {
-        const mark = sub.status === 'completed' ? 'x' : sub.status === 'in_progress' ? '>' : ' ';
-        lines.push(`  [${mark}] ${sub.id}: ${sub.title}`);
-      }
-    }
-
-    if (details.blockedBy.length > 0) {
-      lines.push(`\nBlocked by: ${details.blockedBy.map(d => d.blockerTaskId).join(', ')}`);
-    }
-    if (details.blocks.length > 0) {
-      lines.push(`Blocks: ${details.blocks.map(d => d.blockedTaskId).join(', ')}`);
-    }
-
-    if (details.recentActivity.length > 0) {
-      lines.push(`\nRecent activity:`);
-      for (const act of details.recentActivity.slice(0, 5)) {
-        lines.push(`  ${act.timestamp.split('T')[0]}: ${act.action}${act.detail ? ` - ${act.detail}` : ''}`);
-      }
-    }
-
-    return { content: lines.join('\n'), isError: false };
+    return { content: this.formatTaskDetail(details), isError: false };
   }
 
   private handleList(args: TaskManagerParams): TronToolResult {
@@ -415,8 +497,11 @@ backlog → pending → in_progress → completed/cancelled
       args.timeNote,
     );
 
+    const details = this.config.service.getTask(args.taskId)!;
+    const actionLine = `Logged ${args.minutes}min on ${task.id}. Total: ${task.actualMinutes}min${task.estimatedMinutes ? `/${task.estimatedMinutes}min` : ''}`;
+
     return {
-      content: `Logged ${args.minutes}min on ${task.id}. Total: ${task.actualMinutes}min${task.estimatedMinutes ? `/${task.estimatedMinutes}min` : ''}`,
+      content: `${actionLine}\n\n${this.formatTaskDetail(details)}`,
       isError: false,
     };
   }
@@ -424,12 +509,19 @@ backlog → pending → in_progress → completed/cancelled
   private handleDelete(args: TaskManagerParams): TronToolResult {
     if (!args.taskId) return { content: 'Error: taskId is required for delete', isError: true };
 
-    const task = this.config.service.getTask(args.taskId);
-    if (!task) return { content: `Task not found: ${args.taskId}`, isError: true };
+    const details = this.config.service.getTask(args.taskId);
+    if (!details) return { content: `Task not found: ${args.taskId}`, isError: true };
 
+    // Capture snapshot before deletion
+    const snapshot = this.formatTaskDetail(details);
     this.config.service.deleteTask(args.taskId);
 
-    return { content: `Deleted task ${args.taskId}: ${task.title}`, isError: false };
+    const actionLine = `Deleted task ${args.taskId}: ${details.title}`;
+
+    return {
+      content: `${actionLine}\n\n${snapshot}`,
+      isError: false,
+    };
   }
 
   private handleCreateProject(args: TaskManagerParams): TronToolResult {
@@ -443,8 +535,11 @@ backlog → pending → in_progress → completed/cancelled
       areaId: args.areaId,
     });
 
+    const details = this.config.service.getProjectWithDetails(project.id)!;
+    const actionLine = `Created project ${project.id}: ${project.title}`;
+
     return {
-      content: `Created project ${project.id}: ${project.title}`,
+      content: `${actionLine}\n\n${this.formatProjectDetail(details)}`,
       isError: false,
     };
   }
@@ -460,8 +555,11 @@ backlog → pending → in_progress → completed/cancelled
       areaId: args.areaId,
     });
 
+    const details = this.config.service.getProjectWithDetails(args.projectId)!;
+    const actionLine = `Updated project ${project.id}: ${project.title} [${project.status}]`;
+
     return {
-      content: `Updated project ${project.id}: ${project.title} [${project.status}]`,
+      content: `${actionLine}\n\n${this.formatProjectDetail(details)}`,
       isError: false,
     };
   }
@@ -495,24 +593,7 @@ backlog → pending → in_progress → completed/cancelled
     const details = this.config.service.getProjectWithDetails(args.projectId);
     if (!details) return { content: `Project not found: ${args.projectId}`, isError: true };
 
-    const lines: string[] = [
-      `# ${details.title}`,
-      `ID: ${details.id} | Status: ${details.status} | ${details.completedTaskCount}/${details.taskCount} tasks`,
-    ];
-
-    if (details.description) lines.push(`\n${details.description}`);
-    if (details.area) lines.push(`Area: ${details.area.title}`);
-    if (details.tags.length > 0) lines.push(`Tags: ${details.tags.join(', ')}`);
-
-    if (details.tasks.length > 0) {
-      lines.push(`\nTasks (${details.tasks.length}):`);
-      for (const task of details.tasks) {
-        const mark = task.status === 'completed' ? 'x' : task.status === 'in_progress' ? '>' : ' ';
-        lines.push(`  [${mark}] ${task.id}: ${task.title}`);
-      }
-    }
-
-    return { content: lines.join('\n'), isError: false };
+    return { content: this.formatProjectDetail(details), isError: false };
   }
 
   private handleDeleteProject(args: TaskManagerParams): TronToolResult {
@@ -521,9 +602,16 @@ backlog → pending → in_progress → completed/cancelled
     const project = this.config.service.getProjectWithDetails(args.projectId);
     if (!project) return { content: `Project not found: ${args.projectId}`, isError: true };
 
+    // Capture snapshot before deletion
+    const snapshot = this.formatProjectDetail(project);
     this.config.service.deleteProject(args.projectId);
 
-    return { content: `Deleted project ${args.projectId}: ${project.title}`, isError: false };
+    const actionLine = `Deleted project ${args.projectId}: ${project.title}`;
+
+    return {
+      content: `${actionLine}\n\n${snapshot}`,
+      isError: false,
+    };
   }
 
   private handleCreateArea(args: TaskManagerParams): TronToolResult {
@@ -535,8 +623,11 @@ backlog → pending → in_progress → completed/cancelled
       tags: args.areaTags,
     });
 
+    const areaWithCounts = this.config.service.getArea(area.id)!;
+    const actionLine = `Created area ${area.id}: ${area.title} [${area.status}]`;
+
     return {
-      content: `Created area ${area.id}: ${area.title} [${area.status}]`,
+      content: `${actionLine}\n\n${this.formatAreaDetail(areaWithCounts)}`,
       isError: false,
     };
   }
@@ -551,8 +642,11 @@ backlog → pending → in_progress → completed/cancelled
       tags: args.areaTags,
     });
 
+    const areaWithCounts = this.config.service.getArea(args.areaId)!;
+    const actionLine = `Updated area ${area.id}: ${area.title} [${area.status}]`;
+
     return {
-      content: `Updated area ${area.id}: ${area.title} [${area.status}]`,
+      content: `${actionLine}\n\n${this.formatAreaDetail(areaWithCounts)}`,
       isError: false,
     };
   }
@@ -563,16 +657,7 @@ backlog → pending → in_progress → completed/cancelled
     const area = this.config.service.getArea(args.areaId);
     if (!area) return { content: `Area not found: ${args.areaId}`, isError: true };
 
-    const lines: string[] = [
-      `# ${area.title}`,
-      `ID: ${area.id} | Status: ${area.status}`,
-      `${area.projectCount} project${area.projectCount !== 1 ? 's' : ''}, ${area.taskCount} task${area.taskCount !== 1 ? 's' : ''} (${area.activeTaskCount} active)`,
-    ];
-
-    if (area.description) lines.push(`\n${area.description}`);
-    if (area.tags.length > 0) lines.push(`Tags: ${area.tags.join(', ')}`);
-
-    return { content: lines.join('\n'), isError: false };
+    return { content: this.formatAreaDetail(area), isError: false };
   }
 
   private handleDeleteArea(args: TaskManagerParams): TronToolResult {
@@ -581,9 +666,16 @@ backlog → pending → in_progress → completed/cancelled
     const area = this.config.service.getArea(args.areaId);
     if (!area) return { content: `Area not found: ${args.areaId}`, isError: true };
 
+    // Capture snapshot before deletion
+    const snapshot = this.formatAreaDetail(area);
     this.config.service.deleteArea(args.areaId);
 
-    return { content: `Deleted area ${args.areaId}: ${area.title}`, isError: false };
+    const actionLine = `Deleted area ${args.areaId}: ${area.title}`;
+
+    return {
+      content: `${actionLine}\n\n${snapshot}`,
+      isError: false,
+    };
   }
 
   private handleListAreas(args: TaskManagerParams): TronToolResult {

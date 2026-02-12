@@ -142,11 +142,13 @@ struct ToolResultParser {
                 chipSummary: taskManagerRunningSummary(action: action),
                 fullResult: nil,
                 arguments: tool.arguments,
+                entityDetail: nil,
                 status: .running
             )
         }
 
         let chipSummary = taskManagerChipSummary(action: action, title: taskTitle, result: tool.result)
+        let entityDetail = tool.result.flatMap { parseEntityDetail(from: $0, action: action) }
 
         return TaskManagerChipData(
             toolCallId: tool.toolCallId,
@@ -155,8 +157,320 @@ struct ToolResultParser {
             chipSummary: chipSummary,
             fullResult: tool.result,
             arguments: tool.arguments,
+            entityDetail: entityDetail,
             status: .completed
         )
+    }
+
+    /// Parse enriched tool result text into a structured EntityDetail snapshot.
+    /// Returns nil for list/search actions or malformed input.
+    static func parseEntityDetail(from result: String, action: String) -> EntityDetail? {
+        // Skip list/search actions — no entity to parse
+        let entityActions = Set(["create", "update", "get", "delete", "log_time",
+                                 "create_project", "update_project", "get_project", "delete_project",
+                                 "create_area", "update_area", "get_area", "delete_area"])
+        guard entityActions.contains(action) else { return nil }
+
+        // Determine entity type from action
+        let entityType: EntityDetail.EntityType
+        if action.contains("project") {
+            entityType = .project
+        } else if action.contains("area") {
+            entityType = .area
+        } else {
+            entityType = .task
+        }
+
+        let lines = result.components(separatedBy: "\n")
+
+        // Find the "# Title" header line
+        guard let headerIdx = lines.firstIndex(where: { $0.hasPrefix("# ") }) else { return nil }
+        let title = String(lines[headerIdx].dropFirst(2)).trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty else { return nil }
+
+        // Next line should be "ID: ... | Status: ..." metadata
+        let metaIdx = headerIdx + 1
+        guard metaIdx < lines.count else { return nil }
+        let metaLine = lines[metaIdx]
+        let metaParts = metaLine.components(separatedBy: " | ")
+
+        // Parse ID from first part: "ID: task_abc"
+        var id = ""
+        var status = ""
+        var priority: String?
+        var taskCount: Int?
+        var completedTaskCount: Int?
+
+        for part in metaParts {
+            let trimmed = part.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("ID:") {
+                id = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Status:") {
+                status = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Priority:") {
+                priority = String(trimmed.dropFirst(9)).trimmingCharacters(in: .whitespaces)
+            } else if let match = trimmed.firstMatch(of: /(\d+)\/(\d+)\s+tasks/) {
+                completedTaskCount = Int(match.1)
+                taskCount = Int(match.2)
+            }
+        }
+        guard !id.isEmpty, !status.isEmpty else { return nil }
+
+        // Parse area counts line (for areas): "N projects, M tasks (K active)"
+        var projectCount: Int?
+        var areaTaskCount: Int?
+        var activeTaskCount: Int?
+        if entityType == .area {
+            let countsIdx = metaIdx + 1
+            if countsIdx < lines.count {
+                let countsLine = lines[countsIdx]
+                if let match = countsLine.firstMatch(of: /(\d+)\s+project/) {
+                    projectCount = Int(match.1)
+                }
+                if let match = countsLine.firstMatch(of: /(\d+)\s+task/) {
+                    areaTaskCount = Int(match.1)
+                }
+                if let match = countsLine.firstMatch(of: /\((\d+)\s+active\)/) {
+                    activeTaskCount = Int(match.1)
+                }
+            }
+        }
+
+        // Parse remaining key-value lines and sections
+        var description: String?
+        var activeForm: String?
+        var projectName: String?
+        var areaName: String?
+        var parentId: String?
+        var dueDate: String?
+        var deferredUntil: String?
+        var estimatedMinutes: Int?
+        var actualMinutes: Int?
+        var tags: [String] = []
+        var source: String?
+        var createdAt: String?
+        var updatedAt: String?
+        var startedAt: String?
+        var completedAt: String?
+        var notes: String?
+        var subtasks: [EntityDetail.ListItem] = []
+        var tasks: [EntityDetail.ListItem] = []
+        var blockedBy: [String] = []
+        var blocks: [String] = []
+        var activity: [EntityDetail.ActivityItem] = []
+
+        // Start parsing after the metadata line(s)
+        var startIdx = metaIdx + 1
+        if entityType == .area { startIdx = metaIdx + 2 } // skip counts line
+
+        // Description: first non-empty line after metadata that isn't a known key
+        var descriptionLines: [String] = []
+        var notesLines: [String] = []
+        var inNotes = false
+        var inSubtasks = false
+        var inTasks = false
+        var inActivity = false
+
+        var i = startIdx
+        while i < lines.count {
+            let line = lines[i]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Section headers reset current context
+            if trimmed.hasPrefix("Subtasks (") {
+                inSubtasks = true
+                inTasks = false; inNotes = false; inActivity = false
+                i += 1; continue
+            }
+            if trimmed.hasPrefix("Tasks (") {
+                inTasks = true
+                inSubtasks = false; inNotes = false; inActivity = false
+                i += 1; continue
+            }
+            if trimmed == "Notes:" || trimmed.hasPrefix("Notes:") {
+                inNotes = true
+                inSubtasks = false; inTasks = false; inActivity = false
+                // Check for inline content after "Notes:"
+                let afterNotes = String(trimmed.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                if !afterNotes.isEmpty { notesLines.append(afterNotes) }
+                i += 1; continue
+            }
+            if trimmed.hasPrefix("Recent activity:") {
+                inActivity = true
+                inSubtasks = false; inTasks = false; inNotes = false
+                i += 1; continue
+            }
+
+            // Parse list items in sections
+            if inSubtasks || inTasks {
+                if let item = parseListItem(from: trimmed) {
+                    if inSubtasks { subtasks.append(item) }
+                    else { tasks.append(item) }
+                    i += 1; continue
+                }
+                if trimmed.isEmpty { i += 1; continue }
+                // Non-list-item, non-empty line ends section
+                inSubtasks = false; inTasks = false
+            }
+
+            if inNotes {
+                if trimmed.isEmpty && notesLines.isEmpty {
+                    i += 1; continue // skip leading blank
+                }
+                // Notes end at a known key or section
+                if isKnownKey(trimmed) || trimmed.hasPrefix("Subtasks (") || trimmed.hasPrefix("Tasks (") || trimmed.hasPrefix("Recent activity:") {
+                    inNotes = false
+                    // Don't advance — re-process this line
+                    continue
+                }
+                notesLines.append(trimmed)
+                i += 1; continue
+            }
+
+            if inActivity {
+                // Activity items: "  2026-02-11: created - detail"
+                if let item = parseActivityItem(from: trimmed) {
+                    activity.append(item)
+                    i += 1; continue
+                }
+                if trimmed.isEmpty { i += 1; continue }
+                inActivity = false
+            }
+
+            // Key-value parsing
+            if trimmed.isEmpty {
+                i += 1; continue
+            }
+
+            if trimmed.hasPrefix("Active form:") {
+                activeForm = String(trimmed.dropFirst(12)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Project:") {
+                projectName = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Area:") {
+                areaName = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Parent:") {
+                parentId = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Due:") {
+                dueDate = String(trimmed.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Deferred until:") {
+                deferredUntil = String(trimmed.dropFirst(15)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Time:") {
+                let timeStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                if let match = timeStr.firstMatch(of: /(\d+)\/(\d+)min/) {
+                    actualMinutes = Int(match.1)
+                    estimatedMinutes = Int(match.2)
+                }
+            } else if trimmed.hasPrefix("Tags:") {
+                let tagStr = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                tags = tagStr.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }
+            } else if trimmed.hasPrefix("Source:") {
+                source = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Created:") {
+                createdAt = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Updated:") {
+                updatedAt = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Started:") {
+                startedAt = String(trimmed.dropFirst(8)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Completed:") {
+                completedAt = String(trimmed.dropFirst(10)).trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("Blocked by:") {
+                let ids = String(trimmed.dropFirst(11)).trimmingCharacters(in: .whitespaces)
+                blockedBy = ids.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }
+            } else if trimmed.hasPrefix("Blocks:") {
+                let ids = String(trimmed.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                blocks = ids.components(separatedBy: ", ").map { $0.trimmingCharacters(in: .whitespaces) }
+            } else if !isKnownKey(trimmed) && description == nil {
+                // First unrecognized non-empty line is the description
+                descriptionLines.append(trimmed)
+                // Collect multi-line description
+                var j = i + 1
+                while j < lines.count {
+                    let nextLine = lines[j].trimmingCharacters(in: .whitespaces)
+                    if nextLine.isEmpty || isKnownKey(nextLine) || nextLine.hasPrefix("Subtasks (")
+                        || nextLine.hasPrefix("Tasks (") || nextLine.hasPrefix("Recent activity:")
+                        || nextLine.hasPrefix("Notes:") { break }
+                    descriptionLines.append(nextLine)
+                    j += 1
+                }
+                description = descriptionLines.joined(separator: "\n")
+                i = j; continue
+            }
+
+            i += 1
+        }
+
+        if !notesLines.isEmpty {
+            notes = notesLines.joined(separator: "\n")
+        }
+
+        return EntityDetail(
+            entityType: entityType,
+            title: title,
+            id: id,
+            status: status,
+            priority: priority,
+            source: source,
+            activeForm: activeForm,
+            description: description,
+            notes: notes,
+            tags: tags,
+            projectName: projectName,
+            areaName: areaName,
+            parentId: parentId,
+            dueDate: dueDate,
+            deferredUntil: deferredUntil,
+            estimatedMinutes: estimatedMinutes,
+            actualMinutes: actualMinutes,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            taskCount: entityType == .area ? areaTaskCount : taskCount,
+            completedTaskCount: completedTaskCount,
+            projectCount: projectCount,
+            activeTaskCount: activeTaskCount,
+            subtasks: subtasks,
+            tasks: tasks,
+            blockedBy: blockedBy,
+            blocks: blocks,
+            activity: activity
+        )
+    }
+
+    /// Parse a list item like "  [x] task_abc: Title [high]"
+    private static func parseListItem(from line: String) -> EntityDetail.ListItem? {
+        guard let match = line.firstMatch(of: /\[([x> b\-])\]\s+([\w_]+):\s+(.+)/) else { return nil }
+        let mark = String(match.1)
+        let id = String(match.2)
+        var titleAndExtra = String(match.3).trimmingCharacters(in: .whitespaces)
+
+        // Extract trailing [priority] or similar
+        var extra: String?
+        if let extraMatch = titleAndExtra.firstMatch(of: /\s+(\[\w+\])$/) {
+            extra = String(extraMatch.1)
+            titleAndExtra = String(titleAndExtra[titleAndExtra.startIndex..<extraMatch.range.lowerBound])
+                .trimmingCharacters(in: .whitespaces)
+        }
+
+        return EntityDetail.ListItem(mark: mark, id: id, title: titleAndExtra, extra: extra)
+    }
+
+    /// Parse an activity item like "  2026-02-11: created - detail"
+    private static func parseActivityItem(from line: String) -> EntityDetail.ActivityItem? {
+        guard let match = line.firstMatch(of: /(\d{4}-\d{2}-\d{2}):\s+(\S+)(?:\s+-\s+(.+))?/) else { return nil }
+        return EntityDetail.ActivityItem(
+            date: String(match.1),
+            action: String(match.2),
+            detail: match.3.map { String($0).trimmingCharacters(in: .whitespaces) }
+        )
+    }
+
+    /// Check if a line starts with a known key prefix
+    private static func isKnownKey(_ line: String) -> Bool {
+        let keys = ["Active form:", "Project:", "Area:", "Parent:", "Due:", "Deferred until:",
+                     "Time:", "Tags:", "Source:", "Created:", "Updated:", "Started:", "Completed:",
+                     "Blocked by:", "Blocks:", "ID:"]
+        return keys.contains(where: { line.hasPrefix($0) })
     }
 
     /// Running state summary for chip
