@@ -300,10 +300,20 @@ export class EventStoreOrchestrator extends EventEmitter {
       loadWorkspaceMemory: (workspacePath, options) => this.embeddings.loadWorkspaceMemory(workspacePath, options),
     });
 
+    // Initialize Task management (persistent, SQLite-backed)
+    // Must be before ContextOps and AgentFactory since both reference task services
+    const dbConnection = this.eventStore.getDatabaseConnection();
+    const taskRepo = new TaskRepository(dbConnection);
+    this.taskService = new TaskService(taskRepo, (event, data) => {
+      this.emit(event.replace('.', '_'), data);
+    });
+    const taskContextBuilder = new TaskContextBuilder(taskRepo);
+
     // Initialize ContextOps (delegated module)
     this.context = createContextOps({
       sessionStore: this.activeSessions,
       emit: (event, data) => this.emit(event, data),
+      taskContextBuilder,
     });
 
     // Initialize AuthProvider (delegated module)
@@ -314,15 +324,6 @@ export class EventStoreOrchestrator extends EventEmitter {
     if (this.apnsService) {
       logger.info('APNS service initialized for push notifications');
     }
-
-    // Initialize Task management (persistent, SQLite-backed)
-    // Must be before createAgentFactory since it references this.taskService
-    const dbConnection = this.eventStore.getDatabaseConnection();
-    const taskRepo = new TaskRepository(dbConnection);
-    this.taskService = new TaskService(taskRepo, (event, data) => {
-      this.emit(event.replace('.', '_'), data);
-    });
-    const taskContextBuilder = new TaskContextBuilder(taskRepo);
 
     // Initialize AgentFactory (delegated module)
     // Load external service API keys from ~/.tron/auth.json

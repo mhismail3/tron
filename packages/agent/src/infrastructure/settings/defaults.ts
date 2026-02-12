@@ -215,6 +215,11 @@ export const DEFAULT_SETTINGS: TronSettings = {
     rules: {
       discoverStandaloneFiles: true,
     },
+    tasks: {
+      autoInject: {
+        enabled: false,
+      },
+    },
   },
 
   // Agent Runtime Configuration

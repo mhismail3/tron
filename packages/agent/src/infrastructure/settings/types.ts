@@ -318,12 +318,28 @@ export interface RulesSettings {
 }
 
 /**
+ * Task auto-injection configuration
+ */
+export interface TaskAutoInjectSettings {
+  /** Enable auto-injection of task summary into LLM context each turn */
+  enabled: boolean;
+}
+
+/**
+ * Task manager settings
+ */
+export interface TaskSettings {
+  autoInject: TaskAutoInjectSettings;
+}
+
+/**
  * Context settings container
  */
 export interface ContextSettings {
   compactor: CompactorSettings;
   memory: MemorySettings;
   rules: RulesSettings;
+  tasks: TaskSettings;
 }
 
 // =============================================================================

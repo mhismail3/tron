@@ -30,6 +30,9 @@ export interface SettingsGetResult {
   rules: {
     discoverStandaloneFiles: boolean;
   };
+  tasks: {
+    autoInject: { enabled: boolean };
+  };
   tools: {
     web: {
       fetch: { timeoutMs: number };
@@ -57,6 +60,9 @@ export interface SettingsUpdateParams {
       };
       rules?: {
         discoverStandaloneFiles?: boolean;
+      };
+      tasks?: {
+        autoInject?: { enabled?: boolean };
       };
     };
     tools?: {

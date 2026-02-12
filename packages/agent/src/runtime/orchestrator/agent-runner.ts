@@ -32,6 +32,7 @@ import { createLogger } from '@infrastructure/logging/index.js';
 import { withLoggingContext, getLoggingContext } from '@infrastructure/logging/log-context.js';
 import { normalizeContentBlocks } from '@core/utils/content-normalizer.js';
 import { PersistenceError, parseError } from '@core/utils/errors.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 import type { RunResult, RunContext } from '../agent/types.js';
 import type { UserContent } from '@core/types/messages.js';
 import type { SkillLoader, SubagentSkillRequest } from './operations/skill-loader.js';
@@ -259,8 +260,11 @@ export class AgentRunner {
       });
     }
 
-    // Task context (persistent, from SQLite)
-    const taskContext = this.config.taskContextBuilder.buildSummary();
+    // Task context (persistent, from SQLite) — gated by setting
+    const taskAutoInjectEnabled = getSettings().context.tasks?.autoInject?.enabled ?? false;
+    const taskContext = taskAutoInjectEnabled
+      ? this.config.taskContextBuilder.buildSummary()
+      : undefined;
     if (taskContext) {
       logger.info('[TASK] Including task context in run', {
         sessionId: active.sessionId,

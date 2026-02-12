@@ -268,6 +268,8 @@ struct DetailedContextSnapshotResult: Codable {
     let memory: LoadedMemory?
     /// Session memories written during this session (auto or manual ledger)
     let sessionMemories: LoadedMemory?
+    /// Task context summary (if tasks exist)
+    let taskContext: LoadedTaskContext?
 }
 
 /// A single auto-injected memory entry
@@ -283,6 +285,12 @@ struct LoadedMemory: Codable {
     let count: Int
     let tokens: Int
     let entries: [LoadedMemoryEntry]?
+}
+
+/// Task context summary auto-injected into LLM context
+struct LoadedTaskContext: Codable {
+    let summary: String
+    let tokens: Int
 }
 
 // MARK: - Worktree Payloads

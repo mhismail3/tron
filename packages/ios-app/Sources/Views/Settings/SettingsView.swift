@@ -125,6 +125,11 @@ struct SettingsView: View {
                     updateServerSetting: updateServerSetting
                 )
 
+                TaskSettingsSection(
+                    taskAutoInjectEnabled: Bindable(settingsState).taskAutoInjectEnabled,
+                    updateServerSetting: updateServerSetting
+                )
+
                 if #available(iOS 26.0, *) {
                     AppearanceSection()
                 }

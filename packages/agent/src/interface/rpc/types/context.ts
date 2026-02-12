@@ -101,6 +101,12 @@ export interface RpcMemoryInfo {
   entries: RpcMemoryEntry[];
 }
 
+/** Task context summary auto-injected into LLM context */
+export interface RpcTaskContextInfo {
+  summary: string;
+  tokens: number;
+}
+
 export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResult {
   messages: ContextDetailedMessageInfo[];
   systemPromptContent: string;
@@ -111,6 +117,8 @@ export interface ContextGetDetailedSnapshotResult extends ContextGetSnapshotResu
   rules?: RpcRulesInfo;
   /** Memory loaded for this session (if auto-inject enabled) */
   memory?: RpcMemoryInfo;
+  /** Task context summary (if tasks exist) */
+  taskContext?: RpcTaskContextInfo;
 }
 
 /** Check if compaction is needed */

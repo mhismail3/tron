@@ -11,6 +11,7 @@ struct ServerSettings: Decodable {
     let compaction: CompactionSettings
     let memory: MemorySettings
     let rules: RulesSettings
+    let tasks: TaskSettings
     let tools: ToolSettings
 
     struct CompactionSettings: Decodable {
@@ -38,6 +39,14 @@ struct ServerSettings: Decodable {
 
     struct RulesSettings: Decodable {
         let discoverStandaloneFiles: Bool
+    }
+
+    struct TaskSettings: Decodable {
+        let autoInject: AutoInjectSettings
+
+        struct AutoInjectSettings: Decodable {
+            let enabled: Bool
+        }
     }
 
     struct ToolSettings: Decodable {
@@ -75,6 +84,7 @@ struct ServerSettingsUpdate: Encodable {
         var compactor: CompactorUpdate?
         var memory: MemoryUpdate?
         var rules: RulesUpdate?
+        var tasks: TasksUpdate?
 
         struct CompactorUpdate: Encodable {
             var preserveRecentCount: Int?
@@ -101,6 +111,14 @@ struct ServerSettingsUpdate: Encodable {
 
         struct RulesUpdate: Encodable {
             var discoverStandaloneFiles: Bool?
+        }
+
+        struct TasksUpdate: Encodable {
+            var autoInject: AutoInjectUpdate?
+
+            struct AutoInjectUpdate: Encodable {
+                var enabled: Bool?
+            }
         }
     }
 

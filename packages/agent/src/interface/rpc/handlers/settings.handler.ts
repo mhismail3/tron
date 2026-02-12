@@ -90,6 +90,11 @@ export function createSettingsHandlers(): MethodRegistration[] {
       rules: {
         discoverStandaloneFiles: settings.context.rules?.discoverStandaloneFiles ?? true,
       },
+      tasks: {
+        autoInject: {
+          enabled: settings.context.tasks?.autoInject?.enabled ?? false,
+        },
+      },
       tools: {
         web: {
           fetch: { timeoutMs: settings.tools.web.fetch.timeoutMs },

@@ -32,11 +32,27 @@ export interface ContextOpsConfig {
   sessionStore: ActiveSessionStore;
   /** Emit event */
   emit: (event: string, data: unknown) => void;
+  /** Task context builder for audit snapshot (optional) */
+  taskContextBuilder?: { buildSummary(workspaceId?: string): string | undefined };
 }
 
 // =============================================================================
 // ContextOps Class
 // =============================================================================
+
+/** Augmented snapshot with session-specific data for the context audit sheet */
+export interface AugmentedDetailedSnapshot extends DetailedContextSnapshot {
+  addedSkills: Array<{
+    name: string;
+    source: 'global' | 'project';
+    addedVia: 'mention' | 'explicit';
+    eventId: string;
+    tokens: number;
+  }>;
+  memory?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
+  sessionMemories?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
+  taskContext?: { summary: string; tokens: number };
+}
 
 export class ContextOps {
   private config: ContextOpsConfig;
@@ -147,7 +163,7 @@ export class ContextOps {
 
     // Include added skills from the session's skill tracker
     const addedSkills = active.skillTracker.getAddedSkills();
-    const result = {
+    const result: AugmentedDetailedSnapshot = {
       ...snapshot,
       addedSkills: addedSkills.map(s => ({
         name: s.name,
@@ -156,10 +172,6 @@ export class ContextOps {
         eventId: s.eventId,
         tokens: s.tokens,
       })),
-    } as DetailedContextSnapshot & {
-      addedSkills: typeof addedSkills;
-      memory?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
-      sessionMemories?: { count: number; tokens: number; entries: Array<{ title: string; content: string }> };
     };
 
     // Include memory info if memory was auto-injected
@@ -189,6 +201,17 @@ export class ContextOps {
         tokens: sessionMemories.reduce((sum, m) => sum + m.tokens, 0),
         entries: sessionMemories.map(m => ({ title: m.title, content: m.content })),
       };
+    }
+
+    // Include task context summary if tasks exist (always informational, regardless of auto-inject setting)
+    if (this.config.taskContextBuilder) {
+      const summary = this.config.taskContextBuilder.buildSummary();
+      if (summary) {
+        result.taskContext = {
+          summary,
+          tokens: Math.ceil(summary.length / 4),
+        };
+      }
     }
 
     return result;

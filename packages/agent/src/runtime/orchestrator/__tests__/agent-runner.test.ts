@@ -17,6 +17,16 @@ import { AgentRunner, createAgentRunner, type AgentRunnerConfig } from '../agent
 import type { ActiveSession, AgentRunOptions } from '../types.js';
 import type { RunResult } from '../../agent/types.js';
 
+// Mock settings module for task auto-inject gate
+vi.mock('@infrastructure/settings/index.js', () => ({
+  getSettings: vi.fn().mockReturnValue({
+    context: { tasks: { autoInject: { enabled: false } } },
+  }),
+}));
+
+import { getSettings } from '@infrastructure/settings/index.js';
+const mockGetSettings = vi.mocked(getSettings);
+
 // =============================================================================
 // Test Fixtures
 // =============================================================================
@@ -134,6 +144,9 @@ describe('AgentRunner', () => {
     config = createMockConfig();
     runner = new AgentRunner(config);
     active = createMockActiveSession();
+    mockGetSettings.mockReturnValue({
+      context: { tasks: { autoInject: { enabled: false } } },
+    } as any);
   });
 
   describe('run() - Basic Flow', () => {
@@ -314,6 +327,9 @@ describe('AgentRunner', () => {
     });
 
     it('passes task context via RunContext', async () => {
+      mockGetSettings.mockReturnValue({
+        context: { tasks: { autoInject: { enabled: true } } },
+      } as any);
       config.taskContextBuilder = { buildSummary: vi.fn().mockReturnValue('Active: 1 in progress') };
       runner = new AgentRunner(config);
       const options = createRunOptions();
@@ -329,6 +345,9 @@ describe('AgentRunner', () => {
     });
 
     it('passes undefined taskContext when no tasks exist', async () => {
+      mockGetSettings.mockReturnValue({
+        context: { tasks: { autoInject: { enabled: true } } },
+      } as any);
       config.taskContextBuilder = { buildSummary: vi.fn().mockReturnValue(undefined) };
       runner = new AgentRunner(config);
       const options = createRunOptions();
@@ -339,6 +358,44 @@ describe('AgentRunner', () => {
         expect.anything(),
         expect.objectContaining({
           taskContext: undefined,
+        })
+      );
+    });
+
+    it('skips task context when setting disabled', async () => {
+      mockGetSettings.mockReturnValue({
+        context: { tasks: { autoInject: { enabled: false } } },
+      } as any);
+      config.taskContextBuilder = { buildSummary: vi.fn().mockReturnValue('Active tasks: 3') };
+      runner = new AgentRunner(config);
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      expect(config.taskContextBuilder.buildSummary).not.toHaveBeenCalled();
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          taskContext: undefined,
+        })
+      );
+    });
+
+    it('includes task context when setting enabled', async () => {
+      mockGetSettings.mockReturnValue({
+        context: { tasks: { autoInject: { enabled: true } } },
+      } as any);
+      config.taskContextBuilder = { buildSummary: vi.fn().mockReturnValue('Active tasks: 2') };
+      runner = new AgentRunner(config);
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      expect(config.taskContextBuilder.buildSummary).toHaveBeenCalled();
+      expect(active.agent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          taskContext: 'Active tasks: 2',
         })
       );
     });
@@ -998,6 +1055,9 @@ describe('AgentRunner Edge Cases', () => {
     config = createMockConfig();
     runner = new AgentRunner(config);
     active = createMockActiveSession();
+    mockGetSettings.mockReturnValue({
+      context: { tasks: { autoInject: { enabled: false } } },
+    } as any);
   });
 
   it('handles empty prompt', async () => {

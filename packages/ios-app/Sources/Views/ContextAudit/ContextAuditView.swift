@@ -305,6 +305,10 @@ struct ContextAuditView: View {
                                 if let memory = snapshot.memory, memory.count > 0 {
                                     MemorySection(memory: memory)
                                 }
+
+                                if let taskCtx = snapshot.taskContext {
+                                    TaskContextSection(taskContext: taskCtx)
+                                }
                             }
                             .padding(.horizontal)
 

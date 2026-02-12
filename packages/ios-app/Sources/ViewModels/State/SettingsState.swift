@@ -21,6 +21,7 @@ final class SettingsState {
     var memoryAutoInjectCount: Int = 5
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
+    var taskAutoInjectEnabled: Bool = false
 
     // MARK: - Account Settings
 
@@ -59,6 +60,7 @@ final class SettingsState {
             memoryAutoInjectCount = settings.memory.autoInject.count
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
+            taskAutoInjectEnabled = settings.tasks.autoInject.enabled
             anthropicAccounts = settings.anthropicAccounts ?? []
             selectedAnthropicAccount = settings.anthropicAccount
             if let workspace = settings.defaultWorkspace {
@@ -92,6 +94,7 @@ final class SettingsState {
         memoryAutoInjectCount = 5
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
+        taskAutoInjectEnabled = false
         quickSessionWorkspace = AppConstants.defaultWorkspace
     }
 
@@ -108,7 +111,8 @@ final class SettingsState {
                 defaultTurnFallback: 8
                 ),
                 memory: .init(ledger: .init(enabled: true)),
-                rules: .init(discoverStandaloneFiles: true)
+                rules: .init(discoverStandaloneFiles: true),
+                tasks: .init(autoInject: .init(enabled: false))
             ),
             tools: .init(web: .init(
                 fetch: .init(timeoutMs: 30000),

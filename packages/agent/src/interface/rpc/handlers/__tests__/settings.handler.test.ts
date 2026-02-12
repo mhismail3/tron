@@ -82,6 +82,10 @@ function createMockSettings(overrides: Record<string, any> = {}) {
         autoInject: { enabled: false, count: 5 },
         ...overrides.memory,
       },
+      tasks: {
+        autoInject: { enabled: false },
+        ...overrides.tasks,
+      },
       ...overrides.context,
     },
     tools: {
@@ -145,6 +149,9 @@ describe('Settings Handlers', () => {
         rules: {
           discoverStandaloneFiles: true,
         },
+        tasks: {
+          autoInject: { enabled: false },
+        },
         tools: {
           web: {
             fetch: { timeoutMs: 30000 },
@@ -195,6 +202,9 @@ describe('Settings Handlers', () => {
         },
         rules: {
           discoverStandaloneFiles: true,
+        },
+        tasks: {
+          autoInject: { enabled: false },
         },
         tools: {
           web: {
@@ -285,6 +295,26 @@ describe('Settings Handlers', () => {
 
       expect(result.anthropicAccounts).toBeUndefined();
       expect(result.anthropicAccount).toBeUndefined();
+    });
+
+    it('should return tasks.autoInject.enabled false by default', async () => {
+      const request: RpcRequest = { id: 'task-1', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.tasks.autoInject.enabled).toBe(false);
+    });
+
+    it('should return tasks.autoInject.enabled true when configured', async () => {
+      mockGetSettings.mockReturnValue(createMockSettings({
+        tasks: { autoInject: { enabled: true } },
+      }));
+
+      const request: RpcRequest = { id: 'task-2', method: 'settings.get' };
+      const response = await registry.dispatch(request, mockContext);
+      const result = response.result as any;
+
+      expect(result.tasks.autoInject.enabled).toBe(true);
     });
 
     it('should return web tool settings', async () => {
@@ -519,6 +549,27 @@ describe('Settings Handlers', () => {
       const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
       expect(savedArg.server.anthropicAccount).toBe('Work');
       expect(savedArg.server.defaultModel).toBe('claude-opus-4-6');
+    });
+
+    it('should update tasks.autoInject.enabled', async () => {
+      mockLoadUserSettings.mockReturnValue({
+        context: { tasks: { autoInject: { enabled: true } } },
+      });
+
+      const request: RpcRequest = {
+        id: 'task-update',
+        method: 'settings.update',
+        params: {
+          settings: {
+            context: { tasks: { autoInject: { enabled: false } } },
+          },
+        },
+      };
+
+      await registry.dispatch(request, mockContext);
+
+      const savedArg = mockSaveSettings.mock.calls[0]![0] as any;
+      expect(savedArg.context.tasks.autoInject.enabled).toBe(false);
     });
 
     it('should update memory autoInject count', async () => {
