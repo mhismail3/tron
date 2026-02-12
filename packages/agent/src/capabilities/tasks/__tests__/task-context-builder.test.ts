@@ -119,4 +119,34 @@ describe('TaskContextBuilder', () => {
     const summary = builder.buildSummary()!;
     expect(summary).not.toContain('P:medium');
   });
+
+  describe('area awareness', () => {
+    it('shows active areas with counts', () => {
+      const area = repo.createArea({ title: 'Security', description: 'Ongoing security work' });
+      repo.createTask({ title: 'Audit', areaId: area.id, status: 'pending' });
+      repo.createProject({ title: 'Pen Test', areaId: area.id });
+
+      const summary = builder.buildSummary()!;
+      expect(summary).toContain('Areas');
+      expect(summary).toContain('Security');
+      expect(summary).toContain('Ongoing security work');
+    });
+
+    it('does not show archived areas', () => {
+      const area = repo.createArea({ title: 'Old Area' });
+      repo.updateArea(area.id, { status: 'archived' });
+      // Need an active task so builder doesn't return undefined
+      repo.createTask({ title: 'Active', status: 'pending' });
+
+      const summary = builder.buildSummary()!;
+      expect(summary).not.toContain('Old Area');
+    });
+
+    it('shows areas with zero tasks', () => {
+      repo.createArea({ title: 'Empty Area', description: 'Nothing yet' });
+
+      const summary = builder.buildSummary()!;
+      expect(summary).toContain('Empty Area');
+    });
+  });
 });

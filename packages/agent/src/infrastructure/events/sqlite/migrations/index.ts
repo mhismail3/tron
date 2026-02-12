@@ -16,6 +16,7 @@ import { migration as v004Indexes } from './versions/v004-indexes.js';
 import { migration as v005TraceColumns } from './versions/v005-trace-columns.js';
 import { migration as v006MemoryVectors } from './versions/v006-memory-vectors.js';
 import { migration as v007Tasks } from './versions/v007-tasks.js';
+import { migration as v008Areas } from './versions/v008-areas.js';
 
 /**
  * All registered migrations in order
@@ -28,6 +29,7 @@ export const migrations: Migration[] = [
   v005TraceColumns,
   v006MemoryVectors,
   v007Tasks,
+  v008Areas,
 ];
 
 /**

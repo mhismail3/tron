@@ -147,10 +147,24 @@ export interface TaskRpcManager {
   listProjects(filter?: Record<string, unknown>): unknown;
   /** Get a project */
   getProject(projectId: string): unknown;
+  /** Get project with full details (tasks, area) */
+  getProjectWithDetails(projectId: string): unknown;
   /** Create a project */
   createProject(params: Record<string, unknown>): unknown;
   /** Update a project */
   updateProject(projectId: string, params: Record<string, unknown>): unknown;
+  /** Delete a project */
+  deleteProject(projectId: string): unknown;
+  /** List areas */
+  listAreas(filter?: Record<string, unknown>): unknown;
+  /** Get an area */
+  getArea(areaId: string): unknown;
+  /** Create an area */
+  createArea(params: Record<string, unknown>): unknown;
+  /** Update an area */
+  updateArea(areaId: string, params: Record<string, unknown>): unknown;
+  /** Delete an area */
+  deleteArea(areaId: string): unknown;
 }
 
 /**

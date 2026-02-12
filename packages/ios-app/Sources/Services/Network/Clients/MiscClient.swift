@@ -273,6 +273,17 @@ final class MiscClient {
         return try await ws.send(method: "tasks.list", params: params)
     }
 
+    // MARK: - Area Methods
+
+    /// List areas with optional filters
+    func listAreas(status: String? = nil, limit: Int? = nil) async throws -> AreaListResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        let params = AreaListParams(status: status, limit: limit)
+        return try await ws.send(method: "areas.list", params: params)
+    }
+
     // MARK: - Device Token Methods (Push Notifications)
 
     /// Check if this is a production build (for APNS environment)

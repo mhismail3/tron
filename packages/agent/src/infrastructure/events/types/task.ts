@@ -43,3 +43,48 @@ export interface ProjectUpdatedEvent extends BaseEvent {
     status: string;
   };
 }
+
+export interface ProjectCreatedEvent extends BaseEvent {
+  type: 'project.created';
+  payload: {
+    projectId: string;
+    title: string;
+    status: string;
+    areaId: string | null;
+  };
+}
+
+export interface ProjectDeletedEvent extends BaseEvent {
+  type: 'project.deleted';
+  payload: {
+    projectId: string;
+    title: string;
+  };
+}
+
+export interface AreaCreatedEvent extends BaseEvent {
+  type: 'area.created';
+  payload: {
+    areaId: string;
+    title: string;
+    status: string;
+  };
+}
+
+export interface AreaUpdatedEvent extends BaseEvent {
+  type: 'area.updated';
+  payload: {
+    areaId: string;
+    title: string;
+    status: string;
+    changedFields: string[];
+  };
+}
+
+export interface AreaDeletedEvent extends BaseEvent {
+  type: 'area.deleted';
+  payload: {
+    areaId: string;
+    title: string;
+  };
+}

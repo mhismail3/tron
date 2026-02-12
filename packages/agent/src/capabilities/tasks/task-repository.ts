@@ -10,10 +10,13 @@ import type { DatabaseConnection } from '@infrastructure/events/sqlite/database.
 import type {
   Task,
   Project,
+  Area,
+  AreaWithCounts,
   TaskDependency,
   TaskActivity,
   TaskFilter,
   ProjectFilter,
+  AreaFilter,
   ProjectWithProgress,
   ActivityAction,
   DependencyRelationship,
@@ -28,6 +31,7 @@ interface TaskRow {
   project_id: string | null;
   parent_task_id: string | null;
   workspace_id: string | null;
+  area_id: string | null;
   title: string;
   description: string | null;
   active_form: string | null;
@@ -54,6 +58,7 @@ interface TaskRow {
 interface ProjectRow {
   id: string;
   workspace_id: string | null;
+  area_id: string | null;
   title: string;
   description: string | null;
   status: string;
@@ -62,6 +67,25 @@ interface ProjectRow {
   updated_at: string;
   completed_at: string | null;
   metadata: string | null;
+}
+
+interface AreaRow {
+  id: string;
+  workspace_id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  tags: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  metadata: string;
+}
+
+interface AreaWithCountsRow extends AreaRow {
+  project_count: number;
+  task_count: number;
+  active_task_count: number;
 }
 
 interface ProjectWithProgressRow extends ProjectRow {
@@ -107,6 +131,7 @@ export class TaskRepository extends BaseRepository {
     projectId?: string | null;
     parentTaskId?: string | null;
     workspaceId?: string | null;
+    areaId?: string | null;
     title: string;
     description?: string | null;
     activeForm?: string | null;
@@ -125,7 +150,7 @@ export class TaskRepository extends BaseRepository {
 
     this.run(
       `INSERT INTO tasks (
-        id, project_id, parent_task_id, workspace_id,
+        id, project_id, parent_task_id, workspace_id, area_id,
         title, description, active_form,
         status, priority, source, tags,
         due_date, deferred_until,
@@ -134,7 +159,7 @@ export class TaskRepository extends BaseRepository {
         created_at, updated_at,
         sort_order
       ) VALUES (
-        ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
         ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?,
@@ -147,6 +172,7 @@ export class TaskRepository extends BaseRepository {
       params.projectId ?? null,
       params.parentTaskId ?? null,
       params.workspaceId ?? null,
+      params.areaId ?? null,
       params.title,
       params.description ?? null,
       params.activeForm ?? null,
@@ -280,6 +306,11 @@ export class TaskRepository extends BaseRepository {
       }
     }
 
+    if (filter.areaId !== undefined) {
+      where.push('area_id = ?');
+      params.push(filter.areaId);
+    }
+
     if (filter.dueBefore) {
       where.push('due_date IS NOT NULL AND due_date <= ?');
       params.push(filter.dueBefore);
@@ -334,6 +365,7 @@ export class TaskRepository extends BaseRepository {
   createProject(params: {
     id?: string;
     workspaceId?: string | null;
+    areaId?: string | null;
     title: string;
     description?: string | null;
     tags?: string[];
@@ -343,10 +375,11 @@ export class TaskRepository extends BaseRepository {
     const tags = JSON.stringify(params.tags ?? []);
 
     this.run(
-      `INSERT INTO projects (id, workspace_id, title, description, status, tags, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`,
+      `INSERT INTO projects (id, workspace_id, area_id, title, description, status, tags, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`,
       id,
       params.workspaceId ?? null,
+      params.areaId ?? null,
       params.title,
       params.description ?? null,
       tags,
@@ -409,6 +442,11 @@ export class TaskRepository extends BaseRepository {
       params.push(filter.workspaceId);
     }
 
+    if (filter.areaId !== undefined) {
+      where.push('p.area_id = ?');
+      params.push(filter.areaId);
+    }
+
     const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
     const countParams = [...params];
@@ -435,6 +473,144 @@ export class TaskRepository extends BaseRepository {
       projects: rows.map(r => this.toProjectWithProgress(r)),
       total,
     };
+  }
+
+  deleteProject(id: string): boolean {
+    // Orphan tasks first (set project_id=NULL) — ON DELETE SET NULL handles this
+    // via FK, but we do it explicitly for clarity
+    this.run('UPDATE tasks SET project_id = NULL WHERE project_id = ?', id);
+    const result = this.run('DELETE FROM projects WHERE id = ?', id);
+    return result.changes > 0;
+  }
+
+  // ===========================================================================
+  // Area CRUD
+  // ===========================================================================
+
+  createArea(params: {
+    id?: string;
+    title: string;
+    description?: string | null;
+    tags?: string[];
+    workspaceId?: string;
+    metadata?: Record<string, unknown>;
+  }): Area {
+    const id = params.id ?? this.generateId('area');
+    const now = this.now();
+    const tags = JSON.stringify(params.tags ?? []);
+    const metadata = JSON.stringify(params.metadata ?? {});
+
+    this.run(
+      `INSERT INTO areas (id, workspace_id, title, description, status, tags, sort_order, created_at, updated_at, metadata)
+       VALUES (?, ?, ?, ?, 'active', ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM areas), ?, ?, ?)`,
+      id,
+      params.workspaceId ?? 'default',
+      params.title,
+      params.description ?? null,
+      tags,
+      now,
+      now,
+      metadata,
+    );
+
+    return this.getArea(id)!;
+  }
+
+  getArea(id: string): Area | undefined {
+    const row = this.get<AreaRow>('SELECT * FROM areas WHERE id = ?', id);
+    return row ? this.toArea(row) : undefined;
+  }
+
+  updateArea(id: string, updates: Record<string, unknown>): Area | undefined {
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      const col = this.toSnakeCase(key);
+      if (col === 'tags') {
+        setClauses.push(`${col} = ?`);
+        values.push(JSON.stringify(value));
+      } else if (col === 'metadata') {
+        setClauses.push(`${col} = ?`);
+        values.push(value != null ? JSON.stringify(value) : '{}');
+      } else {
+        setClauses.push(`${col} = ?`);
+        values.push(value as string | number | null);
+      }
+    }
+
+    if (setClauses.length === 0) return this.getArea(id);
+
+    setClauses.push('updated_at = ?');
+    values.push(this.now());
+    values.push(id);
+
+    this.run(
+      `UPDATE areas SET ${setClauses.join(', ')} WHERE id = ?`,
+      ...values as string[],
+    );
+
+    return this.getArea(id);
+  }
+
+  deleteArea(id: string): boolean {
+    // ON DELETE SET NULL handles area_id on projects and tasks
+    const result = this.run('DELETE FROM areas WHERE id = ?', id);
+    return result.changes > 0;
+  }
+
+  listAreas(filter: AreaFilter = {}, limit = 50, offset = 0): { areas: AreaWithCounts[]; total: number } {
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (filter.status) {
+      where.push('a.status = ?');
+      params.push(filter.status);
+    }
+
+    if (filter.workspaceId) {
+      where.push('a.workspace_id = ?');
+      params.push(filter.workspaceId);
+    }
+
+    const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+
+    const countParams = [...params];
+    const total = this.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM areas a ${whereClause}`,
+      ...countParams as string[],
+    )!.count;
+
+    params.push(limit, offset);
+    const rows = this.all<AreaWithCountsRow>(
+      `SELECT a.*,
+              (SELECT COUNT(*) FROM projects p WHERE p.area_id = a.id) as project_count,
+              (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id) as task_count,
+              (SELECT COUNT(*) FROM tasks t WHERE t.area_id = a.id AND t.status NOT IN ('completed', 'cancelled')) as active_task_count
+       FROM areas a
+       ${whereClause}
+       ORDER BY a.sort_order ASC, a.updated_at DESC
+       LIMIT ? OFFSET ?`,
+      ...params as string[],
+    );
+
+    return {
+      areas: rows.map(r => this.toAreaWithCounts(r)),
+      total,
+    };
+  }
+
+  searchAreas(query: string, limit = 20): Area[] {
+    const rows = this.all<AreaRow>(
+      `SELECT a.* FROM areas a
+       JOIN areas_fts f ON f.area_id = a.id
+       WHERE areas_fts MATCH ?
+       ORDER BY rank
+       LIMIT ?`,
+      query,
+      limit,
+    );
+    return rows.map(r => this.toArea(r));
   }
 
   // ===========================================================================
@@ -634,6 +810,7 @@ export class TaskRepository extends BaseRepository {
       projectId: row.project_id,
       parentTaskId: row.parent_task_id,
       workspaceId: row.workspace_id,
+      areaId: row.area_id,
       title: row.title,
       description: row.description,
       activeForm: row.active_form,
@@ -662,6 +839,7 @@ export class TaskRepository extends BaseRepository {
     return {
       id: row.id,
       workspaceId: row.workspace_id,
+      areaId: row.area_id,
       title: row.title,
       description: row.description,
       status: row.status as Project['status'],
@@ -702,6 +880,30 @@ export class TaskRepository extends BaseRepository {
       detail: row.detail,
       minutesLogged: row.minutes_logged,
       timestamp: row.timestamp,
+    };
+  }
+
+  private toArea(row: AreaRow): Area {
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      title: row.title,
+      description: row.description,
+      status: row.status as Area['status'],
+      tags: rowUtils.parseJson<string[]>(row.tags, []),
+      sortOrder: row.sort_order,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      metadata: rowUtils.parseJson<Record<string, unknown>>(row.metadata, {}),
+    };
+  }
+
+  private toAreaWithCounts(row: AreaWithCountsRow): AreaWithCounts {
+    return {
+      ...this.toArea(row),
+      projectCount: row.project_count ?? 0,
+      taskCount: row.task_count ?? 0,
+      activeTaskCount: row.active_task_count ?? 0,
     };
   }
 

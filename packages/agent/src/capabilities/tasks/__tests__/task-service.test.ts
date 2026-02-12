@@ -2,7 +2,7 @@
  * @fileoverview Tests for TaskService
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DatabaseConnection } from '@infrastructure/events/sqlite/database.js';
 import { runMigrations } from '@infrastructure/events/sqlite/migrations/index.js';
 import { TaskRepository } from '../task-repository.js';
@@ -12,13 +12,15 @@ describe('TaskService', () => {
   let connection: DatabaseConnection;
   let repo: TaskRepository;
   let service: TaskService;
+  let emitSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     connection = new DatabaseConnection(':memory:');
     const db = connection.open();
     runMigrations(db);
     repo = new TaskRepository(connection);
-    service = new TaskService(repo);
+    emitSpy = vi.fn();
+    service = new TaskService(repo, emitSpy);
   });
 
   afterEach(() => {
@@ -377,6 +379,264 @@ describe('TaskService', () => {
 
     it('throws on non-existent project update', () => {
       expect(() => service.updateProject('proj_x', { title: 'X' })).toThrow('Project not found');
+    });
+  });
+
+  // =========================================================================
+  // Area Operations
+  // =========================================================================
+
+  describe('area operations', () => {
+    it('creates area with title', () => {
+      const area = service.createArea({ title: 'Security' });
+      expect(area.title).toBe('Security');
+      expect(area.status).toBe('active');
+    });
+
+    it('validates title required', () => {
+      expect(() => service.createArea({ title: '' })).toThrow('title is required');
+    });
+
+    it('returns area with counts from getArea', () => {
+      const area = service.createArea({ title: 'Ops' });
+      const found = service.getArea(area.id);
+      expect(found).toBeDefined();
+      expect(found!.projectCount).toBe(0);
+      expect(found!.taskCount).toBe(0);
+    });
+
+    it('returns undefined for non-existent area', () => {
+      expect(service.getArea('area_nope')).toBeUndefined();
+    });
+
+    it('updates area fields', () => {
+      const area = service.createArea({ title: 'Original' });
+      const updated = service.updateArea(area.id, { title: 'Renamed', description: 'New' });
+      expect(updated.title).toBe('Renamed');
+      expect(updated.description).toBe('New');
+    });
+
+    it('throws on non-existent area update', () => {
+      expect(() => service.updateArea('area_nope', { title: 'X' })).toThrow('Area not found');
+    });
+
+    it('archives area', () => {
+      const area = service.createArea({ title: 'To archive' });
+      const archived = service.updateArea(area.id, { status: 'archived' });
+      expect(archived.status).toBe('archived');
+    });
+
+    it('deletes area and returns true', () => {
+      const area = service.createArea({ title: 'To delete' });
+      expect(service.deleteArea(area.id)).toBe(true);
+      expect(service.getArea(area.id)).toBeUndefined();
+    });
+
+    it('returns false for non-existent delete', () => {
+      expect(service.deleteArea('area_nope')).toBe(false);
+    });
+
+    it('unlinks projects and tasks on delete', () => {
+      const area = service.createArea({ title: 'Area' });
+      const project = service.createProject({ title: 'Proj', areaId: area.id });
+      const task = service.createTask({ title: 'Task', areaId: area.id });
+
+      service.deleteArea(area.id);
+
+      expect(repo.getProject(project.id)!.areaId).toBeNull();
+      expect(repo.getTask(task.id)!.areaId).toBeNull();
+    });
+
+    it('lists active areas with counts', () => {
+      service.createArea({ title: 'A' });
+      service.createArea({ title: 'B' });
+
+      const result = service.listAreas();
+      expect(result.areas).toHaveLength(2);
+    });
+
+    it('filters areas by status', () => {
+      service.createArea({ title: 'Active' });
+      const archived = service.createArea({ title: 'Archived' });
+      service.updateArea(archived.id, { status: 'archived' });
+
+      const result = service.listAreas({ status: 'active' });
+      expect(result.areas).toHaveLength(1);
+    });
+
+    it('searches areas', () => {
+      service.createArea({ title: 'Security monitoring' });
+      service.createArea({ title: 'Code quality' });
+
+      const results = service.searchAreas('security');
+      expect(results).toHaveLength(1);
+    });
+  });
+
+  // =========================================================================
+  // Project Delete + Get with Details
+  // =========================================================================
+
+  describe('deleteProject', () => {
+    it('deletes project and returns true', () => {
+      const project = service.createProject({ title: 'To delete' });
+      expect(service.deleteProject(project.id)).toBe(true);
+      expect(service.getProject(project.id)).toBeUndefined();
+    });
+
+    it('orphans tasks (project_id set to null, tasks still exist)', () => {
+      const project = service.createProject({ title: 'Proj' });
+      const task = service.createTask({ title: 'Task', projectId: project.id });
+
+      service.deleteProject(project.id);
+
+      const updated = repo.getTask(task.id);
+      expect(updated).toBeDefined();
+      expect(updated!.projectId).toBeNull();
+    });
+
+    it('returns false for non-existent', () => {
+      expect(service.deleteProject('proj_nope')).toBe(false);
+    });
+  });
+
+  describe('getProjectWithDetails', () => {
+    it('returns project with task list', () => {
+      const project = service.createProject({ title: 'Proj' });
+      service.createTask({ title: 'T1', projectId: project.id });
+      service.createTask({ title: 'T2', projectId: project.id });
+
+      const details = service.getProjectWithDetails(project.id);
+      expect(details).toBeDefined();
+      expect(details!.title).toBe('Proj');
+      expect(details!.tasks).toHaveLength(2);
+    });
+
+    it('returns project with area info when linked', () => {
+      const area = service.createArea({ title: 'Area' });
+      const project = service.createProject({ title: 'Proj', areaId: area.id });
+
+      const details = service.getProjectWithDetails(project.id);
+      expect(details!.area).toBeDefined();
+      expect(details!.area!.title).toBe('Area');
+    });
+
+    it('returns undefined for non-existent', () => {
+      expect(service.getProjectWithDetails('proj_nope')).toBeUndefined();
+    });
+  });
+
+  // =========================================================================
+  // areaId on Tasks / Projects
+  // =========================================================================
+
+  describe('areaId on tasks', () => {
+    it('createTask with areaId stores it', () => {
+      const area = service.createArea({ title: 'Area' });
+      const task = service.createTask({ title: 'Task', areaId: area.id });
+      expect(task.areaId).toBe(area.id);
+    });
+
+    it('updateTask can change areaId', () => {
+      const area = service.createArea({ title: 'Area' });
+      const task = service.createTask({ title: 'Task' });
+      const updated = service.updateTask(task.id, { areaId: area.id });
+      expect(updated.areaId).toBe(area.id);
+    });
+
+    it('updateTask can clear areaId', () => {
+      const area = service.createArea({ title: 'Area' });
+      const task = service.createTask({ title: 'Task', areaId: area.id });
+      const updated = service.updateTask(task.id, { areaId: null });
+      expect(updated.areaId).toBeNull();
+    });
+  });
+
+  describe('areaId on projects', () => {
+    it('createProject with areaId stores it', () => {
+      const area = service.createArea({ title: 'Area' });
+      const project = service.createProject({ title: 'Proj', areaId: area.id });
+      expect(project.areaId).toBe(area.id);
+    });
+
+    it('updateProject can change areaId', () => {
+      const area = service.createArea({ title: 'Area' });
+      const project = service.createProject({ title: 'Proj' });
+      const updated = service.updateProject(project.id, { areaId: area.id });
+      expect(updated.areaId).toBe(area.id);
+    });
+
+    it('updateProject can clear areaId', () => {
+      const area = service.createArea({ title: 'Area' });
+      const project = service.createProject({ title: 'Proj', areaId: area.id });
+      const updated = service.updateProject(project.id, { areaId: null });
+      expect(updated.areaId).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // Event Emission
+  // =========================================================================
+
+  describe('event emission', () => {
+    it('createTask emits task.created', () => {
+      service.createTask({ title: 'Test' });
+      expect(emitSpy).toHaveBeenCalledWith('task.created', expect.objectContaining({ title: 'Test' }));
+    });
+
+    it('updateTask emits task.updated with changedFields', () => {
+      const task = service.createTask({ title: 'Test' });
+      emitSpy.mockClear();
+      service.updateTask(task.id, { title: 'New', priority: 'high' });
+      expect(emitSpy).toHaveBeenCalledWith('task.updated', expect.objectContaining({
+        taskId: task.id,
+        changedFields: expect.arrayContaining(['title', 'priority']),
+      }));
+    });
+
+    it('deleteTask emits task.deleted', () => {
+      const task = service.createTask({ title: 'Test' });
+      emitSpy.mockClear();
+      service.deleteTask(task.id);
+      expect(emitSpy).toHaveBeenCalledWith('task.deleted', expect.objectContaining({ taskId: task.id }));
+    });
+
+    it('createArea emits area.created', () => {
+      service.createArea({ title: 'Area' });
+      expect(emitSpy).toHaveBeenCalledWith('area.created', expect.objectContaining({ title: 'Area' }));
+    });
+
+    it('updateArea emits area.updated', () => {
+      const area = service.createArea({ title: 'Area' });
+      emitSpy.mockClear();
+      service.updateArea(area.id, { title: 'New' });
+      expect(emitSpy).toHaveBeenCalledWith('area.updated', expect.objectContaining({ areaId: area.id }));
+    });
+
+    it('deleteArea emits area.deleted', () => {
+      const area = service.createArea({ title: 'Area' });
+      emitSpy.mockClear();
+      service.deleteArea(area.id);
+      expect(emitSpy).toHaveBeenCalledWith('area.deleted', expect.objectContaining({ areaId: area.id }));
+    });
+
+    it('createProject emits project.created', () => {
+      service.createProject({ title: 'Proj' });
+      expect(emitSpy).toHaveBeenCalledWith('project.created', expect.objectContaining({ title: 'Proj' }));
+    });
+
+    it('deleteProject emits project.deleted', () => {
+      const project = service.createProject({ title: 'Proj' });
+      emitSpy.mockClear();
+      service.deleteProject(project.id);
+      expect(emitSpy).toHaveBeenCalledWith('project.deleted', expect.objectContaining({ projectId: project.id }));
+    });
+
+    it('updateProject emits project.updated', () => {
+      const project = service.createProject({ title: 'Proj' });
+      emitSpy.mockClear();
+      service.updateProject(project.id, { title: 'New' });
+      expect(emitSpy).toHaveBeenCalledWith('project.updated', expect.objectContaining({ projectId: project.id }));
     });
   });
 });

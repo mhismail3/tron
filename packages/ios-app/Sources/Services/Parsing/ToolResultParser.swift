@@ -132,6 +132,7 @@ struct ToolResultParser {
         let action = ToolArgumentParser.string("action", from: tool.arguments) ?? "list"
         let taskTitle = ToolArgumentParser.string("title", from: tool.arguments)
             ?? ToolArgumentParser.string("projectTitle", from: tool.arguments)
+            ?? ToolArgumentParser.string("areaTitle", from: tool.arguments)
 
         guard tool.result != nil else {
             return TaskManagerChipData(
@@ -173,6 +174,13 @@ struct ToolResultParser {
         case "log_time": return "Logging time..."
         case "add_dependency": return "Adding dependency..."
         case "remove_dependency": return "Removing dependency..."
+        case "get_project": return "Getting project..."
+        case "delete_project": return "Deleting project..."
+        case "create_area": return "Creating area..."
+        case "update_area": return "Updating area..."
+        case "get_area": return "Getting area..."
+        case "delete_area": return "Deleting area..."
+        case "list_areas": return "Listing areas..."
         default: return "Managing tasks..."
         }
     }
@@ -188,6 +196,12 @@ struct ToolResultParser {
             case "get": return "\"\(truncated)\""
             case "create_project": return "Created \"\(truncated)\""
             case "update_project": return "Updated \"\(truncated)\""
+            case "delete_project": return "Deleted \"\(truncated)\""
+            case "get_project": return "\"\(truncated)\""
+            case "create_area": return "Created \"\(truncated)\""
+            case "update_area": return "Updated \"\(truncated)\""
+            case "delete_area": return "Deleted \"\(truncated)\""
+            case "get_area": return "\"\(truncated)\""
             default: break
             }
         }
@@ -202,6 +216,9 @@ struct ToolResultParser {
             }
             if action == "list_projects", let match = result.firstMatch(of: /Projects \((\d+)\)/) {
                 return "\(match.1) projects"
+            }
+            if action == "list_areas", let match = result.firstMatch(of: /Areas \((\d+)\)/) {
+                return "\(match.1) areas"
             }
             // Fallback: first line truncated
             let firstLine = result.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? result

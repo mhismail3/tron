@@ -11,6 +11,7 @@ import type {
   TaskStatus,
   TaskPriority,
   ProjectStatus,
+  AreaStatus,
 } from '../../tasks/types.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 
@@ -30,7 +31,14 @@ type TaskManagerAction =
   | 'delete'
   | 'create_project'
   | 'update_project'
-  | 'list_projects';
+  | 'list_projects'
+  | 'get_project'
+  | 'delete_project'
+  | 'create_area'
+  | 'update_area'
+  | 'get_area'
+  | 'delete_area'
+  | 'list_areas';
 
 interface TaskManagerParams {
   action: TaskManagerAction;
@@ -77,13 +85,19 @@ interface TaskManagerParams {
   projectStatus?: ProjectStatus;
   projectTags?: string[];
   workspaceId?: string;
+
+  // area operations
+  areaId?: string;
+  areaTitle?: string;
+  areaDescription?: string;
+  areaStatus?: AreaStatus;
+  areaTags?: string[];
 }
 
 export interface TaskManagerToolConfig {
   service: TaskService;
   getSessionId: () => string;
   getWorkspaceId: () => string | undefined;
-  onTaskEvent?: (event: string, data: Record<string, unknown>) => void;
 }
 
 // =============================================================================
@@ -94,20 +108,37 @@ export class TaskManagerTool implements TronTool<TaskManagerParams> {
   readonly name = 'TaskManager';
   readonly label = 'Tasks';
   readonly executionContract = 'options' as const;
-  readonly description = `Persistent task and project manager. Tasks survive across sessions.
+  readonly description = `Persistent task, project, and area manager (PARA model). Tasks survive across sessions.
+
+## PARA Model
+- **Projects**: Time-bound scoped efforts with tasks
+- **Areas**: Ongoing responsibilities the agent maintains awareness of (e.g., "Security", "Code Quality")
+- **Tasks**: Individual work items, optionally linked to a project and/or area
 
 ## Actions
 
-- **create**: Create a task. Required: title. Optional: description, activeForm, status, priority, projectId, parentTaskId, addTags, dueDate, deferredUntil, estimatedMinutes
-- **update**: Update a task. Required: taskId. Optional: status, title, description, priority, notes (appends), addTags/removeTags, addBlocks/addBlockedBy/removeBlocks/removeBlockedBy, dueDate, deferredUntil, projectId, parentTaskId
+### Tasks
+- **create**: Create a task. Required: title. Optional: description, activeForm, status, priority, projectId, parentTaskId, areaId, addTags, dueDate, deferredUntil, estimatedMinutes
+- **update**: Update a task. Required: taskId. Optional: status, title, description, priority, notes (appends), addTags/removeTags, addBlocks/addBlockedBy/removeBlocks/removeBlockedBy, dueDate, deferredUntil, projectId, parentTaskId, areaId
 - **get**: Get task details. Required: taskId
-- **list**: List tasks. Optional: filter (status, priority, tags, projectId, includeCompleted, includeDeferred, includeBacklog), limit, offset
+- **list**: List tasks. Optional: filter (status, priority, tags, projectId, areaId, includeCompleted, includeDeferred, includeBacklog), limit, offset
 - **search**: Full-text search. Required: query. Optional: limit
 - **log_time**: Log time spent. Required: taskId, minutes. Optional: timeNote
 - **delete**: Delete a task. Required: taskId
-- **create_project**: Create project. Required: projectTitle. Optional: projectDescription, projectTags, workspaceId
-- **update_project**: Update project. Required: projectId. Optional: projectTitle, projectDescription, projectStatus, projectTags
-- **list_projects**: List projects. Optional: filter by status/workspaceId
+
+### Projects
+- **create_project**: Create project. Required: projectTitle. Optional: projectDescription, projectTags, workspaceId, areaId
+- **update_project**: Update project. Required: projectId. Optional: projectTitle, projectDescription, projectStatus, projectTags, areaId
+- **get_project**: Get project details with tasks. Required: projectId
+- **delete_project**: Delete project (orphans tasks). Required: projectId
+- **list_projects**: List projects. Optional: filter by status/workspaceId/areaId
+
+### Areas
+- **create_area**: Create area. Required: areaTitle. Optional: areaDescription, areaTags
+- **update_area**: Update area. Required: areaId. Optional: areaTitle, areaDescription, areaStatus (active/archived), areaTags
+- **get_area**: Get area details with counts. Required: areaId
+- **delete_area**: Delete area (unlinks projects/tasks). Required: areaId
+- **list_areas**: List areas. Optional: areaStatus filter
 
 ## Status Model
 backlog → pending → in_progress → completed/cancelled
@@ -123,7 +154,7 @@ backlog → pending → in_progress → completed/cancelled
     properties: {
       action: {
         type: 'string' as const,
-        enum: ['create', 'update', 'get', 'list', 'search', 'log_time', 'delete', 'create_project', 'update_project', 'list_projects'],
+        enum: ['create', 'update', 'get', 'list', 'search', 'log_time', 'delete', 'create_project', 'update_project', 'list_projects', 'get_project', 'delete_project', 'create_area', 'update_area', 'get_area', 'delete_area', 'list_areas'],
         description: 'Action to perform',
       },
       title: { type: 'string' as const, description: 'Task title (imperative form)' },
@@ -155,6 +186,11 @@ backlog → pending → in_progress → completed/cancelled
       projectStatus: { type: 'string' as const, enum: ['active', 'paused', 'completed', 'archived'] },
       projectTags: { type: 'array' as const, items: { type: 'string' as const } },
       workspaceId: { type: 'string' as const },
+      areaId: { type: 'string' as const, description: 'Area ID for linking or area operations' },
+      areaTitle: { type: 'string' as const, description: 'Area title' },
+      areaDescription: { type: 'string' as const, description: 'Area description' },
+      areaStatus: { type: 'string' as const, enum: ['active', 'archived'], description: 'Area status' },
+      areaTags: { type: 'array' as const, items: { type: 'string' as const }, description: 'Area tags' },
     },
     required: ['action'] as string[],
   };
@@ -178,6 +214,13 @@ backlog → pending → in_progress → completed/cancelled
         case 'create_project': return this.handleCreateProject(args);
         case 'update_project': return this.handleUpdateProject(args);
         case 'list_projects': return this.handleListProjects(args);
+        case 'get_project': return this.handleGetProject(args);
+        case 'delete_project': return this.handleDeleteProject(args);
+        case 'create_area': return this.handleCreateArea(args);
+        case 'update_area': return this.handleUpdateArea(args);
+        case 'get_area': return this.handleGetArea(args);
+        case 'delete_area': return this.handleDeleteArea(args);
+        case 'list_areas': return this.handleListAreas(args);
         default:
           return { content: `Unknown action: ${args.action}`, isError: true };
       }
@@ -207,15 +250,9 @@ backlog → pending → in_progress → completed/cancelled
       estimatedMinutes: args.estimatedMinutes,
       projectId: args.projectId,
       parentTaskId: args.parentTaskId,
+      areaId: args.areaId,
       sessionId: this.config.getSessionId(),
       workspaceId: this.config.getWorkspaceId(),
-    });
-
-    this.config.onTaskEvent?.('task_created', {
-      taskId: task.id,
-      title: task.title,
-      status: task.status,
-      projectId: task.projectId ?? null,
     });
 
     return {
@@ -241,6 +278,7 @@ backlog → pending → in_progress → completed/cancelled
       removeTags: args.removeTags,
       projectId: args.projectId,
       parentTaskId: args.parentTaskId,
+      areaId: args.areaId,
       sessionId: this.config.getSessionId(),
     });
 
@@ -265,14 +303,6 @@ backlog → pending → in_progress → completed/cancelled
         this.config.service.removeDependency(blockerId, args.taskId);
       }
     }
-
-    const changedFields = Object.keys(args).filter(k => k !== 'action' && k !== 'taskId');
-    this.config.onTaskEvent?.('task_updated', {
-      taskId: task.id,
-      title: task.title,
-      status: task.status,
-      changedFields,
-    });
 
     return {
       content: `Updated task ${task.id}: ${task.title} [${task.status}]`,
@@ -394,12 +424,8 @@ backlog → pending → in_progress → completed/cancelled
   private handleDelete(args: TaskManagerParams): TronToolResult {
     if (!args.taskId) return { content: 'Error: taskId is required for delete', isError: true };
 
-    const task = this.config.service.getTask(args.taskId);
-    const title = task?.title ?? '';
     const deleted = this.config.service.deleteTask(args.taskId);
     if (!deleted) return { content: `Task not found: ${args.taskId}`, isError: true };
-
-    this.config.onTaskEvent?.('task_deleted', { taskId: args.taskId, title });
 
     return { content: `Deleted task ${args.taskId}`, isError: false };
   }
@@ -412,6 +438,7 @@ backlog → pending → in_progress → completed/cancelled
       description: args.projectDescription,
       tags: args.projectTags,
       workspaceId: args.workspaceId ?? this.config.getWorkspaceId(),
+      areaId: args.areaId,
     });
 
     return {
@@ -428,6 +455,7 @@ backlog → pending → in_progress → completed/cancelled
       description: args.projectDescription,
       status: args.projectStatus,
       tags: args.projectTags,
+      areaId: args.areaId,
     });
 
     return {
@@ -440,6 +468,7 @@ backlog → pending → in_progress → completed/cancelled
     const filter: Record<string, unknown> = {};
     if (args.projectStatus) filter.status = args.projectStatus;
     if (args.workspaceId) filter.workspaceId = args.workspaceId;
+    if (args.areaId) filter.areaId = args.areaId;
 
     const result = this.config.service.listProjects(filter as any);
 
@@ -453,6 +482,118 @@ backlog → pending → in_progress → completed/cancelled
         ? ` (${project.completedTaskCount}/${project.taskCount} tasks)`
         : '';
       lines.push(`  ${project.id}: ${project.title} [${project.status}]${progress}`);
+    }
+
+    return { content: lines.join('\n'), isError: false };
+  }
+
+  private handleGetProject(args: TaskManagerParams): TronToolResult {
+    if (!args.projectId) return { content: 'Error: projectId is required for get_project', isError: true };
+
+    const details = this.config.service.getProjectWithDetails(args.projectId);
+    if (!details) return { content: `Project not found: ${args.projectId}`, isError: true };
+
+    const lines: string[] = [
+      `# ${details.title}`,
+      `ID: ${details.id} | Status: ${details.status} | ${details.completedTaskCount}/${details.taskCount} tasks`,
+    ];
+
+    if (details.description) lines.push(`\n${details.description}`);
+    if (details.area) lines.push(`Area: ${details.area.title}`);
+    if (details.tags.length > 0) lines.push(`Tags: ${details.tags.join(', ')}`);
+
+    if (details.tasks.length > 0) {
+      lines.push(`\nTasks (${details.tasks.length}):`);
+      for (const task of details.tasks) {
+        const mark = task.status === 'completed' ? 'x' : task.status === 'in_progress' ? '>' : ' ';
+        lines.push(`  [${mark}] ${task.id}: ${task.title}`);
+      }
+    }
+
+    return { content: lines.join('\n'), isError: false };
+  }
+
+  private handleDeleteProject(args: TaskManagerParams): TronToolResult {
+    if (!args.projectId) return { content: 'Error: projectId is required for delete_project', isError: true };
+
+    const deleted = this.config.service.deleteProject(args.projectId);
+    if (!deleted) return { content: `Project not found: ${args.projectId}`, isError: true };
+
+    return { content: `Deleted project ${args.projectId}`, isError: false };
+  }
+
+  private handleCreateArea(args: TaskManagerParams): TronToolResult {
+    if (!args.areaTitle) return { content: 'Error: areaTitle is required for create_area', isError: true };
+
+    const area = this.config.service.createArea({
+      title: args.areaTitle,
+      description: args.areaDescription,
+      tags: args.areaTags,
+    });
+
+    return {
+      content: `Created area ${area.id}: ${area.title} [${area.status}]`,
+      isError: false,
+    };
+  }
+
+  private handleUpdateArea(args: TaskManagerParams): TronToolResult {
+    if (!args.areaId) return { content: 'Error: areaId is required for update_area', isError: true };
+
+    const area = this.config.service.updateArea(args.areaId, {
+      title: args.areaTitle,
+      description: args.areaDescription,
+      status: args.areaStatus,
+      tags: args.areaTags,
+    });
+
+    return {
+      content: `Updated area ${area.id}: ${area.title} [${area.status}]`,
+      isError: false,
+    };
+  }
+
+  private handleGetArea(args: TaskManagerParams): TronToolResult {
+    if (!args.areaId) return { content: 'Error: areaId is required for get_area', isError: true };
+
+    const area = this.config.service.getArea(args.areaId);
+    if (!area) return { content: `Area not found: ${args.areaId}`, isError: true };
+
+    const lines: string[] = [
+      `# ${area.title}`,
+      `ID: ${area.id} | Status: ${area.status}`,
+      `${area.projectCount} project${area.projectCount !== 1 ? 's' : ''}, ${area.taskCount} task${area.taskCount !== 1 ? 's' : ''} (${area.activeTaskCount} active)`,
+    ];
+
+    if (area.description) lines.push(`\n${area.description}`);
+    if (area.tags.length > 0) lines.push(`Tags: ${area.tags.join(', ')}`);
+
+    return { content: lines.join('\n'), isError: false };
+  }
+
+  private handleDeleteArea(args: TaskManagerParams): TronToolResult {
+    if (!args.areaId) return { content: 'Error: areaId is required for delete_area', isError: true };
+
+    const deleted = this.config.service.deleteArea(args.areaId);
+    if (!deleted) return { content: `Area not found: ${args.areaId}`, isError: true };
+
+    return { content: `Deleted area ${args.areaId}`, isError: false };
+  }
+
+  private handleListAreas(args: TaskManagerParams): TronToolResult {
+    const filter: Record<string, unknown> = {};
+    if (args.areaStatus) filter.status = args.areaStatus;
+
+    const result = this.config.service.listAreas(filter as any);
+
+    if (result.areas.length === 0) {
+      return { content: 'No areas found.', isError: false };
+    }
+
+    const lines: string[] = [`Areas (${result.areas.length}):`];
+    for (const area of result.areas) {
+      const counts = `${area.projectCount}p/${area.taskCount}t (${area.activeTaskCount} active)`;
+      lines.push(`  ${area.id}: ${area.title} [${area.status}] ${counts}`);
     }
 
     return { content: lines.join('\n'), isError: false };

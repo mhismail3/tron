@@ -8,21 +8,31 @@
 import { TaskRepository } from './task-repository.js';
 import type {
   Task,
+  Area,
+  AreaWithCounts,
   Project,
   TaskWithDetails,
   TaskListResult,
   ProjectListResult,
+  ProjectWithDetails,
+  AreaListResult,
   TaskCreateParams,
   TaskUpdateParams,
   ProjectCreateParams,
   ProjectUpdateParams,
+  AreaCreateParams,
+  AreaUpdateParams,
   TaskFilter,
   ProjectFilter,
+  AreaFilter,
   DependencyRelationship,
 } from './types.js';
 
 export class TaskService {
-  constructor(private readonly repo: TaskRepository) {}
+  constructor(
+    private readonly repo: TaskRepository,
+    private readonly emit?: (event: string, data: Record<string, unknown>) => void,
+  ) {}
 
   // ===========================================================================
   // Task Operations
@@ -36,6 +46,7 @@ export class TaskService {
       projectId: params.projectId,
       parentTaskId: params.parentTaskId,
       workspaceId: params.workspaceId,
+      areaId: params.areaId,
       status: params.status ?? 'pending',
       priority: params.priority ?? 'medium',
       source: params.source ?? 'agent',
@@ -73,7 +84,14 @@ export class TaskService {
       detail: `Created: ${task.title}`,
     });
 
-    return this.repo.getTask(task.id)!;
+    const result = this.repo.getTask(task.id)!;
+    this.emit?.('task.created', {
+      taskId: result.id,
+      title: result.title,
+      status: result.status,
+      projectId: result.projectId ?? null,
+    });
+    return result;
   }
 
   updateTask(taskId: string, params: TaskUpdateParams): Task {
@@ -93,6 +111,7 @@ export class TaskService {
     if (params.deferredUntil !== undefined) updates.deferredUntil = params.deferredUntil;
     if (params.estimatedMinutes !== undefined) updates.estimatedMinutes = params.estimatedMinutes;
     if (params.projectId !== undefined) updates.projectId = params.projectId;
+    if (params.areaId !== undefined) updates.areaId = params.areaId;
 
     // Parent task change with hierarchy enforcement
     if (params.parentTaskId !== undefined) {
@@ -187,7 +206,17 @@ export class TaskService {
       this.repo.updateTask(taskId, updates);
     }
 
-    return this.repo.getTask(taskId)!;
+    const result = this.repo.getTask(taskId)!;
+    const changedFields = Object.keys(updates).filter(k => k !== 'lastSessionId' && k !== 'lastSessionAt');
+    if (changedFields.length > 0) {
+      this.emit?.('task.updated', {
+        taskId: result.id,
+        title: result.title,
+        status: result.status,
+        changedFields,
+      });
+    }
+    return result;
   }
 
   getTask(taskId: string): TaskWithDetails | undefined {
@@ -225,7 +254,11 @@ export class TaskService {
       detail: `Deleted: ${task.title}`,
     });
 
-    return this.repo.deleteTask(taskId);
+    const deleted = this.repo.deleteTask(taskId);
+    if (deleted) {
+      this.emit?.('task.deleted', { taskId, title: task.title });
+    }
+    return deleted;
   }
 
   // ===========================================================================
@@ -289,12 +322,20 @@ export class TaskService {
   // ===========================================================================
 
   createProject(params: ProjectCreateParams): Project {
-    return this.repo.createProject({
+    const project = this.repo.createProject({
       title: params.title,
       description: params.description,
       tags: params.tags,
       workspaceId: params.workspaceId,
+      areaId: params.areaId,
     });
+    this.emit?.('project.created', {
+      projectId: project.id,
+      title: project.title,
+      status: project.status,
+      areaId: project.areaId ?? null,
+    });
+    return project;
   }
 
   updateProject(projectId: string, params: ProjectUpdateParams): Project {
@@ -311,15 +352,129 @@ export class TaskService {
       }
     }
     if (params.tags !== undefined) updates.tags = params.tags;
+    if (params.areaId !== undefined) updates.areaId = params.areaId;
 
-    return this.repo.updateProject(projectId, updates)!;
+    const result = this.repo.updateProject(projectId, updates)!;
+    const changedFields = Object.keys(updates);
+    if (changedFields.length > 0) {
+      this.emit?.('project.updated', {
+        projectId: result.id,
+        title: result.title,
+        status: result.status,
+        changedFields,
+      });
+    }
+    return result;
   }
 
   getProject(projectId: string): Project | undefined {
     return this.repo.getProject(projectId);
   }
 
+  getProjectWithDetails(projectId: string): ProjectWithDetails | undefined {
+    const allProjects = this.repo.listProjects({}, 1000, 0);
+    const projectWithProgress = allProjects.projects.find(p => p.id === projectId);
+    if (!projectWithProgress) return undefined;
+
+    const tasks = this.repo.listTasks({ projectId, includeCompleted: true, includeBacklog: true }, 1000, 0).tasks;
+    const area = projectWithProgress.areaId
+      ? this.repo.getArea(projectWithProgress.areaId)
+      : undefined;
+
+    return {
+      ...projectWithProgress,
+      tasks,
+      area,
+    };
+  }
+
+  deleteProject(projectId: string): boolean {
+    const project = this.repo.getProject(projectId);
+    if (!project) return false;
+
+    const deleted = this.repo.deleteProject(projectId);
+    if (deleted) {
+      this.emit?.('project.deleted', { projectId, title: project.title });
+    }
+    return deleted;
+  }
+
   listProjects(filter?: ProjectFilter, limit?: number, offset?: number): ProjectListResult {
     return this.repo.listProjects(filter, limit, offset);
+  }
+
+  // ===========================================================================
+  // Area Operations
+  // ===========================================================================
+
+  createArea(params: AreaCreateParams): Area {
+    if (!params.title?.trim()) {
+      throw new Error('Area title is required');
+    }
+
+    const area = this.repo.createArea({
+      title: params.title,
+      description: params.description,
+      tags: params.tags,
+      workspaceId: params.workspaceId,
+      metadata: params.metadata,
+    });
+
+    this.emit?.('area.created', {
+      areaId: area.id,
+      title: area.title,
+      status: area.status,
+    });
+
+    return area;
+  }
+
+  getArea(areaId: string): AreaWithCounts | undefined {
+    const result = this.repo.listAreas({}, 1000, 0);
+    return result.areas.find(a => a.id === areaId);
+  }
+
+  updateArea(areaId: string, params: AreaUpdateParams): Area {
+    const existing = this.repo.getArea(areaId);
+    if (!existing) throw new Error(`Area not found: ${areaId}`);
+
+    const updates: Record<string, unknown> = {};
+    if (params.title !== undefined) updates.title = params.title;
+    if (params.description !== undefined) updates.description = params.description;
+    if (params.status !== undefined) updates.status = params.status;
+    if (params.tags !== undefined) updates.tags = params.tags;
+    if (params.sortOrder !== undefined) updates.sortOrder = params.sortOrder;
+    if (params.metadata !== undefined) updates.metadata = params.metadata;
+
+    const result = this.repo.updateArea(areaId, updates)!;
+    const changedFields = Object.keys(updates);
+    if (changedFields.length > 0) {
+      this.emit?.('area.updated', {
+        areaId: result.id,
+        title: result.title,
+        status: result.status,
+        changedFields,
+      });
+    }
+    return result;
+  }
+
+  deleteArea(areaId: string): boolean {
+    const area = this.repo.getArea(areaId);
+    if (!area) return false;
+
+    const deleted = this.repo.deleteArea(areaId);
+    if (deleted) {
+      this.emit?.('area.deleted', { areaId, title: area.title });
+    }
+    return deleted;
+  }
+
+  listAreas(filter?: AreaFilter, limit?: number, offset?: number): AreaListResult {
+    return this.repo.listAreas(filter, limit, offset);
+  }
+
+  searchAreas(query: string, limit?: number): Area[] {
+    return this.repo.searchAreas(query, limit);
   }
 }

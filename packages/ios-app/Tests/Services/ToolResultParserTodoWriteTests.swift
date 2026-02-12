@@ -151,6 +151,35 @@ struct ToolResultParserTaskManagerTests {
         #expect(chipData?.chipSummary == "3 results")
     }
 
+    @Test("Extracts areaTitle as fallback for taskTitle")
+    func testParseTaskManagerAreaTitleFallback() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_area",
+            arguments: "{\"action\":\"create_area\",\"areaTitle\":\"Security\"}",
+            status: .running,
+            result: nil
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.taskTitle == "Security")
+        #expect(chipData?.chipSummary == "Creating area...")
+    }
+
+    @Test("Completed list_areas extracts area count for summary")
+    func testParseTaskManagerCompletedListAreasExtractsCount() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_la",
+            arguments: "{\"action\":\"list_areas\"}",
+            status: .success,
+            result: "Areas (3)\n  - Security\n  - Quality\n  - Operations"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "3 areas")
+    }
+
     @Test("Long title is truncated in chip summary")
     func testParseTaskManagerLongTitleTruncated() {
         let longTitle = String(repeating: "x", count: 60)
@@ -180,6 +209,13 @@ struct ToolResultParserTaskManagerTests {
             ("update_project", "Updating project..."),
             ("list_projects", "Listing projects..."),
             ("log_time", "Logging time..."),
+            ("get_project", "Getting project..."),
+            ("delete_project", "Deleting project..."),
+            ("create_area", "Creating area..."),
+            ("update_area", "Updating area..."),
+            ("get_area", "Getting area..."),
+            ("delete_area", "Deleting area..."),
+            ("list_areas", "Listing areas..."),
             ("unknown_action", "Managing tasks...")
         ]
 

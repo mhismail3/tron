@@ -287,6 +287,50 @@ export class TronServer {
         data as Record<string, unknown>,
       ));
     });
+
+    // Forward project events
+    this.orchestrator.on('project_created', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.PROJECT_CREATED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    this.orchestrator.on('project_updated', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.PROJECT_UPDATED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    this.orchestrator.on('project_deleted', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.PROJECT_DELETED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    // Forward area events
+    this.orchestrator.on('area_created', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.AREA_CREATED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    this.orchestrator.on('area_updated', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.AREA_UPDATED,
+        data as Record<string, unknown>,
+      ));
+    });
+
+    this.orchestrator.on('area_deleted', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(
+        BroadcastEventType.AREA_DELETED,
+        data as Record<string, unknown>,
+      ));
+    });
   }
 
   async stop(): Promise<void> {

@@ -35,6 +35,16 @@ export const BroadcastEventType = {
   TASK_UPDATED: 'task.updated',
   TASK_DELETED: 'task.deleted',
 
+  // Project events
+  PROJECT_CREATED: 'project.created',
+  PROJECT_UPDATED: 'project.updated',
+  PROJECT_DELETED: 'project.deleted',
+
+  // Area events
+  AREA_CREATED: 'area.created',
+  AREA_UPDATED: 'area.updated',
+  AREA_DELETED: 'area.deleted',
+
   // Browser events
   BROWSER_FRAME: 'browser.frame',
   BROWSER_CLOSED: 'browser.closed',

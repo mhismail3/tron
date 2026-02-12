@@ -532,4 +532,311 @@ describe('TaskRepository', () => {
       expect(progress[0].total).toBe(3);
     });
   });
+
+  // =========================================================================
+  // Area CRUD
+  // =========================================================================
+
+  describe('createArea', () => {
+    it('creates area with defaults', () => {
+      const area = repo.createArea({ title: 'Code Quality' });
+
+      expect(area.id).toMatch(/^area_[a-f0-9]+$/);
+      expect(area.title).toBe('Code Quality');
+      expect(area.status).toBe('active');
+      expect(area.tags).toEqual([]);
+      expect(area.workspaceId).toBe('default');
+      expect(area.metadata).toEqual({});
+    });
+
+    it('creates area with all params', () => {
+      const area = repo.createArea({
+        title: 'Security',
+        description: 'Ongoing security maintenance',
+        tags: ['security', 'compliance'],
+        workspaceId: 'ws_1',
+        metadata: { priority: 'high' },
+      });
+
+      expect(area.title).toBe('Security');
+      expect(area.description).toBe('Ongoing security maintenance');
+      expect(area.tags).toEqual(['security', 'compliance']);
+      expect(area.workspaceId).toBe('ws_1');
+      expect(area.metadata).toEqual({ priority: 'high' });
+    });
+
+    it('assigns sequential sort orders', () => {
+      const a1 = repo.createArea({ title: 'First' });
+      const a2 = repo.createArea({ title: 'Second' });
+      const a3 = repo.createArea({ title: 'Third' });
+
+      expect(a2.sortOrder).toBeGreaterThan(a1.sortOrder);
+      expect(a3.sortOrder).toBeGreaterThan(a2.sortOrder);
+    });
+  });
+
+  describe('getArea', () => {
+    it('returns undefined for non-existent ID', () => {
+      expect(repo.getArea('area_nonexistent')).toBeUndefined();
+    });
+
+    it('returns full area by ID', () => {
+      const created = repo.createArea({ title: 'Test Area' });
+      const found = repo.getArea(created.id);
+
+      expect(found).toBeDefined();
+      expect(found!.id).toBe(created.id);
+      expect(found!.title).toBe('Test Area');
+    });
+  });
+
+  describe('updateArea', () => {
+    it('updates scalar fields', () => {
+      const area = repo.createArea({ title: 'Original' });
+      const updated = repo.updateArea(area.id, { title: 'Renamed', description: 'New desc' });
+
+      expect(updated!.title).toBe('Renamed');
+      expect(updated!.description).toBe('New desc');
+    });
+
+    it('updates tags as JSON', () => {
+      const area = repo.createArea({ title: 'Test' });
+      const updated = repo.updateArea(area.id, { tags: ['a', 'b'] });
+
+      expect(updated!.tags).toEqual(['a', 'b']);
+    });
+
+    it('updates metadata', () => {
+      const area = repo.createArea({ title: 'Test' });
+      const updated = repo.updateArea(area.id, { metadata: { key: 'value' } });
+
+      expect(updated!.metadata).toEqual({ key: 'value' });
+    });
+
+    it('returns undefined for non-existent area', () => {
+      expect(repo.updateArea('area_nope', { title: 'X' })).toBeUndefined();
+    });
+  });
+
+  describe('deleteArea', () => {
+    it('deletes an existing area and returns true', () => {
+      const area = repo.createArea({ title: 'To delete' });
+      expect(repo.deleteArea(area.id)).toBe(true);
+      expect(repo.getArea(area.id)).toBeUndefined();
+    });
+
+    it('returns false for non-existent', () => {
+      expect(repo.deleteArea('area_nope')).toBe(false);
+    });
+
+    it('cascades: sets area_id=NULL on linked projects', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const project = repo.createProject({ title: 'Proj', areaId: area.id });
+
+      repo.deleteArea(area.id);
+
+      const updated = repo.getProject(project.id);
+      expect(updated!.areaId).toBeNull();
+    });
+
+    it('cascades: sets area_id=NULL on linked tasks', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const task = repo.createTask({ title: 'Task', areaId: area.id });
+
+      repo.deleteArea(area.id);
+
+      const updated = repo.getTask(task.id);
+      expect(updated!.areaId).toBeNull();
+    });
+  });
+
+  describe('listAreas', () => {
+    it('returns empty list when no areas exist', () => {
+      const result = repo.listAreas();
+      expect(result.areas).toEqual([]);
+      expect(result.total).toBe(0);
+    });
+
+    it('returns areas with project/task/activeTask counts', () => {
+      const area = repo.createArea({ title: 'Code Quality' });
+      repo.createProject({ title: 'Proj', areaId: area.id });
+      repo.createTask({ title: 'T1', areaId: area.id, status: 'pending' });
+      repo.createTask({ title: 'T2', areaId: area.id, status: 'completed' });
+
+      const result = repo.listAreas();
+      expect(result.areas).toHaveLength(1);
+      expect(result.areas[0].projectCount).toBe(1);
+      expect(result.areas[0].taskCount).toBe(2);
+      expect(result.areas[0].activeTaskCount).toBe(1);
+    });
+
+    it('filters by status', () => {
+      repo.createArea({ title: 'Active' });
+      const archived = repo.createArea({ title: 'Archived' });
+      repo.updateArea(archived.id, { status: 'archived' });
+
+      const result = repo.listAreas({ status: 'active' });
+      expect(result.areas).toHaveLength(1);
+      expect(result.areas[0].title).toBe('Active');
+    });
+
+    it('filters by workspaceId', () => {
+      repo.createArea({ title: 'Default' });
+      repo.createArea({ title: 'Custom', workspaceId: 'ws_1' });
+
+      const result = repo.listAreas({ workspaceId: 'ws_1' });
+      expect(result.areas).toHaveLength(1);
+      expect(result.areas[0].title).toBe('Custom');
+    });
+
+    it('respects limit and offset', () => {
+      for (let i = 0; i < 5; i++) {
+        repo.createArea({ title: `Area ${i}` });
+      }
+
+      const page1 = repo.listAreas({}, 2, 0);
+      expect(page1.areas).toHaveLength(2);
+      expect(page1.total).toBe(5);
+
+      const page2 = repo.listAreas({}, 2, 2);
+      expect(page2.areas).toHaveLength(2);
+    });
+  });
+
+  describe('searchAreas', () => {
+    it('finds areas by title', () => {
+      repo.createArea({ title: 'Security compliance monitoring' });
+      repo.createArea({ title: 'Code quality' });
+
+      const results = repo.searchAreas('security');
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toContain('Security');
+    });
+
+    it('finds areas by description', () => {
+      repo.createArea({ title: 'Ops', description: 'Infrastructure reliability monitoring' });
+
+      const results = repo.searchAreas('infrastructure');
+      expect(results).toHaveLength(1);
+    });
+
+    it('returns empty for no matches', () => {
+      repo.createArea({ title: 'Something' });
+      const results = repo.searchAreas('nonexistent xyz');
+      expect(results).toHaveLength(0);
+    });
+  });
+
+  // =========================================================================
+  // Project deleteProject
+  // =========================================================================
+
+  describe('deleteProject', () => {
+    it('deletes project and returns true', () => {
+      const project = repo.createProject({ title: 'To delete' });
+      expect(repo.deleteProject(project.id)).toBe(true);
+      expect(repo.getProject(project.id)).toBeUndefined();
+    });
+
+    it('returns false for non-existent', () => {
+      expect(repo.deleteProject('proj_nope')).toBe(false);
+    });
+
+    it('orphans tasks: sets project_id=NULL on linked tasks', () => {
+      const project = repo.createProject({ title: 'Proj' });
+      const task = repo.createTask({ title: 'Task', projectId: project.id });
+
+      repo.deleteProject(project.id);
+
+      const updated = repo.getTask(task.id);
+      expect(updated).toBeDefined();
+      expect(updated!.projectId).toBeNull();
+    });
+  });
+
+  // =========================================================================
+  // area_id on Projects
+  // =========================================================================
+
+  describe('area_id on projects', () => {
+    it('createProject with areaId stores correctly', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const project = repo.createProject({ title: 'Proj', areaId: area.id });
+
+      expect(project.areaId).toBe(area.id);
+    });
+
+    it('updateProject can set areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const project = repo.createProject({ title: 'Proj' });
+
+      const updated = repo.updateProject(project.id, { areaId: area.id });
+      expect(updated!.areaId).toBe(area.id);
+    });
+
+    it('updateProject can clear areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const project = repo.createProject({ title: 'Proj', areaId: area.id });
+
+      const updated = repo.updateProject(project.id, { areaId: null });
+      expect(updated!.areaId).toBeNull();
+    });
+
+    it('listProjects filters by areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      repo.createProject({ title: 'In area', areaId: area.id });
+      repo.createProject({ title: 'No area' });
+
+      const result = repo.listProjects({ areaId: area.id });
+      expect(result.projects).toHaveLength(1);
+      expect(result.projects[0].title).toBe('In area');
+    });
+
+    it('getProject returns areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const project = repo.createProject({ title: 'Proj', areaId: area.id });
+
+      const found = repo.getProject(project.id);
+      expect(found!.areaId).toBe(area.id);
+    });
+  });
+
+  // =========================================================================
+  // area_id on Tasks
+  // =========================================================================
+
+  describe('area_id on tasks', () => {
+    it('createTask with areaId stores correctly', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const task = repo.createTask({ title: 'Task', areaId: area.id });
+
+      expect(task.areaId).toBe(area.id);
+    });
+
+    it('updateTask can set areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const task = repo.createTask({ title: 'Task' });
+
+      const updated = repo.updateTask(task.id, { areaId: area.id });
+      expect(updated!.areaId).toBe(area.id);
+    });
+
+    it('updateTask can clear areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      const task = repo.createTask({ title: 'Task', areaId: area.id });
+
+      const updated = repo.updateTask(task.id, { areaId: null });
+      expect(updated!.areaId).toBeNull();
+    });
+
+    it('listTasks filters by areaId', () => {
+      const area = repo.createArea({ title: 'Area' });
+      repo.createTask({ title: 'In area', areaId: area.id });
+      repo.createTask({ title: 'No area' });
+
+      const result = repo.listTasks({ areaId: area.id });
+      expect(result.tasks).toHaveLength(1);
+      expect(result.tasks[0].title).toBe('In area');
+    });
+  });
 });

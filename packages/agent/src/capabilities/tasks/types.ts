@@ -16,6 +16,8 @@ export type TaskSource = 'agent' | 'user' | 'skill' | 'system';
 
 export type ProjectStatus = 'active' | 'paused' | 'completed' | 'archived';
 
+export type AreaStatus = 'active' | 'archived';
+
 export type DependencyRelationship = 'blocks' | 'related';
 
 export type ActivityAction =
@@ -38,6 +40,7 @@ export interface Task {
   projectId: string | null;
   parentTaskId: string | null;
   workspaceId: string | null;
+  areaId: string | null;
 
   title: string;
   description: string | null;
@@ -70,6 +73,7 @@ export interface Task {
 export interface Project {
   id: string;
   workspaceId: string | null;
+  areaId: string | null;
   title: string;
   description: string | null;
   status: ProjectStatus;
@@ -78,6 +82,25 @@ export interface Project {
   updatedAt: string;
   completedAt: string | null;
   metadata: Record<string, unknown> | null;
+}
+
+export interface Area {
+  id: string;
+  workspaceId: string;
+  title: string;
+  description: string | null;
+  status: AreaStatus;
+  tags: string[];
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface AreaWithCounts extends Area {
+  projectCount: number;
+  taskCount: number;
+  activeTaskCount: number;
 }
 
 export interface TaskDependency {
@@ -111,6 +134,7 @@ export interface TaskCreateParams {
   projectId?: string;
   parentTaskId?: string;
   workspaceId?: string;
+  areaId?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
   source?: TaskSource;
@@ -135,6 +159,7 @@ export interface TaskUpdateParams {
   removeTags?: string[];
   projectId?: string | null;
   parentTaskId?: string | null;
+  areaId?: string | null;
   sessionId?: string;
 }
 
@@ -143,6 +168,7 @@ export interface ProjectCreateParams {
   description?: string;
   tags?: string[];
   workspaceId?: string;
+  areaId?: string;
 }
 
 export interface ProjectUpdateParams {
@@ -150,6 +176,24 @@ export interface ProjectUpdateParams {
   description?: string;
   status?: ProjectStatus;
   tags?: string[];
+  areaId?: string | null;
+}
+
+export interface AreaCreateParams {
+  title: string;
+  description?: string;
+  tags?: string[];
+  workspaceId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AreaUpdateParams {
+  title?: string;
+  description?: string;
+  status?: AreaStatus;
+  tags?: string[];
+  sortOrder?: number;
+  metadata?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -162,6 +206,7 @@ export interface TaskFilter {
   tags?: string[];
   projectId?: string;
   workspaceId?: string;
+  areaId?: string;
   parentTaskId?: string | null;
   dueBefore?: string;
   includeCompleted?: boolean;
@@ -171,6 +216,12 @@ export interface TaskFilter {
 
 export interface ProjectFilter {
   status?: ProjectStatus | ProjectStatus[];
+  workspaceId?: string;
+  areaId?: string;
+}
+
+export interface AreaFilter {
+  status?: AreaStatus;
   workspaceId?: string;
 }
 
@@ -197,5 +248,15 @@ export interface ProjectWithProgress extends Project {
 
 export interface ProjectListResult {
   projects: ProjectWithProgress[];
+  total: number;
+}
+
+export interface ProjectWithDetails extends ProjectWithProgress {
+  area?: Area;
+  tasks: Task[];
+}
+
+export interface AreaListResult {
+  areas: AreaWithCounts[];
   total: number;
 }

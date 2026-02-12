@@ -323,7 +323,9 @@ export class EventStoreOrchestrator extends EventEmitter {
     // Must be before createAgentFactory since it references this.taskService
     const dbConnection = this.eventStore.getDatabaseConnection();
     const taskRepo = new TaskRepository(dbConnection);
-    this.taskService = new TaskService(taskRepo);
+    this.taskService = new TaskService(taskRepo, (event, data) => {
+      this.emit(event.replace('.', '_'), data);
+    });
     const taskContextBuilder = new TaskContextBuilder(taskRepo);
 
     // Initialize AgentFactory (delegated module)
@@ -343,7 +345,6 @@ export class EventStoreOrchestrator extends EventEmitter {
       },
       forwardAgentEvent: (sessionId, event) => this.forwardAgentEvent(sessionId, event),
       taskService: this.taskService,
-      onTaskEvent: (event, data) => this.emit(event, data),
       dbPath: this.eventStore.dbPath,
       get embeddingService() { return self.embeddings.getEmbeddingService() ?? undefined; },
       get vectorRepo() { return self.embeddings.getVectorRepo() ?? undefined; },

@@ -14,11 +14,12 @@ export class TaskContextBuilder {
     const summary = this.repo.getActiveTaskSummary(workspaceId);
     const blockedCount = this.repo.getBlockedTaskCount(workspaceId);
     const projects = this.repo.getActiveProjectProgress(workspaceId);
+    const areas = this.repo.listAreas({ status: 'active' }, 100, 0);
 
     const { inProgress, pendingCount, overdueCount, deferredCount } = summary;
 
     // Nothing to show
-    if (inProgress.length === 0 && pendingCount === 0 && blockedCount === 0 && projects.length === 0) {
+    if (inProgress.length === 0 && pendingCount === 0 && blockedCount === 0 && projects.length === 0 && areas.areas.length === 0) {
       return undefined;
     }
 
@@ -52,6 +53,19 @@ export class TaskContextBuilder {
     if (projects.length > 0) {
       const projectParts = projects.map(p => `${p.title} (${p.done}/${p.total})`);
       lines.push(`Projects: ${projectParts.join(', ')}`);
+    }
+
+    // Areas of responsibility
+    if (areas.areas.length > 0) {
+      lines.push('Areas:');
+      for (const area of areas.areas) {
+        const meta: string[] = [];
+        if (area.taskCount > 0) meta.push(`${area.activeTaskCount} active task${area.activeTaskCount !== 1 ? 's' : ''}`);
+        if (area.projectCount > 0) meta.push(`${area.projectCount} project${area.projectCount !== 1 ? 's' : ''}`);
+        const suffix = meta.length > 0 ? ` (${meta.join(', ')})` : '';
+        const desc = area.description ? ` — ${area.description}` : '';
+        lines.push(`  - ${area.title}${desc}${suffix}`);
+      }
     }
 
     // Overdue / deferred warnings

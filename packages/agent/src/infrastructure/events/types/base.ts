@@ -74,7 +74,12 @@ export type EventType =
   | 'task.created'
   | 'task.updated'
   | 'task.deleted'
+  | 'project.created'
   | 'project.updated'
+  | 'project.deleted'
+  | 'area.created'
+  | 'area.updated'
+  | 'area.deleted'
   // Turn events
   | 'turn.failed'
   // Hook events

@@ -26,33 +26,15 @@ export function createTaskAdapter(deps: AdapterDependencies): TaskRpcManager {
     },
 
     createTask(params: Record<string, unknown>) {
-      const task = service.createTask(params as any);
-      orchestrator.emit('task_created', {
-        taskId: task.id,
-        title: task.title,
-        status: task.status,
-        projectId: task.projectId ?? null,
-      });
-      return task;
+      return service.createTask(params as any);
     },
 
     updateTask(taskId: string, params: Record<string, unknown>) {
-      const task = service.updateTask(taskId, params as any);
-      const changedFields = Object.keys(params).filter(k => k !== 'sessionId');
-      orchestrator.emit('task_updated', {
-        taskId: task.id,
-        title: task.title,
-        status: task.status,
-        changedFields,
-      });
-      return task;
+      return service.updateTask(taskId, params as any);
     },
 
     deleteTask(taskId: string) {
-      const task = service.getTask(taskId);
-      const title = task?.title ?? '';
       service.deleteTask(taskId);
-      orchestrator.emit('task_deleted', { taskId, title });
       return { success: true };
     },
 
@@ -78,6 +60,36 @@ export function createTaskAdapter(deps: AdapterDependencies): TaskRpcManager {
 
     updateProject(projectId: string, params: Record<string, unknown>) {
       return service.updateProject(projectId, params as any);
+    },
+
+    getProjectWithDetails(projectId: string) {
+      return service.getProjectWithDetails(projectId);
+    },
+
+    deleteProject(projectId: string) {
+      service.deleteProject(projectId);
+      return { success: true };
+    },
+
+    listAreas(filter?: Record<string, unknown>) {
+      return service.listAreas(filter as any);
+    },
+
+    getArea(areaId: string) {
+      return service.getArea(areaId);
+    },
+
+    createArea(params: Record<string, unknown>) {
+      return service.createArea(params as any);
+    },
+
+    updateArea(areaId: string, params: Record<string, unknown>) {
+      return service.updateArea(areaId, params as any);
+    },
+
+    deleteArea(areaId: string) {
+      service.deleteArea(areaId);
+      return { success: true };
     },
   };
 }

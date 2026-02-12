@@ -69,6 +69,42 @@ export function createTaskHandlers(): MethodRegistration[] {
     return context.taskManager!.updateProject(projectId, rest);
   };
 
+  const getProjectWithDetailsHandler: MethodHandler<{ projectId: string }> = async (request, context) => {
+    const params = request.params!;
+    return context.taskManager!.getProjectWithDetails(params.projectId);
+  };
+
+  const deleteProjectHandler: MethodHandler<{ projectId: string }> = async (request, context) => {
+    const params = request.params!;
+    return context.taskManager!.deleteProject(params.projectId);
+  };
+
+  const listAreasHandler: MethodHandler<{ status?: string; limit?: number; offset?: number }> = async (request, context) => {
+    const params = request.params ?? {};
+    return context.taskManager!.listAreas(params);
+  };
+
+  const getAreaHandler: MethodHandler<{ areaId: string }> = async (request, context) => {
+    const params = request.params!;
+    return context.taskManager!.getArea(params.areaId);
+  };
+
+  const createAreaHandler: MethodHandler<Record<string, unknown>> = async (request, context) => {
+    const params = request.params!;
+    return context.taskManager!.createArea(params);
+  };
+
+  const updateAreaHandler: MethodHandler<{ areaId: string } & Record<string, unknown>> = async (request, context) => {
+    const params = request.params!;
+    const { areaId, ...rest } = params;
+    return context.taskManager!.updateArea(areaId, rest);
+  };
+
+  const deleteAreaHandler: MethodHandler<{ areaId: string }> = async (request, context) => {
+    const params = request.params!;
+    return context.taskManager!.deleteArea(params.areaId);
+  };
+
   return [
     {
       method: 'tasks.list',
@@ -165,6 +201,68 @@ export function createTaskHandlers(): MethodRegistration[] {
         requiredParams: ['projectId'],
         requiredManagers: ['taskManager'],
         description: 'Update a project',
+      },
+    },
+    {
+      method: 'projects.getDetails',
+      handler: getProjectWithDetailsHandler,
+      options: {
+        requiredParams: ['projectId'],
+        requiredManagers: ['taskManager'],
+        description: 'Get project with tasks and area details',
+      },
+    },
+    {
+      method: 'projects.delete',
+      handler: deleteProjectHandler,
+      options: {
+        requiredParams: ['projectId'],
+        requiredManagers: ['taskManager'],
+        description: 'Delete a project',
+      },
+    },
+    {
+      method: 'areas.list',
+      handler: listAreasHandler,
+      options: {
+        requiredManagers: ['taskManager'],
+        description: 'List areas with optional filters',
+      },
+    },
+    {
+      method: 'areas.get',
+      handler: getAreaHandler,
+      options: {
+        requiredParams: ['areaId'],
+        requiredManagers: ['taskManager'],
+        description: 'Get an area by ID',
+      },
+    },
+    {
+      method: 'areas.create',
+      handler: createAreaHandler,
+      options: {
+        requiredParams: ['title'],
+        requiredManagers: ['taskManager'],
+        description: 'Create an area',
+      },
+    },
+    {
+      method: 'areas.update',
+      handler: updateAreaHandler,
+      options: {
+        requiredParams: ['areaId'],
+        requiredManagers: ['taskManager'],
+        description: 'Update an area',
+      },
+    },
+    {
+      method: 'areas.delete',
+      handler: deleteAreaHandler,
+      options: {
+        requiredParams: ['areaId'],
+        requiredManagers: ['taskManager'],
+        description: 'Delete an area',
       },
     },
   ];

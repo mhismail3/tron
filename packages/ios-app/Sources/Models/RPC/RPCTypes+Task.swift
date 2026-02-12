@@ -15,6 +15,7 @@ struct RpcTask: Decodable, Identifiable, Hashable {
     let tags: [String]
     let projectId: String?
     let parentTaskId: String?
+    let areaId: String?
     let workspaceId: String?
     let dueDate: String?
     let deferredUntil: String?
@@ -140,6 +141,51 @@ struct TaskListResult: Decodable {
 /// Parameters for tasks.get
 struct TaskGetParams: Encodable {
     let taskId: String
+}
+
+// MARK: - Area Types
+
+/// Area of responsibility (PARA model — ongoing concerns)
+struct RpcArea: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let description: String?
+    let status: AreaStatus
+    let tags: [String]
+    let projectCount: Int?
+    let taskCount: Int?
+    let activeTaskCount: Int?
+    let createdAt: String
+    let updatedAt: String
+
+    enum AreaStatus: String, Decodable {
+        case active
+        case archived
+
+        var displayName: String {
+            switch self {
+            case .active: return "Active"
+            case .archived: return "Archived"
+            }
+        }
+    }
+}
+
+/// Parameters for areas.list
+struct AreaListParams: Encodable {
+    let status: String?
+    let limit: Int?
+
+    init(status: String? = nil, limit: Int? = nil) {
+        self.status = status
+        self.limit = limit
+    }
+}
+
+/// Result of areas.list
+struct AreaListResult: Decodable {
+    let areas: [RpcArea]
+    let total: Int
 }
 
 // MARK: - Short Relative Time Formatting

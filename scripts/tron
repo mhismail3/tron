@@ -57,6 +57,7 @@ BETA_HEALTH_PORT=8083
 # File paths
 PROD_LOG_FILE="$INSTALL_DIR/server.log"
 DEPLOYED_COMMIT_FILE="$INSTALL_DIR/deployed-commit"
+BETA_VERIFIED_FILE="$TRON_HOME/beta-deploy-verified.json"
 
 #=============================================================================
 # SECTION 2: UTILITY FUNCTIONS
@@ -899,6 +900,10 @@ cmd_deploy_beta() {
     echo "  Workspace: $PROJECT_DIR"
     echo ""
 
+    local commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo "  Commit: ${commit:0:7}"
+    echo ""
+
     build_workspace
 
     if ! run_tests; then
@@ -915,9 +920,34 @@ cmd_deploy_beta() {
 
     beta_start
 
-    echo ""
-    print_success "Beta deploy complete!"
-    echo ""
+    # Verify beta health before marking as verified
+    print_status "Verifying beta health..."
+    local healthy=false
+    for i in 1 2 3 4 5; do
+        sleep 2
+        if health_check $BETA_HEALTH_PORT; then
+            healthy=true
+            break
+        fi
+        print_warning "Health check attempt $i/5..."
+    done
+
+    if $healthy; then
+        # Write verification marker — required before prod deploy
+        cat > "$BETA_VERIFIED_FILE" << MARKER
+{"commit":"$commit","commitShort":"${commit:0:7}","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+MARKER
+        echo ""
+        print_success "Beta deploy verified on commit ${commit:0:7}"
+        echo ""
+    else
+        rm -f "$BETA_VERIFIED_FILE"
+        echo ""
+        print_error "Beta health check failed — not verified"
+        echo "  Prod deploy will be blocked until beta passes."
+        echo ""
+        return 1
+    fi
 }
 
 cmd_deploy() {
@@ -925,20 +955,60 @@ cmd_deploy() {
     local swap_only=false
     local delay=3
     local tier="prod"
+    local force=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --prepare) prepare_only=true; shift ;;
             --swap)    swap_only=true; shift ;;
             --delay)   delay="$2"; shift 2 ;;
+            --force)   force=true; shift ;;
             beta)      tier="beta"; shift ;;
             *)         shift ;;
         esac
     done
 
+    # Block all deploys from beta agent sessions
+    if [ "$TRON_BUILD_TIER" = "beta" ]; then
+        print_error "Deploy is disabled from beta sessions."
+        echo "  Deploys must be initiated from the production server."
+        echo "  Connect to prod (ws://localhost:$PROD_WS_PORT/ws) and deploy from there."
+        return 1
+    fi
+
     if [ "$tier" = "beta" ]; then
         cmd_deploy_beta
         return $?
+    fi
+
+    # Prod deploy — require beta verification on same commit (unless --force)
+    if ! $swap_only; then
+        local current_commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+
+        if ! $force; then
+            if [ ! -f "$BETA_VERIFIED_FILE" ]; then
+                print_error "No beta verification found."
+                echo "  Deploy to beta first:  tron deploy beta"
+                echo "  Skip check:            tron deploy --force"
+                return 1
+            fi
+
+            local verified_commit=$(cat "$BETA_VERIFIED_FILE" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
+            if [ "$verified_commit" != "$current_commit" ]; then
+                local verified_short=$(cat "$BETA_VERIFIED_FILE" | grep -o '"commitShort":"[^"]*"' | cut -d'"' -f4)
+                print_error "Beta was verified on a different commit."
+                echo "  Current HEAD:     ${current_commit:0:7}"
+                echo "  Beta verified on: $verified_short"
+                echo ""
+                echo "  Deploy to beta first:  tron deploy beta"
+                echo "  Skip check:            tron deploy --force"
+                return 1
+            fi
+
+            print_success "Beta verified on commit ${current_commit:0:7}"
+        else
+            print_warning "Skipping beta verification (--force)"
+        fi
     fi
 
     if $prepare_only; then

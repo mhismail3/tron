@@ -116,6 +116,15 @@ final class EventRegistry: @unchecked Sendable {
         register(TaskUpdatedPlugin.self)
         register(TaskDeletedPlugin.self)
 
+        // Project events
+        register(ProjectCreatedPlugin.self)
+        register(ProjectDeletedPlugin.self)
+
+        // Area events
+        register(AreaCreatedPlugin.self)
+        register(AreaUpdatedPlugin.self)
+        register(AreaDeletedPlugin.self)
+
         // Agent turn events
         register(AgentTurnPlugin.self)
 
