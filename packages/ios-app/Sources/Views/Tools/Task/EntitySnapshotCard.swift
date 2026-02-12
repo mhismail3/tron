@@ -262,30 +262,71 @@ struct EntitySnapshotCard: View {
 
     @ViewBuilder
     private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Recent activity")
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(.tronTextMuted)
 
-            ForEach(Array(entity.activity.enumerated()), id: \.offset) { _, item in
-                HStack(spacing: 8) {
-                    Text(item.date)
-                        .font(TronTypography.mono(size: 10, weight: .regular))
-                        .foregroundStyle(.tronTextMuted)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(entity.activity.enumerated()), id: \.offset) { index, item in
+                    activityRow(item, isLast: index == entity.activity.count - 1)
+                }
+            }
+        }
+    }
 
-                    Text(item.action)
+    @ViewBuilder
+    private func activityRow(_ item: EntityDetail.ActivityItem, isLast: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            // Timeline track: dot + connector line
+            VStack(spacing: 0) {
+                Circle()
+                    .fill(activityColor(for: item.action))
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 6)
+
+                if !isLast {
+                    Rectangle()
+                        .fill(Color.tronBorder.opacity(0.3))
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 6)
+
+            // Content
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(item.action.replacingOccurrences(of: "_", with: " "))
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
                         .foregroundStyle(.tronTextSecondary)
 
-                    if let detail = item.detail {
-                        Text(detail)
-                            .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
-                            .foregroundStyle(.tronTextMuted)
-                    }
-
                     Spacer()
+
+                    Text(item.date)
+                        .font(TronTypography.mono(size: 10, weight: .regular))
+                        .foregroundStyle(.tronTextMuted.opacity(0.6))
+                }
+
+                if let detail = item.detail {
+                    Text(detail)
+                        .font(TronTypography.mono(size: 11, weight: .regular))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(3)
                 }
             }
+            .padding(.bottom, isLast ? 0 : 10)
+        }
+    }
+
+    private func activityColor(for action: String) -> Color {
+        switch action {
+        case "status_changed": return .tronTeal
+        case "time_logged": return .tronAmber
+        case "note_added": return .tronSlate
+        case "created": return .tronSuccess
+        case "priority_changed": return .orange
+        default: return .tronSlate
         }
     }
 
