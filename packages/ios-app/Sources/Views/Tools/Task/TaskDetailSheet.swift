@@ -32,10 +32,10 @@ struct TaskDetailSheet: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checklist")
                             .font(.system(size: 14))
-                            .foregroundStyle(.tronTeal)
+                            .foregroundStyle(.tronSlate)
                         Text("Task Manager")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronTeal)
+                            .foregroundStyle(.tronSlate)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -43,13 +43,13 @@ struct TaskDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTeal)
+                    .foregroundStyle(.tronSlate)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronTeal)
+        .tint(.tronSlate)
     }
 
     // MARK: - Action Header
@@ -60,10 +60,10 @@ struct TaskDetailSheet: View {
             // Action badge
             Text(chip.action.replacingOccurrences(of: "_", with: " "))
                 .font(TronTypography.mono(size: 11, weight: .medium))
-                .foregroundStyle(.tronTeal)
+                .foregroundStyle(.tronSlate)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.tronTeal.opacity(0.15))
+                .background(Color.tronSlate.opacity(0.15))
                 .clipShape(Capsule())
 
             if let title = chip.taskTitle {

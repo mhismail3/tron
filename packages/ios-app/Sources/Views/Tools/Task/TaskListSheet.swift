@@ -25,10 +25,10 @@ struct TaskListSheet: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checklist")
                             .font(.system(size: 14))
-                            .foregroundStyle(.tronTeal)
+                            .foregroundStyle(.tronSlate)
                         Text("Task Manager")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronTeal)
+                            .foregroundStyle(.tronSlate)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -36,7 +36,7 @@ struct TaskListSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronTeal)
+                    .foregroundStyle(.tronSlate)
                 }
             }
             .task {
@@ -45,7 +45,7 @@ struct TaskListSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronTeal)
+        .tint(.tronSlate)
     }
 
     // MARK: - Tasks Overview Section
@@ -78,7 +78,7 @@ struct TaskListSheet: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .scaleEffect(0.8)
-                        .tint(.tronTeal)
+                        .tint(.tronSlate)
                     Text("Loading tasks...")
                         .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
                         .foregroundStyle(.tronTextMuted)
@@ -97,7 +97,7 @@ struct TaskListSheet: View {
                         Task { await loadTasks() }
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(.tronTeal)
+                    .foregroundStyle(.tronSlate)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 12)
@@ -116,7 +116,7 @@ struct TaskListSheet: View {
     private var taskListContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             if !taskState.inProgressTasks.isEmpty {
-                taskGroup(title: "In Progress", icon: "circle.fill", iconColor: .tronTeal, tasks: taskState.inProgressTasks)
+                taskGroup(title: "In Progress", icon: "circle.fill", iconColor: .tronSlate, tasks: taskState.inProgressTasks)
             }
             if !taskState.pendingTasks.isEmpty {
                 taskGroup(title: "Pending", icon: "circle", iconColor: .tronSlate, tasks: taskState.pendingTasks)

@@ -7,7 +7,7 @@ struct EntitySnapshotCard: View {
     let entity: EntityDetail
     let action: String
 
-    private let accentColor: Color = .tronTeal
+    private let accentColor: Color = .tronSlate
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
