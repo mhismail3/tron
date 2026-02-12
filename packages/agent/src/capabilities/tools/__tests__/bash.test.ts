@@ -191,6 +191,34 @@ describe('BashTool', () => {
     });
   });
 
+  describe('onProgress callback', () => {
+    it('should call onProgress with stdout chunks', async () => {
+      mockSpawn.mockReturnValue(createMockProcess('chunk1') as any);
+
+      const onProgress = vi.fn();
+      await bashTool.execute({ command: 'echo test' }, { onProgress });
+
+      expect(onProgress).toHaveBeenCalledWith('chunk1');
+    });
+
+    it('should call onProgress with stderr chunks', async () => {
+      mockSpawn.mockReturnValue(createMockProcess('', 'err1') as any);
+
+      const onProgress = vi.fn();
+      await bashTool.execute({ command: 'cmd' }, { onProgress });
+
+      expect(onProgress).toHaveBeenCalledWith('err1');
+    });
+
+    it('should work without onProgress callback', async () => {
+      mockSpawn.mockReturnValue(createMockProcess('output') as any);
+
+      // Should not throw when no onProgress is provided
+      const result = await bashTool.execute({ command: 'echo test' });
+      expect(result.isError).toBeFalsy();
+    });
+  });
+
   describe('command sanitization', () => {
     it('should reject commands with shell injection', async () => {
       const result = await bashTool.execute({ command: 'echo "test"; rm -rf /' });

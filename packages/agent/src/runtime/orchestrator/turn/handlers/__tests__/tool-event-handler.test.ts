@@ -275,6 +275,41 @@ describe('ToolEventHandler', () => {
     });
   });
 
+  describe('handleToolExecutionUpdate', () => {
+    it('should emit agent.tool_output with toolCallId and output', () => {
+      const ctx = createTestContext();
+      const event = {
+        type: 'tool_execution_update',
+        toolCallId: 'call-1',
+        update: 'partial output chunk',
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionUpdate(ctx, event);
+
+      expect(ctx.emitCalls).toHaveLength(1);
+      expect(ctx.emitCalls[0]).toEqual({
+        type: 'agent.tool_output',
+        data: {
+          toolCallId: 'call-1',
+          output: 'partial output chunk',
+        },
+      });
+    });
+
+    it('should not persist anything', () => {
+      const ctx = createTestContext();
+      const event = {
+        type: 'tool_execution_update',
+        toolCallId: 'call-1',
+        update: 'chunk',
+      } as unknown as TronEvent;
+
+      handler.handleToolExecutionUpdate(ctx, event);
+
+      expect(ctx.persistCalls).toHaveLength(0);
+    });
+  });
+
   describe('handleToolExecutionEnd', () => {
     it('should emit agent.tool_end event on success via context', () => {
       const mockActive = createMockActiveSession({ currentRunId: 'run-123' });

@@ -400,6 +400,7 @@ final class ChatViewModel: ChatEventContext {
                 tool.result = data.result
                 tool.durationMs = data.durationMs
                 tool.details = data.details
+                tool.streamingOutput = nil
                 messages[index].content = .toolUse(tool)
 
                 // Sync to MessageWindowManager

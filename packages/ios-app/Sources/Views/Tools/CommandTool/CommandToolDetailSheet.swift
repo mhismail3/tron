@@ -83,7 +83,11 @@ struct CommandToolDetailSheet: View {
                 if let result = data.result, !result.isEmpty {
                     resultSection(result)
                 } else if data.status == .running {
-                    runningSection
+                    if let output = data.streamingOutput, !output.isEmpty {
+                        streamingResultSection(output)
+                    } else {
+                        runningSection
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -239,6 +243,27 @@ struct CommandToolDetailSheet: View {
 
             // Result viewer based on tool type
             resultViewer(for: result)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.tronBorder.opacity(0.3), lineWidth: 0.5)
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func streamingResultSection(_ output: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .tint(.tronAmber)
+                Text("Output")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            resultViewer(for: output)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

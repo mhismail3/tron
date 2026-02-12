@@ -82,6 +82,20 @@ extension ChatViewModel {
         toolEventCoordinator.handleToolStart(pluginResult, result: result, context: self)
     }
 
+    func handleToolOutput(_ result: ToolOutputPlugin.Result) {
+        guard let index = MessageFinder.lastIndexOfToolUse(
+            toolCallId: result.toolCallId, in: messages
+        ) else { return }
+
+        if case .toolUse(var tool) = messages[index].content {
+            let accumulated = (tool.streamingOutput ?? "") + result.output
+            let (truncated, _) = ResultTruncation.truncate(accumulated)
+            tool.streamingOutput = truncated
+            messages[index].content = .toolUse(tool)
+            messageWindowManager.updateMessage(messages[index])
+        }
+    }
+
     func handleToolEnd(_ pluginResult: ToolEndPlugin.Result) {
         // Process through handler (extracts status and result)
         let result = eventHandler.handleToolEnd(pluginResult)

@@ -74,6 +74,7 @@ final class EventRegistry: @unchecked Sendable {
         // Tool events
         register(ToolGeneratingPlugin.self)
         register(ToolStartPlugin.self)
+        register(ToolOutputPlugin.self)
         register(ToolEndPlugin.self)
 
         // Lifecycle events

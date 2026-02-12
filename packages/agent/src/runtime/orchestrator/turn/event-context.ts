@@ -51,6 +51,7 @@ export type AgentEventType =
   | 'agent.thinking_end'
   | 'agent.tool_generating'
   | 'agent.tool_start'
+  | 'agent.tool_output'
   | 'agent.tool_end'
   | 'agent.compaction_started'
   | 'agent.compaction'

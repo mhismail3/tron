@@ -10,6 +10,7 @@ import Foundation
 @MainActor protocol ToolEventHandler: AnyObject {
     func handleToolGenerating(_ result: ToolGeneratingPlugin.Result)
     func handleToolStart(_ result: ToolStartPlugin.Result)
+    func handleToolOutput(_ result: ToolOutputPlugin.Result)
     func handleToolEnd(_ result: ToolEndPlugin.Result)
 }
 

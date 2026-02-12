@@ -99,11 +99,7 @@ struct ChatSheetContent: View {
             ThinkingDetailSheet(content: content)
 
         case .commandToolDetail(let data):
-            CommandToolDetailSheet(data: data, onOpenURL: { url in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    sheetCoordinator?.showSafari(url)
-                }
-            })
+            commandToolDetailSheet(fallback: data)
 
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
@@ -121,6 +117,23 @@ struct ChatSheetContent: View {
     }
 
     // MARK: - Sheet Builders
+
+    @ViewBuilder
+    private func commandToolDetailSheet(fallback: CommandToolChipData) -> some View {
+        // Look up live data from viewModel.messages so streaming output updates in real-time
+        let liveData: CommandToolChipData = {
+            if let index = MessageFinder.lastIndexOfToolUse(toolCallId: fallback.id, in: viewModel.messages),
+               case .toolUse(let tool) = viewModel.messages[index].content {
+                return CommandToolChipData(from: tool)
+            }
+            return fallback
+        }()
+        CommandToolDetailSheet(data: liveData, onOpenURL: { url in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                sheetCoordinator?.showSafari(url)
+            }
+        })
+    }
 
     @ViewBuilder
     private var browserSheet: some View {

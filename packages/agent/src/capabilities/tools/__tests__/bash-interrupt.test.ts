@@ -28,9 +28,8 @@ describe('BashTool Interrupt', () => {
       abortController.abort(); // Abort immediately
 
       const result = await bashTool.execute(
-        'test-id',
         { command: 'sleep 2' },
-        abortController.signal
+        { signal: abortController.signal }
       );
 
       expect(result.isError).toBe(true);
@@ -43,9 +42,8 @@ describe('BashTool Interrupt', () => {
 
       // Start a long-running command
       const resultPromise = bashTool.execute(
-        'test-id',
         { command: 'sleep 2 && echo "done"' },
-        abortController.signal
+        { signal: abortController.signal }
       );
 
       // Abort after a short delay
@@ -65,9 +63,8 @@ describe('BashTool Interrupt', () => {
 
       // Start a command that produces output then sleeps
       const resultPromise = bashTool.execute(
-        'test-id',
         { command: 'echo "line 1" && echo "line 2" && sleep 2' },
-        abortController.signal
+        { signal: abortController.signal }
       );
 
       // Wait for some output, then abort

@@ -5,7 +5,7 @@
  */
 
 import { spawn } from 'child_process';
-import type { TronTool, TronToolResult } from '@core/types/index.js';
+import type { TronTool, TronToolResult, ToolExecutionOptions } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { BashToolSettings } from '@infrastructure/settings/types.js';
@@ -29,7 +29,7 @@ export interface BashToolConfig {
 
 export class BashTool implements TronTool {
   readonly name = 'Bash';
-  readonly executionContract = 'contextual' as const;
+  readonly executionContract = 'options' as const;
   readonly description = 'Execute a shell command. Commands that are potentially destructive require confirmation.';
   readonly parameters = {
     type: 'object' as const,
@@ -71,23 +71,11 @@ export class BashTool implements TronTool {
   }
 
   async execute(
-    toolCallIdOrArgs: string | Record<string, unknown>,
-    argsOrSignal?: Record<string, unknown> | AbortSignal,
-    signal?: AbortSignal
+    args: Record<string, unknown>,
+    options?: ToolExecutionOptions
   ): Promise<TronToolResult> {
-    // Handle both old and new signatures
-    let args: Record<string, unknown>;
-    let abortSignal: AbortSignal | undefined;
-
-    if (typeof toolCallIdOrArgs === 'string') {
-      // New signature: (toolCallId, params, signal)
-      args = argsOrSignal as Record<string, unknown>;
-      abortSignal = signal;
-    } else {
-      // Old signature: (params)
-      args = toolCallIdOrArgs;
-      abortSignal = argsOrSignal instanceof AbortSignal ? argsOrSignal : undefined;
-    }
+    const abortSignal = options?.signal;
+    const onProgress = options?.onProgress;
 
     const command = args.command as string;
 
@@ -131,7 +119,7 @@ export class BashTool implements TronTool {
     const startTime = Date.now();
 
     try {
-      const result = await this.runCommand(command, timeout, abortSignal);
+      const result = await this.runCommand(command, timeout, abortSignal, onProgress);
       const durationMs = Date.now() - startTime;
 
       // Handle interrupted command
@@ -244,7 +232,8 @@ export class BashTool implements TronTool {
   private runCommand(
     command: string,
     timeout: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onProgress?: (chunk: string) => void
   ): Promise<{ stdout: string; stderr: string; exitCode: number; interrupted?: boolean }> {
     return new Promise((resolve, reject) => {
       let stdout = '';
@@ -283,11 +272,15 @@ export class BashTool implements TronTool {
       }
 
       proc.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString();
+        const chunk = data.toString();
+        stdout += chunk;
+        onProgress?.(chunk);
       });
 
       proc.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString();
+        const chunk = data.toString();
+        stderr += chunk;
+        onProgress?.(chunk);
       });
 
       proc.on('close', (code: number | null) => {

@@ -28,7 +28,9 @@
  * | toolcall_delta        | StreamingEventHandler |
  * | thinking_*            | StreamingEventHandler |
  * | tool_use_batch        | ToolEventHandler    |
- * | tool_execution_*      | ToolEventHandler    |
+ * | tool_execution_start  | ToolEventHandler    |
+ * | tool_execution_update | ToolEventHandler    |
+ * | tool_execution_end    | ToolEventHandler    |
  * | agent_start/end       | LifecycleEventHandler |
  * | agent_interrupted     | LifecycleEventHandler |
  * | api_retry             | LifecycleEventHandler |
@@ -223,6 +225,10 @@ export class AgentEventHandler {
 
       case 'tool_execution_start':
         this.toolHandler.handleToolExecutionStart(ctx, event);
+        break;
+
+      case 'tool_execution_update':
+        this.toolHandler.handleToolExecutionUpdate(ctx, event);
         break;
 
       case 'tool_execution_end':

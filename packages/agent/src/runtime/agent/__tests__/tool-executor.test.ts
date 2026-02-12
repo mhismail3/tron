@@ -286,6 +286,75 @@ describe('AgentToolExecutor', () => {
       );
     });
 
+    it('should pass onProgress to options-contract tools and emit tool_execution_update', async () => {
+      const listener = vi.fn();
+      eventEmitter.addListener(listener);
+
+      const executeFn = vi.fn(
+        async (
+          args: Record<string, unknown>,
+          options?: { onProgress?: (chunk: string) => void }
+        ) => {
+          // Simulate tool calling onProgress
+          options?.onProgress?.('chunk1');
+          options?.onProgress?.('chunk2');
+          return { content: 'done' };
+        }
+      );
+      const tool: TronTool = {
+        name: 'ProgressTool',
+        description: 'Tool with progress',
+        parameters: { type: 'object' },
+        executionContract: 'options' as const,
+        execute: executeFn,
+      };
+      mockTools.set('ProgressTool', tool);
+
+      await executor.execute({
+        toolCallId: 'call_progress',
+        toolName: 'ProgressTool',
+        arguments: {},
+      });
+
+      // Should have emitted tool_execution_update events
+      const updateEvents = listener.mock.calls
+        .map(c => c[0])
+        .filter((e: { type: string }) => e.type === 'tool_execution_update');
+      expect(updateEvents.length).toBeGreaterThan(0);
+      // Combined chunks should contain both
+      const allUpdates = updateEvents.map((e: { update: string }) => e.update).join('');
+      expect(allUpdates).toBe('chunk1chunk2');
+    });
+
+    it('should not pass onProgress to contextual-contract tools', async () => {
+      const executeFn = vi.fn(
+        async (id: string, args: Record<string, unknown>, signal: AbortSignal) => ({
+          content: `ID: ${id}`,
+        })
+      );
+      const tool: TronTool = {
+        name: 'ContextualTool',
+        description: 'Contextual tool',
+        parameters: { type: 'object' },
+        executionContract: 'contextual' as const,
+        execute: executeFn,
+      };
+      mockTools.set('ContextualTool', tool);
+
+      await executor.execute({
+        toolCallId: 'call_ctx',
+        toolName: 'ContextualTool',
+        arguments: {},
+      });
+
+      // Contextual tools receive (id, args, signal) — no onProgress
+      expect(executeFn).toHaveBeenCalledWith(
+        'call_ctx',
+        expect.any(Object),
+        expect.any(AbortSignal)
+      );
+    });
+
     it('should handle stopTurn in tool result', async () => {
       const tool: TronTool = {
         name: 'StopTool',

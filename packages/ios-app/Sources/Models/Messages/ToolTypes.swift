@@ -11,6 +11,8 @@ struct ToolUseData: Equatable {
     var durationMs: Int?
     /// Structured result details from server (tool-specific shape)
     var details: [String: AnyCodable]?
+    /// Streaming output accumulated while tool is running (ephemeral, cleared on tool_end)
+    var streamingOutput: String?
 
     static func == (lhs: ToolUseData, rhs: ToolUseData) -> Bool {
         lhs.toolName == rhs.toolName &&
@@ -18,7 +20,8 @@ struct ToolUseData: Equatable {
         lhs.arguments == rhs.arguments &&
         lhs.status == rhs.status &&
         lhs.result == rhs.result &&
-        lhs.durationMs == rhs.durationMs
+        lhs.durationMs == rhs.durationMs &&
+        lhs.streamingOutput == rhs.streamingOutput
     }
 
     var displayName: String {

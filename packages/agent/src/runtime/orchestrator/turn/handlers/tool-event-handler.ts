@@ -170,6 +170,15 @@ export class ToolEventHandler {
   }
 
   /**
+   * Handle tool_execution_update event.
+   * Ephemeral only — forwards progress to WebSocket, no persistence.
+   */
+  handleToolExecutionUpdate(ctx: EventContext, event: TronEvent): void {
+    const { toolCallId, update } = event as { toolCallId: string; update: string };
+    ctx.emit('agent.tool_output', { toolCallId, output: update });
+  }
+
+  /**
    * Handle tool_execution_end event.
    * Updates tool tracking and persists tool.result event.
    */

@@ -737,6 +737,8 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleToolStartCalledWith = result
     }
 
+    func handleToolOutput(_ result: ToolOutputPlugin.Result) {}
+
     func handleToolEnd(_ result: ToolEndPlugin.Result) {
         handleToolEndCalledWith = result
     }

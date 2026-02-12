@@ -80,6 +80,8 @@ struct CommandToolChipData: Equatable, Identifiable {
     var result: String?
     /// Whether the result was truncated for performance
     var isResultTruncated: Bool
+    /// Streaming output while tool is running (nil when not running or after completion)
+    var streamingOutput: String?
 
     /// Formatted duration for display
     var formattedDuration: String? {
@@ -145,6 +147,7 @@ extension CommandToolChipData {
         self.arguments = tool.arguments
         self.result = truncatedResult
         self.isResultTruncated = wasTruncated
+        self.streamingOutput = tool.streamingOutput
     }
 
     /// Map ToolStatus to CommandToolStatus

@@ -320,15 +320,45 @@ export class AgentToolExecutor implements IToolExecutor {
         return contextualExecute.call(tool, toolCallId, args, signal);
       }
       case 'options': {
+        // Set up throttled progress reporting (50ms coalesce)
+        let progressBuffer = '';
+        let progressTimer: ReturnType<typeof setTimeout> | null = null;
+        const flushProgress = () => {
+          if (progressBuffer) {
+            this.eventEmitter.emit({
+              type: 'tool_execution_update',
+              sessionId: this.sessionId,
+              timestamp: new Date().toISOString(),
+              toolCallId,
+              update: progressBuffer,
+            });
+            progressBuffer = '';
+          }
+          progressTimer = null;
+        };
+        const onProgress = (chunk: string) => {
+          progressBuffer += chunk;
+          if (!progressTimer) {
+            progressTimer = setTimeout(flushProgress, 50);
+          }
+        };
+
         const optionsExecute = tool.execute as (
           params: Record<string, unknown>,
           options?: ToolExecutionOptions
         ) => Promise<TronToolResult>;
-        return optionsExecute.call(tool, args, {
+        const result = await optionsExecute.call(tool, args, {
           toolCallId,
           sessionId: this.sessionId,
           signal,
+          onProgress,
         });
+
+        // Flush remaining buffer before tool_execution_end
+        if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
+        flushProgress();
+
+        return result;
       }
     }
   }
