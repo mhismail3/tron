@@ -23,6 +23,9 @@ enum ErrorPlugin: DispatchableEventPlugin {
             let category: String?
             let suggestion: String?
             let retryable: Bool?
+            let statusCode: Int?
+            let errorType: String?
+            let model: String?
         }
     }
 
@@ -35,6 +38,9 @@ enum ErrorPlugin: DispatchableEventPlugin {
         let category: String?
         let suggestion: String?
         let retryable: Bool?
+        let statusCode: Int?
+        let errorType: String?
+        let model: String?
     }
 
     // MARK: - Protocol Implementation
@@ -46,7 +52,10 @@ enum ErrorPlugin: DispatchableEventPlugin {
             provider: event.data?.provider,
             category: event.data?.category,
             suggestion: event.data?.suggestion,
-            retryable: event.data?.retryable
+            retryable: event.data?.retryable,
+            statusCode: event.data?.statusCode,
+            errorType: event.data?.errorType,
+            model: event.data?.model
         )
     }
 

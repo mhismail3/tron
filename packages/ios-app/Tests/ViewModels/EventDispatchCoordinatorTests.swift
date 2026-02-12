@@ -193,7 +193,10 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             provider: nil,
             category: nil,
             suggestion: nil,
-            retryable: nil
+            retryable: nil,
+            statusCode: nil,
+            errorType: nil,
+            model: nil
         )
 
         // When: Dispatching
@@ -216,7 +219,10 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             provider: "anthropic",
             category: "authentication",
             suggestion: "Run tron login to re-authenticate",
-            retryable: false
+            retryable: false,
+            statusCode: 401,
+            errorType: "authentication_error",
+            model: "claude-sonnet-4-20250514"
         )
 
         // When: Dispatching

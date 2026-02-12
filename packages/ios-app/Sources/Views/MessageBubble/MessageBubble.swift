@@ -18,7 +18,7 @@ struct MessageBubble: View {
     var onWaitForAgentsTap: ((WaitForAgentsChipData) -> Void)?
     var onMemoryUpdatedTap: ((String, String) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
-    var onProviderErrorTap: ((String, String, String, String?, Bool) -> Void)?
+    var onProviderErrorTap: ((ProviderErrorDetailData) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user

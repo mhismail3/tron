@@ -98,14 +98,8 @@ final class SheetCoordinator {
     }
 
     /// Show provider error detail sheet
-    func showProviderErrorDetail(provider: String, category: String, message: String, suggestion: String?, retryable: Bool) {
-        present(.providerErrorDetail(ProviderErrorDetailData(
-            provider: provider,
-            category: category,
-            message: message,
-            suggestion: suggestion,
-            retryable: retryable
-        )))
+    func showProviderErrorDetail(_ data: ProviderErrorDetailData) {
+        present(.providerErrorDetail(data))
     }
 
     /// Show ask user question sheet

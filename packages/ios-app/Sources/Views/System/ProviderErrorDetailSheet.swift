@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Detail sheet shown when tapping the provider error notification pill.
-/// Displays error category, provider, message, suggestion, and retryable status.
+/// Displays error info in glass cards matching the CompactionDetailSheet pattern.
 @available(iOS 26.0, *)
 struct ProviderErrorDetailSheet: View {
     let data: ProviderErrorDetailData
@@ -11,16 +11,11 @@ struct ProviderErrorDetailSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
-                    errorHeader
+                    infoBadges
                         .padding(.horizontal)
 
-                    detailsSection
+                    messageSection
                         .padding(.horizontal)
-
-                    if let suggestion = data.suggestion {
-                        suggestionSection(suggestion)
-                            .padding(.horizontal)
-                    }
                 }
                 .padding(.vertical)
             }
@@ -38,49 +33,72 @@ struct ProviderErrorDetailSheet: View {
         .tint(.red)
     }
 
-    // MARK: - Error Header
+    // MARK: - Info Badges
 
-    private var errorHeader: some View {
-        VStack(spacing: 12) {
-            Image(systemName: ErrorCategoryDisplay.icon(for: data.category))
-                .font(.system(size: 36))
-                .foregroundStyle(.red)
+    private var infoBadges: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Info")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
 
-            HStack(spacing: 8) {
-                Text(data.provider.capitalized)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                if data.retryable {
-                    Text("Retryable")
-                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(.orange.opacity(0.15))
-                        }
+            VStack(spacing: 12) {
+                // Row 1: Provider, Model
+                HStack(spacing: 12) {
+                    ErrorBadge(label: "Provider", value: data.provider.capitalized, color: .red)
+                    if let model = data.model {
+                        ErrorBadge(label: "Model", value: model, color: .red)
+                    }
                 }
+
+                // Row 2: Status code, Error type, Retryable
+                HStack(spacing: 12) {
+                    if let statusCode = data.statusCode {
+                        ErrorBadge(label: "Status", value: "\(statusCode)", color: .red)
+                    }
+                    if let errorType = data.errorType, errorType != "Error" {
+                        ErrorBadge(label: "Type", value: errorType, color: .red)
+                    }
+                    if data.retryable {
+                        ErrorBadge(label: "Retryable", value: "", color: .orange)
+                    }
+                }
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(Color.red.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
 
-    // MARK: - Details Section
+    // MARK: - Message Section
 
-    private var detailsSection: some View {
+    private var messageSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Error Details")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+            HStack {
+                Text("Error Message")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
+
+                Spacer()
+
+                Button {
+                    UIPasteboard.general.string = data.message
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(.red.opacity(0.6))
+                }
+            }
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Image(systemName: "exclamationmark.circle.fill")
+                    Image(systemName: ErrorCategoryDisplay.icon(for: data.category))
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.red)
 
-                    Text("Message")
+                    Text("Details")
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                         .foregroundStyle(.red)
 
@@ -102,40 +120,32 @@ struct ProviderErrorDetailSheet: View {
             }
         }
     }
+}
 
-    // MARK: - Suggestion Section
+// MARK: - Helper Views
 
-    private func suggestionSection(_ suggestion: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Suggestion")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
+@available(iOS 26.0, *)
+private struct ErrorBadge: View {
+    let label: String
+    let value: String
+    let color: Color
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "lightbulb.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.yellow)
-
-                    Text("How to Fix")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                        .foregroundStyle(.yellow)
-
-                    Spacer()
-                }
-
-                Text(suggestion)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+            if !value.isEmpty {
+                Text(value)
+                    .font(TronTypography.pillValue)
             }
-            .padding(14)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(Color.yellow.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.tint(color.opacity(0.2)), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 }

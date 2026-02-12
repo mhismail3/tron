@@ -113,7 +113,7 @@ extension ChatMessage {
     }
 
     /// In-chat notification for provider API errors
-    static func providerError(provider: String, category: String, message: String, suggestion: String?, retryable: Bool) -> ChatMessage {
-        ChatMessage(role: .system, content: .providerError(provider: provider, category: category, message: message, suggestion: suggestion, retryable: retryable))
+    static func providerError(_ data: ProviderErrorDetailData) -> ChatMessage {
+        ChatMessage(role: .system, content: .providerError(data))
     }
 }

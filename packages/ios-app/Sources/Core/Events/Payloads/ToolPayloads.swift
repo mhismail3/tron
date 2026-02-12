@@ -130,6 +130,9 @@ struct ProviderErrorPayload {
     let suggestion: String?
     let retryable: Bool
     let retryAfter: Int?
+    let statusCode: Int?
+    let errorType: String?
+    let model: String?
 
     init?(from payload: [String: AnyCodable]) {
         guard let provider = payload.string("provider"),
@@ -144,6 +147,9 @@ struct ProviderErrorPayload {
         self.suggestion = payload.string("suggestion")
         self.retryable = payload.bool("retryable") ?? false
         self.retryAfter = payload.int("retryAfter")
+        self.statusCode = payload.int("statusCode")
+        self.errorType = payload.string("errorType")
+        self.model = payload.string("model")
     }
 }
 

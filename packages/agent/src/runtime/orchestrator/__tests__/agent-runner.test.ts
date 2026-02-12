@@ -572,7 +572,7 @@ describe('AgentRunner', () => {
       } as RunResult);
     });
 
-    it('emits enriched agent.error for turn failures', async () => {
+    it('emits enriched agent.error for turn failures with model', async () => {
       const options = createRunOptions();
 
       await runner.run(active, options);
@@ -585,6 +585,7 @@ describe('AgentRunner', () => {
           category: 'rate_limit',
           suggestion: expect.any(String),
           retryable: true,
+          model: 'claude-sonnet-4-20250514',
         }),
       }));
     });
@@ -957,6 +958,26 @@ describe('AgentRunner', () => {
           message: expect.stringContaining('authentication_error'),
           category: 'authentication',
           provider: 'anthropic',
+        }),
+      }));
+    });
+
+    it('includes statusCode, errorType, and model in agent.error event', async () => {
+      const apiError = Object.assign(new Error('Rate limit exceeded'), {
+        status: 429,
+        error: { type: 'rate_limit_error', message: 'Too many requests' },
+      });
+      (active.agent.run as Mock).mockRejectedValue(apiError);
+      const options = createRunOptions();
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(config.emit).toHaveBeenCalledWith('agent_event', expect.objectContaining({
+        type: 'agent.error',
+        data: expect.objectContaining({
+          statusCode: 429,
+          errorType: 'rate_limit_error',
+          model: 'claude-sonnet-4-20250514',
         }),
       }));
     });

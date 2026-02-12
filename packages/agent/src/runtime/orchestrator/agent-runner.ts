@@ -619,6 +619,7 @@ export class AgentRunner {
           category: classified.category,
           suggestion: classified.suggestion,
           retryable: classified.isRetryable,
+          model: active.model,
         },
       });
     }
@@ -728,6 +729,12 @@ export class AgentRunner {
       });
     }
 
+    // Extract structured fields from the error object for iOS detail sheet
+    const statusCode = (error as { status?: number }).status
+      ?? (error as { statusCode?: number }).statusCode;
+    const errorType = (error as { error?: { type?: string } }).error?.type
+      ?? (error instanceof Error ? error.name : undefined);
+
     // Emit agent.error via WebSocket so iOS can render the error notification
     this.config.emit('agent_event', {
       type: 'agent.error',
@@ -741,6 +748,9 @@ export class AgentRunner {
         category: classified.category,
         suggestion: classified.suggestion,
         retryable: classified.isRetryable,
+        statusCode,
+        errorType,
+        model: active.model,
       },
     });
 

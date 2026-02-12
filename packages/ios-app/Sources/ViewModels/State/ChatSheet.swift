@@ -22,6 +22,9 @@ struct ProviderErrorDetailData: Equatable {
     let message: String
     let suggestion: String?
     let retryable: Bool
+    let statusCode: Int?
+    let errorType: String?
+    let model: String?
 }
 
 /// Identifiable enum representing all possible sheets in ChatView.

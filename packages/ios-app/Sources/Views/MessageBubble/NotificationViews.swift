@@ -505,20 +505,17 @@ struct MemoryNotificationView: View {
 // MARK: - Provider Error Notification View
 
 struct ProviderErrorNotificationView: View {
-    let provider: String
-    let category: String
-    let message: String
-    let retryable: Bool
+    let data: ProviderErrorDetailData
     var onTap: (() -> Void)? = nil
 
     var body: some View {
         NotificationPill(tint: .red, interactive: true, onTap: onTap) {
             HStack(spacing: 8) {
-                Image(systemName: ErrorCategoryDisplay.icon(for: category))
+                Image(systemName: ErrorCategoryDisplay.icon(for: data.category))
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.red)
 
-                Text(ErrorCategoryDisplay.label(for: category))
+                Text(ErrorCategoryDisplay.label(for: data.category))
                     .font(TronTypography.filePath)
                     .foregroundStyle(.red.opacity(0.9))
 
@@ -526,7 +523,7 @@ struct ProviderErrorNotificationView: View {
                     .font(TronTypography.badge)
                     .foregroundStyle(.red.opacity(0.5))
 
-                Text(message)
+                Text(data.message)
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextSecondary)
                     .lineLimit(1)

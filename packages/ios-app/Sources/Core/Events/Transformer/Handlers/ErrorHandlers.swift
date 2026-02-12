@@ -61,15 +61,19 @@ enum ErrorHandlers {
 
         // Enriched: render as provider error pill
         if let category = parsed.category, category != "unknown" {
+            let data = ProviderErrorDetailData(
+                provider: parsed.provider,
+                category: category,
+                message: parsed.error,
+                suggestion: parsed.suggestion,
+                retryable: parsed.retryable,
+                statusCode: parsed.statusCode,
+                errorType: parsed.errorType,
+                model: parsed.model
+            )
             return ChatMessage(
                 role: .system,
-                content: .providerError(
-                    provider: parsed.provider,
-                    category: category,
-                    message: parsed.error,
-                    suggestion: parsed.suggestion,
-                    retryable: parsed.retryable
-                ),
+                content: .providerError(data),
                 timestamp: timestamp
             )
         }

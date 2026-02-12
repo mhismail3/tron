@@ -370,15 +370,17 @@ extension ChatViewModel {
         closeBrowserSession()
 
         if let category = result.category, category != "unknown" {
-            let provider = result.provider ?? "unknown"
-            let notification = ChatMessage.providerError(
-                provider: provider,
+            let data = ProviderErrorDetailData(
+                provider: result.provider ?? "unknown",
                 category: category,
                 message: result.message,
                 suggestion: result.suggestion,
-                retryable: result.retryable ?? false
+                retryable: result.retryable ?? false,
+                statusCode: result.statusCode,
+                errorType: result.errorType,
+                model: result.model
             )
-            messages.append(notification)
+            messages.append(.providerError(data))
             logger.error("Provider error [\(category)]: \(result.message)", category: .events)
         } else {
             // Legacy (un-enriched server): fall back to plain error text
