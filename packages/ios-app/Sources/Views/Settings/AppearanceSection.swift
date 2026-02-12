@@ -19,9 +19,9 @@ struct AppearanceSection: View {
 
             fontPickerRow
 
-            thinkingIndicatorPickerRow
-
             axisSliders
+
+            thinkingIndicatorPickerRow
         } header: {
             Text("Appearance")
                 .font(TronTypography.caption)
