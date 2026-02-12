@@ -43,8 +43,6 @@ struct RecentSessionRow: View {
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
-                        .background(Color.tronOverlay(0.03))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
 
@@ -59,14 +57,12 @@ struct RecentSessionRow: View {
 
                         Text(response)
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextSecondary)
+                            .foregroundStyle(.tronEmerald)
                             .lineLimit(2)
                             .truncationMode(.tail)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.tronOverlay(0.03))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
 
                 // Footer: Model + tokens/cost

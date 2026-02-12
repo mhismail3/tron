@@ -78,8 +78,8 @@ extension Color {
 
     // MARK: - Special Colors
 
-    /// Phthalo green for iOS 26 liquid glass effect
-    static let tronPhthaloGreen = Color(lightHex: "#34D399", darkHex: "#123524")
+    /// Glass tint — neutral in light mode (clear glass), deep green in dark mode
+    static let tronPhthaloGreen = Color(lightHex: "#FFFFFF", darkHex: "#123524")
 
     // MARK: - Backgrounds (adaptive — warm cream in light mode)
 
@@ -109,11 +109,11 @@ extension Color {
     /// Assistant message text: dark in light mode for readability, near-white in dark mode
     static let assistantMessageText = Color(lightHex: "#1C1917", darkHex: "#FAFAFA")
 
-    /// Input field text: dark in light mode, emerald in dark mode
-    static let inputText = Color(lightHex: "#1C1917", darkHex: "#10B981")
+    /// Input field text: emerald in both modes (deeper shade in light)
+    static let inputText = Color(lightHex: "#059669", darkHex: "#10B981")
 
-    /// Input field placeholder: neutral gray in light, muted emerald in dark
-    static let inputPlaceholder = Color(lightHex: "#9CA3AF", darkHex: "#047857")
+    /// Input field placeholder: soft emerald in light, muted emerald in dark
+    static let inputPlaceholder = Color(lightHex: "#6EE7B7", darkHex: "#047857")
 
     // MARK: - Role Colors (adaptive)
 

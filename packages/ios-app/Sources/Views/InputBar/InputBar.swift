@@ -366,7 +366,7 @@ struct InputBar: View {
             if state.text.isEmpty && !isFocused {
                 Text("Type here")
                     .font(TronTypography.input)
-                    .foregroundStyle(.inputPlaceholder)
+                    .foregroundStyle(.tronEmerald.opacity(0.5))
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
             }
@@ -374,7 +374,7 @@ struct InputBar: View {
             TextField("", text: $state.text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
-                .foregroundStyle(config.readOnly ? .inputPlaceholder : .inputText)
+                .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
                 .padding(.leading, 14)
                 .padding(.trailing, textFieldTrailingPadding)
                 .padding(.vertical, 10)

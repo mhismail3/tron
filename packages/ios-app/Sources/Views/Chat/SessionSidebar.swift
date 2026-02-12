@@ -148,7 +148,7 @@ struct FloatingNewSessionButton: View {
             .foregroundStyle(.tronEmerald)
             .frame(width: 56, height: 56)
             .contentShape(Circle())
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
+            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)).interactive(), in: .circle)
             .onTapGesture { action() }
             .onLongPressGesture(minimumDuration: 0.5) {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -226,8 +226,6 @@ struct CachedSessionSidebarRow: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.tronOverlay(0.03))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
             }
 
@@ -246,7 +244,7 @@ struct CachedSessionSidebarRow: View {
 
                         Text(response)
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextSecondary)
+                            .foregroundStyle(.tronEmerald)
                             .lineLimit(2)
                             .truncationMode(.tail)
 
@@ -259,8 +257,6 @@ struct CachedSessionSidebarRow: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
-                    .background(Color.tronOverlay(0.03))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     Spacer(minLength: 0)
                 }

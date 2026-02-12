@@ -38,16 +38,16 @@ struct TronColorsTests {
 
     // MARK: - Input Text Tokens
 
-    @Test func inputTextLightIsDark() {
-        #expect(lightHex(of: .inputText) == "#1C1917")
+    @Test func inputTextLightIsEmerald() {
+        #expect(lightHex(of: .inputText) == "#059669")
     }
 
     @Test func inputTextDarkIsEmerald() {
         #expect(darkHex(of: .inputText) == "#10B981")
     }
 
-    @Test func inputPlaceholderLightIsNeutral() {
-        #expect(lightHex(of: .inputPlaceholder) == "#9CA3AF")
+    @Test func inputPlaceholderLightIsSoftEmerald() {
+        #expect(lightHex(of: .inputPlaceholder) == "#6EE7B7")
     }
 
     @Test func inputPlaceholderDarkIsMutedEmerald() {
