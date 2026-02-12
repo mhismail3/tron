@@ -112,12 +112,13 @@ describe('TaskManagerTool', () => {
       expect(result.isError).toBe(true);
     });
 
-    it('deletes area and returns confirmation', async () => {
+    it('deletes area and returns confirmation with name', async () => {
       const area = service.createArea({ title: 'To delete' });
       const result = await tool.execute({ action: 'delete_area', areaId: area.id } as any);
 
       expect(result.isError).toBe(false);
       expect(result.content).toContain('Deleted');
+      expect(result.content).toContain('To delete');
     });
 
     it('returns error for non-existent', async () => {
@@ -196,12 +197,13 @@ describe('TaskManagerTool', () => {
       expect(result.content).toContain('projectId is required');
     });
 
-    it('deletes project and returns confirmation', async () => {
+    it('deletes project and returns confirmation with name', async () => {
       const project = service.createProject({ title: 'To delete' });
       const result = await tool.execute({ action: 'delete_project', projectId: project.id } as any);
 
       expect(result.isError).toBe(false);
       expect(result.content).toContain('Deleted');
+      expect(result.content).toContain('To delete');
     });
 
     it('returns error for non-existent', async () => {

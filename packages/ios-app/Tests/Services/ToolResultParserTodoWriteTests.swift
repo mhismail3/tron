@@ -43,9 +43,9 @@ struct ToolResultParserTaskManagerTests {
         #expect(chipData?.chipSummary == "Listing tasks...")
     }
 
-    // MARK: - Completed State Tests
+    // MARK: - Task Actions: <verb> task "<name>"
 
-    @Test("Completed create with title shows quoted title in summary")
+    @Test("Task create shows verb type name format")
     func testParseTaskManagerCompletedCreateWithTitle() {
         let tool = ToolUseData(
             toolName: "TaskManager",
@@ -58,11 +58,143 @@ struct ToolResultParserTaskManagerTests {
         let chipData = ToolResultParser.parseTaskManager(from: tool)
         #expect(chipData != nil)
         #expect(chipData?.status == .completed)
-        #expect(chipData?.chipSummary == "Created \"Fix bug\"")
+        #expect(chipData?.chipSummary == "Created task \"Fix bug\"")
         #expect(chipData?.fullResult == "Created task task_abc: Fix bug [pending]")
     }
 
-    @Test("Completed list with count extracts task count for summary")
+    @Test("Task update extracts name from result")
+    func testParseTaskManagerUpdateExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_upd",
+            arguments: "{\"action\":\"update\",\"taskId\":\"task_abc\",\"status\":\"completed\"}",
+            status: .success,
+            result: "Updated task task_abc: Fix bug [completed]"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Updated task \"Fix bug\"")
+    }
+
+    @Test("Task delete extracts name from result")
+    func testParseTaskManagerDeleteExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_del",
+            arguments: "{\"action\":\"delete\",\"taskId\":\"task_abc\"}",
+            status: .success,
+            result: "Deleted task task_abc: Fix bug"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Deleted task \"Fix bug\"")
+    }
+
+    @Test("Task get extracts name from header")
+    func testParseTaskManagerGetExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_get",
+            arguments: "{\"action\":\"get\",\"taskId\":\"task_abc\"}",
+            status: .success,
+            result: "# Fix bug\nID: task_abc | Status: pending | Priority: medium"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Task \"Fix bug\"")
+    }
+
+    // MARK: - Project Actions: <verb> project "<name>"
+
+    @Test("Project create shows name from args")
+    func testParseTaskManagerProjectCreateShowsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_cp",
+            arguments: "{\"action\":\"create_project\",\"projectTitle\":\"Auth Refactor\"}",
+            status: .success,
+            result: "Created project proj_abc: Auth Refactor"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Created project \"Auth Refactor\"")
+    }
+
+    @Test("Project delete extracts name from result")
+    func testParseTaskManagerProjectDeleteExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_dp",
+            arguments: "{\"action\":\"delete_project\",\"projectId\":\"proj_abc\"}",
+            status: .success,
+            result: "Deleted project proj_abc: Auth Refactor"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Deleted project \"Auth Refactor\"")
+    }
+
+    @Test("Project get extracts name from header")
+    func testParseTaskManagerProjectGetExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_gp",
+            arguments: "{\"action\":\"get_project\",\"projectId\":\"proj_abc\"}",
+            status: .success,
+            result: "# Auth Refactor\nID: proj_abc | Status: active | 2/5 tasks"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Project \"Auth Refactor\"")
+    }
+
+    // MARK: - Area Actions: <verb> area "<name>"
+
+    @Test("Area create shows name from args")
+    func testParseTaskManagerAreaCreateShowsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_ca",
+            arguments: "{\"action\":\"create_area\",\"areaTitle\":\"Security\"}",
+            status: .success,
+            result: "Created area area_abc: Security [active]"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Created area \"Security\"")
+    }
+
+    @Test("Area delete extracts name from result")
+    func testParseTaskManagerAreaDeleteExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_da",
+            arguments: "{\"action\":\"delete_area\",\"areaId\":\"area_abc\"}",
+            status: .success,
+            result: "Deleted area area_abc: Security"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Deleted area \"Security\"")
+    }
+
+    @Test("Area get extracts name from header")
+    func testParseTaskManagerAreaGetExtractsName() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_ga",
+            arguments: "{\"action\":\"get_area\",\"areaId\":\"area_abc\"}",
+            status: .success,
+            result: "# Security\nID: area_abc | Status: active"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Area \"Security\"")
+    }
+
+    // MARK: - List/Search Actions
+
+    @Test("Completed list with count extracts task count")
     func testParseTaskManagerCompletedListExtractsCount() {
         let tool = ToolUseData(
             toolName: "TaskManager",
@@ -75,6 +207,50 @@ struct ToolResultParserTaskManagerTests {
         let chipData = ToolResultParser.parseTaskManager(from: tool)
         #expect(chipData?.chipSummary == "3 tasks")
     }
+
+    @Test("Search action extracts result count")
+    func testParseTaskManagerSearchExtractsCount() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_9",
+            arguments: "{\"action\":\"search\",\"query\":\"bug\"}",
+            status: .success,
+            result: "Search results for \"bug\" (3):\n  task1: Fix login bug [pending]"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "3 results")
+    }
+
+    @Test("Completed list_areas extracts area count")
+    func testParseTaskManagerCompletedListAreasExtractsCount() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_la",
+            arguments: "{\"action\":\"list_areas\"}",
+            status: .success,
+            result: "Areas (3)\n  - Security\n  - Quality\n  - Operations"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "3 areas")
+    }
+
+    @Test("List with 1 item uses singular form")
+    func testParseTaskManagerSingularCount() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_s1",
+            arguments: "{\"action\":\"list_areas\"}",
+            status: .success,
+            result: "Areas (1):\n  area_abc: Security [active]"
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "1 area")
+    }
+
+    // MARK: - Edge Cases
 
     @Test("Completed tool with nil result returns running status")
     func testParseTaskManagerCompletedNoResultReturnsRunning() {
@@ -120,6 +296,21 @@ struct ToolResultParserTaskManagerTests {
         #expect(chipData?.chipSummary == "Creating project...")
     }
 
+    @Test("Extracts areaTitle as fallback for taskTitle")
+    func testParseTaskManagerAreaTitleFallback() {
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_area",
+            arguments: "{\"action\":\"create_area\",\"areaTitle\":\"Security\"}",
+            status: .running,
+            result: nil
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.taskTitle == "Security")
+        #expect(chipData?.chipSummary == "Creating area...")
+    }
+
     @Test("Stores full result and arguments for detail sheet")
     func testParseTaskManagerStoresFullResultAndArguments() {
         let args = "{\"action\":\"get\",\"taskId\":\"task_abc\"}"
@@ -137,63 +328,20 @@ struct ToolResultParserTaskManagerTests {
         #expect(chipData?.arguments == args)
     }
 
-    @Test("Search action extracts result count for summary")
-    func testParseTaskManagerSearchExtractsCount() {
-        let tool = ToolUseData(
-            toolName: "TaskManager",
-            toolCallId: "call_9",
-            arguments: "{\"action\":\"search\",\"query\":\"bug\"}",
-            status: .success,
-            result: "Search results for \"bug\" (3):\n  task1: Fix login bug [pending]"
-        )
-
-        let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.chipSummary == "3 results")
-    }
-
-    @Test("Extracts areaTitle as fallback for taskTitle")
-    func testParseTaskManagerAreaTitleFallback() {
-        let tool = ToolUseData(
-            toolName: "TaskManager",
-            toolCallId: "call_area",
-            arguments: "{\"action\":\"create_area\",\"areaTitle\":\"Security\"}",
-            status: .running,
-            result: nil
-        )
-
-        let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.taskTitle == "Security")
-        #expect(chipData?.chipSummary == "Creating area...")
-    }
-
-    @Test("Completed list_areas extracts area count for summary")
-    func testParseTaskManagerCompletedListAreasExtractsCount() {
-        let tool = ToolUseData(
-            toolName: "TaskManager",
-            toolCallId: "call_la",
-            arguments: "{\"action\":\"list_areas\"}",
-            status: .success,
-            result: "Areas (3)\n  - Security\n  - Quality\n  - Operations"
-        )
-
-        let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.chipSummary == "3 areas")
-    }
-
-    @Test("Long title is truncated in chip summary")
+    @Test("Long name is truncated in chip summary")
     func testParseTaskManagerLongTitleTruncated() {
         let longTitle = String(repeating: "x", count: 60)
         let tool = ToolUseData(
             toolName: "TaskManager",
             toolCallId: "call_10",
-            arguments: "{\"action\":\"create\",\"title\":\"\(longTitle)\"}",
+            arguments: "{\"action\":\"create_project\",\"projectTitle\":\"\(longTitle)\"}",
             status: .success,
-            result: "Created task task_abc: \(longTitle) [pending]"
+            result: "Created project proj_abc: \(longTitle)"
         )
 
         let chipData = ToolResultParser.parseTaskManager(from: tool)
-        #expect(chipData?.chipSummary.count ?? 0 <= 55)
         #expect(chipData?.chipSummary.contains("...") == true)
+        #expect(chipData?.chipSummary.hasPrefix("Created project \"") == true)
     }
 
     @Test("Running state summaries for all actions")

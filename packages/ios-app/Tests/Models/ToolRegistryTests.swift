@@ -61,7 +61,7 @@ struct ToolRegistryTests {
     func testBrowseTheWebDescriptor() {
         let d = ToolRegistry.descriptor(for: "browsetheweb")
         #expect(d.icon == "globe")
-        #expect(d.displayName == "Browse Web")
+        #expect(d.displayName == "Browse")
     }
 
     @Test("OpenURL tool has correct icon and display name")

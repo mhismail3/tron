@@ -7,8 +7,10 @@ struct ToolDescriptor: @unchecked Sendable {
     let icon: String
     /// Icon color
     let iconColor: Color
-    /// Human-readable display name
+    /// Human-readable display name (imperative: "Edit")
     let displayName: String
+    /// Past-tense display name for completed state ("Edited"). Nil = use displayName always.
+    let completedDisplayName: String?
     /// Extracts a one-line summary from raw JSON arguments
     let summaryExtractor: @Sendable (String) -> String
     /// Creates a tool-specific result viewer (nil = use GenericResultViewer)
@@ -59,6 +61,7 @@ enum ToolRegistry {
             icon: "doc.text",
             iconColor: .tronSlate,
             displayName: "Read",
+            completedDisplayName: "Read",
             summaryExtractor: { args in
                 ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args))
             },
@@ -74,6 +77,7 @@ enum ToolRegistry {
             icon: "doc.badge.plus",
             iconColor: .tronPink,
             displayName: "Write",
+            completedDisplayName: "Wrote",
             summaryExtractor: { args in
                 ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args))
             },
@@ -89,6 +93,7 @@ enum ToolRegistry {
             icon: "pencil.line",
             iconColor: .orange,
             displayName: "Edit",
+            completedDisplayName: "Edited",
             summaryExtractor: { args in
                 ToolArgumentParser.shortenPath(ToolArgumentParser.filePath(from: args))
             },
@@ -104,6 +109,7 @@ enum ToolRegistry {
             icon: "terminal",
             iconColor: .tronEmerald,
             displayName: "Bash",
+            completedDisplayName: "Ran",
             summaryExtractor: { args in
                 ToolArgumentParser.truncate(ToolArgumentParser.command(from: args))
             },
@@ -119,6 +125,7 @@ enum ToolRegistry {
             icon: "magnifyingglass",
             iconColor: .purple,
             displayName: "Search",
+            completedDisplayName: "Searched",
             summaryExtractor: { args in
                 let pattern = ToolArgumentParser.pattern(from: args)
                 let path = ToolArgumentParser.path(from: args)
@@ -139,6 +146,7 @@ enum ToolRegistry {
             icon: "doc.text.magnifyingglass",
             iconColor: .cyan,
             displayName: "Find",
+            completedDisplayName: "Found",
             summaryExtractor: { args in ToolArgumentParser.pattern(from: args) },
             viewerFactory: { tool, isExpanded in
                 AnyView(FindResultViewer(
@@ -152,6 +160,7 @@ enum ToolRegistry {
             icon: "doc.text.magnifyingglass",
             iconColor: .cyan,
             displayName: "Glob",
+            completedDisplayName: "Found",
             summaryExtractor: { args in ToolArgumentParser.pattern(from: args) },
             viewerFactory: { tool, isExpanded in
                 AnyView(FindResultViewer(
@@ -164,7 +173,8 @@ enum ToolRegistry {
         "browsetheweb": ToolDescriptor(
             icon: "globe",
             iconColor: .blue,
-            displayName: "Browse Web",
+            displayName: "Browse",
+            completedDisplayName: "Browsed",
             summaryExtractor: { args in
                 let action = ToolArgumentParser.action(from: args)
                 guard !action.isEmpty else { return "" }
@@ -194,6 +204,7 @@ enum ToolRegistry {
             icon: "safari",
             iconColor: .blue,
             displayName: "Open URL",
+            completedDisplayName: "Opened",
             summaryExtractor: { args in
                 let url = ToolArgumentParser.url(from: args)
                 return url.count > 50 ? String(url.prefix(50)) + "..." : url
@@ -212,6 +223,7 @@ enum ToolRegistry {
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
             displayName: "Fetch",
+            completedDisplayName: "Fetched",
             summaryExtractor: { args in
                 let url = ToolArgumentParser.url(from: args)
                 let prompt = ToolArgumentParser.string("prompt", from: args) ?? ""
@@ -237,6 +249,7 @@ enum ToolRegistry {
             icon: "magnifyingglass.circle",
             iconColor: .tronInfo,
             displayName: "Search",
+            completedDisplayName: "Searched",
             summaryExtractor: { args in
                 let query = ToolArgumentParser.query(from: args)
                 guard !query.isEmpty else { return "" }
@@ -254,6 +267,7 @@ enum ToolRegistry {
             icon: "questionmark.circle.fill",
             iconColor: .tronAmber,
             displayName: "Ask User",
+            completedDisplayName: "Asked",
             summaryExtractor: { _ in "" },
             viewerFactory: nil
         ),
@@ -261,6 +275,7 @@ enum ToolRegistry {
             icon: "arrow.triangle.branch",
             iconColor: .tronAmber,
             displayName: "Task",
+            completedDisplayName: nil,
             summaryExtractor: { args in
                 let desc = ToolArgumentParser.string("description", from: args) ?? ToolArgumentParser.string("prompt", from: args) ?? ""
                 return ToolArgumentParser.truncate(desc)
@@ -271,6 +286,7 @@ enum ToolRegistry {
             icon: "brain.fill",
             iconColor: .purple,
             displayName: "Remember",
+            completedDisplayName: "Recalled",
             summaryExtractor: { args in
                 let action = ToolArgumentParser.string("action", from: args) ?? ""
                 return action.isEmpty ? "" : action
@@ -284,6 +300,7 @@ enum ToolRegistry {
             icon: "gearshape",
             iconColor: .tronTextMuted,
             displayName: toolName.capitalized,
+            completedDisplayName: nil,
             summaryExtractor: { _ in "" },
             viewerFactory: nil
         )

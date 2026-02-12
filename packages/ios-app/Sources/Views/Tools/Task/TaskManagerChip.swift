@@ -22,7 +22,7 @@ struct TaskManagerChip: View {
             }
         }
         .glassEffect(
-            .regular.tint(Color.tronSlate.opacity(0.35)).interactive(),
+            .regular.tint(Color.tronTeal.opacity(0.35)).interactive(),
             in: .capsule
         )
     }
@@ -33,17 +33,17 @@ struct TaskManagerChip: View {
 
             Text("Task Manager")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronSlate)
+                .foregroundStyle(.tronTeal)
 
             Text(data.chipSummary)
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronSlate.opacity(0.7))
+                .foregroundStyle(.tronTeal.opacity(0.7))
                 .lineLimit(1)
 
             if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronSlate.opacity(0.5))
+                    .foregroundStyle(.tronTeal.opacity(0.5))
             }
         }
         .padding(.horizontal, 10)
@@ -58,11 +58,11 @@ struct TaskManagerChip: View {
             ProgressView()
                 .scaleEffect(0.6)
                 .frame(width: TronTypography.sizeBodySM, height: TronTypography.sizeBodySM)
-                .tint(.tronSlate)
+                .tint(.tronTeal)
         case .completed:
             Image(systemName: "checklist")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronSlate)
+                .foregroundStyle(.tronTeal)
         }
     }
 }
@@ -92,22 +92,22 @@ struct TaskManagerChipFallback: View {
 
             Text("Task Manager")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronSlate)
+                .foregroundStyle(.tronTeal)
 
             Text(data.chipSummary)
                 .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronSlate.opacity(0.7))
+                .foregroundStyle(.tronTeal.opacity(0.7))
                 .lineLimit(1)
 
             if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                    .foregroundStyle(.tronSlate.opacity(0.5))
+                    .foregroundStyle(.tronTeal.opacity(0.5))
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .chipFill(.tronSlate)
+        .chipFill(.tronTeal)
         .contentShape(Capsule())
     }
 
@@ -118,11 +118,11 @@ struct TaskManagerChipFallback: View {
             ProgressView()
                 .scaleEffect(0.6)
                 .frame(width: TronTypography.sizeBodySM, height: TronTypography.sizeBodySM)
-                .tint(.tronSlate)
+                .tint(.tronTeal)
         case .completed:
             Image(systemName: "checklist")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronSlate)
+                .foregroundStyle(.tronTeal)
         }
     }
 }

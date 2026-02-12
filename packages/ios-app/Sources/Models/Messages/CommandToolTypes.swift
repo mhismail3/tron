@@ -120,18 +120,27 @@ extension CommandToolChipData {
     /// Create CommandToolChipData from a ToolUseData
     init(from tool: ToolUseData) {
         let descriptor = ToolRegistry.descriptor(for: tool.toolName)
+        let mappedStatus = Self.mapStatus(tool.status)
 
         // Truncate result if too large to prevent performance issues
         let (truncatedResult, wasTruncated) = tool.result.map { ResultTruncation.truncate($0) } ?? (nil, false)
+
+        // Use past-tense display name for completed tools
+        let name: String
+        if mappedStatus == .success, let completed = descriptor.completedDisplayName {
+            name = completed
+        } else {
+            name = descriptor.displayName
+        }
 
         self.id = tool.toolCallId
         self.toolName = tool.toolName
         self.normalizedName = tool.toolName.lowercased()
         self.icon = descriptor.icon
         self.iconColor = descriptor.iconColor
-        self.displayName = descriptor.displayName
+        self.displayName = name
         self.summary = descriptor.summaryExtractor(tool.arguments)
-        self.status = Self.mapStatus(tool.status)
+        self.status = mappedStatus
         self.durationMs = tool.durationMs
         self.arguments = tool.arguments
         self.result = truncatedResult

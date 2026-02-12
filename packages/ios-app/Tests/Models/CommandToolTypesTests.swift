@@ -335,6 +335,52 @@ struct CommandToolTypesTests {
         #expect(chipData.status == .running)
     }
 
+    @Test("Factory uses past-tense display name for completed tools")
+    func testFactoryUsesPastTenseForCompleted() {
+        let tools: [(String, String, String)] = [
+            ("Write", "Wrote", "{\"file_path\": \"/path/file.ts\", \"content\": \"x\"}"),
+            ("Edit", "Edited", "{\"file_path\": \"/path/file.ts\", \"old_string\": \"a\", \"new_string\": \"b\"}"),
+            ("Bash", "Ran", "{\"command\": \"git status\"}"),
+        ]
+
+        for (toolName, expectedDisplayName, args) in tools {
+            let toolUse = ToolUseData(
+                toolName: toolName,
+                toolCallId: "call_\(toolName)",
+                arguments: args,
+                status: .success,
+                result: "ok",
+                durationMs: 10
+            )
+
+            let chipData = CommandToolChipData(from: toolUse)
+            #expect(chipData.displayName == expectedDisplayName, "Expected '\(expectedDisplayName)' for completed \(toolName), got '\(chipData.displayName)'")
+        }
+    }
+
+    @Test("Factory uses imperative display name for running tools")
+    func testFactoryUsesImperativeForRunning() {
+        let tools: [(String, String)] = [
+            ("Write", "Write"),
+            ("Edit", "Edit"),
+            ("Bash", "Bash"),
+        ]
+
+        for (toolName, expectedDisplayName) in tools {
+            let toolUse = ToolUseData(
+                toolName: toolName,
+                toolCallId: "call_\(toolName)",
+                arguments: "{}",
+                status: .running,
+                result: nil,
+                durationMs: nil
+            )
+
+            let chipData = CommandToolChipData(from: toolUse)
+            #expect(chipData.displayName == expectedDisplayName, "Expected '\(expectedDisplayName)' for running \(toolName), got '\(chipData.displayName)'")
+        }
+    }
+
     @Test("Factory creates chip data with error status")
     func testFactoryCreatesErrorChipData() {
         let toolUse = ToolUseData(

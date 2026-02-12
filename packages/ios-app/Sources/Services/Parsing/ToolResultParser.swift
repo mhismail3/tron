@@ -185,53 +185,101 @@ struct ToolResultParser {
         }
     }
 
-    /// Completed state summary for chip — short and clean
+    /// Completed state summary for chip — strict format: <verb> <type> "<name>"
     private static func taskManagerChipSummary(action: String, title: String?, result: String?) -> String {
-        if let title = title {
-            let truncated = title.count > 40 ? String(title.prefix(40)) + "..." : title
-            switch action {
-            case "create": return "Created \"\(truncated)\""
-            case "update": return "Updated \"\(truncated)\""
-            case "delete": return "Deleted \"\(truncated)\""
-            case "get": return "\"\(truncated)\""
-            case "create_project": return "Created \"\(truncated)\""
-            case "update_project": return "Updated \"\(truncated)\""
-            case "delete_project": return "Deleted \"\(truncated)\""
-            case "get_project": return "\"\(truncated)\""
-            case "create_area": return "Created \"\(truncated)\""
-            case "update_area": return "Updated \"\(truncated)\""
-            case "delete_area": return "Deleted \"\(truncated)\""
-            case "get_area": return "\"\(truncated)\""
-            default: break
-            }
-        }
-
-        // Extract count from result for list/search actions
-        if let result = result {
-            if action == "list", let match = result.firstMatch(of: /Tasks \((\d+)/) {
-                return "\(match.1) tasks"
-            }
-            if action == "search", let match = result.firstMatch(of: /\((\d+)\)/) {
-                return "\(match.1) results"
-            }
-            if action == "list_projects", let match = result.firstMatch(of: /Projects \((\d+)\)/) {
-                return "\(match.1) projects"
-            }
-            if action == "list_areas", let match = result.firstMatch(of: /Areas \((\d+)\)/) {
-                return "\(match.1) areas"
-            }
-            // Fallback: first line truncated
-            let firstLine = result.components(separatedBy: "\n").first(where: { !$0.isEmpty }) ?? result
-            return firstLine.count > 50 ? String(firstLine.prefix(50)) + "..." : firstLine
-        }
+        let name = title ?? extractEntityName(from: result)
+        let truncated = name.map { $0.count > 30 ? String($0.prefix(30)) + "..." : $0 }
 
         switch action {
-        case "create": return "Task created"
-        case "update": return "Task updated"
-        case "delete": return "Task deleted"
-        case "list": return "Tasks listed"
-        default: return "Done"
+        // Task actions
+        case "create":
+            if let t = truncated { return "Created task \"\(t)\"" }
+            return "Created task"
+        case "update":
+            if let t = truncated { return "Updated task \"\(t)\"" }
+            return "Updated task"
+        case "delete":
+            if let t = truncated { return "Deleted task \"\(t)\"" }
+            return "Deleted task"
+        case "get":
+            if let t = truncated { return "Task \"\(t)\"" }
+            return "Task details"
+        case "log_time":
+            return "Logged time"
+
+        // Project actions
+        case "create_project":
+            if let t = truncated { return "Created project \"\(t)\"" }
+            return "Created project"
+        case "update_project":
+            if let t = truncated { return "Updated project \"\(t)\"" }
+            return "Updated project"
+        case "delete_project":
+            if let t = truncated { return "Deleted project \"\(t)\"" }
+            return "Deleted project"
+        case "get_project":
+            if let t = truncated { return "Project \"\(t)\"" }
+            return "Project details"
+
+        // Area actions
+        case "create_area":
+            if let t = truncated { return "Created area \"\(t)\"" }
+            return "Created area"
+        case "update_area":
+            if let t = truncated { return "Updated area \"\(t)\"" }
+            return "Updated area"
+        case "delete_area":
+            if let t = truncated { return "Deleted area \"\(t)\"" }
+            return "Deleted area"
+        case "get_area":
+            if let t = truncated { return "Area \"\(t)\"" }
+            return "Area details"
+
+        // List/search actions — count extraction
+        case "list":
+            if let result, let match = result.firstMatch(of: /Tasks \((\d+)/) {
+                let count = Int(match.1) ?? 0
+                return "\(count) task\(count == 1 ? "" : "s")"
+            }
+            return "Tasks listed"
+        case "search":
+            if let result, let match = result.firstMatch(of: /\((\d+)\)/) {
+                let count = Int(match.1) ?? 0
+                return "\(count) result\(count == 1 ? "" : "s")"
+            }
+            return "Search complete"
+        case "list_projects":
+            if let result, let match = result.firstMatch(of: /Projects \((\d+)\)/) {
+                let count = Int(match.1) ?? 0
+                return "\(count) project\(count == 1 ? "" : "s")"
+            }
+            return "Projects listed"
+        case "list_areas":
+            if let result, let match = result.firstMatch(of: /Areas \((\d+)\)/) {
+                let count = Int(match.1) ?? 0
+                return "\(count) area\(count == 1 ? "" : "s")"
+            }
+            return "Areas listed"
+
+        default:
+            return "Done"
         }
+    }
+
+    /// Extract entity name from tool result text
+    /// Matches ID patterns like "task_xxx: Name [status]" or "# Name" headers
+    private static func extractEntityName(from result: String?) -> String? {
+        guard let result else { return nil }
+        // Match "entity_id: Name" — strip trailing [status]
+        if let match = result.firstMatch(of: /(?:task_|proj_|area_)\w+:\s+(.+?)(?:\s+\[|$)/) {
+            let name = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        // Match "# Name" header (get actions)
+        if let match = result.firstMatch(of: /(?m)^#\s+(.+)$/) {
+            return String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 
     // MARK: - NotifyApp Parsing

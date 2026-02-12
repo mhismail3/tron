@@ -424,10 +424,12 @@ backlog → pending → in_progress → completed/cancelled
   private handleDelete(args: TaskManagerParams): TronToolResult {
     if (!args.taskId) return { content: 'Error: taskId is required for delete', isError: true };
 
-    const deleted = this.config.service.deleteTask(args.taskId);
-    if (!deleted) return { content: `Task not found: ${args.taskId}`, isError: true };
+    const task = this.config.service.getTask(args.taskId);
+    if (!task) return { content: `Task not found: ${args.taskId}`, isError: true };
 
-    return { content: `Deleted task ${args.taskId}`, isError: false };
+    this.config.service.deleteTask(args.taskId);
+
+    return { content: `Deleted task ${args.taskId}: ${task.title}`, isError: false };
   }
 
   private handleCreateProject(args: TaskManagerParams): TronToolResult {
@@ -516,10 +518,12 @@ backlog → pending → in_progress → completed/cancelled
   private handleDeleteProject(args: TaskManagerParams): TronToolResult {
     if (!args.projectId) return { content: 'Error: projectId is required for delete_project', isError: true };
 
-    const deleted = this.config.service.deleteProject(args.projectId);
-    if (!deleted) return { content: `Project not found: ${args.projectId}`, isError: true };
+    const project = this.config.service.getProjectWithDetails(args.projectId);
+    if (!project) return { content: `Project not found: ${args.projectId}`, isError: true };
 
-    return { content: `Deleted project ${args.projectId}`, isError: false };
+    this.config.service.deleteProject(args.projectId);
+
+    return { content: `Deleted project ${args.projectId}: ${project.title}`, isError: false };
   }
 
   private handleCreateArea(args: TaskManagerParams): TronToolResult {
@@ -574,10 +578,12 @@ backlog → pending → in_progress → completed/cancelled
   private handleDeleteArea(args: TaskManagerParams): TronToolResult {
     if (!args.areaId) return { content: 'Error: areaId is required for delete_area', isError: true };
 
-    const deleted = this.config.service.deleteArea(args.areaId);
-    if (!deleted) return { content: `Area not found: ${args.areaId}`, isError: true };
+    const area = this.config.service.getArea(args.areaId);
+    if (!area) return { content: `Area not found: ${args.areaId}`, isError: true };
 
-    return { content: `Deleted area ${args.areaId}`, isError: false };
+    this.config.service.deleteArea(args.areaId);
+
+    return { content: `Deleted area ${args.areaId}: ${area.title}`, isError: false };
   }
 
   private handleListAreas(args: TaskManagerParams): TronToolResult {
