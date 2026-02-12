@@ -185,7 +185,17 @@ struct CachedSessionSidebarRow: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
 
-                // Message count (moved to right of title)
+                Spacer()
+
+                sessionTokenStats
+                    .fixedSize()
+
+                Text(session.formattedCost)
+                    .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                    .fixedSize()
+
+                // Message count
                 HStack(spacing: 3) {
                     Image(systemName: "bubble.left")
                         .font(TronTypography.sans(size: TronTypography.sizeSM))
@@ -193,12 +203,6 @@ struct CachedSessionSidebarRow: View {
                         .font(TronTypography.codeSM)
                 }
                 .foregroundStyle(.tronTextMuted)
-
-                Spacer()
-
-                Text(session.formattedDate)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
             }
 
             // Recent prompt (user's last message, right-aligned)
@@ -223,7 +227,7 @@ struct CachedSessionSidebarRow: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                     .background(Color.tronOverlay(0.03))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
             }
 
@@ -232,67 +236,49 @@ struct CachedSessionSidebarRow: View {
                 // Thinking indicator with pulse animation
                 SessionProcessingIndicator()
             } else if let response = session.lastAssistantResponse, !response.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "cpu")
-                        .font(TronTypography.labelSM)
-                        .foregroundStyle(.tronEmerald.opacity(0.8))
-                        .frame(width: 12)
-                        .offset(y: 2)
+                HStack {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "cpu")
+                            .font(TronTypography.labelSM)
+                            .foregroundStyle(.tronEmerald.opacity(0.8))
+                            .frame(width: 12)
+                            .offset(y: 2)
 
-                    Text(response)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
+                        Text(response)
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+
+                        // Tool count badge
+                        if let toolCount = session.lastToolCount, toolCount > 0 {
+                            Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
+                                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                                .foregroundStyle(.tronEmerald.opacity(0.7))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.tronOverlay(0.03))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     Spacer(minLength: 0)
-
-                    // Tool count badge
-                    if let toolCount = session.lastToolCount, toolCount > 0 {
-                        Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
-                            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                            .foregroundStyle(.tronEmerald.opacity(0.7))
-                    }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.tronOverlay(0.03))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
 
-            // Bottom row: Working directory + tokens/cost
-            ViewThatFits(in: .horizontal) {
-                // Full layout: directory + stats + cost
-                HStack(spacing: 6) {
-                    Text(session.displayDirectory)
-                        .font(TronTypography.codeSM)
-                        .foregroundStyle(.tronTextMuted)
-                        .lineLimit(1)
-                        .truncationMode(.head)
+            // Bottom row: Working directory + date
+            HStack(spacing: 6) {
+                Text(session.displayDirectory)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.head)
 
-                    Spacer(minLength: 4)
+                Spacer(minLength: 4)
 
-                    sessionTokenStats
-                        .fixedSize()
-
-                    Text(session.formattedCost)
-                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                        .foregroundStyle(.tronEmerald.opacity(0.5))
-                        .fixedSize()
-                }
-
-                // Compact fallback: stats + cost only (drop directory)
-                HStack(spacing: 6) {
-                    sessionTokenStats
-                        .fixedSize()
-
-                    Spacer(minLength: 0)
-
-                    Text(session.formattedCost)
-                        .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                        .foregroundStyle(.tronEmerald.opacity(0.5))
-                        .fixedSize()
-                }
+                Text(session.formattedDate)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronTextMuted)
             }
         }
         .padding(.vertical, 10)
