@@ -23,6 +23,9 @@ struct ConnectionStatusPill: View {
     /// Debounce task for connected→hide transition
     @State private var debounceTask: Task<Void, Never>?
 
+    /// Debounce task for disconnected→show transition (avoids flash on foreground return)
+    @State private var disconnectDebounceTask: Task<Void, Never>?
+
     init(connectionState: ConnectionState, isReady: Bool = true, onRetry: @escaping () async -> Void) {
         self.connectionState = connectionState
         self.isReady = isReady
@@ -36,6 +39,7 @@ struct ConnectionStatusPill: View {
         Group {
             if let state = displayedState, hasSeenDisconnect, isReady {
                 pillContent(for: state)
+                    .frame(maxWidth: .infinity)
                     .transition(.blurReplace)
             }
         }
@@ -109,7 +113,7 @@ struct ConnectionStatusPill: View {
         switch state {
         case .disconnected, .failed:
             return "Not Connected (Tap to retry)"
-        case .connecting: return "Connecting"
+        case .connecting: return hasSeenDisconnect ? "Reconnecting" : "Connecting"
         case .reconnecting(let attempt, _):
             return "Reconnecting (Attempt \(attempt))"
         case .connected: return "Connected"
@@ -135,7 +139,11 @@ struct ConnectionStatusPill: View {
 
         guard hasSeenDisconnect else { return }
 
-        if newState.isConnected {
+        switch newState {
+        case .connected:
+            disconnectDebounceTask?.cancel()
+            disconnectDebounceTask = nil
+
             // Show "Connected" briefly, then dismiss
             if let current = displayedState, !current.isConnected {
                 displayedState = newState
@@ -152,7 +160,26 @@ struct ConnectionStatusPill: View {
             } else {
                 displayedState = nil
             }
-        } else {
+
+        case .disconnected, .failed:
+            // If pill is already showing a non-connected state, update immediately
+            if let current = displayedState, !current.isConnected {
+                displayedState = newState
+            } else {
+                // Debounce: delay showing disconnected by 300ms to avoid flash on foreground return
+                disconnectDebounceTask?.cancel()
+                disconnectDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        displayedState = newState
+                    }
+                }
+            }
+
+        case .connecting, .reconnecting:
+            disconnectDebounceTask?.cancel()
+            disconnectDebounceTask = nil
             displayedState = newState
         }
     }
