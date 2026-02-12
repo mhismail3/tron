@@ -51,6 +51,37 @@ import type { ActiveSessionStore } from './active-session-store.js';
 
 const logger = createLogger('session-manager');
 
+/**
+ * Create the rules-activator hook definition for a session.
+ * This hook feeds file touches to the RulesTracker so that
+ * path-scoped rules are activated when agents read/write files.
+ */
+function createRulesActivatorHook(
+  workingDir: WorkingDirectory,
+  rulesTracker: ReturnType<typeof createRulesTracker>,
+): { name: string; type: 'PostToolUse'; description: string; priority: number; handler: (ctx: unknown) => Promise<HookResult> } {
+  return {
+    name: 'builtin:rules-activator',
+    type: 'PostToolUse',
+    description: 'Activates path-scoped rules based on file touches',
+    priority: 40,
+    handler: async (ctx): Promise<HookResult> => {
+      const context = ctx as PostToolHookContext;
+      const filePath = extractFilePath(
+        context.toolName,
+        context.data as Record<string, unknown>,
+      );
+      if (filePath) {
+        const rel = path.relative(workingDir.path, filePath);
+        if (!rel.startsWith('..')) {
+          rulesTracker.touchPath(rel);
+        }
+      }
+      return { action: 'continue' };
+    },
+  };
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -275,26 +306,7 @@ export class SessionManager {
     }
 
     // Register rules-activator hook to feed file touches to the tracker
-    agent.registerHook({
-      name: 'builtin:rules-activator',
-      type: 'PostToolUse',
-      description: 'Activates path-scoped rules based on file touches',
-      priority: 40,
-      handler: async (ctx): Promise<HookResult> => {
-        const context = ctx as PostToolHookContext;
-        const filePath = extractFilePath(
-          context.toolName,
-          context.data as Record<string, unknown>,
-        );
-        if (filePath) {
-          const rel = path.relative(workingDir.path, filePath);
-          if (!rel.startsWith('..')) {
-            rulesTracker.touchPath(rel);
-          }
-        }
-        return { action: 'continue' };
-      },
-    });
+    agent.registerHook(createRulesActivatorHook(workingDir, rulesTracker));
 
     // Load and inject workspace memory (conditional on settings)
     // Emit via eventStore.append() (like rules.loaded) so it broadcasts over WebSocket
@@ -527,26 +539,7 @@ export class SessionManager {
     }
 
     // Register rules-activator hook
-    agent.registerHook({
-      name: 'builtin:rules-activator',
-      type: 'PostToolUse',
-      description: 'Activates path-scoped rules based on file touches',
-      priority: 40,
-      handler: async (ctx): Promise<HookResult> => {
-        const context = ctx as PostToolHookContext;
-        const filePath = extractFilePath(
-          context.toolName,
-          context.data as Record<string, unknown>,
-        );
-        if (filePath) {
-          const rel = path.relative(workingDir.path, filePath);
-          if (!rel.startsWith('..')) {
-            rulesTracker.touchPath(rel);
-          }
-        }
-        return { action: 'continue' };
-      },
-    });
+    agent.registerHook(createRulesActivatorHook(workingDir, rulesTracker));
 
     // Create SessionContext for modular state management
     const sessionContext = createSessionContext({

@@ -1,9 +1,8 @@
 /**
  * @fileoverview Hook execution engine
  *
- * Orchestrates hook registration and execution. Delegates to:
- * - HookRegistry for registration/lookup
- * - BackgroundTracker for background hook tracking
+ * Orchestrates hook registration, lookup, and execution.
+ * Manages background hook tracking with drain functionality.
  */
 
 import type {
@@ -12,6 +11,7 @@ import type {
   HookDefinition,
   RegisteredHook,
   AnyHookContext,
+  HookExecutionMode,
   PreToolHookContext,
   PostToolHookContext,
 } from './types.js';
@@ -19,10 +19,14 @@ import type { TronEvent } from '@core/types/index.js';
 import { createLogger, categorizeError, LogErrorCategory, LogErrorCodes } from '@infrastructure/logging/index.js';
 import { getSettings } from '@infrastructure/settings/index.js';
 import type { HookSettings } from '@infrastructure/settings/types.js';
-import { HookRegistry } from './registry.js';
-import { BackgroundTracker } from './background-tracker.js';
 
 const logger = createLogger('hooks:engine');
+
+/**
+ * Hook types that must always be blocking because they can affect agent flow.
+ * PreToolUse, UserPromptSubmit, PreCompact need to block to allow modifications/blocking.
+ */
+const FORCED_BLOCKING_TYPES: HookType[] = ['PreToolUse', 'UserPromptSubmit', 'PreCompact'];
 
 /**
  * Get default hook settings from global settings.
@@ -38,42 +42,72 @@ function getHookSettings() {
 }
 
 export class HookEngine {
-  private registry = new HookRegistry();
-  private backgroundTracker = new BackgroundTracker();
+  private hooks = new Map<string, RegisteredHook>();
+  private pendingBackground = new Map<string, Promise<void>>();
+  private backgroundCounter = 0;
 
   /**
    * Register a hook
    */
   register(definition: HookDefinition): void {
-    this.registry.register(definition);
+    const existing = this.hooks.get(definition.name);
+    if (existing) {
+      logger.debug('Replacing existing hook', { name: definition.name });
+    }
+
+    // Force blocking mode for hooks that need to affect agent flow
+    const resolvedMode: HookExecutionMode = FORCED_BLOCKING_TYPES.includes(definition.type)
+      ? 'blocking'
+      : (definition.mode ?? 'blocking');
+
+    const hook: RegisteredHook = {
+      ...definition,
+      priority: definition.priority ?? 0,
+      mode: resolvedMode,
+      registeredAt: new Date().toISOString(),
+    };
+
+    this.hooks.set(definition.name, hook);
+    logger.info('Hook registered', {
+      name: definition.name,
+      type: definition.type,
+      priority: hook.priority,
+      mode: hook.mode,
+    });
   }
 
   /**
    * Unregister a hook by name
    */
   unregister(name: string): void {
-    this.registry.unregister(name);
+    const removed = this.hooks.delete(name);
+    if (removed) {
+      logger.info('Hook unregistered', { name });
+    }
   }
 
   /**
-   * Get all hooks for a specific type
+   * Get all hooks for a specific type, sorted by priority (descending)
    */
   getHooks(type: HookType): RegisteredHook[] {
-    return this.registry.getByType(type);
+    return Array.from(this.hooks.values())
+      .filter(hook => hook.type === type)
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
   }
 
   /**
    * List all registered hooks
    */
   listHooks(): RegisteredHook[] {
-    return this.registry.getAll();
+    return Array.from(this.hooks.values());
   }
 
   /**
    * Clear all hooks
    */
   clear(): void {
-    this.registry.clear();
+    this.hooks.clear();
+    logger.info('All hooks cleared');
   }
 
   /**
@@ -202,6 +236,37 @@ export class HookEngine {
   }
 
   /**
+   * Wait for all pending background hooks to complete.
+   * Call this before session end to ensure all hooks have finished.
+   *
+   * @param timeoutMs - Maximum time to wait (default: 30000ms)
+   */
+  async waitForBackgroundHooks(timeoutMs = 30000): Promise<void> {
+    const pending = Array.from(this.pendingBackground.values());
+    if (pending.length === 0) {
+      return;
+    }
+
+    logger.debug('Waiting for background hooks', { count: pending.length, timeoutMs });
+
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise<void>(resolve => setTimeout(resolve, timeoutMs)),
+    ]);
+
+    logger.debug('Background hooks drain complete', {
+      remaining: this.pendingBackground.size,
+    });
+  }
+
+  /**
+   * Get the number of pending background hooks
+   */
+  getPendingBackgroundCount(): number {
+    return this.pendingBackground.size;
+  }
+
+  /**
    * Execute blocking hooks sequentially
    */
   private async executeBlockingHooks(
@@ -304,7 +369,7 @@ export class HookEngine {
     context: AnyHookContext,
     eventEmitter: { emit: (event: TronEvent) => void }
   ): void {
-    const executionId = this.backgroundTracker.generateExecutionId();
+    const executionId = `bg_${++this.backgroundCounter}_${Date.now()}`;
     const hookNames = hooks.map(h => h.name);
     const startTime = Date.now();
 
@@ -329,7 +394,9 @@ export class HookEngine {
       type
     );
 
-    this.backgroundTracker.track(executionId, promise);
+    // Track for draining
+    this.pendingBackground.set(executionId, promise);
+    promise.finally(() => this.pendingBackground.delete(executionId));
   }
 
   /**
@@ -422,23 +489,6 @@ export class HookEngine {
     const result = await Promise.race([executionPromise, timeoutPromise]);
     logger.debug('Background hook executed', { name: hook.name, action: result.action });
     return result;
-  }
-
-  /**
-   * Wait for all pending background hooks to complete.
-   * Call this before session end to ensure all hooks have finished.
-   *
-   * @param timeoutMs - Maximum time to wait (default: 30000ms)
-   */
-  async waitForBackgroundHooks(timeoutMs = 30000): Promise<void> {
-    return this.backgroundTracker.waitForAll(timeoutMs);
-  }
-
-  /**
-   * Get the number of pending background hooks
-   */
-  getPendingBackgroundCount(): number {
-    return this.backgroundTracker.getPendingCount();
   }
 
   /**

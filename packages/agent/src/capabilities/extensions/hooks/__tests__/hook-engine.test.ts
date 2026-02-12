@@ -74,6 +74,80 @@ describe('HookEngine', () => {
       // Should replace
       expect(engine.getHooks('PreToolUse')).toHaveLength(1);
     });
+
+    it('should set default priority to 0', () => {
+      engine.register({
+        name: 'no-priority',
+        type: 'PreToolUse',
+        handler: async () => ({ action: 'continue' }),
+      });
+
+      const hooks = engine.getHooks('PreToolUse');
+      expect(hooks[0].priority).toBe(0);
+    });
+
+    it('should set registeredAt timestamp', () => {
+      const before = new Date().toISOString();
+      engine.register({
+        name: 'timestamped',
+        type: 'PreToolUse',
+        handler: async () => ({ action: 'continue' }),
+      });
+      const after = new Date().toISOString();
+
+      const hooks = engine.getHooks('PreToolUse');
+      expect(hooks[0].registeredAt).toBeDefined();
+      expect(hooks[0].registeredAt >= before).toBe(true);
+      expect(hooks[0].registeredAt <= after).toBe(true);
+    });
+
+    it('should force blocking mode for PreToolUse hooks', () => {
+      engine.register({
+        name: 'bg-pre',
+        type: 'PreToolUse',
+        mode: 'background',
+        handler: async () => ({ action: 'continue' }),
+      });
+
+      const hooks = engine.getHooks('PreToolUse');
+      expect(hooks[0].mode).toBe('blocking');
+    });
+
+    it('should force blocking mode for UserPromptSubmit hooks', () => {
+      engine.register({
+        name: 'bg-prompt',
+        type: 'UserPromptSubmit',
+        mode: 'background',
+        handler: async () => ({ action: 'continue' }),
+      });
+
+      const hooks = engine.getHooks('UserPromptSubmit');
+      expect(hooks[0].mode).toBe('blocking');
+    });
+
+    it('should force blocking mode for PreCompact hooks', () => {
+      engine.register({
+        name: 'bg-compact',
+        type: 'PreCompact',
+        mode: 'background',
+        handler: async () => ({ action: 'continue' }),
+      });
+
+      const hooks = engine.getHooks('PreCompact');
+      expect(hooks[0].mode).toBe('blocking');
+    });
+
+    it('should allow background mode for PostToolUse hooks', () => {
+      engine.register({
+        name: 'bg-post',
+        type: 'PostToolUse',
+        mode: 'background',
+        handler: async () => ({ action: 'continue' }),
+      });
+
+      const hooks = engine.getHooks('PostToolUse');
+      expect(hooks[0].mode).toBe('background');
+    });
   });
 
   describe('execution', () => {
