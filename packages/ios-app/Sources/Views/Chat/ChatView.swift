@@ -447,6 +447,15 @@ struct ChatView: View {
                                 },
                                 onSubagentResultTap: { sessionId in
                                     viewModel.subagentState.showDetails(for: sessionId)
+                                },
+                                onProviderErrorTap: { [sheetCoordinator] provider, category, message, suggestion, retryable in
+                                    sheetCoordinator.showProviderErrorDetail(
+                                        provider: provider,
+                                        category: category,
+                                        message: message,
+                                        suggestion: suggestion,
+                                        retryable: retryable
+                                    )
                                 }
                             )
                             .id(message.id)

@@ -8,6 +8,7 @@ struct SystemEventView: View {
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
     var onMemoryUpdatedTap: ((String, String) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
+    var onProviderErrorTap: ((String, String, String, String?, Bool) -> Void)?
 
     var body: some View {
         // Memory updating/updated share a single view for smooth in-place animation
@@ -94,6 +95,19 @@ struct SystemEventView: View {
 
         case .memoriesLoaded(let count):
             MemoriesLoadedNotificationView(count: count)
+
+        case .providerError(let provider, let category, let message, _, let retryable):
+            ProviderErrorNotificationView(
+                provider: provider,
+                category: category,
+                message: message,
+                retryable: retryable,
+                onTap: {
+                    if case .providerError(let p, let c, let m, let s, let r) = event {
+                        onProviderErrorTap?(p, c, m, s, r)
+                    }
+                }
+            )
 
         default:
             EmptyView()

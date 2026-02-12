@@ -15,6 +15,15 @@ struct MemoryDetailData: Equatable {
     let sessionId: String
 }
 
+/// Data for provider error detail sheet
+struct ProviderErrorDetailData: Equatable {
+    let provider: String
+    let category: String
+    let message: String
+    let suggestion: String?
+    let retryable: Bool
+}
+
 /// Identifiable enum representing all possible sheets in ChatView.
 /// Uses single sheet(item:) modifier pattern per SwiftUI best practices.
 /// This avoids Swift compiler type-checking timeout with multiple .sheet() modifiers.
@@ -43,6 +52,7 @@ enum ChatSheet: Identifiable, Equatable {
     // Notification sheets
     case notifyApp(NotifyAppChipData)
     case thinkingDetail(String)
+    case providerErrorDetail(ProviderErrorDetailData)
 
     // Command tool detail
     case commandToolDetail(CommandToolChipData)
@@ -84,6 +94,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "thinking"
         case .commandToolDetail(let data):
             return "commandTool-\(data.id)"
+        case .providerErrorDetail:
+            return "providerError"
         case .modelPicker:
             return "modelPicker"
         }
@@ -125,6 +137,8 @@ enum ChatSheet: Identifiable, Equatable {
             return content1 == content2
         case (.commandToolDetail(let data1), .commandToolDetail(let data2)):
             return data1.id == data2.id
+        case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
+            return data1 == data2
         case (.modelPicker, .modelPicker):
             return true
         default:

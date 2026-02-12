@@ -105,6 +105,10 @@ struct ChatSheetContent: View {
                 }
             })
 
+        case .providerErrorDetail(let data):
+            ProviderErrorDetailSheet(data: data)
+                .adaptivePresentationDetents([.medium])
+
         case .modelPicker:
             ModelPickerSheet(
                 models: viewModel.modelPickerState.cachedModels,

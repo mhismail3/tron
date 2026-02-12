@@ -348,6 +348,45 @@ extension ChatViewModel {
         }
     }
 
+    /// Handle enriched provider errors from the agent.error event.
+    /// Only terminal errors reach here (retries are silent).
+    /// Resets all processing state and shows error notification pill.
+    func handleProviderError(_ result: ErrorPlugin.Result) {
+        uiUpdateQueue.flush()
+        uiUpdateQueue.reset()
+        animationCoordinator.resetToolState()
+        streamingManager.reset()
+
+        agentPhase = .idle
+        isCompacting = false
+        compactionInProgressMessageId = nil
+        memoryUpdatingInProgressMessageId = nil
+        eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
+        eventStoreManager?.updateSessionDashboardInfo(
+            sessionId: sessionId,
+            lastAssistantResponse: "Error: \(String(result.message.prefix(100)))"
+        )
+        finalizeStreamingMessage()
+        closeBrowserSession()
+
+        if let category = result.category, category != "unknown" {
+            let provider = result.provider ?? "unknown"
+            let notification = ChatMessage.providerError(
+                provider: provider,
+                category: category,
+                message: result.message,
+                suggestion: result.suggestion,
+                retryable: result.retryable ?? false
+            )
+            messages.append(notification)
+            logger.error("Provider error [\(category)]: \(result.message)", category: .events)
+        } else {
+            // Legacy (un-enriched server): fall back to plain error text
+            messages.append(.error(result.message))
+            logger.error("Agent error: \(result.message)", category: .events)
+        }
+    }
+
     /// Handle errors from the agent streaming (shows error in chat)
     func handleAgentError(_ message: String) {
         // Process through handler (resets handler state)
@@ -436,6 +475,31 @@ extension ChatViewModel {
     func handleTaskDeleted(_ result: TaskDeletedPlugin.Result) {
         logger.debug("Task deleted: \(result.taskId)", category: .events)
         taskState.removeTask(id: result.taskId)
+    }
+
+    func handleProjectCreated(_ result: ProjectCreatedPlugin.Result) {
+        logger.debug("Project created: \(result.projectId)", category: .events)
+        Task { await refreshTasks() }
+    }
+
+    func handleProjectDeleted(_ result: ProjectDeletedPlugin.Result) {
+        logger.debug("Project deleted: \(result.projectId)", category: .events)
+        Task { await refreshTasks() }
+    }
+
+    func handleAreaCreated(_ result: AreaCreatedPlugin.Result) {
+        logger.debug("Area created: \(result.areaId)", category: .events)
+        Task { await refreshTasks() }
+    }
+
+    func handleAreaUpdated(_ result: AreaUpdatedPlugin.Result) {
+        logger.debug("Area updated: \(result.areaId)", category: .events)
+        Task { await refreshTasks() }
+    }
+
+    func handleAreaDeleted(_ result: AreaDeletedPlugin.Result) {
+        logger.debug("Area deleted: \(result.areaId)", category: .events)
+        Task { await refreshTasks() }
     }
 
     private func refreshTasks() async {

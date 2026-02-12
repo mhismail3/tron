@@ -502,6 +502,70 @@ struct MemoryNotificationView: View {
     }
 }
 
+// MARK: - Provider Error Notification View
+
+struct ProviderErrorNotificationView: View {
+    let provider: String
+    let category: String
+    let message: String
+    let retryable: Bool
+    var onTap: (() -> Void)? = nil
+
+    var body: some View {
+        NotificationPill(tint: .red, interactive: true, onTap: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: ErrorCategoryDisplay.icon(for: category))
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.red)
+
+                Text(ErrorCategoryDisplay.label(for: category))
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.red.opacity(0.9))
+
+                Text("\u{2022}")
+                    .font(TronTypography.badge)
+                    .foregroundStyle(.red.opacity(0.5))
+
+                Text(message)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextSecondary)
+                    .lineLimit(1)
+                    .baselineOffset(0.5)
+            }
+        }
+    }
+}
+
+// MARK: - Error Category Display
+
+enum ErrorCategoryDisplay {
+    static func label(for category: String) -> String {
+        switch category {
+        case "authentication": return "Auth Error"
+        case "authorization": return "Access Denied"
+        case "rate_limit": return "Rate Limited"
+        case "network": return "Network Error"
+        case "server": return "Server Error"
+        case "invalid_request": return "Invalid Request"
+        case "quota": return "Quota Exceeded"
+        default: return "Error"
+        }
+    }
+
+    static func icon(for category: String) -> String {
+        switch category {
+        case "authentication": return "lock.fill"
+        case "authorization": return "lock.shield.fill"
+        case "rate_limit": return "clock.fill"
+        case "network": return "wifi.slash"
+        case "server": return "exclamationmark.icloud.fill"
+        case "invalid_request": return "xmark.circle.fill"
+        case "quota": return "creditcard.fill"
+        default: return "exclamationmark.triangle.fill"
+        }
+    }
+}
+
 // MARK: - Memories Loaded Notification View
 
 struct MemoriesLoadedNotificationView: View {

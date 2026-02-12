@@ -130,7 +130,7 @@ export const DEFAULT_SETTINGS: TronSettings = {
 
   // Retry Configuration
   retry: {
-    maxRetries: 5,
+    maxRetries: 1,
     baseDelayMs: 1000,
     maxDelayMs: 60000,
     jitterFactor: 0.2,

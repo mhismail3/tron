@@ -51,14 +51,30 @@ enum ErrorHandlers {
 
     /// Transform error.provider event into a ChatMessage.
     ///
-    /// Provider errors represent failures from the AI provider (e.g., API errors).
-    /// Includes retry information when available.
+    /// Provider errors with a category are rendered as interactive notification pills.
+    /// Legacy events (no category) fall back to plain error text.
     static func transformProviderError(
         _ payload: [String: AnyCodable],
         timestamp: Date
     ) -> ChatMessage? {
         guard let parsed = ProviderErrorPayload(from: payload) else { return nil }
 
+        // Enriched: render as provider error pill
+        if let category = parsed.category, category != "unknown" {
+            return ChatMessage(
+                role: .system,
+                content: .providerError(
+                    provider: parsed.provider,
+                    category: category,
+                    message: parsed.error,
+                    suggestion: parsed.suggestion,
+                    retryable: parsed.retryable
+                ),
+                timestamp: timestamp
+            )
+        }
+
+        // Legacy fallback: plain error text
         var errorText = "\(parsed.provider) error: \(parsed.error)"
         if let code = parsed.code {
             errorText = "[\(code)] \(errorText)"

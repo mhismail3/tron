@@ -20,6 +20,7 @@ import Foundation
     func handleComplete()
     func handleAgentReady()
     func handleAgentError(_ message: String)
+    func handleProviderError(_ result: ErrorPlugin.Result)
 }
 
 @MainActor protocol ContextEventHandler: AnyObject {
@@ -58,6 +59,11 @@ import Foundation
     func handleTaskCreated(_ result: TaskCreatedPlugin.Result)
     func handleTaskUpdated(_ result: TaskUpdatedPlugin.Result)
     func handleTaskDeleted(_ result: TaskDeletedPlugin.Result)
+    func handleProjectCreated(_ result: ProjectCreatedPlugin.Result)
+    func handleProjectDeleted(_ result: ProjectDeletedPlugin.Result)
+    func handleAreaCreated(_ result: AreaCreatedPlugin.Result)
+    func handleAreaUpdated(_ result: AreaUpdatedPlugin.Result)
+    func handleAreaDeleted(_ result: AreaDeletedPlugin.Result)
 }
 
 @MainActor protocol EventDispatchLogger: AnyObject {

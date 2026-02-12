@@ -44,6 +44,8 @@ export interface ErrorProviderEvent extends BaseEvent {
     provider: string;
     error: string;
     code?: string;
+    category?: string;
+    suggestion?: string;
     retryable: boolean;
     retryAfter?: number;
   };

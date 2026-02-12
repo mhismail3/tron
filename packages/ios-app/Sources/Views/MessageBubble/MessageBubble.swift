@@ -18,6 +18,7 @@ struct MessageBubble: View {
     var onWaitForAgentsTap: ((WaitForAgentsChipData) -> Void)?
     var onMemoryUpdatedTap: ((String, String) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
+    var onProviderErrorTap: ((String, String, String, String?, Bool) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -255,7 +256,8 @@ struct MessageBubble: View {
                     event: event,
                     onCompactionTap: onCompactionTap,
                     onMemoryUpdatedTap: onMemoryUpdatedTap,
-                    onSubagentResultTap: onSubagentResultTap
+                    onSubagentResultTap: onSubagentResultTap,
+                    onProviderErrorTap: onProviderErrorTap
                 )
             } else {
                 // Fallback without subagent result notification for older iOS

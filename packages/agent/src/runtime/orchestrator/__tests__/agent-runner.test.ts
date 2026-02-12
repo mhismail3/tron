@@ -562,6 +562,64 @@ describe('AgentRunner', () => {
     });
   });
 
+  describe('run() - Turn Failure (graceful)', () => {
+    beforeEach(() => {
+      (active.agent.run as Mock).mockResolvedValue({
+        success: false,
+        turns: 1,
+        error: 'Rate limit exceeded',
+        totalTokenUsage: { inputTokens: 100, outputTokens: 0 },
+      } as RunResult);
+    });
+
+    it('emits enriched agent.error for turn failures', async () => {
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      expect(config.emit).toHaveBeenCalledWith('agent_event', expect.objectContaining({
+        type: 'agent.error',
+        sessionId: 'sess_test123',
+        data: expect.objectContaining({
+          message: 'Rate limit exceeded',
+          category: 'rate_limit',
+          suggestion: expect.any(String),
+          retryable: true,
+        }),
+      }));
+    });
+
+    it('emits agent.error BEFORE agent.complete', async () => {
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      const emitCalls = (config.emit as Mock).mock.calls
+        .filter(([event]) => event === 'agent_event')
+        .map(([, data]) => data.type);
+
+      const errorIdx = emitCalls.indexOf('agent.error');
+      const completeIdx = emitCalls.indexOf('agent.complete');
+      expect(errorIdx).toBeGreaterThanOrEqual(0);
+      expect(completeIdx).toBeGreaterThan(errorIdx);
+    });
+
+    it('does not emit agent.error for successful completion', async () => {
+      (active.agent.run as Mock).mockResolvedValue({
+        success: true,
+        turns: 1,
+        totalTokenUsage: { inputTokens: 100, outputTokens: 50 },
+      } as RunResult);
+      const options = createRunOptions();
+
+      await runner.run(active, options);
+
+      const agentErrors = (config.emit as Mock).mock.calls
+        .filter(([event, data]) => event === 'agent_event' && data.type === 'agent.error');
+      expect(agentErrors).toHaveLength(0);
+    });
+  });
+
   describe('run() - Interrupt Handling', () => {
     beforeEach(() => {
       (active.agent.run as Mock).mockResolvedValue({
@@ -760,6 +818,146 @@ describe('AgentRunner', () => {
       // Should emit persistence error event
       expect(config.emit).toHaveBeenCalledWith('agent_event', expect.objectContaining({
         type: 'error.persistence',
+      }));
+    });
+  });
+
+  describe('run() - Error Enrichment', () => {
+    it('emits enriched error event with category/suggestion for authentication errors', async () => {
+      const authError = new Error('401 authentication_error: Invalid API key');
+      (active.agent.run as Mock).mockRejectedValue(authError);
+      const onEvent = vi.fn();
+      const options = createRunOptions({ onEvent });
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error',
+        data: expect.objectContaining({
+          category: 'authentication',
+          retryable: false,
+          provider: 'anthropic',
+        }),
+      }));
+      // Suggestion should be present
+      const errorCall = onEvent.mock.calls.find(([evt]) => evt.type === 'error');
+      expect(errorCall[0].data.suggestion).toBeDefined();
+    });
+
+    it('emits enriched error event with category/suggestion for rate limit errors', async () => {
+      const rateLimitError = new Error('429 rate_limit: Too many requests');
+      (active.agent.run as Mock).mockRejectedValue(rateLimitError);
+      const onEvent = vi.fn();
+      const options = createRunOptions({ onEvent });
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error',
+        data: expect.objectContaining({
+          category: 'rate_limit',
+          retryable: true,
+        }),
+      }));
+    });
+
+    it('persists error.provider before error.agent for provider-category errors', async () => {
+      const authError = new Error('401 authentication_error: Invalid token');
+      (active.agent.run as Mock).mockRejectedValue(authError);
+      const options = createRunOptions();
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      const appendCalls = (active.sessionContext.appendEvent as Mock).mock.calls;
+      const errorProviderIdx = appendCalls.findIndex(([type]) => type === 'error.provider');
+      const errorAgentIdx = appendCalls.findIndex(([type]) => type === 'error.agent');
+
+      expect(errorProviderIdx).toBeGreaterThanOrEqual(0);
+      expect(errorAgentIdx).toBeGreaterThanOrEqual(0);
+      expect(errorProviderIdx).toBeLessThan(errorAgentIdx);
+    });
+
+    it('persists error.provider with category and suggestion', async () => {
+      const networkError = new Error('ECONNREFUSED: Connection refused');
+      (active.agent.run as Mock).mockRejectedValue(networkError);
+      const options = createRunOptions();
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(active.sessionContext.appendEvent).toHaveBeenCalledWith(
+        'error.provider',
+        expect.objectContaining({
+          category: 'network',
+          retryable: true,
+        })
+      );
+      // Verify suggestion is present
+      const providerCall = (active.sessionContext.appendEvent as Mock).mock.calls
+        .find(([type]) => type === 'error.provider');
+      expect(providerCall[1].suggestion).toBeDefined();
+    });
+
+    it('does not persist error.provider for non-provider errors', async () => {
+      const typeError = new TypeError('Cannot read properties of undefined');
+      (active.agent.run as Mock).mockRejectedValue(typeError);
+      const options = createRunOptions();
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      const appendCalls = (active.sessionContext.appendEvent as Mock).mock.calls;
+      const hasProviderError = appendCalls.some(([type]) => type === 'error.provider');
+      expect(hasProviderError).toBe(false);
+    });
+
+    it('falls back gracefully for unknown errors (no error.provider)', async () => {
+      const weirdError = new Error('Something completely unexpected happened');
+      (active.agent.run as Mock).mockRejectedValue(weirdError);
+      const onEvent = vi.fn();
+      const options = createRunOptions({ onEvent });
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error',
+        data: expect.objectContaining({
+          category: 'unknown',
+        }),
+      }));
+    });
+
+    it('derives provider correctly from model string', async () => {
+      const authError = new Error('401 authentication_error');
+
+      // Test with OpenAI model
+      active = createMockActiveSession({ model: 'gpt-4o' });
+      (active.agent.run as Mock).mockRejectedValue(authError);
+      const onEvent = vi.fn();
+      const options = createRunOptions({ onEvent });
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'error',
+        data: expect.objectContaining({
+          provider: 'openai',
+        }),
+      }));
+    });
+
+    it('emits agent.error via config.emit for WebSocket broadcast', async () => {
+      const authError = new Error('401 authentication_error: Invalid API key');
+      (active.agent.run as Mock).mockRejectedValue(authError);
+      const options = createRunOptions();
+
+      await expect(runner.run(active, options)).rejects.toThrow();
+
+      expect(config.emit).toHaveBeenCalledWith('agent_event', expect.objectContaining({
+        type: 'agent.error',
+        data: expect.objectContaining({
+          message: expect.stringContaining('authentication_error'),
+          category: 'authentication',
+          provider: 'anthropic',
+        }),
       }));
     });
   });

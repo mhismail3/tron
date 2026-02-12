@@ -97,6 +97,17 @@ final class SheetCoordinator {
         present(.memoryDetail(MemoryDetailData(title: title, entryType: entryType, sessionId: sessionId)))
     }
 
+    /// Show provider error detail sheet
+    func showProviderErrorDetail(provider: String, category: String, message: String, suggestion: String?, retryable: Bool) {
+        present(.providerErrorDetail(ProviderErrorDetailData(
+            provider: provider,
+            category: category,
+            message: message,
+            suggestion: suggestion,
+            retryable: retryable
+        )))
+    }
+
     /// Show ask user question sheet
     func showAskUserQuestion() {
         present(.askUserQuestion)

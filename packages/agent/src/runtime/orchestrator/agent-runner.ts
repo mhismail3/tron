@@ -31,7 +31,7 @@ import { randomUUID } from 'crypto';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { withLoggingContext, getLoggingContext } from '@infrastructure/logging/log-context.js';
 import { normalizeContentBlocks } from '@core/utils/content-normalizer.js';
-import { PersistenceError } from '@core/utils/errors.js';
+import { PersistenceError, parseError } from '@core/utils/errors.js';
 import type { RunResult, RunContext } from '../agent/types.js';
 import type { UserContent } from '@core/types/messages.js';
 import type { SkillLoader, SubagentSkillRequest } from './operations/skill-loader.js';
@@ -581,7 +581,7 @@ export class AgentRunner {
   // ===========================================================================
 
   /**
-   * Handle successful agent completion.
+   * Handle agent completion (success or graceful failure from turn runner).
    */
   private async handleCompletion(
     active: ActiveSession,
@@ -600,6 +600,29 @@ export class AgentRunner {
     // Emit turn completion event
     this.emitTurnComplete(active.sessionId, runResult, options.onEvent, options.runId);
 
+    // Emit enriched agent.error for turn failures (e.g., retries exhausted)
+    // so iOS can show a notification pill. Turn failures don't throw — they
+    // return { success: false, error } — so handleError() is never called.
+    if (runResult.error) {
+      const classified = parseError(runResult.error);
+      const isProviderError = classified.category !== 'unknown';
+      const provider = isProviderError ? this.deriveProvider(active.model) : undefined;
+
+      this.config.emit('agent_event', {
+        type: 'agent.error',
+        sessionId: options.sessionId,
+        timestamp: new Date().toISOString(),
+        runId: options.runId,
+        data: {
+          message: runResult.error,
+          provider,
+          category: classified.category,
+          suggestion: classified.suggestion,
+          retryable: classified.isRetryable,
+        },
+      });
+    }
+
     // Emit agent.complete AFTER all linearized events are persisted
     this.emitAgentComplete(options.sessionId, !runResult.error, runResult.error, options.runId);
 
@@ -617,7 +640,8 @@ export class AgentRunner {
 
   /**
    * Handle agent execution error.
-   * Persists error event and re-throws.
+   * Classifies the error via parseError(), persists error.provider (for provider
+   * errors) and error.agent events, then emits enriched agent.error to WebSocket.
    */
   private async handleError(
     active: ActiveSession,
@@ -626,10 +650,28 @@ export class AgentRunner {
   ): Promise<never> {
     logger.error('Agent run error', { sessionId: options.sessionId, error });
 
-    // Store error.agent event for agent-level errors (linearized)
+    // Classify the error for enriched notifications
+    const classified = parseError(error);
+    const isProviderError = classified.category !== 'unknown';
+    const provider = isProviderError ? this.deriveProvider(active.model) : undefined;
+
+    // Store error events (linearized)
     try {
       // CRITICAL: Wait for any pending events before appending
       await active.sessionContext.flushEvents();
+
+      // Persist error.provider BEFORE error.agent for provider-category errors
+      if (isProviderError && provider) {
+        await active.sessionContext.appendEvent('error.provider', {
+          provider,
+          error: error instanceof Error ? error.message : String(error),
+          code: error instanceof Error ? error.name : undefined,
+          category: classified.category,
+          suggestion: classified.suggestion,
+          retryable: classified.isRetryable,
+        });
+      }
+
       const errorEvent = await active.sessionContext.appendEvent('error.agent', {
         error: error instanceof Error ? error.message : String(error),
         code: error instanceof Error ? error.name : undefined,
@@ -669,16 +711,38 @@ export class AgentRunner {
       });
     }
 
-    // Notify caller of error
+    // Notify caller of error (enriched with classification)
     if (options.onEvent) {
       options.onEvent({
         type: 'error',
         sessionId: options.sessionId,
         timestamp: new Date().toISOString(),
         runId: options.runId,
-        data: { message: error instanceof Error ? error.message : 'Unknown error' },
+        data: {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          provider,
+          category: classified.category,
+          suggestion: classified.suggestion,
+          retryable: classified.isRetryable,
+        },
       });
     }
+
+    // Emit agent.error via WebSocket so iOS can render the error notification
+    this.config.emit('agent_event', {
+      type: 'agent.error',
+      sessionId: options.sessionId,
+      timestamp: new Date().toISOString(),
+      runId: options.runId,
+      data: {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        code: error instanceof Error ? error.name : undefined,
+        provider,
+        category: classified.category,
+        suggestion: classified.suggestion,
+        retryable: classified.isRetryable,
+      },
+    });
 
     // Emit agent.complete for error case
     this.emitAgentComplete(options.sessionId, false, error instanceof Error ? error.message : String(error), options.runId);
@@ -687,6 +751,16 @@ export class AgentRunner {
     this.emitAgentReady(options.sessionId, options.runId);
 
     throw error;
+  }
+
+  /**
+   * Derive provider name from model string.
+   */
+  private deriveProvider(model: string): string {
+    if (model.startsWith('claude') || model.startsWith('anthropic')) return 'anthropic';
+    if (model.startsWith('gpt') || model.startsWith('o1') || model.startsWith('o3') || model.startsWith('o4')) return 'openai';
+    if (model.startsWith('gemini') || model.startsWith('google')) return 'google';
+    return 'unknown';
   }
 
   // ===========================================================================

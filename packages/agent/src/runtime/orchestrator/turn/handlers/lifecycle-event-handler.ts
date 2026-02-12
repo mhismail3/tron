@@ -15,6 +15,7 @@
 
 import type { TronEvent } from '@core/types/index.js';
 import type { EventType } from '@infrastructure/events/index.js';
+import { parseError } from '@core/utils/errors.js';
 import type { EventContext } from '../event-context.js';
 import type { UIRenderHandler } from '../../ui-render-handler.js';
 
@@ -109,7 +110,9 @@ export class LifecycleEventHandler {
 
   /**
    * Handle api_retry event.
-   * Persists provider error event for retryable errors.
+   * Persists enriched error.provider event for DB logging.
+   * Does NOT emit to WebSocket — the terminal error (after retries exhausted)
+   * flows through AgentRunner.handleError() which emits agent.error + agent.complete.
    */
   handleApiRetry(ctx: EventContext, event: TronEvent): void {
     const retryEvent = event as {
@@ -118,10 +121,16 @@ export class LifecycleEventHandler {
       delayMs?: number;
     };
 
+    // Classify error to get suggestion text
+    const classified = parseError(retryEvent.errorMessage ?? '');
+    const category = retryEvent.errorCategory || classified.category;
+
     ctx.persist('error.provider' as EventType, {
       provider: this.deps.defaultProvider,
       error: retryEvent.errorMessage,
       code: retryEvent.errorCategory,
+      category,
+      suggestion: classified.suggestion,
       retryable: true,
       retryAfter: retryEvent.delayMs,
     });

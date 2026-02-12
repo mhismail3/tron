@@ -39,6 +39,8 @@ enum SystemEvent: Equatable {
     case memoryUpdated(title: String, entryType: String)
     /// Memories were auto-injected at session start
     case memoriesLoaded(count: Int)
+    /// Provider API error (auth, rate limit, network, etc.)
+    case providerError(provider: String, category: String, message: String, suggestion: String?, retryable: Bool)
 
     /// Human-readable description for the event
     var textContent: String {
@@ -82,6 +84,9 @@ enum SystemEvent: Equatable {
             return "Memory updated: \(title)"
         case .memoriesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "memory" : "memories")"
+        case .providerError(_, let category, let message, _, _):
+            let label = ErrorCategoryDisplay.label(for: category)
+            return "\(label): \(message)"
         }
     }
 

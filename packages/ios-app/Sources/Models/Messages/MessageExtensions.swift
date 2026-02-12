@@ -111,4 +111,9 @@ extension ChatMessage {
     static func thinking(_ text: String, isExpanded: Bool = false, isStreaming: Bool = false) -> ChatMessage {
         ChatMessage(role: .assistant, content: .thinking(visible: text, isExpanded: isExpanded, isStreaming: isStreaming))
     }
+
+    /// In-chat notification for provider API errors
+    static func providerError(provider: String, category: String, message: String, suggestion: String?, retryable: Bool) -> ChatMessage {
+        ChatMessage(role: .system, content: .providerError(provider: provider, category: category, message: message, suggestion: suggestion, retryable: retryable))
+    }
 }

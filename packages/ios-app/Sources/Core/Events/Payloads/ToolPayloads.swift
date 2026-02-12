@@ -126,6 +126,8 @@ struct ProviderErrorPayload {
     let provider: String
     let error: String
     let code: String?
+    let category: String?
+    let suggestion: String?
     let retryable: Bool
     let retryAfter: Int?
 
@@ -138,6 +140,8 @@ struct ProviderErrorPayload {
         self.provider = provider
         self.error = error
         self.code = payload.string("code")
+        self.category = payload.string("category")
+        self.suggestion = payload.string("suggestion")
         self.retryable = payload.bool("retryable") ?? false
         self.retryAfter = payload.int("retryAfter")
     }

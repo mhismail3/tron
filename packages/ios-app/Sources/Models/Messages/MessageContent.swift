@@ -89,6 +89,10 @@ enum MessageContent: Equatable {
     static func memoriesLoaded(count: Int) -> MessageContent {
         .systemEvent(.memoriesLoaded(count: count))
     }
+    /// In-chat notification for provider API errors
+    static func providerError(provider: String, category: String, message: String, suggestion: String?, retryable: Bool) -> MessageContent {
+        .systemEvent(.providerError(provider: provider, category: category, message: message, suggestion: suggestion, retryable: retryable))
+    }
 
     var textContent: String {
         switch self {

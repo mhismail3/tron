@@ -209,7 +209,7 @@ describe('LifecycleEventHandler', () => {
   });
 
   describe('handleApiRetry', () => {
-    it('should persist error.provider event via context', () => {
+    it('should persist enriched error.provider event with category and suggestion', () => {
       const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
       const ctx = createTestContext({ active: mockActive });
       const event = {
@@ -232,11 +232,32 @@ describe('LifecycleEventHandler', () => {
           provider: 'anthropic',
           error: 'Rate limit exceeded',
           code: 'rate_limit',
+          category: 'rate_limit',
+          suggestion: 'Wait a moment and try again',
           retryable: true,
           retryAfter: 5000,
           runId: 'run-123',
         },
       });
+    });
+
+    it('should not emit to WebSocket (terminal error handles that)', () => {
+      const mockActive = createMockActiveSession({ currentRunId: 'run-123' });
+      const ctx = createTestContext({ active: mockActive });
+      const event = {
+        type: 'api_retry',
+        sessionId: ctx.sessionId,
+        timestamp: ctx.timestamp,
+        attempt: 1,
+        maxRetries: 1,
+        errorMessage: 'Rate limit exceeded',
+        errorCategory: 'rate_limit',
+        delayMs: 5000,
+      } as const;
+
+      handler.handleApiRetry(ctx, event);
+
+      expect(ctx.emitCalls).toHaveLength(0);
     });
 
     it('should handle missing error details', () => {
@@ -261,11 +282,16 @@ describe('LifecycleEventHandler', () => {
           provider: 'anthropic',
           error: '',
           code: '',
+          category: 'unknown',
+          suggestion: undefined,
           retryable: true,
           retryAfter: 0,
           runId: undefined,
         },
       });
+
+      // Should not emit — terminal error handles WebSocket notification
+      expect(ctx.emitCalls).toHaveLength(0);
     });
   });
 
