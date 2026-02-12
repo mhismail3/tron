@@ -84,52 +84,82 @@ extension ChatView {
 
     /// Handle initial message visibility on session load.
     /// Scrolls to bottom while content is hidden, then fades everything in.
+    ///
+    /// LazyVStack only materializes cells near the visible viewport, using estimated
+    /// heights (~80pt) for distant cells. Real message heights average ~170pt, so each
+    /// `scrollTo("bottom")` reveals new cells whose true heights push "bottom" further
+    /// away. We iterate until the content height stabilizes.
+    ///
+    /// Uses GCD-based delays instead of `Task.sleep` because `.task` can inherit
+    /// cancellation context during rapid navigation, causing `Task.sleep` to throw
+    /// immediately (the `try?` swallows it → zero delay → all iterations in 0ms).
     func handleInitialMessageVisibility() async {
-        guard viewModel.messages.count > 0 else {
-            // No messages - just mark load complete
+        let msgCount = viewModel.messages.count
+        logger.debug("[INIT] handleInitialMessageVisibility: messages=\(msgCount) scrollProxy=\(scrollProxy != nil) hasMore=\(viewModel.hasMoreMessages)", category: .ui)
+
+        guard msgCount > 0 else {
+            logger.debug("[INIT] No messages, marking load complete", category: .ui)
             initialLoadComplete = true
             return
         }
 
         // Deep link: skip animation, scroll to target
         if let target = scrollTarget {
-            // Make all messages visible instantly (use current count)
-            viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
+            logger.debug("[INIT] Deep link target, skipping cascade", category: .ui)
+            viewModel.animationCoordinator.makeAllMessagesVisible(count: msgCount)
             initialLoadComplete = true
 
             scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms for layout
+            await layoutDelay(milliseconds: 100)
             performDeepLinkScroll(to: target)
             return
         }
 
-        // Normal load: scroll to bottom while hidden, then fade in.
-        // While !initialLoadComplete and cascadeProgress=0, all messages are at opacity 0.
-        // Multiple scrolls let LazyVStack materialize bottom cells and settle real heights.
-        // For long sessions, estimated heights can be wildly off — each scroll gets closer
-        // as LazyVStack replaces estimates with measured heights for materialized cells.
-
-        for i in 0..<4 {
+        // Scroll to bottom repeatedly until LazyVStack heights converge.
+        // Each scroll materializes cells near the viewport, revealing their true
+        // heights and shifting "bottom". We break early once content height
+        // stabilizes (typically 2-3 iterations, ~100ms).
+        for i in 0..<8 {
+            let heightBefore = initContentHeight
             scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            // Exponential backoff: 16ms, 50ms, 100ms, 150ms — gives layout time to settle
-            let delay: UInt64 = switch i {
-            case 0: 16_000_000
-            case 1: 50_000_000
-            case 2: 100_000_000
-            default: 150_000_000
+            await layoutDelay(milliseconds: 30)
+            let heightAfter = initContentHeight
+
+            logger.debug("[INIT] scroll \(i): contentH \(heightBefore)→\(heightAfter)", category: .ui)
+
+            // Content height stabilized — LazyVStack finished materializing cells.
+            // Require at least 2 scrolls so the first scroll has time to trigger
+            // cell materialization before we check for convergence.
+            if heightAfter == heightBefore && i >= 1 {
+                logger.debug("[INIT] converged at iteration \(i)", category: .ui)
+                break
             }
-            try? await Task.sleep(nanoseconds: delay)
         }
 
-        // Final scroll after all layout settling
+        // One final scroll after convergence to ensure we're at the true bottom
         scrollProxy?.scrollTo("bottom", anchor: .bottom)
 
         // Fade in all messages from the correct scroll position
+        logger.debug("[INIT] fading in \(viewModel.messages.count) messages, setting initialLoadComplete=true", category: .ui)
         withAnimation(.easeOut(duration: 0.3)) {
             viewModel.animationCoordinator.makeAllMessagesVisible(count: viewModel.messages.count)
             initialLoadComplete = true
         }
 
-        logger.debug("Session loaded with \(viewModel.messages.count) messages", category: .session)
+        logger.debug("[INIT] Session loaded with \(viewModel.messages.count) messages", category: .session)
+    }
+
+    // MARK: - Layout Delay
+
+    /// Non-cancellable delay for layout settling. Uses GCD scheduling which is
+    /// independent of Swift concurrency Task cancellation. `Task.sleep` throws
+    /// `CancellationError` when the parent Task is cancelled (common during rapid
+    /// navigation between sessions), and `try?` silently swallows it → zero delay.
+    private func layoutDelay(milliseconds: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
+                continuation.resume()
+            }
+        }
     }
 }

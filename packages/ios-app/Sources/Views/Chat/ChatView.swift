@@ -38,6 +38,9 @@ struct ChatView: View {
 
     // MARK: - Message Loading State (internal for extension access)
     @State var initialLoadComplete = false
+    /// Content height reported by scroll geometry during initial load.
+    /// Used by the scroll convergence loop to detect when LazyVStack heights stabilize.
+    @State var initContentHeight: Int = 0
 
     // MARK: - Deep Link Scroll Target (internal for extension access)
     @Binding var scrollTarget: ScrollTarget?
@@ -257,6 +260,8 @@ struct ChatView: View {
             //
             // Model prefetch and audio prewarm are independent and don't block UI
 
+            logger.debug("[INIT] task started, messages=\(viewModel.messages.count) scrollProxy=\(scrollProxy != nil) initialLoadComplete=\(initialLoadComplete)", category: .ui)
+
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
 
@@ -283,15 +288,20 @@ struct ChatView: View {
             }
 
             // Connect and resume - this is required before loading messages
+            logger.debug("[INIT] starting connectAndResume", category: .ui)
             await viewModel.connectAndResume()
+            logger.debug("[INIT] connectAndResume done, messages=\(viewModel.messages.count)", category: .ui)
 
             // Load messages after connection is established
+            logger.debug("[INIT] starting syncAndLoadMessagesForResume", category: .ui)
             await viewModel.syncAndLoadMessagesForResume()
+            logger.debug("[INIT] syncAndLoad done, messages=\(viewModel.messages.count) scrollProxy=\(scrollProxy != nil)", category: .ui)
 
             // Handle message visibility and set initialLoadComplete
             // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
             // AFTER the cascade starts, to prevent a flash where all messages are visible
             await handleInitialMessageVisibility()
+            logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
         }
         .onChange(of: rpcClient.connectionState) { oldState, newState in
             // React when connection transitions to connected
@@ -459,7 +469,11 @@ struct ChatView: View {
                             .offset(y: messageIsVisible(at: index, total: viewModel.messages.count) ? 0 : 6)
                             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
                         }
-                        .animation(.easeOut(duration: 0.25), value: viewModel.messages.count)
+                        // Animate message insertions/removals ONLY after initial load.
+                        // During initial load, messages appear at opacity 0 and the
+                        // .transition(.scale(0.98)) would cause content height to grow
+                        // by 2% over 0.25s, shifting "bottom" while we're scrolling to it.
+                        .animation(initialLoadComplete ? .easeOut(duration: 0.25) : nil, value: viewModel.messages.count)
 
                         // Always present in view tree to avoid layout shifts.
                         // Zero height + clipped + zero opacity = invisible with no layout impact.
@@ -500,6 +514,9 @@ struct ChatView: View {
                 .scrollDismissesKeyboard(.interactively)
                 // Track scroll phases — definitively know user vs programmatic scroll
                 .onScrollPhaseChange { oldPhase, newPhase in
+                    if !initialLoadComplete {
+                        logger.debug("[INIT] phase: \(oldPhase) → \(newPhase)", category: .ui)
+                    }
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
                 }
                 // Track near-bottom geometry — fires only when the Bool changes.
@@ -514,12 +531,26 @@ struct ChatView: View {
                     guard initialLoadComplete else { return }
                     scrollCoordinator.geometryChanged(isNearBottom: isNearBottom)
                 }
+                // Track content height during initial load for convergence detection.
+                // The scroll loop reads initContentHeight to know when LazyVStack
+                // has finished materializing cells and heights have stabilized.
+                .onScrollGeometryChange(for: Int.self) { geometry in
+                    Int(geometry.contentSize.height)
+                } action: { _, contentH in
+                    guard !initialLoadComplete else { return }
+                    initContentHeight = contentH
+                }
                 .onAppear {
                     scrollProxy = proxy
+                    logger.debug("[INIT] scrollProxy set via onAppear", category: .ui)
                 }
                 // Auto-scroll on new messages
                 .onChange(of: viewModel.messages.count) { oldCount, newCount in
                     guard newCount > oldCount else { return }
+
+                    if !initialLoadComplete {
+                        logger.debug("[INIT] messages.count changed \(oldCount)→\(newCount) DURING initial load", category: .ui)
+                    }
 
                     if viewModel.animationCoordinator.isCascading {
                         viewModel.animationCoordinator.makeAllMessagesVisible(count: newCount)
