@@ -24,25 +24,21 @@ struct RecentSessionRow: View {
 
                 // Last user prompt (right-aligned)
                 if let prompt = session.lastUserPrompt, !prompt.isEmpty {
-                    HStack {
+                    HStack(alignment: .top, spacing: 6) {
                         Spacer(minLength: 0)
 
-                        HStack(alignment: .top, spacing: 6) {
-                            Text(prompt)
-                                .font(TronTypography.codeCaption)
-                                .foregroundStyle(.tronTextSecondary)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                                .multilineTextAlignment(.trailing)
+                        Text(prompt)
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.trailing)
 
-                            Image(systemName: "person.fill")
-                                .font(TronTypography.labelSM)
-                                .foregroundStyle(.tronEmerald.opacity(0.6))
-                                .frame(width: 12)
-                                .offset(y: 2)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
+                        Image(systemName: "person.fill")
+                            .font(TronTypography.labelSM)
+                            .foregroundStyle(.tronEmerald.opacity(0.6))
+                            .frame(width: 12)
+                            .offset(y: 2)
                     }
                 }
 
@@ -57,12 +53,10 @@ struct RecentSessionRow: View {
 
                         Text(response)
                             .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronEmerald)
+                            .foregroundStyle(.tronEmeraldDark.opacity(0.8))
                             .lineLimit(2)
                             .truncationMode(.tail)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
                 }
 
                 // Footer: Model + tokens/cost

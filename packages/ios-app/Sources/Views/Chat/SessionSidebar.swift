@@ -207,25 +207,21 @@ struct CachedSessionSidebarRow: View {
 
             // Recent prompt (user's last message, right-aligned)
             if let prompt = session.lastUserPrompt, !prompt.isEmpty {
-                HStack {
+                HStack(alignment: .top, spacing: 6) {
                     Spacer(minLength: 0)
 
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(prompt)
-                            .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextSecondary)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
-                            .multilineTextAlignment(.trailing)
+                    Text(prompt)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .multilineTextAlignment(.trailing)
 
-                        Image(systemName: "person.fill")
-                            .font(TronTypography.labelSM)
-                            .foregroundStyle(.tronEmerald.opacity(0.6))
-                            .frame(width: 12)
-                            .offset(y: 2)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                    Image(systemName: "person.fill")
+                        .font(TronTypography.labelSM)
+                        .foregroundStyle(.tronEmerald.opacity(0.6))
+                        .frame(width: 12)
+                        .offset(y: 2)
                 }
             }
 
@@ -234,31 +230,25 @@ struct CachedSessionSidebarRow: View {
                 // Thinking indicator with pulse animation
                 SessionProcessingIndicator()
             } else if let response = session.lastAssistantResponse, !response.isEmpty {
-                HStack {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "cpu")
-                            .font(TronTypography.labelSM)
-                            .foregroundStyle(.tronEmerald.opacity(0.8))
-                            .frame(width: 12)
-                            .offset(y: 2)
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "cpu")
+                        .font(TronTypography.labelSM)
+                        .foregroundStyle(.tronEmerald.opacity(0.8))
+                        .frame(width: 12)
+                        .offset(y: 2)
 
-                        Text(response)
-                            .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronEmerald)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
+                    Text(response)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronEmeraldDark.opacity(0.8))
+                        .lineLimit(2)
+                        .truncationMode(.tail)
 
-                        // Tool count badge
-                        if let toolCount = session.lastToolCount, toolCount > 0 {
-                            Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
-                                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                                .foregroundStyle(.tronEmerald.opacity(0.7))
-                        }
+                    // Tool count badge
+                    if let toolCount = session.lastToolCount, toolCount > 0 {
+                        Text("(\(toolCount) \(toolCount == 1 ? "tool" : "tools"))")
+                            .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
+                            .foregroundStyle(.tronEmerald.opacity(0.7))
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-
-                    Spacer(minLength: 0)
                 }
             }
 
