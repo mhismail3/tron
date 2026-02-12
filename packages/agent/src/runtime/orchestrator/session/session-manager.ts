@@ -15,6 +15,7 @@ import { SessionError } from '@core/utils/errors.js';
 import { MaxSessionsReachedError } from '@core/errors/rpc-errors.js';
 import type { Message as CoreMessage } from '@core/types/messages.js';
 import { EventStore } from '@infrastructure/events/event-store.js';
+import { EventChainBuilder } from '@infrastructure/events/event-chain-builder.js';
 import { WorktreeCoordinator } from '@platform/session/worktree-coordinator.js';
 import { createSkillTracker } from '@capabilities/extensions/skills/skill-tracker.js';
 import { createSubAgentTracker } from '@capabilities/tools/subagent/subagent-tracker.js';
@@ -182,7 +183,7 @@ export class SessionManager {
 
     // Load rules files for the session
     const rulesTracker = createRulesTracker();
-    let rulesHeadEventId = result.rootEvent.id;
+    const eventChain = new EventChainBuilder(this.eventStore, sessionId, result.rootEvent.id);
     let dynamicRulesCount = 0;
 
     // Discover scoped CLAUDE.md/AGENTS.md files first (need count for rules.loaded)
@@ -233,12 +234,10 @@ export class SessionManager {
           dynamicRulesCount,
         };
 
-        const rulesEvent = await this.eventStore.append({
-          sessionId,
-          type: 'rules.loaded' as EventType,
-          payload: rulesPayload as unknown as Record<string, unknown>,
-          parentId: result.rootEvent.id,
-        });
+        const rulesEvent = await eventChain.append(
+          'rules.loaded' as EventType,
+          rulesPayload as unknown as Record<string, unknown>,
+        );
 
         if (loadedContext.files.length > 0) {
           rulesTracker.setRules(
@@ -248,7 +247,6 @@ export class SessionManager {
             loadedContext.merged
           );
         }
-        rulesHeadEventId = rulesEvent.id;
 
         // Inject rules content into agent for context building
         if (loadedContext.merged) {
@@ -290,13 +288,10 @@ export class SessionManager {
           })),
         };
 
-        const indexedEvent = await this.eventStore.append({
-          sessionId,
-          type: 'rules.indexed' as EventType,
-          payload: indexedPayload as unknown as Record<string, unknown>,
-          parentId: rulesHeadEventId,
-        });
-        rulesHeadEventId = indexedEvent.id;
+        await eventChain.append(
+          'rules.indexed' as EventType,
+          indexedPayload as unknown as Record<string, unknown>,
+        );
       } catch (error) {
         logger.warn('Failed to emit rules.indexed event', {
           sessionId,
@@ -310,7 +305,6 @@ export class SessionManager {
 
     // Load and inject workspace memory (conditional on settings)
     // Emit via eventStore.append() (like rules.loaded) so it broadcasts over WebSocket
-    let memoryHeadEventId = rulesHeadEventId;
     const memSettings = getSettings().context?.memory?.autoInject;
     if (memSettings?.enabled && this.config.loadWorkspaceMemory) {
       try {
@@ -320,17 +314,11 @@ export class SessionManager {
         );
         if (memResult?.content) {
           agent.setMemoryContent(memResult.content);
-          const memEvent = await this.eventStore.append({
-            sessionId,
-            type: 'memory.loaded' as EventType,
-            payload: {
-              count: memResult.count,
-              tokens: memResult.tokens,
-              workspaceId: '',
-            },
-            parentId: memoryHeadEventId,
+          await eventChain.append('memory.loaded' as EventType, {
+            count: memResult.count,
+            tokens: memResult.tokens,
+            workspaceId: '',
           });
-          memoryHeadEventId = memEvent.id;
           logger.info('Memory auto-injected', {
             sessionId,
             count: memResult.count,
@@ -349,7 +337,7 @@ export class SessionManager {
     const sessionContext = createSessionContext({
       sessionId,
       eventStore: this.eventStore,
-      initialHeadEventId: memoryHeadEventId,
+      initialHeadEventId: eventChain.headEventId,
       model,
       workingDirectory: workingDir.path,
       workingDir,

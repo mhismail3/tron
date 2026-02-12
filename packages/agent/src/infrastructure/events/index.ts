@@ -132,3 +132,6 @@ export {
   type SessionForkOptions,
   type GenericEventOptions,
 } from './event-factory.js';
+
+// Event chain builder for sequential appends
+export { EventChainBuilder } from './event-chain-builder.js';
