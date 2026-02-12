@@ -19,7 +19,7 @@ open TronMobile.xcodeproj
 ### Server Connection
 
 The app connects to the Tron server:
-- **Beta**: `localhost:8082` (run `tron dev`)
+- **Beta**: `localhost:8082` (run `tron start beta` or `tron dev`)
 - **Production**: `localhost:8080` (run `tron start`)
 
 ## Build Configurations

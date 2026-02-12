@@ -488,20 +488,26 @@ Creates a launchd service, installs `tron` CLI to `~/.local/bin/`, and starts th
 ### Service Management
 
 ```bash
-tron status      # Show service status, health, deployed commit
-tron start       # Start production service
-tron stop        # Stop production service
-tron restart     # Restart production service
-tron logs        # Tail production logs
-tron errors      # Show error log
+tron status          # Show all services (prod + beta)
+tron start [beta]    # Start service
+tron stop [beta]     # Stop service
+tron restart [beta]  # Restart service
+tron logs [beta]     # Query database logs
+tron errors [beta]   # Show recent errors
 ```
 
-### Deploy Updates
+### Deployment Pipeline
+
+Deploys follow a beta-first promotion model: `code → beta (verify) → prod (promote)`.
 
 ```bash
-tron deploy      # Test → build → deploy with commit tracking
-tron rollback    # Restore to last deployed commit
+tron deploy beta     # Stage 1: build, test, deploy to beta, verify health
+tron deploy          # Stage 2: requires beta-verified commit, then build + swap
+tron deploy --force  # Emergency: skip beta verification
+tron rollback        # Restore previous prod deployment
 ```
+
+Production deploys are blocked unless beta has been verified on the same commit. The verification marker (`~/.tron/app/beta-deploy-verified.json`) is written automatically after a successful beta deploy + health check.
 
 ### Dual Environment
 
@@ -513,19 +519,19 @@ Run beta and production simultaneously:
 | Beta | 8082 | 8083 | `~/.tron/database/beta.db` |
 
 ```bash
-tron dev         # Run beta server (Ctrl+C to stop)
+tron dev             # Beta dev workflow (sidecars, foreground mode)
+tron start beta      # Start beta server (minimal)
 ```
 
 ### Logs
 
+```bash
+tron logs                # Recent prod logs
+tron logs beta           # Recent beta logs
+tron logs -l error       # Filter by level
+tron logs -q "search"    # Full-text search
+tron logs -t             # Tail prod file log
 ```
-~/.tron/logs/
-├── prod/        # Production logs
-└── beta/        # Beta logs
-```
-
-Format: `YYYY-MM-DD-HH-<tier>-server.log`
-Retention: 90 days (auto-cleanup)
 
 ---
 

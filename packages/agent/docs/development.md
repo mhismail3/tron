@@ -30,16 +30,26 @@ bun run --cwd packages/agent typecheck
 # Full monorepo build + test
 bun run build && bun run test
 
-# Start development server (beta)
-tron dev
-# WebSocket: localhost:8082
-# Health: localhost:8083
+# Service management (prod or beta)
+tron start [beta]    # Start service
+tron stop [beta]     # Stop service
+tron restart [beta]  # Restart service
+tron status          # Show all services
 
-# Start production server
-tron start
-# WebSocket: localhost:8080
-# Health: localhost:8081
+# Beta dev workflow (includes sidecar setup, foreground mode)
+tron dev             # Start beta in background
+tron dev -t          # Start beta in foreground (logs to stdout)
+tron dev -b          # Build + test, then start beta
+
+# Deployment (beta-first pipeline)
+tron deploy beta     # Build, test, deploy to beta, verify health
+tron deploy          # Promote to prod (requires beta-verified commit)
 ```
+
+| Environment | WebSocket | Health | Database |
+|-------------|-----------|--------|----------|
+| Production | localhost:8080 | localhost:8081 | `~/.tron/database/prod.db` |
+| Beta | localhost:8082 | localhost:8083 | `~/.tron/database/beta.db` |
 
 ## Testing
 
