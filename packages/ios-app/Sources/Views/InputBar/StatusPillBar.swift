@@ -154,7 +154,7 @@ struct StatusPillsColumn: View {
                         .font(TronTypography.labelSM)
                 }
             }
-            .foregroundStyle(readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
+            .foregroundStyle(readOnly ? .inputPlaceholder : .tronEmerald)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .contentShape(Capsule())

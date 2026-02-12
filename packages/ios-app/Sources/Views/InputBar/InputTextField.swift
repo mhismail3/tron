@@ -18,7 +18,7 @@ struct GlassTextField: View {
             if text.isEmpty && !isFocused {
                 Text("Type here")
                     .font(TronTypography.input)
-                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                    .foregroundStyle(.inputPlaceholder)
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
             }
@@ -26,7 +26,7 @@ struct GlassTextField: View {
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(.inputText)
                 .padding(.leading, 14)
                 .padding(.trailing, trailingPadding)
                 .padding(.vertical, 10)
@@ -58,7 +58,7 @@ struct SimplifiedTextField: View {
             if text.isEmpty && !isFocused {
                 Text("Type here")
                     .font(TronTypography.input)
-                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                    .foregroundStyle(.inputPlaceholder)
                     .padding(.leading, 14)
                     .padding(.vertical, 10)
             }
@@ -66,7 +66,7 @@ struct SimplifiedTextField: View {
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(TronTypography.input)
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(.inputText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
@@ -118,7 +118,7 @@ struct TextFieldWithHistory: View {
                     if text.isEmpty && !isFocused {
                         Text("Type here")
                             .font(TronTypography.input)
-                            .foregroundStyle(.tronEmerald.opacity(0.5))
+                            .foregroundStyle(.inputPlaceholder)
                             .padding(.leading, 14)
                             .padding(.vertical, 10)
                     }
@@ -126,7 +126,7 @@ struct TextFieldWithHistory: View {
                     TextField("", text: $text, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(TronTypography.input)
-                        .foregroundStyle(.tronEmerald)
+                        .foregroundStyle(.inputText)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .lineLimit(1...8)

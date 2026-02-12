@@ -199,6 +199,7 @@
 		669DB4593CE2A289495B3C04 /* AnyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDEF0D27AD1FDBE81FB4A4CF /* AnyCodable.swift */; };
 		671C4CACBB0DF7C3AEA59A0D /* AlanSans-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 4665FD394D5F63951D8B2012 /* AlanSans-Variable.ttf */; };
 		6769C4A760E9872FC4462501 /* MentionDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1C9A2BCF89A42D355F6C52 /* MentionDetector.swift */; };
+		67F1350335FAA4CCC8F6E85E /* TronColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3B02B6C8363802CE2163B3 /* TronColorsTests.swift */; };
 		6855A8197F571DD7F96D9897 /* CommandToolTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE3B9CE86236E7F465571D9 /* CommandToolTypesTests.swift */; };
 		68F10F5CFF9AE69C663A5567 /* LoggingContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC475667BC6878E548D29BB1 /* LoggingContext.swift */; };
 		6994EC5A5D84B6F81D585ABB /* ThinkingIndicatorStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7287993C693A02565C33042A /* ThinkingIndicatorStyleTests.swift */; };
@@ -702,6 +703,7 @@
 		68FF256D5E59A844B8D41277 /* EventTreeBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTreeBuilder.swift; sourceTree = "<group>"; };
 		69317B252AC29B403294D386 /* MessageWindowManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWindowManagerTests.swift; sourceTree = "<group>"; };
 		6964BC2C78A1224344F88458 /* InputHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputHistoryStore.swift; sourceTree = "<group>"; };
+		6A3B02B6C8363802CE2163B3 /* TronColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronColorsTests.swift; sourceTree = "<group>"; };
 		6A6ADBAAD11685160BE5A51B /* SettingsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsClient.swift; sourceTree = "<group>"; };
 		6A728932D4055DD33082C067 /* LineNumberedContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LineNumberedContentView.swift; sourceTree = "<group>"; };
 		6AC377B44A707E319C9A4C25 /* BrowserToolViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserToolViewer.swift; sourceTree = "<group>"; };
@@ -2038,6 +2040,7 @@
 				78526BB911BE412A17BFDBD3 /* AppearanceSettingsTests.swift */,
 				6DEF75386D4B60039A818B0F /* FontSettingsTests.swift */,
 				7287993C693A02565C33042A /* ThinkingIndicatorStyleTests.swift */,
+				6A3B02B6C8363802CE2163B3 /* TronColorsTests.swift */,
 			);
 			path = Theme;
 			sourceTree = "<group>";
@@ -2975,6 +2978,7 @@
 				1CB6632A703C236EB9CE68F6 /* ToolRegistryTests.swift in Sources */,
 				2FB8075888EDDE8DA47E8D1C /* ToolResultParserTodoWriteTests.swift in Sources */,
 				FFE8EE699BA7BFD96512E197 /* TranscriptionCoordinatorTests.swift in Sources */,
+				67F1350335FAA4CCC8F6E85E /* TronColorsTests.swift in Sources */,
 				DB71481015BA128E4D2069E5 /* TurnEndPluginTests.swift in Sources */,
 				5FBFDBA2E52517DAA17F6AB0 /* TurnLifecycleCoordinatorTests.swift in Sources */,
 				7015C4D764E9EAA0BD4E800E /* UICanvasCoordinatorTests.swift in Sources */,
