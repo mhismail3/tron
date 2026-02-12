@@ -392,6 +392,122 @@ describe('BrowserService', () => {
     });
   });
 
+  describe('startStream', () => {
+    it('creates session if needed and starts screencast', async () => {
+      const result = await service.startStream('new-session');
+
+      expect(result.success).toBe(true);
+      expect(service.hasSession('new-session')).toBe(true);
+      expect(mockBrowserManager.startScreencast).toHaveBeenCalled();
+    });
+
+    it('starts screencast directly if session already exists', async () => {
+      await service.createSession('existing');
+      mockBrowserManager.launch.mockClear();
+
+      const result = await service.startStream('existing');
+
+      expect(result.success).toBe(true);
+      expect(mockBrowserManager.launch).not.toHaveBeenCalled();
+      expect(mockBrowserManager.startScreencast).toHaveBeenCalled();
+    });
+
+    it('returns error when session creation fails', async () => {
+      mockBrowserManager.launch.mockRejectedValueOnce(new Error('Launch failed'));
+
+      const result = await service.startStream('fail-session');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+
+    it('returns error when screencast fails', async () => {
+      await service.createSession('test-session');
+      mockBrowserManager.startScreencast.mockRejectedValueOnce(new Error('Screencast error'));
+
+      const result = await service.startStream('test-session');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('stopStream', () => {
+    it('stops screencast for existing session', async () => {
+      await service.createSession('test-session');
+      const session = service.getSession('test-session');
+      if (session) session.isStreaming = true;
+
+      const result = await service.stopStream('test-session');
+
+      expect(result.success).toBe(true);
+      expect(mockBrowserManager.stopScreencast).toHaveBeenCalled();
+    });
+
+    it('returns success if session does not exist', async () => {
+      const result = await service.stopStream('non-existent');
+
+      expect(result.success).toBe(true);
+      expect(mockBrowserManager.stopScreencast).not.toHaveBeenCalled();
+    });
+
+    it('returns error when stop fails', async () => {
+      await service.createSession('test-session');
+      const session = service.getSession('test-session');
+      if (session) session.isStreaming = true;
+      mockBrowserManager.stopScreencast.mockRejectedValueOnce(new Error('Connection lost'));
+
+      const result = await service.stopStream('test-session');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  describe('getStreamStatus', () => {
+    it('returns hasBrowser false when no session exists', () => {
+      const result = service.getStreamStatus('non-existent');
+
+      expect(result).toEqual({ hasBrowser: false, isStreaming: false });
+    });
+
+    it('returns streaming status from session', async () => {
+      await service.createSession('test-session');
+      const session = service.getSession('test-session');
+      if (session) session.isStreaming = true;
+
+      const result = service.getStreamStatus('test-session');
+
+      expect(result.hasBrowser).toBe(true);
+      expect(result.isStreaming).toBe(true);
+      expect(result.currentUrl).toBe('https://example.com');
+    });
+
+    it('handles session with no manager', async () => {
+      await service.createSession('test-session');
+      mockBrowserManager.isLaunched.mockReturnValue(false);
+
+      const result = service.getStreamStatus('test-session');
+
+      expect(result.hasBrowser).toBe(true);
+      expect(result.isStreaming).toBe(false);
+      expect(result.currentUrl).toBeUndefined();
+    });
+
+    it('handles errors when getting URL', async () => {
+      await service.createSession('test-session');
+      const session = service.getSession('test-session');
+      if (session) session.isStreaming = true;
+      mockBrowserManager.getPage.mockImplementation(() => { throw new Error('Page closed'); });
+
+      const result = service.getStreamStatus('test-session');
+
+      expect(result.hasBrowser).toBe(true);
+      expect(result.isStreaming).toBe(true);
+      expect(result.currentUrl).toBeUndefined();
+    });
+  });
+
   describe('unknown action', () => {
     it('should return error for unknown action', async () => {
       await service.createSession('test-session');

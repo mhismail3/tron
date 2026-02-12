@@ -43,7 +43,6 @@ vi.mock('@core/utils/retry.js', () => ({
 }));
 
 import Anthropic from '@anthropic-ai/sdk';
-import { getSettings } from '@infrastructure/settings/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { shouldRefreshTokens } from '@infrastructure/auth/oauth.js';
 import { convertMessages, convertTools, convertResponse } from '../anthropic/message-converter.js';
@@ -52,13 +51,11 @@ import { AnthropicProvider } from '../anthropic/anthropic-provider.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '@runtime/constants.js';
 
 describe('Anthropic Provider', () => {
-  const mockSettings = {
+  const mockProviderSettings = {
     api: {
-      anthropic: {
-        systemPromptPrefix: "You are Claude Code.",
-        oauthBetaHeaders: 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
-        tokenExpiryBufferSeconds: 300,
-      },
+      systemPromptPrefix: "You are Claude Code.",
+      oauthBetaHeaders: 'oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
+      tokenExpiryBufferSeconds: 300,
     },
     models: {
       default: 'claude-opus-4-6',
@@ -75,7 +72,6 @@ describe('Anthropic Provider', () => {
     lastConstructorArgs = undefined;
     lastStreamParams = undefined;
 
-    vi.mocked(getSettings).mockReturnValue(mockSettings as any);
     vi.mocked(createLogger).mockReturnValue({
       info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(),
     } as any);
@@ -225,6 +221,7 @@ describe('Anthropic Provider', () => {
     return new AnthropicProvider({
       model,
       auth: { type: 'api_key', apiKey: 'sk-test' },
+      providerSettings: mockProviderSettings,
     });
   }
 
@@ -232,6 +229,7 @@ describe('Anthropic Provider', () => {
     return new AnthropicProvider({
       model,
       auth: { type: 'oauth', accessToken: 'token', refreshToken: 'refresh', expiresAt: Date.now() + 3600000 },
+      providerSettings: mockProviderSettings,
     });
   }
 

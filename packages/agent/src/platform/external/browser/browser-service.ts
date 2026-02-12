@@ -32,6 +32,12 @@ import {
 
 export type { BrowserSession, ActionResult, BrowserLocator };
 
+export interface BrowserStreamStatus {
+  hasBrowser: boolean;
+  isStreaming: boolean;
+  currentUrl?: string;
+}
+
 const logger = createLogger('browser:service');
 
 export interface BrowserConfig {
@@ -411,6 +417,66 @@ export class BrowserService extends EventEmitter {
     converted = converted.replace(/:contains\(([^)]+)\)/g, ':has-text("$1")');
 
     return converted;
+  }
+
+  /**
+   * Start browser frame streaming for a session.
+   * Creates the browser session if it doesn't already exist.
+   */
+  async startStream(sessionId: string): Promise<ActionResult> {
+    if (!this.hasSession(sessionId)) {
+      const createResult = await this.createSession(sessionId);
+      if (!createResult.success) {
+        return { success: false, error: createResult.error || 'Failed to create browser session' };
+      }
+    }
+
+    const result = await this.startScreencast(sessionId);
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to start screencast' };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Stop browser frame streaming for a session.
+   * Returns success if session doesn't exist (already not streaming).
+   */
+  async stopStream(sessionId: string): Promise<ActionResult> {
+    if (!this.hasSession(sessionId)) {
+      return { success: true };
+    }
+
+    const result = await this.stopScreencast(sessionId);
+    if (!result.success) {
+      return { success: false, error: result.error || 'Failed to stop screencast' };
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Get browser streaming status for a session.
+   */
+  getStreamStatus(sessionId: string): BrowserStreamStatus {
+    if (!this.hasSession(sessionId)) {
+      return { hasBrowser: false, isStreaming: false };
+    }
+
+    const session = this.getSession(sessionId);
+    let currentUrl: string | undefined;
+    try {
+      currentUrl = session?.manager?.isLaunched() ? session.manager.getPage().url() : undefined;
+    } catch {
+      // Browser not ready or page closed
+    }
+
+    return {
+      hasBrowser: true,
+      isStreaming: session?.isStreaming ?? false,
+      currentUrl,
+    };
   }
 
   /**

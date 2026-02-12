@@ -13,7 +13,6 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { AssistantMessage, Context, StreamEvent } from '@core/types/index.js';
 import { createLogger } from '@infrastructure/logging/index.js';
-import { getSettings } from '@infrastructure/settings/index.js';
 import { withProviderRetry, composeContextParts, type StreamRetryConfig } from '../base/index.js';
 import type {
   OpenAIConfig,
@@ -46,19 +45,6 @@ const INSTRUCTIONS_PATH = existsSync(join(__dirname, '..', 'prompts', 'codex-ins
 const DEFAULT_INSTRUCTIONS = readFileSync(INSTRUCTIONS_PATH, 'utf-8');
 
 // =============================================================================
-// Settings Helper
-// =============================================================================
-
-/**
- * Get default OpenAI settings from global settings.
- * Exported for dependency injection - consumers can pass custom settings.
- */
-export function getDefaultOpenAISettings(): OpenAIApiSettings | undefined {
-  const settings = getSettings();
-  return settings.api.openaiCodex;
-}
-
-// =============================================================================
 // Provider Class
 // =============================================================================
 
@@ -72,7 +58,7 @@ export class OpenAIProvider {
 
   constructor(config: OpenAIConfig) {
     this.config = config;
-    this.openaiSettings = config.openaiSettings ?? getDefaultOpenAISettings();
+    this.openaiSettings = config.openaiSettings;
     this.baseURL = config.baseURL || this.openaiSettings?.baseUrl || 'https://chatgpt.com/backend-api';
     this.retryConfig = config.retry === false ? false : (config.retry ?? {});
     this.tokenManager = new OpenAITokenManager(config.auth, this.openaiSettings);

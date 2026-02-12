@@ -2,7 +2,7 @@
  * @fileoverview Tests for Browser Adapter
  *
  * The browser adapter delegates browser automation operations
- * to the EventStoreOrchestrator's BrowserController.
+ * to the EventStoreOrchestrator's BrowserService.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -17,7 +17,7 @@ describe('BrowserAdapter', () => {
       browser: {
         startStream: vi.fn(),
         stopStream: vi.fn(),
-        getStatus: vi.fn(),
+        getStreamStatus: vi.fn(),
       },
     } as any;
   });
@@ -25,7 +25,7 @@ describe('BrowserAdapter', () => {
   describe('startStream', () => {
     it('should delegate to orchestrator.browser.startStream', async () => {
       const mockResult = { success: true, streamId: 'stream-123' };
-      vi.mocked(mockOrchestrator.browser!.startStream).mockResolvedValue(mockResult);
+      vi.mocked(mockOrchestrator.browser!.startStream).mockResolvedValue(mockResult as any);
 
       const adapter = createBrowserAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -55,13 +55,13 @@ describe('BrowserAdapter', () => {
   });
 
   describe('getStatus', () => {
-    it('should delegate to orchestrator.browser.getStatus', async () => {
+    it('should delegate to orchestrator.browser.getStreamStatus', async () => {
       const mockResult = {
         hasBrowser: true,
         isStreaming: true,
         currentUrl: 'https://example.com',
       };
-      vi.mocked(mockOrchestrator.browser!.getStatus).mockResolvedValue(mockResult);
+      vi.mocked((mockOrchestrator.browser as any).getStreamStatus).mockReturnValue(mockResult);
 
       const adapter = createBrowserAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -69,7 +69,7 @@ describe('BrowserAdapter', () => {
 
       const result = await adapter.getStatus({ sessionId: 'sess-123' });
 
-      expect(mockOrchestrator.browser!.getStatus).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator.browser as any).getStreamStatus).toHaveBeenCalledWith('sess-123');
       expect(result).toEqual(mockResult);
     });
   });

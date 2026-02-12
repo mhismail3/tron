@@ -4,7 +4,6 @@
  * Controllers for feature-specific operations:
  *
  * - EventController: Event query and mutation with linearization
- * - BrowserController: Browser streaming operations
  * - WorktreeController: Git worktree operations
  * - AgentController: Agent execution
  * - ModelController: Model switching and configuration
@@ -19,15 +18,6 @@ export {
   type EventSearchOptions,
   type DeleteMessageResult,
 } from './event-controller.js';
-
-// Browser streaming
-export {
-  BrowserController,
-  createBrowserController,
-  type BrowserControllerConfig,
-  type BrowserStreamResult,
-  type BrowserStatus,
-} from './browser-controller.js';
 
 // Worktree operations
 export {

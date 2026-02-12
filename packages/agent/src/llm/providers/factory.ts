@@ -30,6 +30,7 @@ import { CLAUDE_MODELS, DEFAULT_MODEL } from './anthropic/index.js';
 import { GEMINI_MODELS } from './google/index.js';
 import { DEFAULT_GOOGLE_MODEL } from './model-ids.js';
 import { createLogger } from '@infrastructure/logging/index.js';
+import { getSettings } from '@infrastructure/settings/index.js';
 
 const logger = createLogger('provider-factory');
 
@@ -309,6 +310,7 @@ export function createProvider(config: ProviderConfig): Provider {
  * Create Anthropic provider
  */
 function createAnthropicProvider(config: ProviderConfig): Provider {
+  const settings = getSettings();
   const anthropicConfig: AnthropicConfig = {
     model: config.model,
     auth: config.auth,
@@ -316,6 +318,11 @@ function createAnthropicProvider(config: ProviderConfig): Provider {
     temperature: config.temperature,
     baseURL: config.baseURL,
     thinkingBudget: config.thinkingBudget,
+    providerSettings: {
+      api: settings.api.anthropic,
+      models: settings.models,
+      retry: settings.retry,
+    },
   };
 
   const provider = new AnthropicProvider(anthropicConfig);
@@ -346,6 +353,7 @@ function createOpenAIProvider(config: ProviderConfig): Provider {
     throw new Error('OpenAI requires OAuth authentication');
   }
 
+  const settings = getSettings();
   const openaiConfig: OpenAIConfig = {
     model: config.model,
     auth: config.auth,
@@ -353,6 +361,7 @@ function createOpenAIProvider(config: ProviderConfig): Provider {
     temperature: config.temperature,
     baseURL: config.baseURL,
     reasoningEffort: config.reasoningEffort,
+    openaiSettings: settings.api.openaiCodex,
   };
 
   const provider = new OpenAIProvider(openaiConfig);

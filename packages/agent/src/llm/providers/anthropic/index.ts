@@ -22,12 +22,9 @@ export {
   OAUTH_SYSTEM_PROMPT_PREFIX,
 } from './types.js';
 
-// Re-export provider class and helpers
+// Re-export provider class
 export {
   AnthropicProvider,
-  getDefaultModel,
-  getOAuthSystemPromptPrefix,
-  getDefaultAnthropicProviderSettings,
 } from './anthropic-provider.js';
 
 // Re-export message conversion utilities (for testing)
@@ -36,3 +33,20 @@ export {
   convertTools,
   convertResponse,
 } from './message-converter.js';
+
+// Re-export stream handler (for testing)
+export {
+  processAnthropicStream,
+  processStreamEvent,
+  createStreamState,
+  type StreamState,
+  type AnthropicMessageStream,
+} from './stream-handler.js';
+
+// Re-export auth utilities (for testing)
+export {
+  getOAuthHeaders,
+  ensureValidTokens,
+  type TokenRefreshResult,
+  type TokenPersistenceConfig,
+} from './auth.js';

@@ -21,7 +21,7 @@ export function createBrowserAdapter(deps: AdapterDependencies): BrowserManagerA
       return orchestrator.browser.stopStream(params.sessionId);
     },
     async getStatus(params) {
-      return orchestrator.browser.getStatus(params.sessionId);
+      return orchestrator.browser.getStreamStatus(params.sessionId);
     },
   };
 }

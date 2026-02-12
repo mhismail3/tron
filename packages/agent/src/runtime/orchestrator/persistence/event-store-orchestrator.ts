@@ -144,10 +144,6 @@ import {
   createEventController,
 } from '../controllers/event-controller.js';
 import {
-  BrowserController,
-  createBrowserController,
-} from '../controllers/browser-controller.js';
-import {
   WorktreeController,
   createWorktreeController,
 } from '../controllers/worktree-controller.js';
@@ -201,8 +197,8 @@ export class EventStoreOrchestrator extends EventEmitter {
   /** Event query and mutation with linearization */
   readonly events: EventController;
 
-  /** Browser streaming operations */
-  readonly browser: BrowserController;
+  /** Browser streaming and automation operations */
+  readonly browser: BrowserService;
 
   /** Git worktree operations */
   readonly worktree: WorktreeController;
@@ -463,10 +459,8 @@ export class EventStoreOrchestrator extends EventEmitter {
       },
     });
 
-    // Initialize BrowserController (browser streaming operations)
-    this.browser = createBrowserController({
-      browserService: this.browserService,
-    });
+    // Browser streaming operations — exposed directly
+    this.browser = this.browserService;
 
     // Initialize WorktreeController (git worktree operations)
     this.worktree = createWorktreeController({

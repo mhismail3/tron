@@ -6,7 +6,7 @@
  */
 
 // Main provider
-export { OpenAIProvider, getDefaultOpenAISettings } from './openai-provider.js';
+export { OpenAIProvider } from './openai-provider.js';
 
 // Types
 export type {
