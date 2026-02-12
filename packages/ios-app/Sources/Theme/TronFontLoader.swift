@@ -132,7 +132,7 @@ enum TronFontLoader {
             variations[AxisTag.slant] = 0.0
             variations[AxisTag.cursive] = 0.0
 
-        case .alanSans, .comme, .libreBaskerville, .vollkorn:
+        case .alanSans, .comme, .libreBaskerville:
             break // weight-only
 
         case .donegalOne, .ibmPlexSerif:

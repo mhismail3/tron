@@ -63,8 +63,7 @@ struct ThinkingContentView: View {
                 // Content: preview or full (compact, smaller text)
                 // Use eagerly-parsed AttributedString (not LocalizedStringKey) to avoid
                 // SDF renderer crash during navigation teardown
-                Text(TextContentView.markdownAttributedString(from: expanded ? content : previewText))
-                    .font(TronTypography.mono(size: 10, weight: .regular))
+                Text(TextContentView.markdownAttributedString(from: expanded ? content : previewText, size: TronTypography.sizeCaption))
                     .foregroundStyle(Color.secondary.opacity(0.6))
                     .italic()
                     .lineLimit(expanded ? nil : 2)

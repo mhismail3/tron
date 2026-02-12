@@ -8,7 +8,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     case donegalOne
     case ibmPlexSerif
     case libreBaskerville
-    case vollkorn
 
     var id: String { rawValue }
 
@@ -20,7 +19,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: "Donegal One"
         case .ibmPlexSerif: "IBM Plex Serif"
         case .libreBaskerville: "Libre Baskerville"
-        case .vollkorn: "Vollkorn"
         }
     }
 
@@ -32,7 +30,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: "Sturdy transitional serif"
         case .ibmPlexSerif: "Contemporary slab serif"
         case .libreBaskerville: "Classic transitional serif"
-        case .vollkorn: "Warm book serif"
         }
     }
 
@@ -45,7 +42,6 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: "DonegalOne-Regular"
         case .ibmPlexSerif: "IBMPlexSerif-Regular"
         case .libreBaskerville: "LibreBaskerville-Regular"
-        case .vollkorn: "Vollkorn-Regular"
         }
     }
 
@@ -55,7 +51,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     /// Whether this font is a variable font (vs static weight files)
     var isVariable: Bool {
         switch self {
-        case .recursive, .alanSans, .comme, .libreBaskerville, .vollkorn: true
+        case .recursive, .alanSans, .comme, .libreBaskerville: true
         case .donegalOne, .ibmPlexSerif: false
         }
     }
@@ -64,7 +60,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var customAxes: [FontAxis] {
         switch self {
         case .recursive: [.casual]
-        case .alanSans, .comme, .donegalOne, .ibmPlexSerif, .libreBaskerville, .vollkorn: []
+        case .alanSans, .comme, .donegalOne, .ibmPlexSerif, .libreBaskerville: []
         }
     }
 
@@ -77,9 +73,9 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .donegalOne: 400...400
         case .ibmPlexSerif: 300...700
         case .libreBaskerville: 400...700
-        case .vollkorn: 400...900
         }
     }
+
 }
 
 /// Variable font axes beyond weight that users can customize

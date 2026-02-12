@@ -400,7 +400,6 @@
 		D1FF05B10FA026434547CD83 /* AppConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573786916D189526D1A7C795 /* AppConstantsTests.swift */; };
 		D227BCFF3007E6E8AB7698A3 /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4C6348A82F197609B6FCECA /* MessageBubble.swift */; };
 		D26706F9E367918F95B376EB /* RulesSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41E439F6EDA04B30FEBD4516 /* RulesSettingsSection.swift */; };
-		D27D9F5E12BD27DD454BE16D /* Vollkorn-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = FE303EDB7CDA67F1A309A95F /* Vollkorn-Variable.ttf */; };
 		D3DF95E31C02DFD68776DD8A /* BrowserScreenshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71AB6F442D3C78FA3E19C340 /* BrowserScreenshotService.swift */; };
 		D4A087CD2F14088F65B8AD98 /* ThisSessionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D5A311AB1B7FF933F00153 /* ThisSessionSection.swift */; };
 		D4FC68B1B4E9BFED27CA74E7 /* ChatViewModel+ToolEventContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = E89D8DDB78A41DA0D004098E /* ChatViewModel+ToolEventContext.swift */; };
@@ -999,7 +998,6 @@
 		FD1BE5A5CFA90E4C1B372A48 /* WaitForAgentsChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitForAgentsChip.swift; sourceTree = "<group>"; };
 		FDE9A0978D5561D8DF70C5BD /* DocumentPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentPicker.swift; sourceTree = "<group>"; };
 		FE083467BD3FC013AF685716 /* ModelRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRepository.swift; sourceTree = "<group>"; };
-		FE303EDB7CDA67F1A309A95F /* Vollkorn-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Vollkorn-Variable.ttf"; sourceTree = "<group>"; };
 		FEA3C78E118EF1447D6EFEC0 /* MentionDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionDetectorTests.swift; sourceTree = "<group>"; };
 		FEA6CFF3F143AE2A118B1798 /* DashboardPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardPoller.swift; sourceTree = "<group>"; };
 		FEFB374911270AD459784A7D /* DependencyContainerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainerTests.swift; sourceTree = "<group>"; };
@@ -1618,7 +1616,6 @@
 				F72E8400474CDFE4BA272302 /* IBMPlexSerif-SemiBold.ttf */,
 				6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */,
 				5E837774214A074AC646428E /* Recursive-Variable.ttf */,
-				FE303EDB7CDA67F1A309A95F /* Vollkorn-Variable.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -2493,7 +2490,6 @@
 				A49D1B18FB4452B215A7BF05 /* IBMPlexSerif-SemiBold.ttf in Resources */,
 				CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */,
 				2310BE4C23993CC491219502 /* Recursive-Variable.ttf in Resources */,
-				D27D9F5E12BD27DD454BE16D /* Vollkorn-Variable.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -55,8 +55,8 @@ struct TextContentView: View {
 
     /// Inline-only markdown with bold fix. Used by other views (ThinkingContentView, etc.)
     @MainActor
-    static func markdownAttributedString(from content: String) -> AttributedString {
-        inlineMarkdown(from: content)
+    static func markdownAttributedString(from content: String, size: CGFloat = TronTypography.sizeBody) -> AttributedString {
+        inlineMarkdown(from: content, size: size)
     }
 
     /// Parse text into block-level markdown segments

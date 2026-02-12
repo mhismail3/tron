@@ -6,7 +6,7 @@ import Testing
 struct FontFamilyTests {
 
     @Test func allCasesCount() {
-        #expect(FontFamily.allCases.count == 7)
+        #expect(FontFamily.allCases.count == 6)
     }
 
     @Test func displayNames() {
@@ -16,7 +16,6 @@ struct FontFamilyTests {
         #expect(FontFamily.donegalOne.displayName == "Donegal One")
         #expect(FontFamily.ibmPlexSerif.displayName == "IBM Plex Serif")
         #expect(FontFamily.libreBaskerville.displayName == "Libre Baskerville")
-        #expect(FontFamily.vollkorn.displayName == "Vollkorn")
     }
 
     @Test func rawValueRoundTrip() {
@@ -43,7 +42,6 @@ struct FontFamilyTests {
         #expect(FontFamily.donegalOne.customAxes.isEmpty)
         #expect(FontFamily.ibmPlexSerif.customAxes.isEmpty)
         #expect(FontFamily.libreBaskerville.customAxes.isEmpty)
-        #expect(FontFamily.vollkorn.customAxes.isEmpty)
     }
 
     @Test func weightRanges() {
@@ -53,7 +51,6 @@ struct FontFamilyTests {
         #expect(FontFamily.donegalOne.weightRange == 400...400)
         #expect(FontFamily.ibmPlexSerif.weightRange == 300...700)
         #expect(FontFamily.libreBaskerville.weightRange == 400...700)
-        #expect(FontFamily.vollkorn.weightRange == 400...900)
     }
 
     @Test func variableFontClassification() {
@@ -61,7 +58,6 @@ struct FontFamilyTests {
         #expect(FontFamily.alanSans.isVariable == true)
         #expect(FontFamily.comme.isVariable == true)
         #expect(FontFamily.libreBaskerville.isVariable == true)
-        #expect(FontFamily.vollkorn.isVariable == true)
         #expect(FontFamily.donegalOne.isVariable == false)
         #expect(FontFamily.ibmPlexSerif.isVariable == false)
     }
