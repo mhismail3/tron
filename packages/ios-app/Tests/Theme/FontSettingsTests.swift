@@ -6,7 +6,7 @@ import Testing
 struct FontFamilyTests {
 
     @Test func allCasesCount() {
-        #expect(FontFamily.allCases.count == 5)
+        #expect(FontFamily.allCases.count == 6)
     }
 
     @Test func displayNames() {
@@ -14,6 +14,7 @@ struct FontFamilyTests {
         #expect(FontFamily.alanSans.displayName == "Alan Sans")
         #expect(FontFamily.comme.displayName == "Comme")
         #expect(FontFamily.ibmPlexSerif.displayName == "IBM Plex Serif")
+        #expect(FontFamily.libreBaskerville.displayName == "Libre Baskerville")
         #expect(FontFamily.vollkorn.displayName == "Vollkorn")
     }
 
@@ -39,6 +40,7 @@ struct FontFamilyTests {
         #expect(FontFamily.alanSans.customAxes.isEmpty)
         #expect(FontFamily.comme.customAxes.isEmpty)
         #expect(FontFamily.ibmPlexSerif.customAxes.isEmpty)
+        #expect(FontFamily.libreBaskerville.customAxes.isEmpty)
         #expect(FontFamily.vollkorn.customAxes.isEmpty)
     }
 
@@ -47,6 +49,7 @@ struct FontFamilyTests {
         #expect(FontFamily.alanSans.weightRange == 300...900)
         #expect(FontFamily.comme.weightRange == 100...900)
         #expect(FontFamily.ibmPlexSerif.weightRange == 300...700)
+        #expect(FontFamily.libreBaskerville.weightRange == 400...700)
         #expect(FontFamily.vollkorn.weightRange == 400...900)
     }
 
@@ -54,6 +57,7 @@ struct FontFamilyTests {
         #expect(FontFamily.recursive.isVariable == true)
         #expect(FontFamily.alanSans.isVariable == true)
         #expect(FontFamily.comme.isVariable == true)
+        #expect(FontFamily.libreBaskerville.isVariable == true)
         #expect(FontFamily.vollkorn.isVariable == true)
         #expect(FontFamily.ibmPlexSerif.isVariable == false)
     }
