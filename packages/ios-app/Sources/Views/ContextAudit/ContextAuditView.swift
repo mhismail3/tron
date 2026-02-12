@@ -307,6 +307,10 @@ struct ContextAuditView: View {
                                     tokens: snapshot.breakdown.tools
                                 )
 
+                                if let skills = skillStore?.skills, !skills.isEmpty {
+                                    SkillReferencesSection(skills: skills)
+                                }
+
                                 if let rules = snapshot.rules, rules.totalFiles > 0 {
                                     RulesSection(
                                         rules: rules,
@@ -318,10 +322,6 @@ struct ContextAuditView: View {
 
                                 if let memory = snapshot.memory, memory.count > 0 {
                                     MemorySection(memory: memory)
-                                }
-
-                                if let skills = skillStore?.skills, !skills.isEmpty {
-                                    SkillReferencesSection(skills: skills)
                                 }
                             }
                             .padding(.horizontal)
@@ -346,6 +346,10 @@ struct ContextAuditView: View {
                                         )
                                     }
 
+                                    if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
+                                        SessionMemoriesSection(memory: sessionMem)
+                                    }
+
                                     if !allMessages.isEmpty {
                                         MessagesContainer(
                                             messages: paginatedMessages,
@@ -356,10 +360,6 @@ struct ContextAuditView: View {
                                                 messagesLoadedCount += 10
                                             }
                                         )
-                                    }
-
-                                    if let sessionMem = detailedSnapshot?.sessionMemories, sessionMem.count > 0 {
-                                        SessionMemoriesSection(memory: sessionMem)
                                     }
                                 }
                                 .padding(.horizontal)
