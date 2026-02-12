@@ -19,7 +19,6 @@ let lastStreamParams: any;
 // vi.mock factories must not reference top-level variables.
 // We use vi.fn() inside the factory and set implementations in beforeEach.
 vi.mock('@anthropic-ai/sdk', () => ({ default: vi.fn() }));
-vi.mock('@infrastructure/settings/index.js', () => ({ getSettings: vi.fn() }));
 vi.mock('@infrastructure/logging/index.js', () => ({
   createLogger: vi.fn().mockReturnValue({
     info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(),

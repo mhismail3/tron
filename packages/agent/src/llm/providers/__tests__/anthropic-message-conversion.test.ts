@@ -23,26 +23,6 @@ vi.mock('@anthropic-ai/sdk', () => ({
   })),
 }));
 
-vi.mock('../../settings/index.js', () => ({
-  getSettings: () => ({
-    api: {
-      anthropic: {
-        oauthBetaHeaders: 'beta-1,beta-2',
-        systemPromptPrefix: "You are Claude Code.",
-      },
-    },
-    models: {
-      default: 'claude-sonnet-4-20250514',
-    },
-    retry: {
-      maxRetries: 3,
-      baseDelayMs: 1000,
-      maxDelayMs: 60000,
-      jitterFactor: 0.2,
-    },
-  }),
-}));
-
 describe('Anthropic Message Conversion', () => {
   describe('User Message Conversion', () => {
     it('should convert simple string content', () => {
