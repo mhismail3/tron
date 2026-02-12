@@ -35,6 +35,8 @@ export interface StreamState {
   outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  cacheCreation5mTokens: number;
+  cacheCreation1hTokens: number;
 }
 
 /**
@@ -53,6 +55,8 @@ export function createStreamState(): StreamState {
     outputTokens: 0,
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
+    cacheCreation5mTokens: 0,
+    cacheCreation1hTokens: 0,
   };
 }
 
@@ -86,14 +90,22 @@ export function* processStreamEvent(
           input_tokens?: number;
           cache_creation_input_tokens?: number;
           cache_read_input_tokens?: number;
+          cache_creation?: {
+            ephemeral_5m_input_tokens: number;
+            ephemeral_1h_input_tokens: number;
+          } | null;
         };
         state.inputTokens = usage.input_tokens ?? 0;
         state.cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
         state.cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+        state.cacheCreation5mTokens = usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
+        state.cacheCreation1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
         logger.info('[CACHE] API response', {
           inputTokens: state.inputTokens,
           cacheCreationTokens: state.cacheCreationTokens,
           cacheReadTokens: state.cacheReadTokens,
+          cacheCreation5m: state.cacheCreation5mTokens,
+          cacheCreation1h: state.cacheCreation1hTokens,
           cacheHit: state.cacheReadTokens > 0,
           cacheWrite: state.cacheCreationTokens > 0,
         });
@@ -209,6 +221,8 @@ async function* buildDoneEvent(
           outputTokens: state.outputTokens || assistantMessage.usage?.outputTokens || 0,
           cacheCreationTokens: state.cacheCreationTokens || assistantMessage.usage?.cacheCreationTokens,
           cacheReadTokens: state.cacheReadTokens || assistantMessage.usage?.cacheReadTokens,
+          cacheCreation5mTokens: state.cacheCreation5mTokens || undefined,
+          cacheCreation1hTokens: state.cacheCreation1hTokens || undefined,
           providerType: 'anthropic' as const,
         };
       }
@@ -241,6 +255,8 @@ function* buildFallbackDoneEvent(state: StreamState): Generator<StreamEvent> {
         outputTokens: state.outputTokens,
         cacheCreationTokens: state.cacheCreationTokens,
         cacheReadTokens: state.cacheReadTokens,
+        cacheCreation5mTokens: state.cacheCreation5mTokens || undefined,
+        cacheCreation1hTokens: state.cacheCreation1hTokens || undefined,
         providerType: 'anthropic' as const,
       },
     },

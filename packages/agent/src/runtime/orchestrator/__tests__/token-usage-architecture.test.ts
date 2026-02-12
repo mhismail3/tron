@@ -42,6 +42,8 @@ function createTokenSource(
     rawOutputTokens: outputTokens,
     rawCacheReadTokens: cacheReadTokens,
     rawCacheCreationTokens: cacheCreationTokens,
+    rawCacheCreation5mTokens: 0,
+    rawCacheCreation1hTokens: 0,
   };
 }
 

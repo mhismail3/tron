@@ -50,3 +50,9 @@ export {
   type TokenRefreshResult,
   type TokenPersistenceConfig,
 } from './auth.js';
+
+// Re-export cache pruning utilities (for testing)
+export {
+  isCacheCold,
+  pruneToolResultsForRecache,
+} from './cache-pruning.js';

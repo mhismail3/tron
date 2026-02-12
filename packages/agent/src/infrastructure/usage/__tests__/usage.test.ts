@@ -110,6 +110,34 @@ describe('calculateCost', () => {
 
     expect(cost.total).toBe(0);
   });
+
+  it('applies per-TTL pricing: 5m at 1.25x and 1h at 2.0x', () => {
+    const cost = calculateCost('claude-sonnet-4-20250514', {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheCreationTokens: 500_000,
+      cacheCreation5mTokens: 200_000, // 200K at 1.25x
+      cacheCreation1hTokens: 300_000, // 300K at 2.0x
+    });
+
+    // Base: (1M - 500K) = 500K at $3/M = $1.50
+    // 5m cache write: 200K at $3/M * 1.25 = $0.75
+    // 1h cache write: 300K at $3/M * 2.0 = $1.80
+    expect(cost.inputCost).toBeCloseTo(4.05, 2);
+  });
+
+  it('falls back to 5m multiplier when no per-TTL breakdown', () => {
+    const cost = calculateCost('claude-sonnet-4-20250514', {
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cacheCreationTokens: 500_000,
+      // No cacheCreation5mTokens or cacheCreation1hTokens
+    });
+
+    // Base: 500K at $3/M = $1.50
+    // Cache write: 500K at $3/M * 1.25 = $1.875
+    expect(cost.inputCost).toBeCloseTo(3.375, 2);
+  });
 });
 
 describe('formatCost', () => {

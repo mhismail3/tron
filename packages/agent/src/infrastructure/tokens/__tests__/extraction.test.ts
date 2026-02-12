@@ -105,6 +105,56 @@ describe('Token Extraction', () => {
       });
     });
 
+    describe('per-TTL cache creation breakdown', () => {
+      it('extracts per-TTL fields from cache_creation', () => {
+        const messageStartUsage = {
+          input_tokens: 500,
+          cache_creation_input_tokens: 300,
+          cache_read_input_tokens: 100,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 100,
+            ephemeral_1h_input_tokens: 200,
+          },
+        };
+        const messageDeltaUsage = { output_tokens: 50 };
+
+        const result = extractFromAnthropic(messageStartUsage, messageDeltaUsage, baseMeta);
+
+        expect(result.rawCacheCreation5mTokens).toBe(100);
+        expect(result.rawCacheCreation1hTokens).toBe(200);
+        // Total should still be populated from cache_creation_input_tokens
+        expect(result.rawCacheCreationTokens).toBe(300);
+      });
+
+      it('defaults per-TTL fields to 0 when cache_creation is null', () => {
+        const messageStartUsage = {
+          input_tokens: 500,
+          cache_creation_input_tokens: 200,
+          cache_creation: null,
+        };
+        const messageDeltaUsage = { output_tokens: 50 };
+
+        const result = extractFromAnthropic(messageStartUsage, messageDeltaUsage, baseMeta);
+
+        expect(result.rawCacheCreation5mTokens).toBe(0);
+        expect(result.rawCacheCreation1hTokens).toBe(0);
+        expect(result.rawCacheCreationTokens).toBe(200);
+      });
+
+      it('defaults per-TTL fields to 0 when cache_creation is absent', () => {
+        const messageStartUsage = {
+          input_tokens: 500,
+          cache_creation_input_tokens: 150,
+        };
+        const messageDeltaUsage = { output_tokens: 50 };
+
+        const result = extractFromAnthropic(messageStartUsage, messageDeltaUsage, baseMeta);
+
+        expect(result.rawCacheCreation5mTokens).toBe(0);
+        expect(result.rawCacheCreation1hTokens).toBe(0);
+      });
+    });
+
     describe('partial data handling', () => {
       it('allows message_start only (no output tokens yet)', () => {
         const messageStartUsage = { input_tokens: 500 };

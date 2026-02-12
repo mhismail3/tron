@@ -78,5 +78,7 @@ export function extractFromGoogle(
     rawOutputTokens,
     rawCacheReadTokens,
     rawCacheCreationTokens,
+    rawCacheCreation5mTokens: 0,
+    rawCacheCreation1hTokens: 0,
   };
 }

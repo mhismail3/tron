@@ -24,7 +24,8 @@ import { CLAUDE_MODELS } from './types.js';
 import { convertMessages, convertTools } from './message-converter.js';
 import { processAnthropicStream, createStreamState } from './stream-handler.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '@runtime/constants.js';
-import { composeContextParts } from '../base/context-composition.js';
+import { composeContextParts, composeContextPartsGrouped } from '../base/context-composition.js';
+import { isCacheCold, pruneToolResultsForRecache } from './cache-pruning.js';
 
 const logger = createLogger('anthropic');
 
@@ -39,6 +40,7 @@ export class AnthropicProvider {
   private isOAuth: boolean;
   private retryConfig: StreamRetryConfig;
   private providerSettings: AnthropicProviderSettings;
+  private lastApiCallTimestamp = 0;
 
   constructor(config: AnthropicConfig) {
     this.config = config;
@@ -129,6 +131,8 @@ export class AnthropicProvider {
       () => this.streamInternal(context, options),
       this.retryConfig
     );
+
+    this.lastApiCallTimestamp = Date.now();
   }
 
   /**
@@ -151,11 +155,52 @@ export class AnthropicProvider {
 
     // Sanitize messages to guarantee API compliance (handles interrupted tool calls, etc.)
     const sanitized = sanitizeMessages(context.messages);
-    const messages = convertMessages(sanitized.messages);
+    let messages = convertMessages(sanitized.messages);
     const tools = context.tools ? convertTools(context.tools) : undefined;
 
-    // Build system prompt
+    // Breakpoint 1: Tools (1h TTL for OAuth)
+    if (this.isOAuth && tools && tools.length > 0) {
+      tools[tools.length - 1]!.cache_control = { type: 'ephemeral', ttl: '1h' };
+    }
+
+    // Cache-TTL pruning: when cache is cold, prune large old tool_results
+    if (this.isOAuth && this.lastApiCallTimestamp > 0) {
+      const elapsedMs = Date.now() - this.lastApiCallTimestamp;
+      if (isCacheCold(this.lastApiCallTimestamp)) {
+        const messagesBefore = messages.length;
+        messages = pruneToolResultsForRecache(messages);
+        logger.info('[CACHE] Cache cold — pruned old tool results', {
+          elapsedMs,
+          elapsedSec: Math.round(elapsedMs / 1000),
+          messageCount: messagesBefore,
+        });
+      } else {
+        logger.debug('[CACHE] Cache warm', { elapsedMs, elapsedSec: Math.round(elapsedMs / 1000) });
+      }
+    }
+
+    // Breakpoint 4: Last user message content (5m TTL for OAuth)
+    if (this.isOAuth) {
+      this.applyCacheControlToLastUserMessage(messages);
+    }
+
+    // Build system prompt (includes breakpoints 2 & 3)
     const systemParam = this.buildSystemPrompt(context);
+
+    if (this.isOAuth) {
+      const systemBlocks = systemParam as SystemPromptBlock[];
+      const breakpoints = systemBlocks
+        .map((b, i) => b.cache_control ? `[${i}]=${b.cache_control.ttl ?? '5m'}` : null)
+        .filter(Boolean);
+      logger.info('[CACHE] Breakpoints configured', {
+        toolBreakpoint: tools && tools.length > 0 ? '1h' : 'none',
+        systemBreakpoints: breakpoints,
+        systemBlockCount: systemBlocks.length,
+        messageBreakpoint: '5m',
+        messageCount: messages.length,
+        isFirstRequest: this.lastApiCallTimestamp === 0,
+      });
+    }
 
     // Build request parameters
     const params: Anthropic.Messages.MessageCreateParams = {
@@ -200,23 +245,51 @@ export class AnthropicProvider {
       hasMemoryContent: !!context.memoryContent,
     });
 
-    const parts = composeContextParts(context);
-
     if (this.isOAuth) {
+      const { stable, volatile } = composeContextPartsGrouped(context);
       const systemBlocks: SystemPromptBlock[] = [
         { type: 'text', text: this.providerSettings.api.systemPromptPrefix },
-        ...parts.map(text => ({ type: 'text' as const, text })),
+        ...stable.map(text => ({ type: 'text' as const, text })),
+        ...volatile.map(text => ({ type: 'text' as const, text })),
       ];
 
-      // Add cache control to last block
-      const lastBlock = systemBlocks[systemBlocks.length - 1];
-      if (lastBlock) {
-        lastBlock.cache_control = { type: 'ephemeral' };
+      if (volatile.length > 0) {
+        // Breakpoint 2: Last stable block → 1h TTL
+        const lastStableIndex = stable.length; // offset by 1 for prefix block
+        if (lastStableIndex > 0) {
+          systemBlocks[lastStableIndex]!.cache_control = { type: 'ephemeral', ttl: '1h' };
+        }
+        // Breakpoint 3: Last volatile block → 5m TTL (default)
+        systemBlocks[systemBlocks.length - 1]!.cache_control = { type: 'ephemeral' };
+      } else if (stable.length > 0) {
+        // Only stable content — use 1h TTL on last block
+        systemBlocks[systemBlocks.length - 1]!.cache_control = { type: 'ephemeral', ttl: '1h' };
+      } else {
+        // Only prefix — use default 5m
+        systemBlocks[systemBlocks.length - 1]!.cache_control = { type: 'ephemeral' };
       }
 
       return systemBlocks;
     } else {
+      const parts = composeContextParts(context);
       return parts.length > 0 ? parts.join('\n\n') : undefined;
+    }
+  }
+
+  /**
+   * Apply cache_control to the last content block of the last user message.
+   * Breakpoint 4: 5m TTL on last user message.
+   */
+  private applyCacheControlToLastUserMessage(messages: Anthropic.Messages.MessageParam[]): void {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]!;
+      if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.length > 0) {
+        const lastBlock = msg.content[msg.content.length - 1];
+        if (typeof lastBlock === 'object' && lastBlock !== null) {
+          (lastBlock as any).cache_control = { type: 'ephemeral' };
+        }
+        break;
+      }
     }
   }
 

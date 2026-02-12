@@ -5,7 +5,7 @@
  * with correct wrapping for each context field.
  */
 import { describe, it, expect } from 'vitest';
-import { composeContextParts } from '../context-composition.js';
+import { composeContextParts, composeContextPartsGrouped } from '../context-composition.js';
 import type { Context } from '@core/types/index.js';
 
 function createContext(overrides: Partial<Context> = {}): Context {
@@ -144,6 +144,79 @@ describe('composeContextParts', () => {
     expect(result).toEqual([
       'system',
       'memory',
+      'skill',
+    ]);
+  });
+});
+
+describe('composeContextPartsGrouped', () => {
+  it('splits all fields into correct stable/volatile groups', () => {
+    const result = composeContextPartsGrouped(createContext({
+      systemPrompt: 'system',
+      rulesContent: 'rules',
+      memoryContent: 'memory',
+      dynamicRulesContext: 'dynamic',
+      skillContext: 'skill',
+      subagentResultsContext: 'subagent',
+      taskContext: 'tasks',
+    }));
+
+    expect(result.stable).toEqual([
+      'system',
+      '# Project Rules\n\nrules',
+      'memory',
+    ]);
+    expect(result.volatile).toEqual([
+      '# Active Rules\n\ndynamic',
+      'skill',
+      'subagent',
+      '<task-context>\ntasks\n</task-context>',
+    ]);
+  });
+
+  it('returns only stable parts when no volatile fields', () => {
+    const result = composeContextPartsGrouped(createContext({
+      systemPrompt: 'system',
+      rulesContent: 'rules',
+    }));
+
+    expect(result.stable).toEqual(['system', '# Project Rules\n\nrules']);
+    expect(result.volatile).toEqual([]);
+  });
+
+  it('returns only volatile parts when no stable fields', () => {
+    const result = composeContextPartsGrouped(createContext({
+      dynamicRulesContext: 'dynamic',
+      taskContext: 'tasks',
+    }));
+
+    expect(result.stable).toEqual([]);
+    expect(result.volatile).toEqual([
+      '# Active Rules\n\ndynamic',
+      '<task-context>\ntasks\n</task-context>',
+    ]);
+  });
+
+  it('returns empty groups when context has no content fields', () => {
+    const result = composeContextPartsGrouped(createContext());
+
+    expect(result.stable).toEqual([]);
+    expect(result.volatile).toEqual([]);
+  });
+
+  it('preserves canonical ordering within each group', () => {
+    const result = composeContextPartsGrouped(createContext({
+      memoryContent: 'memory',
+      systemPrompt: 'system',
+      skillContext: 'skill',
+      dynamicRulesContext: 'dynamic',
+    }));
+
+    // Stable: system before memory (canonical order)
+    expect(result.stable).toEqual(['system', 'memory']);
+    // Volatile: dynamic before skill (canonical order)
+    expect(result.volatile).toEqual([
+      '# Active Rules\n\ndynamic',
       'skill',
     ]);
   });

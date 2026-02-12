@@ -20,6 +20,10 @@ export interface AnthropicMessageStartUsage {
   input_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  cache_creation?: {
+    ephemeral_5m_input_tokens: number;
+    ephemeral_1h_input_tokens: number;
+  } | null;
 }
 
 /**
@@ -74,6 +78,8 @@ export function extractFromAnthropic(
   const rawOutputTokens = messageDeltaUsage?.output_tokens ?? 0;
   const rawCacheReadTokens = messageStartUsage?.cache_read_input_tokens ?? 0;
   const rawCacheCreationTokens = messageStartUsage?.cache_creation_input_tokens ?? 0;
+  const rawCacheCreation5mTokens = messageStartUsage?.cache_creation?.ephemeral_5m_input_tokens ?? 0;
+  const rawCacheCreation1hTokens = messageStartUsage?.cache_creation?.ephemeral_1h_input_tokens ?? 0;
 
   // Log warning if input_tokens is 0 but we have cache tokens (unusual)
   if (rawInputTokens === 0 && (rawCacheReadTokens > 0 || rawCacheCreationTokens > 0)) {
@@ -102,5 +108,7 @@ export function extractFromAnthropic(
     rawOutputTokens,
     rawCacheReadTokens,
     rawCacheCreationTokens,
+    rawCacheCreation5mTokens,
+    rawCacheCreation1hTokens,
   };
 }

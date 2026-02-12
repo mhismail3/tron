@@ -173,6 +173,8 @@ export interface TokenUsage {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
+  cacheCreation5mTokens?: number;
+  cacheCreation1hTokens?: number;
   /** Provider type for normalization (different providers report tokens differently) */
   providerType?: ProviderType;
 }

@@ -33,6 +33,8 @@ function createMockTokenRecord(overrides: Partial<{
       rawOutputTokens: overrides.outputTokens ?? 50,
       rawCacheReadTokens: 0,
       rawCacheCreationTokens: 0,
+      rawCacheCreation5mTokens: 0,
+      rawCacheCreation1hTokens: 0,
     },
     computed: {
       contextWindowTokens: overrides.contextWindowTokens ?? 1000,

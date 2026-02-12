@@ -40,12 +40,17 @@ vi.mock('@core/utils/retry.js', () => ({
   extractRetryAfterFromError: vi.fn(),
   sleepWithAbort: vi.fn(),
 }));
+vi.mock('../anthropic/cache-pruning.js', () => ({
+  isCacheCold: vi.fn(),
+  pruneToolResultsForRecache: vi.fn(),
+}));
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createLogger } from '@infrastructure/logging/index.js';
 import { shouldRefreshTokens } from '@infrastructure/auth/oauth.js';
 import { convertMessages, convertTools, convertResponse } from '../anthropic/message-converter.js';
 import { sanitizeMessages } from '@core/utils/message-sanitizer.js';
+import { isCacheCold, pruneToolResultsForRecache } from '../anthropic/cache-pruning.js';
 import { AnthropicProvider } from '../anthropic/anthropic-provider.js';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '@runtime/constants.js';
 
@@ -75,6 +80,8 @@ describe('Anthropic Provider', () => {
       info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), trace: vi.fn(),
     } as any);
     vi.mocked(shouldRefreshTokens).mockReturnValue(false);
+    vi.mocked(isCacheCold).mockReturnValue(false);
+    vi.mocked(pruneToolResultsForRecache).mockImplementation((msgs) => msgs);
     vi.mocked(convertMessages).mockReturnValue([]);
     vi.mocked(convertTools).mockReturnValue([]);
     vi.mocked(convertResponse).mockReturnValue({
@@ -319,6 +326,226 @@ describe('Anthropic Provider', () => {
       const provider = createApiKeyProvider('claude-unknown-model');
       await collectStream(provider, ctx, {});
       expect(lastStreamParams.max_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
+    });
+  });
+
+  describe('Cache Strategy', () => {
+    describe('OAuth: system prompt breakpoints', () => {
+      it('places 1h TTL on last stable block and 5m on last volatile block', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+
+        const provider = createOAuthProv('claude-opus-4-6');
+        const ctxWithParts: Context = {
+          messages: [{ role: 'user', content: 'Hello' }],
+          systemPrompt: 'You are Tron.',
+          rulesContent: 'Use TypeScript.',
+          memoryContent: '# Memory',
+          dynamicRulesContext: 'Dynamic rule',
+          skillContext: '<skill>test</skill>',
+        };
+
+        await collectStream(provider, ctxWithParts, {});
+
+        // System blocks: prefix + system + rules + memory (stable) + dynamic + skill (volatile)
+        const systemBlocks = lastStreamParams.system;
+        expect(Array.isArray(systemBlocks)).toBe(true);
+
+        // Find last stable block (memory = index 3, since 0=prefix, 1=system, 2=rules, 3=memory)
+        // Stable: systemPrompt, rulesContent, memoryContent → blocks at indices 1, 2, 3
+        // Last stable block should have ttl: '1h'
+        const stableBlocks = systemBlocks.filter(
+          (b: any) => b.cache_control?.ttl === '1h'
+        );
+        expect(stableBlocks).toHaveLength(1);
+        expect(stableBlocks[0].text).toBe('# Memory');
+
+        // Last volatile block (skill) should have cache_control without ttl (defaults to 5m)
+        const lastBlock = systemBlocks[systemBlocks.length - 1];
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+      });
+
+      it('only places stable breakpoint when no volatile blocks exist', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+
+        const provider = createOAuthProv('claude-opus-4-6');
+        const ctxStableOnly: Context = {
+          messages: [{ role: 'user', content: 'Hello' }],
+          systemPrompt: 'You are Tron.',
+          rulesContent: 'Use TypeScript.',
+        };
+
+        await collectStream(provider, ctxStableOnly, {});
+
+        const systemBlocks = lastStreamParams.system;
+        // Last block should have 1h TTL (stable only)
+        const lastBlock = systemBlocks[systemBlocks.length - 1];
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+      });
+    });
+
+    describe('API key: no cache_control', () => {
+      it('returns plain string system prompt', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+
+        const provider = createApiKeyProvider('claude-opus-4-6');
+        const ctxWithParts: Context = {
+          messages: [{ role: 'user', content: 'Hello' }],
+          systemPrompt: 'You are Tron.',
+        };
+
+        await collectStream(provider, ctxWithParts, {});
+
+        expect(typeof lastStreamParams.system).toBe('string');
+      });
+    });
+
+    describe('OAuth: tool cache_control', () => {
+      it('places 1h TTL on last tool', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+        vi.mocked(convertTools).mockReturnValue([
+          { name: 'Read', input_schema: {} },
+          { name: 'Write', input_schema: {} },
+        ] as any);
+
+        const provider = createOAuthProv('claude-opus-4-6');
+        const ctxWithTools: Context = {
+          messages: [{ role: 'user', content: 'Hello' }],
+          tools: [{ name: 'Read' } as any, { name: 'Write' } as any],
+        };
+
+        await collectStream(provider, ctxWithTools, {});
+
+        const tools = lastStreamParams.tools;
+        // Last tool should have cache_control
+        expect(tools[tools.length - 1].cache_control).toEqual({
+          type: 'ephemeral',
+          ttl: '1h',
+        });
+        // First tool should NOT have cache_control
+        expect(tools[0].cache_control).toBeUndefined();
+      });
+
+      it('API key: tools have no cache_control', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+        vi.mocked(convertTools).mockReturnValue([
+          { name: 'Read', input_schema: {} },
+        ] as any);
+
+        const provider = createApiKeyProvider('claude-opus-4-6');
+        const ctxWithTools: Context = {
+          messages: [{ role: 'user', content: 'Hello' }],
+          tools: [{ name: 'Read' } as any],
+        };
+
+        await collectStream(provider, ctxWithTools, {});
+
+        expect(lastStreamParams.tools[0].cache_control).toBeUndefined();
+      });
+    });
+
+    describe('OAuth: message cache_control', () => {
+      it('places 5m cache_control on last user message content block', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+        vi.mocked(convertMessages).mockReturnValue([
+          { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+          { role: 'user', content: [{ type: 'text', text: 'World' }] },
+        ] as any);
+
+        const provider = createOAuthProv('claude-opus-4-6');
+        await collectStream(provider, ctx, {});
+
+        const messages = lastStreamParams.messages;
+        // Last user message's last content block should have cache_control
+        const lastUserMsg = messages[2]; // index 2 = last user
+        expect(lastUserMsg.content[0].cache_control).toEqual({ type: 'ephemeral' });
+        // First user message should NOT have cache_control
+        expect(messages[0].content[0].cache_control).toBeUndefined();
+      });
+    });
+
+    describe('no tools: 3 breakpoints only', () => {
+      it('uses 3 breakpoints (system stable + volatile + messages) when no tools', async () => {
+        vi.mocked(sanitizeMessages).mockReturnValue({
+          messages: [{ role: 'user', content: 'Hello' }],
+          wasSanitized: false,
+        } as any);
+        vi.mocked(convertMessages).mockReturnValue([
+          { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
+        ] as any);
+
+        const provider = createOAuthProv('claude-opus-4-6');
+        const ctxNoTools: Context = {
+          messages: [{ role: 'user', content: 'Hello' }],
+          systemPrompt: 'You are Tron.',
+          dynamicRulesContext: 'Dynamic rule',
+        };
+
+        await collectStream(provider, ctxNoTools, {});
+
+        // No tool cache_control (tools is undefined)
+        expect(lastStreamParams.tools).toBeUndefined();
+        // System prompt has breakpoints
+        expect(Array.isArray(lastStreamParams.system)).toBe(true);
+        // Messages have breakpoint
+        const lastMsg = lastStreamParams.messages[0];
+        expect(lastMsg.content[0].cache_control).toEqual({ type: 'ephemeral' });
+      });
+    });
+
+    describe('Cache Pruning Integration', () => {
+      it('does not prune on first call (lastApiCallTimestamp is 0)', async () => {
+        const provider = createOAuthProv('claude-sonnet-4-5-20250929');
+        await collectStream(provider, ctx, {});
+
+        expect(isCacheCold).not.toHaveBeenCalled();
+        expect(pruneToolResultsForRecache).not.toHaveBeenCalled();
+      });
+
+      it('does not prune when cache is warm (within 5m)', async () => {
+        vi.mocked(isCacheCold).mockReturnValue(false);
+        const provider = createOAuthProv('claude-sonnet-4-5-20250929');
+
+        // First call — sets lastApiCallTimestamp
+        await collectStream(provider, ctx, {});
+        // Second call — cache is warm
+        await collectStream(provider, ctx, {});
+
+        expect(isCacheCold).toHaveBeenCalled();
+        expect(pruneToolResultsForRecache).not.toHaveBeenCalled();
+      });
+
+      it('prunes messages when cache is cold (after 5m idle)', async () => {
+        const provider = createOAuthProv('claude-sonnet-4-5-20250929');
+
+        // First call — sets lastApiCallTimestamp
+        await collectStream(provider, ctx, {});
+
+        // Now mock cache as cold for second call
+        vi.mocked(isCacheCold).mockReturnValue(true);
+        await collectStream(provider, ctx, {});
+
+        expect(isCacheCold).toHaveBeenCalled();
+        expect(pruneToolResultsForRecache).toHaveBeenCalled();
+      });
     });
   });
 

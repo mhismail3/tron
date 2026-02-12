@@ -270,6 +270,8 @@ export interface ResponseCompleteEvent extends BaseTronEvent {
     outputTokens: number;
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
+    cacheCreation5mTokens?: number;
+    cacheCreation1hTokens?: number;
   };
   /** Whether the response contains tool calls */
   hasToolCalls: boolean;

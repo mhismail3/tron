@@ -41,8 +41,9 @@ import { detectProviderFromModel, getModelInfo } from '@llm/providers/factory.js
 interface PricingTier {
   inputPerMillion: number;
   outputPerMillion: number;
-  cacheWriteMultiplier: number;  // 1.25x for 5-min, 2x for 1-hour
-  cacheReadMultiplier: number;   // 0.1x (90% discount)
+  cacheWrite5mMultiplier: number;  // 1.25x for 5-min TTL
+  cacheWrite1hMultiplier: number;  // 2.0x for 1-hour TTL
+  cacheReadMultiplier: number;     // 0.1x (90% discount)
 }
 
 const CLAUDE_PRICING: Record<string, PricingTier> = {
@@ -50,60 +51,69 @@ const CLAUDE_PRICING: Record<string, PricingTier> = {
   [CLAUDE_OPUS_4_6]: {
     inputPerMillion: 5,
     outputPerMillion: 25,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   // Claude 4.5 models (Current Generation)
   [CLAUDE_OPUS_4_5]: {
     inputPerMillion: 5,
     outputPerMillion: 25,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   [CLAUDE_SONNET_4_5]: {
     inputPerMillion: 3,
     outputPerMillion: 15,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   [CLAUDE_HAIKU_4_5]: {
     inputPerMillion: 1,
     outputPerMillion: 5,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   // Claude 4.1 models (Legacy - August 2025)
   [CLAUDE_OPUS_4_1]: {
     inputPerMillion: 15,
     outputPerMillion: 75,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   // Claude 4 models (Legacy - May 2025)
   [CLAUDE_OPUS_4]: {
     inputPerMillion: 15,
     outputPerMillion: 75,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   [CLAUDE_SONNET_4]: {
     inputPerMillion: 3,
     outputPerMillion: 15,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   // Claude 3.7 Sonnet (Legacy - February 2025)
   [CLAUDE_3_7_SONNET]: {
     inputPerMillion: 3,
     outputPerMillion: 15,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
   // Claude 3 Haiku (Legacy)
   [CLAUDE_3_HAIKU]: {
     inputPerMillion: 0.25,
     outputPerMillion: 1.25,
-    cacheWriteMultiplier: 1.25,
+    cacheWrite5mMultiplier: 1.25,
+    cacheWrite1hMultiplier: 2.0,
     cacheReadMultiplier: 0.1,
   },
 };
@@ -113,26 +123,30 @@ const GOOGLE_PRICING: Record<string, PricingTier> = {
   [GEMINI_3_PRO_PREVIEW]: {
     inputPerMillion: 1.25,
     outputPerMillion: 5,
-    cacheWriteMultiplier: 1,
+    cacheWrite5mMultiplier: 1,
+    cacheWrite1hMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
   [GEMINI_3_FLASH_PREVIEW]: {
     inputPerMillion: 0.075,
     outputPerMillion: 0.3,
-    cacheWriteMultiplier: 1,
+    cacheWrite5mMultiplier: 1,
+    cacheWrite1hMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
   // Gemini 2.5 models
   [GEMINI_2_5_PRO]: {
     inputPerMillion: 1.25,
     outputPerMillion: 5,
-    cacheWriteMultiplier: 1,
+    cacheWrite5mMultiplier: 1,
+    cacheWrite1hMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
   [GEMINI_2_5_FLASH]: {
     inputPerMillion: 0.075,
     outputPerMillion: 0.3,
-    cacheWriteMultiplier: 1,
+    cacheWrite5mMultiplier: 1,
+    cacheWrite1hMultiplier: 1,
     cacheReadMultiplier: 0.25,
   },
 };
@@ -178,7 +192,8 @@ function openAIPricingFromInfo(info: Record<string, unknown>): PricingTier | nul
   return {
     inputPerMillion: input,
     outputPerMillion: output,
-    cacheWriteMultiplier: 1,
+    cacheWrite5mMultiplier: 1,
+    cacheWrite1hMultiplier: 1,
     cacheReadMultiplier: typeof cacheRead === 'number' && input > 0 ? cacheRead / input : 0.1,
   };
 }
@@ -255,16 +270,27 @@ export function calculateCost(
   const outputTokens = usage.outputTokens;
   const cacheCreationTokens = usage.cacheCreationTokens ?? 0;
   const cacheReadTokens = usage.cacheReadTokens ?? 0;
+  const cacheCreation5mTokens = usage.cacheCreation5mTokens ?? 0;
+  const cacheCreation1hTokens = usage.cacheCreation1hTokens ?? 0;
 
   // Calculate input cost components
   // Base input tokens (excluding cache tokens which are billed separately)
-  // Use max(0) to handle edge cases where cache tokens might exceed reported input
   const baseInputTokens = Math.max(0, inputTokens - cacheReadTokens - cacheCreationTokens);
   const baseInputCost = (baseInputTokens / 1_000_000) * pricing.inputPerMillion;
 
-  // Cache creation cost (higher rate)
-  const cacheCreationCost = (cacheCreationTokens / 1_000_000) *
-    pricing.inputPerMillion * pricing.cacheWriteMultiplier;
+  // Cache creation cost — use per-TTL pricing when breakdown is available
+  let cacheCreationCost: number;
+  if (cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0) {
+    const cost5m = (cacheCreation5mTokens / 1_000_000) *
+      pricing.inputPerMillion * pricing.cacheWrite5mMultiplier;
+    const cost1h = (cacheCreation1hTokens / 1_000_000) *
+      pricing.inputPerMillion * pricing.cacheWrite1hMultiplier;
+    cacheCreationCost = cost5m + cost1h;
+  } else {
+    // Backward compat: fall back to 5m multiplier for total
+    cacheCreationCost = (cacheCreationTokens / 1_000_000) *
+      pricing.inputPerMillion * pricing.cacheWrite5mMultiplier;
+  }
 
   // Cache read cost (discounted rate)
   const cacheReadCost = (cacheReadTokens / 1_000_000) *

@@ -157,6 +157,8 @@ export class TurnEventHandler {
         outputTokens: number;
         cacheReadTokens?: number;
         cacheCreationTokens?: number;
+        cacheCreation5mTokens?: number;
+        cacheCreation1hTokens?: number;
       };
     };
 
@@ -176,6 +178,8 @@ export class TurnEventHandler {
               rawOutputTokens: tokenRecord.source.rawOutputTokens,
               rawCacheReadTokens: tokenRecord.source.rawCacheReadTokens,
               rawCacheCreationTokens: tokenRecord.source.rawCacheCreationTokens,
+              rawCacheCreation5mTokens: tokenRecord.source.rawCacheCreation5mTokens,
+              rawCacheCreation1hTokens: tokenRecord.source.rawCacheCreation1hTokens,
             }
           : 'NOT_COMPUTED',
         computed: tokenRecord
@@ -271,6 +275,8 @@ export class TurnEventHandler {
         outputTokens: number;
         cacheReadTokens?: number;
         cacheCreationTokens?: number;
+        cacheCreation5mTokens?: number;
+        cacheCreation1hTokens?: number;
       };
     },
     active: EventContext['active']
@@ -283,6 +289,8 @@ export class TurnEventHandler {
         outputTokens: turnEndEvent.tokenUsage.outputTokens,
         cacheReadTokens: turnEndEvent.tokenUsage.cacheReadTokens,
         cacheCreationTokens: turnEndEvent.tokenUsage.cacheCreationTokens,
+        cacheCreation5mTokens: turnEndEvent.tokenUsage.cacheCreation5mTokens,
+        cacheCreation1hTokens: turnEndEvent.tokenUsage.cacheCreation1hTokens,
       });
       // Use calculated cost if agent didn't provide one or provided 0
       if (turnCost === undefined || turnCost === 0) {
@@ -313,6 +321,9 @@ export class TurnEventHandler {
               rawInputTokens: tokenRecord.source.rawInputTokens,
               rawOutputTokens: tokenRecord.source.rawOutputTokens,
               rawCacheReadTokens: tokenRecord.source.rawCacheReadTokens,
+              rawCacheCreationTokens: tokenRecord.source.rawCacheCreationTokens,
+              rawCacheCreation5m: tokenRecord.source.rawCacheCreation5mTokens,
+              rawCacheCreation1h: tokenRecord.source.rawCacheCreation1hTokens,
             },
             computed: {
               newInputTokens: tokenRecord.computed.newInputTokens,

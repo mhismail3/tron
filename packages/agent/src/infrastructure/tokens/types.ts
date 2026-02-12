@@ -50,6 +50,12 @@ export interface TokenSource {
    * It tells you how many inputTokens are being written to cache (costs 25% more).
    */
   readonly rawCacheCreationTokens: number;
+
+  /** Cache creation tokens with 5-minute TTL (Anthropic per-TTL breakdown) */
+  readonly rawCacheCreation5mTokens: number;
+
+  /** Cache creation tokens with 1-hour TTL (Anthropic per-TTL breakdown) */
+  readonly rawCacheCreation1hTokens: number;
 }
 
 // =============================================================================
@@ -154,6 +160,12 @@ export interface AccumulatedTokens {
   /** Total cache creation tokens across all turns */
   cacheCreationTokens: number;
 
+  /** Total cache creation tokens with 5-minute TTL */
+  cacheCreation5mTokens: number;
+
+  /** Total cache creation tokens with 1-hour TTL */
+  cacheCreation1hTokens: number;
+
   /** Total cost across all turns */
   cost: number;
 }
@@ -250,6 +262,8 @@ export function createEmptyTokenState(maxContextSize: number = 200_000): TokenSt
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
+      cacheCreation5mTokens: 0,
+      cacheCreation1hTokens: 0,
       cost: 0,
     },
     contextWindow: {
@@ -271,6 +285,8 @@ export function createEmptyAccumulatedTokens(): AccumulatedTokens {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
+    cacheCreation5mTokens: 0,
+    cacheCreation1hTokens: 0,
     cost: 0,
   };
 }

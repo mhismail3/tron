@@ -159,6 +159,8 @@ export class AgentTurnRunner implements ITurnRunner {
             outputTokens: assistantMessage.usage.outputTokens,
             cacheReadTokens: assistantMessage.usage.cacheReadTokens,
             cacheCreationTokens: assistantMessage.usage.cacheCreationTokens,
+            cacheCreation5mTokens: assistantMessage.usage.cacheCreation5mTokens,
+            cacheCreation1hTokens: assistantMessage.usage.cacheCreation1hTokens,
           }
         : undefined;
 
@@ -172,6 +174,8 @@ export class AgentTurnRunner implements ITurnRunner {
               outputTokens: tokenUsageForEvent.outputTokens,
               cacheRead: tokenUsageForEvent.cacheReadTokens ?? 0,
               cacheCreation: tokenUsageForEvent.cacheCreationTokens ?? 0,
+              cacheCreation5m: tokenUsageForEvent.cacheCreation5mTokens ?? 0,
+              cacheCreation1h: tokenUsageForEvent.cacheCreation1hTokens ?? 0,
             }
           : 'MISSING',
       });

@@ -35,6 +35,8 @@ function createSource(
     rawOutputTokens,
     rawCacheReadTokens,
     rawCacheCreationTokens,
+    rawCacheCreation5mTokens: 0,
+    rawCacheCreation1hTokens: 0,
   };
 }
 
@@ -266,6 +268,8 @@ describe('TokenStateManager', () => {
         outputTokens: 250,
         cacheReadTokens: 16000,
         cacheCreationTokens: 0,
+        cacheCreation5mTokens: 0,
+        cacheCreation1hTokens: 0,
         cost: 0.05,
       };
 
@@ -296,6 +300,8 @@ describe('TokenStateManager', () => {
         outputTokens: 100,
         cacheReadTokens: 8000,
         cacheCreationTokens: 0,
+        cacheCreation5mTokens: 0,
+        cacheCreation1hTokens: 0,
         cost: 0.02,
       };
 

@@ -429,6 +429,8 @@ export class TurnContentTracker {
       outputTokens: number;
       cacheReadTokens?: number;
       cacheCreationTokens?: number;
+      cacheCreation5mTokens?: number;
+      cacheCreation1hTokens?: number;
     },
     sessionId: string = ''
   ): void {
@@ -444,6 +446,8 @@ export class TurnContentTracker {
       rawOutputTokens: tokenUsage.outputTokens,
       rawCacheReadTokens: tokenUsage.cacheReadTokens ?? 0,
       rawCacheCreationTokens: tokenUsage.cacheCreationTokens ?? 0,
+      rawCacheCreation5mTokens: tokenUsage.cacheCreation5mTokens ?? 0,
+      rawCacheCreation1hTokens: tokenUsage.cacheCreation1hTokens ?? 0,
     };
 
     // Create metadata
@@ -464,6 +468,11 @@ export class TurnContentTracker {
       turn: this.currentTurn,
       providerType: this.currentProviderType,
       rawInputTokens: tokenUsage.inputTokens,
+      rawOutputTokens: tokenUsage.outputTokens,
+      rawCacheReadTokens: tokenUsage.cacheReadTokens,
+      rawCacheCreationTokens: tokenUsage.cacheCreationTokens,
+      rawCacheCreation5mTokens: tokenUsage.cacheCreation5mTokens,
+      rawCacheCreation1hTokens: tokenUsage.cacheCreation1hTokens,
       newInputTokens: this.lastTokenRecord.computed.newInputTokens,
       contextWindowTokens: this.lastTokenRecord.computed.contextWindowTokens,
       baseline: this.previousContextBaseline,

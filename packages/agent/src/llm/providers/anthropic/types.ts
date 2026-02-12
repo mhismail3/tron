@@ -235,5 +235,5 @@ export const OAUTH_SYSTEM_PROMPT_PREFIX = "You are Claude Code, Anthropic's offi
 export type SystemPromptBlock = {
   type: 'text';
   text: string;
-  cache_control?: { type: 'ephemeral' };
+  cache_control?: { type: 'ephemeral'; ttl?: '5m' | '1h' };
 };

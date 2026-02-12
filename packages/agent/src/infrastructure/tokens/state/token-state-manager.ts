@@ -86,6 +86,8 @@ export class TokenStateManager {
     this.state.accumulated.outputTokens += source.rawOutputTokens;
     this.state.accumulated.cacheReadTokens += source.rawCacheReadTokens;
     this.state.accumulated.cacheCreationTokens += source.rawCacheCreationTokens;
+    this.state.accumulated.cacheCreation5mTokens += source.rawCacheCreation5mTokens;
+    this.state.accumulated.cacheCreation1hTokens += source.rawCacheCreation1hTokens;
     this.state.accumulated.cost += cost ?? 0;
 
     // Update context window state
@@ -101,9 +103,14 @@ export class TokenStateManager {
       provider: source.provider,
       rawInput: source.rawInputTokens,
       rawOutput: source.rawOutputTokens,
+      rawCacheRead: source.rawCacheReadTokens,
+      rawCacheCreation: source.rawCacheCreationTokens,
+      rawCacheCreation5m: source.rawCacheCreation5mTokens,
+      rawCacheCreation1h: source.rawCacheCreation1hTokens,
       contextWindow: record.computed.contextWindowTokens,
       newInput: record.computed.newInputTokens,
       accumulatedInput: this.state.accumulated.inputTokens,
+      accumulatedCacheRead: this.state.accumulated.cacheReadTokens,
     });
 
     return record;

@@ -84,6 +84,12 @@ describe('Anthropic Stream Handler', () => {
       expect(state.cacheCreationTokens).toBe(0);
       expect(state.cacheReadTokens).toBe(0);
     });
+
+    it('initializes per-TTL cache creation fields to 0', () => {
+      const state = createStreamState();
+      expect(state.cacheCreation5mTokens).toBe(0);
+      expect(state.cacheCreation1hTokens).toBe(0);
+    });
   });
 
   describe('processStreamEvent', () => {
@@ -117,6 +123,47 @@ describe('Anthropic Stream Handler', () => {
 
         expect(events).toHaveLength(0);
         expect(state.inputTokens).toBe(0);
+      });
+
+      it('extracts per-TTL cache creation from cache_creation field', () => {
+        const state = createStreamState();
+        const event = {
+          type: 'message_start' as const,
+          message: {
+            usage: {
+              input_tokens: 100,
+              cache_creation_input_tokens: 50,
+              cache_read_input_tokens: 25,
+              cache_creation: {
+                ephemeral_5m_input_tokens: 20,
+                ephemeral_1h_input_tokens: 30,
+              },
+            },
+          },
+        };
+
+        collectSync(processStreamEvent(event as any, state));
+
+        expect(state.cacheCreation5mTokens).toBe(20);
+        expect(state.cacheCreation1hTokens).toBe(30);
+      });
+
+      it('defaults per-TTL fields to 0 when cache_creation is absent', () => {
+        const state = createStreamState();
+        const event = {
+          type: 'message_start' as const,
+          message: {
+            usage: {
+              input_tokens: 100,
+              cache_creation_input_tokens: 50,
+            },
+          },
+        };
+
+        collectSync(processStreamEvent(event as any, state));
+
+        expect(state.cacheCreation5mTokens).toBe(0);
+        expect(state.cacheCreation1hTokens).toBe(0);
       });
     });
 
@@ -523,6 +570,52 @@ describe('Anthropic Stream Handler', () => {
       expect(doneEvent.message.usage.outputTokens).toBe(10);
       expect(doneEvent.message.usage.cacheCreationTokens).toBe(80);
       expect(doneEvent.message.usage.cacheReadTokens).toBe(20);
+    });
+
+    it('includes per-TTL cache creation in done event usage', async () => {
+      vi.mocked(convertResponse).mockReturnValue({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Cached' }],
+        usage: { inputTokens: 100, outputTokens: 10, providerType: 'anthropic' },
+      } as any);
+
+      const stream = createMockStream(
+        [
+          {
+            type: 'message_start',
+            message: {
+              usage: {
+                input_tokens: 100,
+                cache_creation_input_tokens: 80,
+                cache_read_input_tokens: 20,
+                cache_creation: {
+                  ephemeral_5m_input_tokens: 30,
+                  ephemeral_1h_input_tokens: 50,
+                },
+              },
+            },
+          },
+          { type: 'content_block_start', content_block: { type: 'text' } },
+          { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Cached' } },
+          { type: 'content_block_stop' },
+          { type: 'message_delta', usage: { output_tokens: 10 } },
+          { type: 'message_stop' },
+        ],
+        {
+          id: 'msg_ttl',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Cached' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 100, output_tokens: 10 },
+        }
+      );
+
+      const state = createStreamState();
+      const events = await collectAsync(processAnthropicStream(stream, state));
+
+      const doneEvent = events.find(e => e.type === 'done')!;
+      expect(doneEvent.message.usage.cacheCreation5mTokens).toBe(30);
+      expect(doneEvent.message.usage.cacheCreation1hTokens).toBe(50);
     });
 
     it('falls back to empty message when finalMessage returns null', async () => {

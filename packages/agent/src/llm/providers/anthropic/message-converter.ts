@@ -246,6 +246,8 @@ export function convertResponse(
     outputTokens: number;
     cacheCreationTokens?: number;
     cacheReadTokens?: number;
+    cacheCreation5mTokens?: number;
+    cacheCreation1hTokens?: number;
     providerType: 'anthropic';
   };
   stopReason?: string;
