@@ -5,6 +5,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     case recursive
     case alanSans
     case comme
+    case donegalOne
     case ibmPlexSerif
     case libreBaskerville
     case vollkorn
@@ -16,6 +17,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Recursive"
         case .alanSans: "Alan Sans"
         case .comme: "Comme"
+        case .donegalOne: "Donegal One"
         case .ibmPlexSerif: "IBM Plex Serif"
         case .libreBaskerville: "Libre Baskerville"
         case .vollkorn: "Vollkorn"
@@ -27,6 +29,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Variable casual sans"
         case .alanSans: "Clean geometric sans"
         case .comme: "Minimal geometric sans"
+        case .donegalOne: "Sturdy transitional serif"
         case .ibmPlexSerif: "Contemporary slab serif"
         case .libreBaskerville: "Classic transitional serif"
         case .vollkorn: "Warm book serif"
@@ -39,6 +42,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: "Recursive"
         case .alanSans: "AlanSans-Light"
         case .comme: "Comme-Regular"
+        case .donegalOne: "DonegalOne-Regular"
         case .ibmPlexSerif: "IBMPlexSerif-Regular"
         case .libreBaskerville: "LibreBaskerville-Regular"
         case .vollkorn: "Vollkorn-Regular"
@@ -52,7 +56,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var isVariable: Bool {
         switch self {
         case .recursive, .alanSans, .comme, .libreBaskerville, .vollkorn: true
-        case .ibmPlexSerif: false
+        case .donegalOne, .ibmPlexSerif: false
         }
     }
 
@@ -60,7 +64,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
     var customAxes: [FontAxis] {
         switch self {
         case .recursive: [.casual]
-        case .alanSans, .comme, .ibmPlexSerif, .libreBaskerville, .vollkorn: []
+        case .alanSans, .comme, .donegalOne, .ibmPlexSerif, .libreBaskerville, .vollkorn: []
         }
     }
 
@@ -70,6 +74,7 @@ enum FontFamily: String, CaseIterable, Sendable, Identifiable {
         case .recursive: 300...1000
         case .alanSans: 300...900
         case .comme: 100...900
+        case .donegalOne: 400...400
         case .ibmPlexSerif: 300...700
         case .libreBaskerville: 400...700
         case .vollkorn: 400...900

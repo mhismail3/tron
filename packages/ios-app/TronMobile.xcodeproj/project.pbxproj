@@ -206,6 +206,7 @@
 		6B050CA2391E6B697E854630 /* AbortSessionUseCaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25170E4A014E4D37EAABB58 /* AbortSessionUseCaseTests.swift */; };
 		6B5AA7C596E4C1B5902B4D00 /* ToolEventCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB682DF2B519182106BCE83 /* ToolEventCoordinatorTests.swift */; };
 		6BC998D19575068CE76B2319 /* RPCTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD437E42ED6468422C818F7F /* RPCTransport.swift */; };
+		6C033E43C462E07F4F546476 /* DonegalOne-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 1B4015C0F0BEDCF2EE9F5FF6 /* DonegalOne-Regular.ttf */; };
 		6C0BFCAC80C2804D4C33EF6D /* NotifyAppTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080088A841A12AAE66B98245 /* NotifyAppTypes.swift */; };
 		6C1DE7DFDE5FFF6193163221 /* SubagentResultNotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB98000DFDD7BD8FA48B164A /* SubagentResultNotificationView.swift */; };
 		6C288E480185BFA008936619 /* StreamingContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82FBD1C62F81A20D5003A4E5 /* StreamingContentView.swift */; };
@@ -567,6 +568,7 @@
 		183E3782429C3E4BBA4C17F2 /* EventSorter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventSorter.swift; sourceTree = "<group>"; };
 		19201A745774A4FE8633AE2D /* ConfigPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigPayloads.swift; sourceTree = "<group>"; };
 		1A0ED2A1D7582E1ECFC7FFDA /* ThinkingIndicatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingIndicatorTests.swift; sourceTree = "<group>"; };
+		1B4015C0F0BEDCF2EE9F5FF6 /* DonegalOne-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "DonegalOne-Regular.ttf"; sourceTree = "<group>"; };
 		1C9791FD669564830645DA0B /* AsyncEventStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncEventStream.swift; sourceTree = "<group>"; };
 		1CA3462B5E6E278A66E9E9B7 /* VoiceNotesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesListView.swift; sourceTree = "<group>"; };
 		1CF5274343CE2A3872EBFBC6 /* ErrorPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorPlugin.swift; sourceTree = "<group>"; };
@@ -1599,6 +1601,7 @@
 			children = (
 				4665FD394D5F63951D8B2012 /* AlanSans-Variable.ttf */,
 				2BFF5606F19446978F9B9BF5 /* Comme-Variable.ttf */,
+				1B4015C0F0BEDCF2EE9F5FF6 /* DonegalOne-Regular.ttf */,
 				2B9F68C73E01D0089F4DE39E /* IBMPlexSerif-Bold.ttf */,
 				68C53AD3FC00E6F11E3CD04E /* IBMPlexSerif-Light.ttf */,
 				2ED3322DDABB60F27852BE4C /* IBMPlexSerif-Medium.ttf */,
@@ -2472,6 +2475,7 @@
 				671C4CACBB0DF7C3AEA59A0D /* AlanSans-Variable.ttf in Resources */,
 				FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */,
 				5FEA34E3EB5AB89D977A8404 /* Comme-Variable.ttf in Resources */,
+				6C033E43C462E07F4F546476 /* DonegalOne-Regular.ttf in Resources */,
 				B88F6EEB81F285616AFE665B /* Fonts in Resources */,
 				52DA57119FDA87709008C206 /* IBMPlexSerif-Bold.ttf in Resources */,
 				0720BB45CADD07E225F5692A /* IBMPlexSerif-Light.ttf in Resources */,
