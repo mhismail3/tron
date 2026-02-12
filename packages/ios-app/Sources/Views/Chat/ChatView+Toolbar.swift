@@ -67,7 +67,7 @@ extension ChatView {
                         Label("Session History", systemImage: "clock.arrow.circlepath")
                     }
                     Button { NotificationCenter.default.post(name: .chatMenuAction, object: "context") } label: {
-                        Label("Context Manager", systemImage: "brain")
+                        Label("Context Manager", systemImage: "gauge.with.dots.needle.67percent")
                     }
                     if viewModel.taskState.hasTasks {
                         Button { NotificationCenter.default.post(name: .chatMenuAction, object: "tasks") } label: {

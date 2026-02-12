@@ -65,7 +65,7 @@ struct ContextUsageGaugeView: View {
             VStack(spacing: 12) {
                 // Header
                 HStack {
-                    Image(systemName: "brain.fill")
+                    Image(systemName: "gauge.with.dots.needle.67percent")
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(usageColor)
 
