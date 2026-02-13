@@ -9,8 +9,6 @@ struct NewSessionFlow: View {
     let eventStoreManager: EventStoreManager
     /// Callback with (sessionId, workspaceId, model, workingDirectory)
     let onSessionCreated: (String, String, String, String) -> Void
-    /// Callback when an existing session is forked - receives the NEW forked session ID
-    let onSessionForked: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var workingDirectory = ""
@@ -22,48 +20,12 @@ struct NewSessionFlow: View {
     @State private var isLoadingModels = false
     @State private var showModelPicker = false
 
-    // Server sessions state (sessions from ALL devices, not just local)
-    @State private var serverSessions: [SessionInfo] = []
-    @State private var isLoadingServerSessions = false
-    @State private var serverSessionsError: String? = nil
-
-    // Session preview navigation
-    @State private var previewSession: SessionInfo? = nil
-
     // Clone repository sheet
     @State private var showCloneSheet = false
     @State private var showMaxSessionsAlert = false
 
-    // Workspace validation - track paths that no longer exist
-    @State private var invalidWorkspacePaths: Set<String> = []
-
     private var canCreate: Bool {
         !isCreating && !workingDirectory.isEmpty && !selectedModel.isEmpty
-    }
-
-    /// Recent sessions from SERVER, excluding sessions already on this device
-    /// Filtered by workspace if one is selected
-    /// Also excludes sessions with invalid (deleted) workspace paths
-    private var filteredRecentSessions: [SessionInfo] {
-        // Get IDs of sessions already on this device
-        let localSessionIds = Set(eventStoreManager.sessions.map { $0.id })
-
-        // Filter out local sessions - show only sessions NOT on this device
-        var filtered = serverSessions.filter { !localSessionIds.contains($0.sessionId) }
-
-        // Filter by workspace if selected
-        if !workingDirectory.isEmpty {
-            filtered = filtered.filter { $0.workingDirectory == workingDirectory }
-        }
-
-        // Filter out sessions with known invalid workspace paths
-        filtered = filtered.filter { session in
-            guard let path = session.workingDirectory else { return true }
-            return !invalidWorkspacePaths.contains(path)
-        }
-
-        // Return up to 10 most recent
-        return Array(filtered.prefix(10))
     }
 
     var body: some View {
@@ -175,11 +137,6 @@ struct NewSessionFlow: View {
                     }
                     .padding(.top, 8)
 
-                    // Recent Sessions section (at the bottom)
-                    // Extra spacing above to visually separate from model section
-                    recentSessionsSection
-                        .padding(.top, 8)
-
                     // Error message
                     if let error = errorMessage {
                         HStack {
@@ -253,48 +210,12 @@ struct NewSessionFlow: View {
                     }
                 )
             }
-            .sheet(item: $previewSession) { session in
-                SessionPreviewSheetWrapper(
-                    session: session,
-                    rpcClient: rpcClient,
-                    eventStoreManager: eventStoreManager,
-                    onFork: { newSessionId in
-                        // IMPORTANT: Call onSessionForked FIRST to set selectedSessionId
-                        // BEFORE dismissing sheets. This ensures navigation state is set
-                        // before SwiftUI starts sheet dismissal animations.
-                        onSessionForked(newSessionId)
-                        // Dismiss preview sheet after navigation is set
-                        // (parent sheet dismissal in onSessionForked will also dismiss this)
-                        previewSession = nil
-                    },
-                    onDismiss: {
-                        previewSession = nil
-                    },
-                    onWorkspaceDeleted: {
-                        // Add to invalid paths so it doesn't appear again
-                        if let path = session.workingDirectory {
-                            invalidWorkspacePaths.insert(path)
-                        }
-                        serverSessions.removeAll { $0.sessionId == session.sessionId }
-                        previewSession = nil
-                    }
-                )
-            }
             .task {
                 await loadModels()
-                await loadServerSessions()
-                await validateWorkspacePaths()
             }
             .onChange(of: rpcClient.connectionState) { oldState, newState in
-                // React when connection transitions to connected
-                if newState.isConnected && !oldState.isConnected && serverSessionsError != nil {
-                    // Connection established and we had an error - reload data
-                    serverSessionsError = nil
-                    _ = Task {
-                        await loadModels()
-                        await loadServerSessions()
-                        await validateWorkspacePaths()
-                    }
+                if newState.isConnected && !oldState.isConnected {
+                    _ = Task { await loadModels() }
                 }
             }
             .onAppear {
@@ -383,58 +304,6 @@ struct NewSessionFlow: View {
         }
     }
 
-    /// Load sessions from SERVER (all devices, all workspaces)
-    private func loadServerSessions() async {
-        isLoadingServerSessions = true
-        serverSessionsError = nil
-
-        // Ensure connection is established
-        await rpcClient.connect()
-        if !rpcClient.isConnected {
-            try? await Task.sleep(for: .milliseconds(100))
-        }
-
-        do {
-            // Fetch all sessions from server (no workspace filter)
-            let result = try await rpcClient.session.list(
-                workingDirectory: nil,
-                limit: 50
-            )
-            let sessions = result.sessions
-
-            await MainActor.run {
-                serverSessions = sessions
-                isLoadingServerSessions = false
-            }
-        } catch {
-            await MainActor.run {
-                serverSessionsError = error.localizedDescription
-                isLoadingServerSessions = false
-            }
-        }
-    }
-
-    /// Validate workspace paths in background and track invalid ones.
-    /// This allows filtering out sessions whose workspaces have been deleted.
-    private func validateWorkspacePaths() async {
-        // Get unique workspace paths from server sessions
-        let paths = Set(serverSessions.compactMap { $0.workingDirectory })
-
-        for path in paths {
-            guard !path.isEmpty else { continue }
-            do {
-                _ = try await rpcClient.filesystem.listDirectory(path: path, showHidden: false)
-            } catch is RPCError {
-                // Server confirmed path doesn't exist (e.g. ENOENT)
-                await MainActor.run {
-                    invalidWorkspacePaths.insert(path)
-                }
-            } catch {
-                // Connection/transport error — can't determine, don't mark as invalid
-            }
-        }
-    }
-
     private func createSession() {
         isCreating = true
         errorMessage = nil
@@ -470,72 +339,4 @@ struct NewSessionFlow: View {
         }
     }
 
-    // MARK: - Recent Sessions Section
-
-    private var recentSessionsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Recent Sessions")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                Spacer()
-
-                if isLoadingServerSessions {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .tint(.tronEmerald)
-                }
-            }
-
-            // Loading state
-            if isLoadingServerSessions && serverSessions.isEmpty {
-                HStack {
-                    Spacer()
-                    ProgressView()
-                        .tint(.tronEmerald)
-                    Text("Loading sessions...")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(.tronTextMuted)
-                    Spacer()
-                }
-                .padding(.vertical, 20)
-            } else if let error = serverSessionsError {
-                // Error loading sessions
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.tronError)
-                    Text(error)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(.tronError)
-                }
-                .padding()
-                .glassEffect(.regular.tint(Color.tronError.opacity(0.2)), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else if filteredRecentSessions.isEmpty {
-                // Empty state
-                VStack(spacing: 8) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(TronTypography.sans(size: TronTypography.sizeXXL))
-                        .foregroundStyle(.tronTextDisabled)
-                    Text(workingDirectory.isEmpty
-                        ? "No sessions found"
-                        : "No sessions in this workspace")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(.tronTextMuted)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 32)
-                .padding(.bottom, 16)
-            } else {
-                // Sessions list - tap to preview
-                VStack(spacing: 4) {
-                    ForEach(filteredRecentSessions) { session in
-                        RecentSessionRow(session: session) {
-                            previewSession = session
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

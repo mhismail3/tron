@@ -303,10 +303,6 @@ struct ContentView: View {
                 }
                 selectedSessionId = sessionId
                 showNewSessionSheet = false
-            },
-            onSessionForked: { newSessionId in
-                selectedSessionId = newSessionId
-                showNewSessionSheet = false
             }
         )
     }
@@ -469,20 +465,34 @@ struct ContentView: View {
         }
     }
 
-    /// Creates a quick session using the configured defaults (workspace and model from Settings)
+    /// Creates a quick session using the current session's workspace (or most recent, or configured default)
     private func createQuickSession() {
+        // Use current session's workspace, fall back to most recent, then configured default
+        let workspace: String = {
+            if let currentId = selectedSessionId,
+               let current = eventStoreManager.sessions.first(where: { $0.id == currentId }),
+               !current.workingDirectory.isEmpty {
+                return current.workingDirectory
+            }
+            if let mostRecent = eventStoreManager.sortedSessions.first,
+               !mostRecent.workingDirectory.isEmpty {
+                return mostRecent.workingDirectory
+            }
+            return quickSessionWorkspace
+        }()
+
         Task {
             do {
                 let result = try await rpcClient.session.create(
-                    workingDirectory: quickSessionWorkspace,
+                    workingDirectory: workspace,
                     model: defaultModel
                 )
 
                 try eventStoreManager.cacheNewSession(
                     sessionId: result.sessionId,
-                    workspaceId: quickSessionWorkspace,
+                    workspaceId: workspace,
                     model: result.model,
-                    workingDirectory: quickSessionWorkspace
+                    workingDirectory: workspace
                 )
 
                 await MainActor.run {
