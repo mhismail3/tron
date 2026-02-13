@@ -88,7 +88,7 @@ struct SettingsView: View {
                     }
                 )
 
-                if settingsState.anthropicAccounts.count > 1 {
+                if !settingsState.anthropicAccounts.isEmpty {
                     AccountSection(
                         accounts: settingsState.anthropicAccounts,
                         selectedAccount: Bindable(settingsState).selectedAnthropicAccount,
@@ -113,20 +113,12 @@ struct SettingsView: View {
                     updateServerSetting: updateServerSetting
                 )
 
-                MemorySettingsSection(
+                ContextSettingsSection(
                     memoryLedgerEnabled: Bindable(settingsState).memoryLedgerEnabled,
                     memoryAutoInject: Bindable(settingsState).memoryAutoInject,
                     memoryAutoInjectCount: Bindable(settingsState).memoryAutoInjectCount,
-                    updateServerSetting: updateServerSetting
-                )
-
-                RulesSettingsSection(
-                    discoverStandaloneFiles: Bindable(settingsState).rulesDiscoverStandaloneFiles,
-                    updateServerSetting: updateServerSetting
-                )
-
-                TaskSettingsSection(
                     taskAutoInjectEnabled: Bindable(settingsState).taskAutoInjectEnabled,
+                    discoverStandaloneFiles: Bindable(settingsState).rulesDiscoverStandaloneFiles,
                     updateServerSetting: updateServerSetting
                 )
 
@@ -151,7 +143,7 @@ struct SettingsView: View {
                     EmptyView()
                 } footer: {
                     VStack(spacing: 4) {
-                        Text("v\(AppConstants.appVersion)")
+                        Text("Built by Moose 🫎 · v0.1.0")
                             .font(TronTypography.caption2)
                     }
                     .frame(maxWidth: .infinity)

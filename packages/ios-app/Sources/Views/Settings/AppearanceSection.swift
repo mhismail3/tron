@@ -6,27 +6,51 @@ struct AppearanceSection: View {
     @State private var fontSettings = FontSettings.shared
 
     var body: some View {
+        // Color mode
         Section {
-            Picker("Mode", selection: Binding(
-                get: { appearanceSettings.mode },
-                set: { appearanceSettings.mode = $0 }
-            )) {
-                ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                    Text(mode.label).tag(mode)
+            HStack {
+                Label {
+                    Text("Theme")
+                } icon: {
+                    Image(systemName: "circle.lefthalf.filled")
+                        .foregroundStyle(.tronEmerald)
                 }
+                .font(TronTypography.subheadline)
+                Spacer()
+                Picker("Theme", selection: Binding(
+                    get: { appearanceSettings.mode },
+                    set: { appearanceSettings.mode = $0 }
+                )) {
+                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 200)
             }
-            .pickerStyle(.segmented)
-
-            fontPickerRow
-
-            axisSliders
-
-            thinkingIndicatorPickerRow
         } header: {
             Text("Appearance")
-                .font(TronTypography.caption)
+                .font(TronTypography.bodySM)
         } footer: {
-            footerText
+            Text("Auto follows your system appearance setting.")
+                .font(TronTypography.caption2)
+        }
+
+        // Font
+        Section {
+            fontPickerRow
+            axisSliders
+        } footer: {
+            Text("Code and file paths always use Recursive mono.")
+                .font(TronTypography.caption2)
+        }
+
+        // Thinking indicator
+        Section {
+            thinkingIndicatorPickerRow
+        } footer: {
+            Text("Animation shown while the model is thinking.")
+                .font(TronTypography.caption2)
         }
         .listSectionSpacing(16)
     }
@@ -211,18 +235,5 @@ struct AppearanceSection: View {
         case .casual:
             return String(format: "%.2f", value)
         }
-    }
-
-    // MARK: - Footer
-
-    private var footerText: some View {
-        Group {
-            if fontSettings.selectedFamily == .recursive {
-                Text("Auto follows your system appearance setting. Font style adjusts the casual axis — Linear is precise, Casual is playful.")
-            } else {
-                Text("Auto follows your system appearance setting. Code and file paths always use Recursive mono.")
-            }
-        }
-        .font(TronTypography.caption2)
     }
 }

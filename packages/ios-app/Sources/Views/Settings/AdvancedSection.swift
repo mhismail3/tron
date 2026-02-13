@@ -14,7 +14,7 @@ struct AdvancedSection: View {
             }
         } header: {
             Text("Advanced")
-                .font(TronTypography.caption)
+                .font(TronTypography.bodySM)
         }
     }
 }

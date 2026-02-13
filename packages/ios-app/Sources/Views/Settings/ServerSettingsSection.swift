@@ -40,10 +40,7 @@ struct ServerSettingsSection: View {
             }
         } header: {
             Text("Server")
-                .font(TronTypography.caption)
-        } footer: {
-            Text("Default ports: Beta (\(AppConstants.betaPort)), Prod (\(AppConstants.prodPort)).")
-                .font(TronTypography.caption2)
+                .font(TronTypography.bodySM)
         }
         .listSectionSpacing(16)
     }

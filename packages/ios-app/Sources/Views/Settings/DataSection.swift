@@ -50,7 +50,7 @@ struct DataSection: View {
             .disabled(!hasActiveSessions || isArchivingAll)
         } header: {
             Text("Session Management")
-                .font(TronTypography.caption)
+                .font(TronTypography.bodySM)
         } footer: {
             Text("Removes all sessions from your device. Session data on the server will remain.")
                 .font(TronTypography.caption2)
