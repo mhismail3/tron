@@ -229,7 +229,7 @@ function runProviderStatusMigration(db: Database, runner: MigrationRunner): void
       fork_from_event_id TEXT,
       created_at TEXT NOT NULL,
       last_activity_at TEXT NOT NULL,
-      ended_at TEXT,
+      archived_at TEXT,
       event_count INTEGER DEFAULT 0,
       message_count INTEGER DEFAULT 0,
       turn_count INTEGER DEFAULT 0,
@@ -242,7 +242,7 @@ function runProviderStatusMigration(db: Database, runner: MigrationRunner): void
       tags TEXT DEFAULT '[]'
     );
 
-    -- Copy data from old table (model -> latest_model, status -> ended_at)
+    -- Copy data from old table (model -> latest_model, status -> archived_at)
     INSERT INTO sessions_new
     SELECT
       id, workspace_id, head_event_id, root_event_id, title,
@@ -267,7 +267,7 @@ function runProviderStatusMigration(db: Database, runner: MigrationRunner): void
     CREATE INDEX idx_sessions_activity ON sessions(last_activity_at DESC);
     CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);
     CREATE INDEX idx_sessions_working_dir ON sessions(working_directory);
-    CREATE INDEX idx_sessions_ended ON sessions(ended_at);
+    CREATE INDEX idx_sessions_archived ON sessions(archived_at);
 
     -- Update schema version
     INSERT OR REPLACE INTO schema_version (version, applied_at, description)
