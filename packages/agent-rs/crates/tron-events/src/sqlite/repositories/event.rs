@@ -315,6 +315,158 @@ impl EventRepo {
         Ok(count)
     }
 
+    /// Batch-fetch events by IDs.
+    ///
+    /// Returns a map of `event_id → EventRow`. Missing IDs are silently omitted.
+    pub fn get_by_ids(
+        conn: &Connection,
+        event_ids: &[&str],
+    ) -> Result<std::collections::HashMap<String, EventRow>> {
+        let mut result = std::collections::HashMap::new();
+        if event_ids.is_empty() {
+            return Ok(result);
+        }
+
+        let placeholders: Vec<String> = (1..=event_ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
+                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+             FROM events WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = event_ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt
+            .query_map(params.as_slice(), Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for row in rows {
+            let _ = result.insert(row.id.clone(), row);
+        }
+        Ok(result)
+    }
+
+    /// Get events of specific types within a session.
+    pub fn get_by_types(
+        conn: &Connection,
+        session_id: &str,
+        types: &[&str],
+        limit: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        if types.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build the type placeholders starting after session_id (?1)
+        let placeholders: Vec<String> =
+            (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
+        let mut sql = format!(
+            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
+                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+             FROM events WHERE session_id = ?1 AND type IN ({}) ORDER BY sequence ASC",
+            placeholders.join(", ")
+        );
+        if let Some(limit) = limit {
+            use std::fmt::Write;
+            let _ = write!(sql, " LIMIT {limit}");
+        }
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params.push(Box::new(session_id.to_string()));
+        for t in types {
+            params.push(Box::new(t.to_string()));
+        }
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(Box::as_ref).collect();
+
+        let rows = stmt
+            .query_map(params_refs.as_slice(), Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Get events by workspace and types (cross-session).
+    pub fn get_by_workspace_and_types(
+        conn: &Connection,
+        workspace_id: &str,
+        types: &[&str],
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        if types.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholders: Vec<String> =
+            (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
+        let mut sql = format!(
+            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
+                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+             FROM events WHERE workspace_id = ?1 AND type IN ({}) ORDER BY timestamp DESC",
+            placeholders.join(", ")
+        );
+        if let Some(limit) = limit {
+            use std::fmt::Write;
+            let _ = write!(sql, " LIMIT {limit}");
+        }
+        if let Some(offset) = offset {
+            use std::fmt::Write;
+            let _ = write!(sql, " OFFSET {offset}");
+        }
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params.push(Box::new(workspace_id.to_string()));
+        for t in types {
+            params.push(Box::new(t.to_string()));
+        }
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(Box::as_ref).collect();
+
+        let rows = stmt
+            .query_map(params_refs.as_slice(), Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Count events by workspace and types.
+    pub fn count_by_workspace_and_types(
+        conn: &Connection,
+        workspace_id: &str,
+        types: &[&str],
+    ) -> Result<i64> {
+        if types.is_empty() {
+            return Ok(0);
+        }
+
+        let placeholders: Vec<String> =
+            (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT COUNT(*) FROM events WHERE workspace_id = ?1 AND type IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params.push(Box::new(workspace_id.to_string()));
+        for t in types {
+            params.push(Box::new(t.to_string()));
+        }
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(Box::as_ref).collect();
+
+        let count: i64 = stmt.query_row(params_refs.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
     // ─── Private helpers ─────────────────────────────────────────────────────
 
     fn compute_depth(conn: &Connection, parent_id: Option<&str>) -> Result<i64> {
@@ -759,5 +911,122 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 1);
+    }
+
+    // ── Batch operations ─────────────────────────────────────────────
+
+    #[test]
+    fn get_by_ids_basic() {
+        let conn = setup();
+        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
+
+        let ids = ["evt_1", "evt_2"];
+        let map = EventRepo::get_by_ids(&conn, &ids).unwrap();
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("evt_1"));
+        assert!(map.contains_key("evt_2"));
+    }
+
+    #[test]
+    fn get_by_ids_empty() {
+        let conn = setup();
+        let map = EventRepo::get_by_ids(&conn, &[]).unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn get_by_ids_missing_omitted() {
+        let conn = setup();
+        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
+
+        let ids = ["evt_1", "evt_nonexistent"];
+        let map = EventRepo::get_by_ids(&conn, &ids).unwrap();
+        assert_eq!(map.len(), 1);
+    }
+
+    // ── Type-filtered queries ────────────────────────────────────────
+
+    #[test]
+    fn get_by_types_basic() {
+        let conn = setup();
+        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::ToolCall, None, json!({}))).unwrap();
+
+        let types = ["message.user", "message.assistant"];
+        let results = EventRepo::get_by_types(&conn, "sess_1", &types, None).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn get_by_types_empty_types() {
+        let conn = setup();
+        let results = EventRepo::get_by_types(&conn, "sess_1", &[], None).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn get_by_types_with_limit() {
+        let conn = setup();
+        for i in 1..=5 {
+            EventRepo::insert(&conn, &make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}))).unwrap();
+        }
+
+        let types = ["message.user"];
+        let results = EventRepo::get_by_types(&conn, "sess_1", &types, Some(3)).unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    // ── Workspace-scoped queries ─────────────────────────────────────
+
+    #[test]
+    fn get_by_workspace_and_types_basic() {
+        let conn = setup();
+        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::ToolCall, None, json!({}))).unwrap();
+
+        let types = ["message.user"];
+        let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, None, None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "evt_1");
+    }
+
+    #[test]
+    fn get_by_workspace_and_types_empty_types() {
+        let conn = setup();
+        let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &[], None, None).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn get_by_workspace_and_types_with_limit_offset() {
+        let conn = setup();
+        for i in 1..=5 {
+            EventRepo::insert(&conn, &make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}))).unwrap();
+        }
+
+        let types = ["message.user"];
+        let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, Some(2), Some(1)).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn count_by_workspace_and_types_basic() {
+        let conn = setup();
+        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::ToolCall, None, json!({}))).unwrap();
+
+        let types = ["message.user", "message.assistant"];
+        let count = EventRepo::count_by_workspace_and_types(&conn, "ws_1", &types).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn count_by_workspace_and_types_empty_types() {
+        let conn = setup();
+        let count = EventRepo::count_by_workspace_and_types(&conn, "ws_1", &[]).unwrap();
+        assert_eq!(count, 0);
     }
 }

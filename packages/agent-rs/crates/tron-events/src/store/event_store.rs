@@ -7,19 +7,22 @@
 use serde_json::Value;
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
 use crate::errors::{EventStoreError, Result};
+use crate::reconstruct::{reconstruct_from_events, ReconstructionResult};
 use crate::sqlite::connection::{ConnectionPool, PooledConnection};
 use crate::sqlite::repositories::blob::BlobRepo;
 use crate::sqlite::repositories::branch::BranchRepo;
 use crate::sqlite::repositories::event::{EventRepo, ListEventsOptions, TokenUsageSummary};
 use crate::sqlite::repositories::search::{SearchOptions, SearchRepo};
 use crate::sqlite::repositories::session::{
-    CreateSessionOptions, IncrementCounters, ListSessionsOptions, SessionRepo,
+    CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
 use crate::sqlite::repositories::workspace::WorkspaceRepo;
 use crate::sqlite::row_types::{BlobRow, EventRow, SessionRow, WorkspaceRow};
 use crate::types::base::SessionEvent;
-use crate::types::state::SearchResult;
+use crate::types::state::{SearchResult, SessionState};
 use crate::types::EventType;
 
 /// Result of creating a new session.
@@ -435,6 +438,120 @@ impl EventStore {
         EventRepo::get_token_usage_summary(&conn, session_id)
     }
 
+    /// Batch-fetch events by IDs.
+    ///
+    /// Returns a map of `event_id → EventRow`. IDs that don't match any event
+    /// are silently omitted.
+    pub fn get_events_by_ids(&self, event_ids: &[&str]) -> Result<HashMap<String, EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_ids(&conn, event_ids)
+    }
+
+    /// Get events of specific types within a session.
+    pub fn get_events_by_type(
+        &self,
+        session_id: &str,
+        types: &[&str],
+        limit: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_types(&conn, session_id, types, limit)
+    }
+
+    /// Get events by workspace and types (cross-session query).
+    pub fn get_events_by_workspace_and_types(
+        &self,
+        workspace_id: &str,
+        types: &[&str],
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_workspace_and_types(&conn, workspace_id, types, limit, offset)
+    }
+
+    /// Count events by workspace and types.
+    pub fn count_events_by_workspace_and_types(
+        &self,
+        workspace_id: &str,
+        types: &[&str],
+    ) -> Result<i64> {
+        let conn = self.conn()?;
+        EventRepo::count_by_workspace_and_types(&conn, workspace_id, types)
+    }
+
+    /// Count total events in a session.
+    pub fn count_events(&self, session_id: &str) -> Result<i64> {
+        let conn = self.conn()?;
+        EventRepo::count_by_session(&conn, session_id)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // State projection (message reconstruction)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Reconstruct messages at the session head.
+    ///
+    /// Walks ancestors from root to head event, converts to `SessionEvent`s,
+    /// and runs the two-pass reconstruction algorithm.
+    pub fn get_messages_at_head(&self, session_id: &str) -> Result<ReconstructionResult> {
+        let conn = self.conn()?;
+        let session = SessionRepo::get_by_id(&conn, session_id)?
+            .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_string()))?;
+        let head_id = session
+            .head_event_id
+            .as_deref()
+            .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
+        let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
+        let events = rows_to_session_events(&ancestors);
+        Ok(reconstruct_from_events(&events))
+    }
+
+    /// Reconstruct messages at a specific event.
+    ///
+    /// Walks ancestors from root to the given event, converts to `SessionEvent`s,
+    /// and runs the two-pass reconstruction algorithm.
+    pub fn get_messages_at(&self, event_id: &str) -> Result<ReconstructionResult> {
+        let conn = self.conn()?;
+        let ancestors = EventRepo::get_ancestors(&conn, event_id)?;
+        if ancestors.is_empty() {
+            return Err(EventStoreError::EventNotFound(event_id.to_string()));
+        }
+        let events = rows_to_session_events(&ancestors);
+        Ok(reconstruct_from_events(&events))
+    }
+
+    /// Build full session state at the head event.
+    ///
+    /// Combines session metadata with reconstructed messages.
+    pub fn get_state_at_head(&self, session_id: &str) -> Result<SessionState> {
+        let conn = self.conn()?;
+        let session = SessionRepo::get_by_id(&conn, session_id)?
+            .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_string()))?;
+        let head_id = session
+            .head_event_id
+            .as_deref()
+            .ok_or_else(|| EventStoreError::InvalidOperation("Session has no head event".into()))?;
+        let ancestors = EventRepo::get_ancestors(&conn, head_id)?;
+        let events = rows_to_session_events(&ancestors);
+        let reconstruction = reconstruct_from_events(&events);
+        Ok(build_session_state(&session, head_id, reconstruction))
+    }
+
+    /// Build full session state at a specific event.
+    pub fn get_state_at(&self, session_id: &str, event_id: &str) -> Result<SessionState> {
+        let conn = self.conn()?;
+        let session = SessionRepo::get_by_id(&conn, session_id)?
+            .ok_or_else(|| EventStoreError::SessionNotFound(session_id.to_string()))?;
+        let ancestors = EventRepo::get_ancestors(&conn, event_id)?;
+        if ancestors.is_empty() {
+            return Err(EventStoreError::EventNotFound(event_id.to_string()));
+        }
+        let events = rows_to_session_events(&ancestors);
+        let reconstruction = reconstruct_from_events(&events);
+        Ok(build_session_state(&session, event_id, reconstruction))
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Session management
     // ─────────────────────────────────────────────────────────────────────
@@ -493,6 +610,28 @@ impl EventStore {
     pub fn list_subagents(&self, spawning_session_id: &str) -> Result<Vec<SessionRow>> {
         let conn = self.conn()?;
         SessionRepo::list_subagents(&conn, spawning_session_id)
+    }
+
+    /// Batch-fetch sessions by IDs.
+    ///
+    /// Returns a map of `session_id → SessionRow`. IDs not found are omitted.
+    pub fn get_sessions_by_ids(
+        &self,
+        session_ids: &[&str],
+    ) -> Result<HashMap<String, SessionRow>> {
+        let conn = self.conn()?;
+        SessionRepo::get_by_ids(&conn, session_ids)
+    }
+
+    /// Get message previews for a list of sessions.
+    ///
+    /// Returns the last user prompt and last assistant response per session.
+    pub fn get_session_message_previews(
+        &self,
+        session_ids: &[&str],
+    ) -> Result<HashMap<String, MessagePreview>> {
+        let conn = self.conn()?;
+        SessionRepo::get_message_previews(&conn, session_ids)
     }
 
     /// Update session spawn info (links child to parent session).
@@ -596,6 +735,66 @@ impl EventStore {
     /// Get the raw connection pool (for advanced/custom queries).
     pub fn pool(&self) -> &ConnectionPool {
         &self.pool
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Convert `EventRow`s to `SessionEvent`s for reconstruction.
+///
+/// Each `EventRow.payload` is a JSON string; this parses it into `serde_json::Value`.
+/// Invalid JSON falls back to `Value::Null`.
+fn rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
+    rows.iter()
+        .map(|row| SessionEvent {
+            id: row.id.clone(),
+            parent_id: row.parent_id.clone(),
+            session_id: row.session_id.clone(),
+            workspace_id: row.workspace_id.clone(),
+            timestamp: row.timestamp.clone(),
+            event_type: row
+                .event_type
+                .parse()
+                .unwrap_or(EventType::SessionStart),
+            sequence: row.sequence,
+            checksum: row.checksum.clone(),
+            payload: serde_json::from_str(&row.payload).unwrap_or(Value::Null),
+        })
+        .collect()
+}
+
+/// Build `SessionState` from a `SessionRow` and `ReconstructionResult`.
+fn build_session_state(
+    session: &SessionRow,
+    head_event_id: &str,
+    reconstruction: ReconstructionResult,
+) -> SessionState {
+    use crate::types::payloads::TokenUsage;
+
+    SessionState {
+        session_id: session.id.clone(),
+        workspace_id: session.workspace_id.clone(),
+        head_event_id: head_event_id.to_string(),
+        model: session.latest_model.clone(),
+        working_directory: session.working_directory.clone(),
+        messages_with_event_ids: reconstruction.messages_with_event_ids,
+        token_usage: TokenUsage {
+            input_tokens: session.total_input_tokens,
+            output_tokens: session.total_output_tokens,
+            cache_read_tokens: Some(session.total_cache_read_tokens),
+            cache_creation_tokens: Some(session.total_cache_creation_tokens),
+            ..Default::default()
+        },
+        turn_count: reconstruction.turn_count,
+        provider: None,
+        system_prompt: reconstruction.system_prompt,
+        reasoning_level: reconstruction.reasoning_level,
+        metadata: None,
+        is_ended: session.ended_at.as_ref().map(|_| true),
+        branch: None,
+        timestamp: Some(session.last_activity_at.clone()),
     }
 }
 
@@ -1370,5 +1569,524 @@ mod tests {
 
         // Original assistant response NOT in fork ancestors
         assert!(fork_ancestors.iter().all(|e| e.id != assistant_msg.id));
+    }
+
+    // ── Batch session queries ─────────────────────────────────────────
+
+    #[test]
+    fn get_sessions_by_ids_basic() {
+        let store = setup();
+        let cr1 = store
+            .create_session("claude-opus-4-6", "/tmp/a", Some("A"))
+            .unwrap();
+        let cr2 = store
+            .create_session("claude-opus-4-6", "/tmp/b", Some("B"))
+            .unwrap();
+        store
+            .create_session("claude-opus-4-6", "/tmp/c", Some("C"))
+            .unwrap();
+
+        let ids = [cr1.session.id.as_str(), cr2.session.id.as_str()];
+        let result = store.get_sessions_by_ids(&ids).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key(&cr1.session.id));
+        assert!(result.contains_key(&cr2.session.id));
+    }
+
+    #[test]
+    fn get_sessions_by_ids_empty() {
+        let store = setup();
+        let result = store.get_sessions_by_ids(&[]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn get_sessions_by_ids_missing_omitted() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/a", None)
+            .unwrap();
+
+        let ids = [cr.session.id.as_str(), "sess_nonexistent"];
+        let result = store.get_sessions_by_ids(&ids).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&cr.session.id));
+    }
+
+    #[test]
+    fn get_session_message_previews_basic() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/a", None)
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "What is Rust?"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({"content": "A systems language."}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let ids = [cr.session.id.as_str()];
+        let previews = store.get_session_message_previews(&ids).unwrap();
+        let preview = &previews[&cr.session.id];
+        assert_eq!(preview.last_user_prompt.as_deref(), Some("What is Rust?"));
+        assert_eq!(
+            preview.last_assistant_response.as_deref(),
+            Some("A systems language.")
+        );
+    }
+
+    // ── Batch event queries ───────────────────────────────────────────
+
+    #[test]
+    fn get_events_by_ids_basic() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/a", None)
+            .unwrap();
+        let evt = store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let ids = [cr.root_event.id.as_str(), evt.id.as_str()];
+        let result = store.get_events_by_ids(&ids).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key(&cr.root_event.id));
+        assert!(result.contains_key(&evt.id));
+    }
+
+    #[test]
+    fn get_events_by_type_basic() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/a", None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({"content": "Hi"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = store
+            .get_events_by_type(&cr.session.id, &["message.user"], None)
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_type, "message.user");
+    }
+
+    #[test]
+    fn get_events_by_workspace_and_types_cross_session() {
+        let store = setup();
+        let cr1 = store
+            .create_session("claude-opus-4-6", "/tmp/proj", None)
+            .unwrap();
+        let cr2 = store
+            .create_session("claude-opus-4-6", "/tmp/proj", None)
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr1.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "A"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr2.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "B"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = store
+            .get_events_by_workspace_and_types(
+                &cr1.session.workspace_id,
+                &["message.user"],
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn count_events_basic() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/a", None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let count = store.count_events(&cr.session.id).unwrap();
+        assert_eq!(count, 2); // root + user message
+    }
+
+    // ── State projection ──────────────────────────────────────────────
+
+    #[test]
+    fn get_messages_at_head_basic() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "Hi there"}],
+                    "turn": 1,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = store.get_messages_at_head(&cr.session.id).unwrap();
+        assert_eq!(result.messages_with_event_ids.len(), 2);
+        assert_eq!(result.messages_with_event_ids[0].message.role, "user");
+        assert_eq!(result.messages_with_event_ids[1].message.role, "assistant");
+        assert_eq!(result.turn_count, 1);
+    }
+
+    #[test]
+    fn get_messages_at_specific_event() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        let user_evt = store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "Hi"}],
+                    "turn": 1,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Reconstruct at user message event (before assistant response)
+        let result = store.get_messages_at(&user_evt.id).unwrap();
+        assert_eq!(result.messages_with_event_ids.len(), 1);
+        assert_eq!(result.messages_with_event_ids[0].message.role, "user");
+    }
+
+    #[test]
+    fn get_messages_at_nonexistent_fails() {
+        let store = setup();
+        let result = store.get_messages_at("evt_nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_state_at_head_basic() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "Hi"}],
+                    "turn": 1,
+                    "tokenUsage": {"inputTokens": 100, "outputTokens": 50}
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = store.get_state_at_head(&cr.session.id).unwrap();
+        assert_eq!(state.session_id, cr.session.id);
+        assert_eq!(state.model, "claude-opus-4-6");
+        assert_eq!(state.working_directory, "/tmp/project");
+        assert_eq!(state.messages_with_event_ids.len(), 2);
+        assert_eq!(state.turn_count, 1);
+        assert_eq!(state.token_usage.input_tokens, 100);
+        assert_eq!(state.token_usage.output_tokens, 50);
+        assert!(state.is_ended.is_none()); // session is active
+    }
+
+    #[test]
+    fn get_state_at_head_ended_session() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        store.end_session(&cr.session.id).unwrap();
+
+        let state = store.get_state_at_head(&cr.session.id).unwrap();
+        assert_eq!(state.is_ended, Some(true));
+    }
+
+    #[test]
+    fn get_state_at_specific_event() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        let user_evt = store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "Hi"}],
+                    "turn": 1,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = store
+            .get_state_at(&cr.session.id, &user_evt.id)
+            .unwrap();
+        assert_eq!(state.head_event_id, user_evt.id);
+        assert_eq!(state.messages_with_event_ids.len(), 1);
+        assert_eq!(state.messages_with_event_ids[0].message.role, "user");
+    }
+
+    #[test]
+    fn get_state_at_head_nonexistent_session_fails() {
+        let store = setup();
+        let result = store.get_state_at_head("sess_nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_state_at_head_with_agentic_loop() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Use a tool"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "tool_use", "id": "c1", "name": "Bash", "input": {}}],
+                    "turn": 1,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::ToolResult,
+                payload: serde_json::json!({"toolCallId": "c1", "content": "output", "isError": false}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "Done"}],
+                    "turn": 2,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = store.get_state_at_head(&cr.session.id).unwrap();
+        // user, assistant, toolResult, assistant
+        assert_eq!(state.messages_with_event_ids.len(), 4);
+        assert_eq!(state.messages_with_event_ids[0].message.role, "user");
+        assert_eq!(state.messages_with_event_ids[1].message.role, "assistant");
+        assert_eq!(
+            state.messages_with_event_ids[2].message.role,
+            "toolResult"
+        );
+        assert_eq!(state.messages_with_event_ids[3].message.role, "assistant");
+    }
+
+    #[test]
+    fn get_state_at_head_with_compaction() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Old message"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::CompactSummary,
+                payload: serde_json::json!({"summary": "User said hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "New message"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = store.get_state_at_head(&cr.session.id).unwrap();
+        // synthetic user (summary), synthetic assistant (ack), new user
+        assert_eq!(state.messages_with_event_ids.len(), 3);
+        assert!(state.messages_with_event_ids[0]
+            .message
+            .content
+            .as_str()
+            .unwrap()
+            .contains("Context from earlier"));
+        assert_eq!(
+            state.messages_with_event_ids[2].message.content,
+            "New message"
+        );
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+
+    #[test]
+    fn rows_to_session_events_converts_correctly() {
+        let row = EventRow {
+            id: "evt_1".to_string(),
+            session_id: "sess_1".to_string(),
+            parent_id: None,
+            sequence: 0,
+            depth: 0,
+            event_type: "session.start".to_string(),
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            payload: r#"{"model":"claude-opus-4-6"}"#.to_string(),
+            content_blob_id: None,
+            workspace_id: "ws_1".to_string(),
+            role: None,
+            tool_name: None,
+            tool_call_id: None,
+            turn: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+            checksum: None,
+        };
+
+        let events = super::rows_to_session_events(&[row]);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "evt_1");
+        assert_eq!(events[0].event_type, EventType::SessionStart);
+        assert_eq!(events[0].payload["model"], "claude-opus-4-6");
+    }
+
+    #[test]
+    fn rows_to_session_events_handles_invalid_json() {
+        let row = EventRow {
+            id: "evt_1".to_string(),
+            session_id: "sess_1".to_string(),
+            parent_id: None,
+            sequence: 0,
+            depth: 0,
+            event_type: "message.user".to_string(),
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            payload: "not-json".to_string(),
+            content_blob_id: None,
+            workspace_id: "ws_1".to_string(),
+            role: None,
+            tool_name: None,
+            tool_call_id: None,
+            turn: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+            checksum: None,
+        };
+
+        let events = super::rows_to_session_events(&[row]);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].payload.is_null());
     }
 }

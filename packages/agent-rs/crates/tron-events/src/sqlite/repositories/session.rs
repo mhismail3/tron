@@ -71,6 +71,40 @@ pub struct IncrementCounters {
     pub cache_creation_tokens: Option<i64>,
 }
 
+/// Message preview for session list display.
+#[derive(Clone, Debug, Default)]
+pub struct MessagePreview {
+    /// Last user prompt text.
+    pub last_user_prompt: Option<String>,
+    /// Last assistant response text.
+    pub last_assistant_response: Option<String>,
+}
+
+/// Extract text from a message event payload JSON string.
+///
+/// Handles both string content (`"content": "hello"`) and array content
+/// (`"content": [{"type": "text", "text": "hello"}]`).
+fn extract_text_from_payload(payload_str: &str) -> String {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload_str) else {
+        return String::new();
+    };
+    match payload.get("content") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(arr)) => {
+            let mut texts = Vec::new();
+            for block in arr {
+                if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                        texts.push(text);
+                    }
+                }
+            }
+            texts.join("")
+        }
+        _ => String::new(),
+    }
+}
+
 /// Session repository — stateless, every method takes `&Connection`.
 pub struct SessionRepo;
 
@@ -315,6 +349,105 @@ impl SessionRepo {
         let changed =
             conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
         Ok(changed > 0)
+    }
+
+    /// Batch-fetch sessions by IDs.
+    ///
+    /// Returns a map of `session_id → SessionRow`. Missing IDs are silently omitted.
+    /// Uses dynamic `IN (?)` placeholders — safe for reasonable batch sizes (<1000).
+    pub fn get_by_ids(
+        conn: &Connection,
+        session_ids: &[&str],
+    ) -> Result<std::collections::HashMap<String, SessionRow>> {
+        let mut result = std::collections::HashMap::new();
+        if session_ids.is_empty() {
+            return Ok(result);
+        }
+
+        let placeholders: Vec<String> = (1..=session_ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT * FROM sessions WHERE id IN ({})",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = session_ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt
+            .query_map(params.as_slice(), Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for row in rows {
+            let _ = result.insert(row.id.clone(), row);
+        }
+        Ok(result)
+    }
+
+    /// Get message previews (last user prompt and assistant response) for a list of sessions.
+    ///
+    /// Uses a window function to find the most recent message of each type per session.
+    /// Returns a map of `session_id → MessagePreview`.
+    pub fn get_message_previews(
+        conn: &Connection,
+        session_ids: &[&str],
+    ) -> Result<std::collections::HashMap<String, MessagePreview>> {
+        let mut result = std::collections::HashMap::new();
+        if session_ids.is_empty() {
+            return Ok(result);
+        }
+
+        // Initialize all sessions with empty previews
+        for &sid in session_ids {
+            let _ = result.insert(sid.to_string(), MessagePreview::default());
+        }
+
+        let placeholders: Vec<String> = (1..=session_ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "WITH ranked AS (
+               SELECT
+                 session_id,
+                 type,
+                 payload,
+                 ROW_NUMBER() OVER (PARTITION BY session_id, type ORDER BY sequence DESC) as rn
+               FROM events
+               WHERE session_id IN ({})
+                 AND type IN ('message.user', 'message.assistant')
+             )
+             SELECT session_id, type, payload
+             FROM ranked
+             WHERE rn = 1",
+            placeholders.join(", ")
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = session_ids
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for (session_id, event_type, payload_str) in rows {
+            let text = extract_text_from_payload(&payload_str);
+            if let Some(preview) = result.get_mut(&session_id) {
+                match event_type.as_str() {
+                    "message.user" => preview.last_user_prompt = Some(text),
+                    "message.assistant" => preview.last_assistant_response = Some(text),
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     /// List subagent sessions for a parent.
@@ -736,5 +869,176 @@ mod tests {
         )
         .unwrap();
         assert_eq!(no_subagents.len(), 1);
+    }
+
+    // ── Batch operations ─────────────────────────────────────────────
+
+    #[test]
+    fn get_by_ids_basic() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+        let s2 = create_default_session(&conn, &ws_id);
+
+        let ids = [s1.id.as_str(), s2.id.as_str()];
+        let map = SessionRepo::get_by_ids(&conn, &ids).unwrap();
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key(&s1.id));
+        assert!(map.contains_key(&s2.id));
+    }
+
+    #[test]
+    fn get_by_ids_empty() {
+        let (conn, _) = setup();
+        let map = SessionRepo::get_by_ids(&conn, &[]).unwrap();
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn get_by_ids_missing_ids_omitted() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+
+        let ids = [s1.id.as_str(), "sess_nonexistent"];
+        let map = SessionRepo::get_by_ids(&conn, &ids).unwrap();
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key(&s1.id));
+    }
+
+    // ── Message previews ─────────────────────────────────────────────
+
+    fn insert_event(conn: &Connection, session_id: &str, ws_id: &str, seq: i64, event_type: &str, payload: &str) {
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'), ?5, ?6)",
+            rusqlite::params![
+                format!("evt_{seq}_{session_id}"),
+                session_id,
+                seq,
+                event_type,
+                payload,
+                ws_id,
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn get_message_previews_basic() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+
+        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "Hello world"}"#);
+        insert_event(&conn, &s1.id, &ws_id, 2, "message.assistant", r#"{"content": "Hi there!"}"#);
+
+        let ids = [s1.id.as_str()];
+        let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
+        let preview = previews.get(&s1.id).unwrap();
+        assert_eq!(preview.last_user_prompt.as_deref(), Some("Hello world"));
+        assert_eq!(preview.last_assistant_response.as_deref(), Some("Hi there!"));
+    }
+
+    #[test]
+    fn get_message_previews_array_content() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+
+        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "Hello"}"#);
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            2,
+            "message.assistant",
+            r#"{"content": [{"type": "text", "text": "Part 1"}, {"type": "text", "text": " Part 2"}]}"#,
+        );
+
+        let ids = [s1.id.as_str()];
+        let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
+        let preview = previews.get(&s1.id).unwrap();
+        assert_eq!(preview.last_assistant_response.as_deref(), Some("Part 1 Part 2"));
+    }
+
+    #[test]
+    fn get_message_previews_uses_latest() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+
+        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "First"}"#);
+        insert_event(&conn, &s1.id, &ws_id, 2, "message.user", r#"{"content": "Second"}"#);
+
+        let ids = [s1.id.as_str()];
+        let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
+        let preview = previews.get(&s1.id).unwrap();
+        assert_eq!(preview.last_user_prompt.as_deref(), Some("Second"));
+    }
+
+    #[test]
+    fn get_message_previews_empty() {
+        let (conn, _) = setup();
+        let previews = SessionRepo::get_message_previews(&conn, &[]).unwrap();
+        assert!(previews.is_empty());
+    }
+
+    #[test]
+    fn get_message_previews_no_messages() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+
+        let ids = [s1.id.as_str()];
+        let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
+        let preview = previews.get(&s1.id).unwrap();
+        assert!(preview.last_user_prompt.is_none());
+        assert!(preview.last_assistant_response.is_none());
+    }
+
+    #[test]
+    fn get_message_previews_multiple_sessions() {
+        let (conn, ws_id) = setup();
+        let s1 = create_default_session(&conn, &ws_id);
+        let s2 = create_default_session(&conn, &ws_id);
+
+        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "S1 user"}"#);
+        insert_event(&conn, &s2.id, &ws_id, 1, "message.user", r#"{"content": "S2 user"}"#);
+
+        let ids = [s1.id.as_str(), s2.id.as_str()];
+        let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
+        assert_eq!(previews.get(&s1.id).unwrap().last_user_prompt.as_deref(), Some("S1 user"));
+        assert_eq!(previews.get(&s2.id).unwrap().last_user_prompt.as_deref(), Some("S2 user"));
+    }
+
+    // ── Text extraction helper ───────────────────────────────────────
+
+    #[test]
+    fn extract_text_string_content() {
+        let text = extract_text_from_payload(r#"{"content": "hello"}"#);
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn extract_text_array_content() {
+        let text = extract_text_from_payload(
+            r#"{"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}"#,
+        );
+        assert_eq!(text, "ab");
+    }
+
+    #[test]
+    fn extract_text_skips_non_text_blocks() {
+        let text = extract_text_from_payload(
+            r#"{"content": [{"type": "text", "text": "hi"}, {"type": "tool_use", "name": "bash"}]}"#,
+        );
+        assert_eq!(text, "hi");
+    }
+
+    #[test]
+    fn extract_text_invalid_json() {
+        let text = extract_text_from_payload("not json");
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn extract_text_missing_content() {
+        let text = extract_text_from_payload(r#"{"other": "field"}"#);
+        assert_eq!(text, "");
     }
 }

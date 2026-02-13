@@ -22,9 +22,11 @@
 #![deny(unsafe_code)]
 
 pub mod store;
+pub mod transport;
 pub mod types;
 
 pub use store::LogStore;
+pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
 pub use types::{LogEntry, LogLevel, LogQueryOptions};
 
 /// Initialize the global tracing subscriber with stderr output.
