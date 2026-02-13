@@ -11,7 +11,8 @@ workspace = true
 
 [dependencies]
 tron-core.workspace = true
-tron-rpc.workspace = true
+tron-rpc = { path = "../tron-rpc" }
+tron-runtime = { path = "../tron-runtime" }
 axum.workspace = true
 axum-extra.workspace = true
 tower.workspace = true
@@ -24,8 +25,12 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 futures.workspace = true
+chrono.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 insta.workspace = true
+async-trait.workspace = true
+tron-events.workspace = true

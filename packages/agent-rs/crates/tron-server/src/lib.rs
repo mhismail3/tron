@@ -2,10 +2,16 @@
 //!
 //! Axum HTTP + `WebSocket` server and event broadcasting.
 //!
-//! - HTTP endpoints: health check, static assets
+//! - HTTP endpoints: health check
 //! - `WebSocket` gateway: connection management, heartbeat, message dispatch
-//! - Event broadcasting via `tokio::sync::broadcast` (fan-out to all connected clients)
-//! - Event envelope construction matching `BroadcastEventType`
-//! - Graceful shutdown via `tokio::signal` + `CancellationToken`
+//! - Event fan-out to connected clients via `BroadcastManager`
+//! - Graceful shutdown via `CancellationToken` coordination
 
 #![deny(unsafe_code)]
+#![allow(unused_results)]
+
+pub mod config;
+pub mod health;
+pub mod server;
+pub mod shutdown;
+pub mod websocket;

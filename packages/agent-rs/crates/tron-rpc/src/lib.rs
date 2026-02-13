@@ -3,15 +3,20 @@
 //! JSON-RPC 2.0 protocol layer, method registry, and handlers.
 //!
 //! Implements the full RPC surface that iOS connects to:
-//! - Session: create, get, list, fork, delete, archive
-//! - Agent: message, abort, respond
+//! - Session: create, resume, list, delete, fork, getHead, getState
+//! - Agent: prompt, abort, getState
 //! - Model: list, switch
-//! - Context: get, compact
-//! - Events: list, sync
+//! - Context: getSnapshot, compact, clear, canAcceptTurn, shouldCompact
+//! - Events: getHistory, getSince, subscribe, append
 //! - Settings: get, update
-//! - Skills: list, get
-//! - Plus: browser, canvas, device, sandbox, task, transcription, worktree adapters
-//!
-//! All 30 `RpcEventType` variants are a Rust enum matching the `TypeScript` wire format exactly.
+//! - Skills: list, get, refresh, remove
+//! - Plus: browser, canvas, device, task, transcription, worktree, tree adapters
 
 #![deny(unsafe_code)]
+#![allow(unused_results)]
+
+pub mod context;
+pub mod errors;
+pub mod handlers;
+pub mod registry;
+pub mod types;

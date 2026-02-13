@@ -16,6 +16,10 @@ tron-llm.workspace = true
 tron-context.workspace = true
 tron-tools.workspace = true
 tron-hooks.workspace = true
+tron-guardrails = { path = "../tron-guardrails" }
+tron-skills = { path = "../tron-skills" }
+tron-memory = { path = "../tron-memory" }
+tron-tasks = { path = "../tron-tasks" }
 tron-settings.workspace = true
 async-trait.workspace = true
 serde.workspace = true
@@ -25,9 +29,14 @@ tokio.workspace = true
 tokio-util.workspace = true
 futures.workspace = true
 tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+dashmap = "6"
 
 [dev-dependencies]
 tempfile.workspace = true
 mockall.workspace = true
 insta.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+async-stream.workspace = true
+regex.workspace = true
