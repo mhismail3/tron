@@ -109,7 +109,7 @@ struct TronMobileApp: App {
                 container.setBackgroundState(isBackground)
                 TronLogger.shared.info("Scene phase changed: \(oldPhase) -> \(newPhase), background=\(isBackground)", category: .session)
 
-                // When returning to foreground, handle reconnection based on current state
+                // When returning to foreground, handle reconnection and refresh session list
                 if newPhase == .active && oldPhase != .active {
                     Task {
                         // Clear badge count
@@ -127,9 +127,13 @@ struct TronMobileApp: App {
                             if !isAlive {
                                 TronLogger.shared.info("Connection dead on foreground return - reconnecting", category: .rpc)
                                 await container.forceReconnect()
+                            } else {
+                                // Connection alive — refresh session list to pick up server-side changes
+                                await container.eventStoreManager.refreshSessionList()
                             }
                         case .disconnected, .failed:
                             // Trigger reconnection for disconnected/failed states
+                            // Session list will refresh via ContentView's onChange(of: connectionState)
                             TronLogger.shared.info("Triggering reconnection on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
                             await container.manualRetry()
                         case .connecting, .reconnecting:

@@ -45,8 +45,10 @@ export interface SessionListParams {
   workingDirectory?: string;
   /** Max sessions to return */
   limit?: number;
-  /** Include ended sessions */
-  includeEnded?: boolean;
+  /** Include archived sessions (default: false) */
+  includeArchived?: boolean;
+  /** Offset for pagination */
+  offset?: number;
 }
 
 export interface SessionListResult {
@@ -65,6 +67,7 @@ export interface SessionListResult {
     createdAt: string;
     lastActivity: string;
     isActive: boolean;
+    isArchived: boolean;
     parentSessionId?: string;
     /** Last user prompt text (for preview display) */
     lastUserPrompt?: string;
@@ -80,6 +83,24 @@ export interface SessionDeleteParams {
 
 export interface SessionDeleteResult {
   deleted: boolean;
+}
+
+/** Archive session */
+export interface SessionArchiveParams {
+  sessionId: string;
+}
+
+export interface SessionArchiveResult {
+  archived: boolean;
+}
+
+/** Unarchive session */
+export interface SessionUnarchiveParams {
+  sessionId: string;
+}
+
+export interface SessionUnarchiveResult {
+  unarchived: boolean;
 }
 
 /** Fork session from specific event */

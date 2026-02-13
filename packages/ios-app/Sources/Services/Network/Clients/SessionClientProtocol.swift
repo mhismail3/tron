@@ -24,8 +24,6 @@ protocol SessionClientProtocol {
 
     func getHistory(limit: Int) async throws -> [HistoryMessage]
 
-    func delete(_ sessionId: String) async throws -> Bool
-
     func fork(_ sessionId: String, fromEventId: String?) async throws -> SessionForkResult
 }
 

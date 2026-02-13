@@ -49,8 +49,8 @@ export interface SubagentStatusInfo {
   createdAt: string;
   /** Last activity time */
   lastActivityAt: string;
-  /** End time if completed/failed */
-  endedAt: string | null;
+  /** Completion time if completed/failed */
+  completedAt?: string;
   /** Model used */
   model: string;
   /** Working directory */
@@ -284,8 +284,8 @@ Use this to monitor sub-agents you've spawned with SpawnSubagent or SpawnTmuxAge
 | **Created** | ${status.createdAt} |
 | **Last Activity** | ${status.lastActivityAt} |`;
 
-    if (status.endedAt) {
-      output += `\n| **Ended** | ${status.endedAt} |`;
+    if (status.completedAt) {
+      output += `\n| **Completed** | ${status.completedAt} |`;
     }
 
     if (status.tmuxSessionName) {

@@ -42,11 +42,6 @@ struct SessionClientTests {
         var getHistoryResult: [HistoryMessage] = []
         var getHistoryShouldThrow = false
 
-        var deleteCallCount = 0
-        var deleteSessionId: String?
-        var deleteResult = true
-        var deleteShouldThrow = false
-
         var forkCallCount = 0
         var forkSessionId: String?
         var forkFromEventId: String?
@@ -105,13 +100,6 @@ struct SessionClientTests {
             getHistoryLimit = limit
             if getHistoryShouldThrow { throw TestError.mockError }
             return getHistoryResult
-        }
-
-        func delete(_ sessionId: String) async throws -> Bool {
-            deleteCallCount += 1
-            deleteSessionId = sessionId
-            if deleteShouldThrow { throw TestError.mockError }
-            return deleteResult
         }
 
         func fork(_ sessionId: String, fromEventId: String?) async throws -> SessionForkResult {
@@ -219,29 +207,6 @@ struct SessionClientTests {
         await #expect(throws: MockSessionClient.TestError.self) {
             try await mock.resume(sessionId: "session-123")
         }
-    }
-
-    // MARK: - Delete Tests
-
-    @Test("Delete session returns success")
-    func testDelete_returnsSuccess() async throws {
-        let mock = MockSessionClient()
-        mock.deleteResult = true
-
-        let result = try await mock.delete("session-123")
-
-        #expect(result == true)
-        #expect(mock.deleteSessionId == "session-123")
-    }
-
-    @Test("Delete session returns false when not found")
-    func testDelete_returnsFalseWhenNotFound() async throws {
-        let mock = MockSessionClient()
-        mock.deleteResult = false
-
-        let result = try await mock.delete("session-123")
-
-        #expect(result == false)
     }
 
     // MARK: - Fork Tests

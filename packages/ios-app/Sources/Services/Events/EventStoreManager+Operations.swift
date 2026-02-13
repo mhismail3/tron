@@ -71,15 +71,15 @@ extension EventStoreManager {
             throw error
         }
 
-        // 4. Try to delete from server (optional, don't rollback on failure)
+        // 4. Try to archive on server (optional, don't rollback on failure)
         do {
-            _ = try await rpcClient.session.delete(sessionId)
+            try await rpcClient.session.archive(sessionId)
         } catch {
-            logger.warning("Server delete failed (continuing): \(error.localizedDescription)", category: .session)
+            logger.warning("Server archive failed (continuing): \(error.localizedDescription)", category: .session)
         }
 
         // 5. DON'T call loadSessions() - the local array is already correct
-        logger.info("Deleted session: \(sessionId)", category: .session)
+        logger.info("Archived session: \(sessionId)", category: .session)
     }
 
     /// Archive all sessions (delete locally, optionally notify server)
@@ -104,9 +104,9 @@ extension EventStoreManager {
                 try eventDB.events.deleteBySession(session.id)
 
                 do {
-                    _ = try await rpcClient.session.delete(session.id)
+                    try await rpcClient.session.archive(session.id)
                 } catch {
-                    logger.warning("Server delete failed for \(session.id) (continuing): \(error.localizedDescription)", category: .session)
+                    logger.warning("Server archive failed for \(session.id) (continuing): \(error.localizedDescription)", category: .session)
                 }
             } catch {
                 logger.error("Failed to archive session \(session.id): \(error.localizedDescription)", category: .session)
@@ -354,7 +354,6 @@ extension EventStoreManager {
                     } catch {
                         logger.warning("Failed to update metadata after repair for session \(sessionId.prefix(12))...: \(error.localizedDescription)", category: .session)
                     }
-                    notifySessionUpdated(sessionId)
                 }
             }
         } catch {

@@ -11,10 +11,6 @@ protocol SessionStoreProtocol: AnyObject {
     var lastSyncError: String? { get }
     var activeSessionId: String? { get }
 
-    // MARK: - Session Change Notification (Async Stream API)
-    /// Async stream of session IDs that have been updated
-    var sessionUpdates: AsyncStream<String> { get }
-
     // MARK: - Processing State
     var processingSessionIds: Set<String> { get set }
 

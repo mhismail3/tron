@@ -42,7 +42,7 @@ export const migration: Migration = {
         fork_from_event_id TEXT,
         created_at TEXT NOT NULL,
         last_activity_at TEXT NOT NULL,
-        ended_at TEXT,
+        archived_at TEXT,
         event_count INTEGER DEFAULT 0,
         message_count INTEGER DEFAULT 0,
         turn_count INTEGER DEFAULT 0,
@@ -58,11 +58,11 @@ export const migration: Migration = {
         spawn_task TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
-      CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
+      CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived_at);
       CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_working_dir ON sessions(working_directory);
-      CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id, ended_at);
+      CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id);
 
       -- Events
       CREATE TABLE IF NOT EXISTS events (

@@ -18,8 +18,8 @@ export interface DashboardSessionSummary {
   model: string;
   createdAt: string;
   lastActivityAt: string;
-  endedAt: string | null;
-  isEnded: boolean;
+  archivedAt: string | null;
+  isArchived: boolean;
 
   // Counters
   eventCount: number;
@@ -84,8 +84,8 @@ export interface PaginatedResult<T> {
 export interface ListSessionsOptions extends Partial<PaginationOptions> {
   /** Filter by workspace */
   workspaceId?: WorkspaceId;
-  /** Filter by ended state */
-  ended?: boolean;
+  /** Filter by archived state */
+  archived?: boolean;
   /** Sort field */
   orderBy?: 'createdAt' | 'lastActivityAt';
   /** Sort direction */

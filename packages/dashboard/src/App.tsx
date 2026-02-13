@@ -33,7 +33,7 @@ class ApiSessionRepository implements IDashboardSessionRepository {
     const params = new URLSearchParams();
     if (options.limit) params.set('limit', String(options.limit));
     if (options.offset) params.set('offset', String(options.offset));
-    if (options.ended !== undefined) params.set('ended', String(options.ended));
+    if (options.archived !== undefined) params.set('archived', String(options.archived));
 
     const response = await fetch(`/api/sessions?${params}`);
     const data = await response.json();
@@ -79,9 +79,9 @@ class ApiSessionRepository implements IDashboardSessionRepository {
     return response.json();
   }
 
-  async count(options?: Pick<ListSessionsOptions, 'workspaceId' | 'ended'>): Promise<number> {
+  async count(options?: Pick<ListSessionsOptions, 'workspaceId' | 'archived'>): Promise<number> {
     const params = new URLSearchParams();
-    if (options?.ended !== undefined) params.set('ended', String(options.ended));
+    if (options?.archived !== undefined) params.set('archived', String(options.archived));
 
     const response = await fetch(`/api/sessions?${params}&limit=0`);
     const data = await response.json();

@@ -36,7 +36,7 @@ export class DashboardSessionRepository implements IDashboardSessionRepository {
   async listWithStats(options: ListSessionsOptions = {}): Promise<DashboardSessionSummary[]> {
     const {
       workspaceId,
-      ended,
+      archived,
       limit = 100,
       offset = 0,
       orderBy = 'lastActivityAt',
@@ -46,7 +46,7 @@ export class DashboardSessionRepository implements IDashboardSessionRepository {
 
     const sessions = await this.store.listSessions({
       workspaceId,
-      ended,
+      archived,
       limit,
       offset,
       orderBy,
@@ -141,7 +141,7 @@ export class DashboardSessionRepository implements IDashboardSessionRepository {
     for (const session of allSessions) {
       totalTokensUsed += session.totalInputTokens + session.totalOutputTokens;
       totalCost += session.totalCost;
-      if (!session.isEnded) activeSessions++;
+      if (!session.isArchived) activeSessions++;
     }
 
     return {
@@ -156,7 +156,7 @@ export class DashboardSessionRepository implements IDashboardSessionRepository {
   /**
    * Count total sessions matching filters
    */
-  async count(options?: Pick<ListSessionsOptions, 'workspaceId' | 'ended'>): Promise<number> {
+  async count(options?: Pick<ListSessionsOptions, 'workspaceId' | 'archived'>): Promise<number> {
     const sessions = await this.store.listSessions({
       ...options,
       limit: 100000, // Large limit to count all
@@ -179,8 +179,8 @@ export class DashboardSessionRepository implements IDashboardSessionRepository {
       model: session.latestModel,
       createdAt: session.createdAt,
       lastActivityAt: session.lastActivityAt,
-      endedAt: session.endedAt,
-      isEnded: session.isEnded,
+      archivedAt: session.archivedAt,
+      isArchived: session.isArchived,
       eventCount: session.eventCount,
       messageCount: session.messageCount,
       turnCount: session.turnCount,

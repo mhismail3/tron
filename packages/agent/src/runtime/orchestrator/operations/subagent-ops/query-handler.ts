@@ -58,13 +58,12 @@ export class QueryHandler {
 
       switch (queryType) {
         case 'status': {
-          const isEnded = session.endedAt !== null;
           let status: 'running' | 'completed' | 'failed' | 'unknown' =
             'unknown';
           if (this.deps.sessionStore.get(sessionId)) {
             status = 'running';
-          } else if (isEnded) {
-            // Check if there's a failure event
+          } else {
+            // Not in active store — check events for completion/failure
             const allEvents = session.headEventId
               ? await this.deps.eventStore.getAncestors(session.headEventId)
               : [];
@@ -91,7 +90,6 @@ export class QueryHandler {
               cost: session.totalCost,
               createdAt: session.createdAt,
               lastActivityAt: session.lastActivityAt,
-              endedAt: session.endedAt,
               model: session.latestModel,
               workingDirectory: session.workingDirectory,
             },

@@ -2,7 +2,8 @@
  * @fileoverview Tests for Session Adapter
  *
  * The session adapter handles session lifecycle including creation,
- * retrieval, resumption, listing, deletion, forking, and model switching.
+ * retrieval, resumption, listing, deletion, archiving, unarchiving,
+ * forking, and model switching.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -43,6 +44,8 @@ describe('SessionAdapter', () => {
         resumeSession: vi.fn(),
         listSessions: vi.fn(),
         endSession: vi.fn(),
+        archiveSession: vi.fn(),
+        unarchiveSession: vi.fn(),
         forkSession: vi.fn(),
         wasSessionInterrupted: vi.fn(),
       },
@@ -180,8 +183,8 @@ describe('SessionAdapter', () => {
   });
 
   describe('deleteSession', () => {
-    it('should end session and return true', async () => {
-      vi.mocked((mockOrchestrator as any).sessions.endSession).mockResolvedValue(undefined);
+    it('should archive session and return true', async () => {
+      vi.mocked((mockOrchestrator as any).sessions.archiveSession).mockResolvedValue(undefined);
 
       const adapter = createSessionAdapter({
         orchestrator: mockOrchestrator as EventStoreOrchestrator,
@@ -189,7 +192,37 @@ describe('SessionAdapter', () => {
 
       const result = await adapter.deleteSession('sess-123');
 
-      expect((mockOrchestrator as any).sessions.endSession).toHaveBeenCalledWith('sess-123');
+      expect((mockOrchestrator as any).sessions.archiveSession).toHaveBeenCalledWith('sess-123');
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('archiveSession', () => {
+    it('should archive session via orchestrator', async () => {
+      vi.mocked((mockOrchestrator as any).sessions.archiveSession).mockResolvedValue(undefined);
+
+      const adapter = createSessionAdapter({
+        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+      });
+
+      const result = await adapter.archiveSession('sess-123');
+
+      expect((mockOrchestrator as any).sessions.archiveSession).toHaveBeenCalledWith('sess-123');
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('unarchiveSession', () => {
+    it('should unarchive session via orchestrator', async () => {
+      vi.mocked((mockOrchestrator as any).sessions.unarchiveSession).mockResolvedValue(undefined);
+
+      const adapter = createSessionAdapter({
+        orchestrator: mockOrchestrator as EventStoreOrchestrator,
+      });
+
+      const result = await adapter.unarchiveSession('sess-123');
+
+      expect((mockOrchestrator as any).sessions.unarchiveSession).toHaveBeenCalledWith('sess-123');
       expect(result).toBe(true);
     });
   });

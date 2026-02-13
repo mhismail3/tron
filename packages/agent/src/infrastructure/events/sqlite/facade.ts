@@ -275,12 +275,12 @@ export class SQLiteEventStore {
     this.sessionRepo.updateRoot(sessionId, rootEventId);
   }
 
-  async markSessionEnded(sessionId: SessionId): Promise<void> {
-    this.sessionRepo.markEnded(sessionId);
+  async archiveSession(sessionId: SessionId): Promise<void> {
+    this.sessionRepo.archive(sessionId);
   }
 
-  async clearSessionEnded(sessionId: SessionId): Promise<void> {
-    this.sessionRepo.clearEnded(sessionId);
+  async unarchiveSession(sessionId: SessionId): Promise<void> {
+    this.sessionRepo.unarchive(sessionId);
   }
 
   async updateLatestModel(sessionId: SessionId, model: string): Promise<void> {

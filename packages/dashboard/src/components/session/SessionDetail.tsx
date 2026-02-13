@@ -24,8 +24,8 @@ export const SessionDetail = memo(function SessionDetail({
           <h2 className="session-detail-title">
             {session.title || 'Untitled Session'}
           </h2>
-          <Badge variant={session.isEnded ? 'default' : 'success'}>
-            {session.isEnded ? 'Ended' : 'Active'}
+          <Badge variant={session.isArchived ? 'default' : 'success'}>
+            {session.isArchived ? 'Archived' : 'Active'}
           </Badge>
         </div>
         {onClose && (
@@ -58,11 +58,11 @@ export const SessionDetail = memo(function SessionDetail({
             {formatRelativeTime(session.lastActivityAt)}
           </span>
         </div>
-        {session.endedAt && (
+        {session.archivedAt && (
           <div className="session-detail-meta-item">
-            <span className="meta-label">Ended:</span>
+            <span className="meta-label">Archived:</span>
             <span className="meta-value">
-              {new Date(session.endedAt).toLocaleString()}
+              {new Date(session.archivedAt).toLocaleString()}
             </span>
           </div>
         )}

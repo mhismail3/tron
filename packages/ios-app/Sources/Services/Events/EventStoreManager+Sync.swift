@@ -6,15 +6,17 @@ extension EventStoreManager {
 
     /// Lightweight session list refresh: fetch sessions from server and update local DB.
     /// Does NOT sync events — just updates the session metadata so all devices see the same list.
-    /// Call this on WebSocket connect for fast session list population.
+    /// Reconciles local state: adds new sessions, updates existing, removes stale ones.
     func refreshSessionList() async {
         let serverOrigin = rpcClient.serverOrigin
         logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
 
         do {
             let serverSessions = try await sessionSynchronizer.fetchServerSessions()
+            let serverSessionIds = Set(serverSessions.map(\.sessionId))
             logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
 
+            // Upsert server sessions into local DB
             for serverSession in serverSessions {
                 let sessionId = serverSession.sessionId
 
@@ -29,6 +31,20 @@ extension EventStoreManager {
                     cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
                 }
                 try eventDB.sessions.insert(cachedSession)
+            }
+
+            // Remove local sessions that no longer exist on the server
+            let localSessions = try eventDB.sessions.getByOrigin(serverOrigin)
+            var removedCount = 0
+            for local in localSessions {
+                if !serverSessionIds.contains(local.id) {
+                    try eventDB.events.deleteBySession(local.id)
+                    try eventDB.sessions.delete(local.id)
+                    removedCount += 1
+                }
+            }
+            if removedCount > 0 {
+                logger.info("Removed \(removedCount) stale local sessions", category: .session)
             }
 
             loadSessions()
@@ -113,7 +129,6 @@ extension EventStoreManager {
     func fullSyncSession(_ sessionId: String) async throws {
         _ = try await sessionSynchronizer.fullSync(sessionId: sessionId)
         try await updateSessionMetadata(sessionId: sessionId)
-        notifySessionUpdated(sessionId)
     }
 
     /// Update session metadata from event database.

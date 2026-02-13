@@ -36,12 +36,6 @@ final class MockSessionClientForRepository {
     var lastUnarchiveSessionId: String?
     var unarchiveError: Error?
 
-    // Delete
-    var deleteCallCount = 0
-    var lastDeleteSessionId: String?
-    var deleteResult: Bool = true
-    var deleteError: Error?
-
     // Fork
     var forkCallCount = 0
     var lastForkSessionId: String?
@@ -99,15 +93,6 @@ final class MockSessionClientForRepository {
         if let error = unarchiveError {
             throw error
         }
-    }
-
-    func delete(_ sessionId: String) async throws -> Bool {
-        deleteCallCount += 1
-        lastDeleteSessionId = sessionId
-        if let error = deleteError {
-            throw error
-        }
-        return deleteResult
     }
 
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
@@ -302,42 +287,6 @@ final class DefaultSessionRepositoryTests: XCTestCase {
         // Then
         XCTAssertEqual(mockClient.unarchiveCallCount, 1)
         XCTAssertEqual(mockClient.lastUnarchiveSessionId, "session-456")
-    }
-
-    // MARK: - Delete Tests
-
-    func test_delete_callsClientWithSessionId() async throws {
-        // When
-        let result = try await mockClient.delete("session-123")
-
-        // Then
-        XCTAssertEqual(mockClient.deleteCallCount, 1)
-        XCTAssertEqual(mockClient.lastDeleteSessionId, "session-123")
-        XCTAssertTrue(result)
-    }
-
-    func test_delete_returnsFalse() async throws {
-        // Given
-        mockClient.deleteResult = false
-
-        // When
-        let result = try await mockClient.delete("session-123")
-
-        // Then
-        XCTAssertFalse(result)
-    }
-
-    func test_delete_throwsError() async throws {
-        // Given
-        mockClient.deleteError = NSError(domain: "Test", code: 1, userInfo: nil)
-
-        // When/Then
-        do {
-            _ = try await mockClient.delete("session-123")
-            XCTFail("Expected error to be thrown")
-        } catch {
-            XCTAssertEqual(mockClient.deleteCallCount, 1)
-        }
     }
 
     // MARK: - Fork Tests

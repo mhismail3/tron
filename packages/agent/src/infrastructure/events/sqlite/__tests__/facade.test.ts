@@ -121,17 +121,17 @@ describe('SQLiteEventStore Facade', () => {
       expect(updated?.headEventId).toBe(eventId);
     });
 
-    it('should mark session ended', async () => {
+    it('should archive session', async () => {
       const session = await store.createSession({
         workspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
 
-      await store.markSessionEnded(session.id);
+      await store.archiveSession(session.id);
 
       const updated = await store.getSession(session.id);
-      expect(updated?.isEnded).toBe(true);
+      expect(updated?.isArchived).toBe(true);
     });
 
     it('should increment counters', async () => {

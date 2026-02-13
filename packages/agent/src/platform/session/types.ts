@@ -29,8 +29,8 @@ export interface Session {
   createdAt: string;
   /** Last activity timestamp */
   lastActivityAt: string;
-  /** End timestamp if session ended */
-  endedAt?: string;
+  /** Archive timestamp if session archived */
+  archivedAt?: string;
   /** Total token usage */
   tokenUsage: TokenUsage;
   /** Current turn number */
@@ -106,8 +106,8 @@ export interface CreateSessionOptions {
 export interface ListSessionsOptions {
   /** Filter by working directory */
   workingDirectory?: string;
-  /** Include ended sessions */
-  includeEnded?: boolean;
+  /** Include archived sessions */
+  includeArchived?: boolean;
   /** Maximum sessions to return */
   limit?: number;
   /** Offset for pagination */

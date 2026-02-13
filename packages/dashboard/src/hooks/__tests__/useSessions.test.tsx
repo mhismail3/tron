@@ -21,7 +21,7 @@ describe('useSessions', () => {
         model: 'claude-sonnet-4-20250514',
         createdAt: new Date().toISOString(),
         lastActivityAt: new Date().toISOString(),
-        isEnded: false,
+        isArchived: false,
         eventCount: 10,
         messageCount: 5,
         turnCount: 2,

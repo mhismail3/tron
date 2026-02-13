@@ -80,8 +80,8 @@ export interface SessionState {
   metadata?: SessionMetadata;
   /** Active files being worked on */
   activeFiles?: string[];
-  /** Whether session has ended (derived from ended_at) */
-  isEnded?: boolean;
+  /** Whether session is archived (derived from archived_at) */
+  isArchived?: boolean;
   /** Branch information */
   branch?: {
     id: BranchId;
@@ -187,8 +187,8 @@ export interface SessionSummary {
   tokenUsage: TokenUsage;
   created: string;
   lastActivity: string;
-  /** Whether session has ended (derived from ended_at IS NOT NULL) */
-  isEnded: boolean;
+  /** Whether session is archived (derived from archived_at IS NOT NULL) */
+  isArchived: boolean;
   tags: string[];
 }
 

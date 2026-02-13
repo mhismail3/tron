@@ -17,6 +17,7 @@ import { migration as v005TraceColumns } from './versions/v005-trace-columns.js'
 import { migration as v006MemoryVectors } from './versions/v006-memory-vectors.js';
 import { migration as v007Tasks } from './versions/v007-tasks.js';
 import { migration as v008Areas } from './versions/v008-areas.js';
+import { migration as v009ArchiveRename } from './versions/v009-archive-rename.js';
 
 /**
  * All registered migrations in order
@@ -30,6 +31,7 @@ export const migrations: Migration[] = [
   v006MemoryVectors,
   v007Tasks,
   v008Areas,
+  v009ArchiveRename,
 ];
 
 /**
@@ -77,7 +79,7 @@ export function runIncrementalMigrations(db: Database): void {
   const indices = db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[];
   const hasIndex = indices.some(i => i.name === 'idx_sessions_spawning');
   if (!hasIndex) {
-    db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id, ended_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_spawning ON sessions(spawning_session_id, archived_at)');
   }
 
   // Migration: Update FTS trigger to extract memory.ledger fields

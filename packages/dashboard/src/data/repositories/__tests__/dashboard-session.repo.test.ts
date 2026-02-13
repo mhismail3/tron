@@ -75,7 +75,7 @@ describe('DashboardSessionRepository', () => {
       expect(sessions[1].id).toBe(session1.id);
     });
 
-    it('filters by ended state', async () => {
+    it('filters by archived state', async () => {
       const workspace = await store.getWorkspaceByPath('/test/workspace');
       const workspaceId = workspace!.id;
 
@@ -91,17 +91,17 @@ describe('DashboardSessionRepository', () => {
         workingDirectory: '/test/project2',
       });
 
-      await store.markSessionEnded(session1.id);
+      await store.archiveSession(session1.id);
 
-      // Filter active sessions
-      const activeSessions = await repo.listWithStats({ ended: false });
+      // Filter non-archived sessions
+      const activeSessions = await repo.listWithStats({ archived: false });
       expect(activeSessions).toHaveLength(1);
       expect(activeSessions[0].id).toBe(session2.id);
 
-      // Filter ended sessions
-      const endedSessions = await repo.listWithStats({ ended: true });
-      expect(endedSessions).toHaveLength(1);
-      expect(endedSessions[0].id).toBe(session1.id);
+      // Filter archived sessions
+      const archivedSessions = await repo.listWithStats({ archived: true });
+      expect(archivedSessions).toHaveLength(1);
+      expect(archivedSessions[0].id).toBe(session1.id);
     });
 
     it('respects limit and offset', async () => {
@@ -156,7 +156,7 @@ describe('DashboardSessionRepository', () => {
       expect(session!.title).toBe('Test Session');
       expect(session!.model).toBe('claude-sonnet-4-20250514');
       expect(session!.workingDirectory).toBe('/test/project');
-      expect(session!.isEnded).toBe(false);
+      expect(session!.isArchived).toBe(false);
       expect(session!.tags).toEqual(['test', 'unit']);
     });
   });
@@ -227,7 +227,7 @@ describe('DashboardSessionRepository', () => {
         workingDirectory: '/test/project2',
       });
 
-      await store.markSessionEnded(session1.id);
+      await store.archiveSession(session1.id);
 
       // Add some token usage
       await store.incrementSessionCounters(session1.id, {
@@ -280,9 +280,9 @@ describe('DashboardSessionRepository', () => {
         workingDirectory: '/test/project2',
       });
 
-      await store.markSessionEnded(session1.id);
+      await store.archiveSession(session1.id);
 
-      const activeCount = await repo.count({ ended: false });
+      const activeCount = await repo.count({ archived: false });
       expect(activeCount).toBe(1);
     });
   });

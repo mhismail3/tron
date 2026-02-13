@@ -94,7 +94,7 @@ export interface TrackedSubagent {
   /** Start time (ISO string) */
   startedAt: string;
   /** End time if completed/failed (ISO string) */
-  endedAt?: string;
+  completedAt?: string;
   /** Result summary if completed */
   resultSummary?: string;
   /** Full output if completed */
@@ -243,7 +243,7 @@ export class SubAgentTracker {
     subagent.currentTurn = totalTurns;
     subagent.tokenUsage = totalTokenUsage;
     subagent.duration = duration;
-    subagent.endedAt = completedAt;
+    subagent.completedAt = completedAt;
     subagent.stopReason = metadata?.stopReason;
     subagent.truncated = metadata?.truncated;
     subagent.completionType = metadata?.completionType ?? 'success';
@@ -300,7 +300,7 @@ export class SubAgentTracker {
     subagent.error = error;
     subagent.currentTurn = failedAtTurn;
     subagent.duration = duration;
-    subagent.endedAt = completedAt;
+    subagent.completedAt = completedAt;
     subagent.completionType = completionType;
 
     // Create the result object (failed)
@@ -415,7 +415,7 @@ export class SubAgentTracker {
         totalTurns: subagent.currentTurn,
         tokenUsage: subagent.tokenUsage,
         duration: subagent.duration ?? 0,
-        completedAt: subagent.endedAt ?? new Date().toISOString(),
+        completedAt: subagent.completedAt ?? new Date().toISOString(),
         error: subagent.error,
         stopReason: subagent.stopReason,
         truncated: subagent.truncated,

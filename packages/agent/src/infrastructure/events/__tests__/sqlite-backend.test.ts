@@ -120,7 +120,7 @@ describe('SQLiteEventStore', () => {
       expect(session.id).toMatch(/^sess_/);
       expect(session.workspaceId).toBe(workspaceId);
       expect(session.model).toBe('claude-sonnet-4-20250514');
-      expect(session.isEnded).toBe(false);
+      expect(session.isArchived).toBe(false);
     });
 
     it('should get session by id', async () => {
@@ -172,17 +172,17 @@ describe('SQLiteEventStore', () => {
       expect(updated?.headEventId).toBe(eventId);
     });
 
-    it('should mark session as ended', async () => {
+    it('should archive session', async () => {
       const session = await backend.createSession({
         workspaceId,
         workingDirectory: '/test',
         model: 'claude-sonnet-4-20250514',
       });
 
-      await backend.markSessionEnded(session.id);
+      await backend.archiveSession(session.id);
 
       const updated = await backend.getSession(session.id);
-      expect(updated?.isEnded).toBe(true);
+      expect(updated?.isArchived).toBe(true);
     });
 
     it('should exclude subagent sessions when excludeSubagents is true', async () => {

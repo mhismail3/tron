@@ -51,7 +51,7 @@ export interface IDashboardSessionRepository {
   /**
    * Count total sessions matching filters
    */
-  count(options?: Pick<ListSessionsOptions, 'workspaceId' | 'ended'>): Promise<number>;
+  count(options?: Pick<ListSessionsOptions, 'workspaceId' | 'archived'>): Promise<number>;
 }
 
 /**

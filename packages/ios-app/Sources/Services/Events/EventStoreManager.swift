@@ -47,22 +47,6 @@ final class EventStoreManager {
         rpcClient.serverOrigin
     }
 
-    // MARK: - Session Update Stream
-
-    /// Async event stream for session update notifications
-    @ObservationIgnored
-    private let _sessionUpdates = AsyncEventStream<String>()
-
-    /// Async stream of session IDs that have been updated
-    var sessionUpdates: AsyncStream<String> {
-        _sessionUpdates.events
-    }
-
-    /// Send a session update notification
-    func notifySessionUpdated(_ sessionId: String) {
-        _sessionUpdates.send(sessionId)
-    }
-
     // MARK: - Turn Content Cache
 
     /// TTL-based cache for turn content used to enrich server events

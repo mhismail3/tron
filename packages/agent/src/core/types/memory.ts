@@ -17,7 +17,7 @@ import type { Message, ToolCall } from './messages.js';
 export interface SessionMemory {
   sessionId: string;
   startedAt: string;
-  endedAt?: string;
+  completedAt?: string;
   messages: Message[];
   toolCalls: ToolCall[];
   workingDirectory: string;

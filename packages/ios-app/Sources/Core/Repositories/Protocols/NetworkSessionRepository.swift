@@ -34,11 +34,6 @@ protocol NetworkSessionRepository: AnyObject {
     /// - Parameter sessionId: The session ID to unarchive
     func unarchive(sessionId: String) async throws
 
-    /// Delete a session (archives on server).
-    /// - Parameter sessionId: The session ID to delete
-    /// - Returns: Whether the session was deleted
-    func delete(sessionId: String) async throws -> Bool
-
     /// Fork a session from a specific point.
     /// - Parameters:
     ///   - sessionId: The session to fork

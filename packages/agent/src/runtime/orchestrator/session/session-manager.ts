@@ -677,11 +677,51 @@ export class SessionManager {
       await this.config.closeBrowserSession?.(sessionId);
     }
 
-    await this.eventStore.endSession(sessionId as SessionId);
     this.config.sessionStore.delete(sessionId);
 
     this.config.emit('session_ended', { sessionId, reason: 'completed' });
     logger.info('Session ended', { sessionId });
+  }
+
+  /**
+   * Archive a session — hides it from the default session list.
+   * Unloads the session from memory if active, but preserves all data.
+   */
+  async archiveSession(sessionId: string): Promise<void> {
+    const active = this.config.sessionStore.get(sessionId);
+
+    // Unload from memory if active
+    if (active) {
+      // Release worktree
+      try {
+        await this.worktreeCoordinator.release(sessionId as SessionId);
+      } catch (err) {
+        logger.debug('No worktree to release for session', { sessionId, err });
+      }
+
+      // Close browser session if it exists
+      if (this.config.hasBrowserSession?.(sessionId)) {
+        await this.config.closeBrowserSession?.(sessionId);
+      }
+
+      this.config.sessionStore.delete(sessionId);
+    }
+
+    // Set archived_at in database
+    await this.eventStore.archiveSession(sessionId as SessionId);
+
+    this.config.emit('session_archived', { sessionId });
+    logger.info('Session archived', { sessionId });
+  }
+
+  /**
+   * Unarchive a session — makes it visible in the session list again.
+   */
+  async unarchiveSession(sessionId: string): Promise<void> {
+    await this.eventStore.unarchiveSession(sessionId as SessionId);
+
+    this.config.emit('session_unarchived', { sessionId });
+    logger.info('Session unarchived', { sessionId });
   }
 
   // ===========================================================================
@@ -700,7 +740,9 @@ export class SessionManager {
   async listSessions(options: {
     workingDirectory?: string;
     limit?: number;
+    offset?: number;
     activeOnly?: boolean;
+    includeArchived?: boolean;
   }): Promise<SessionInfo[]> {
     if (options.activeOnly) {
       const active = Array.from(this.config.sessionStore.entries())
@@ -726,7 +768,10 @@ export class SessionManager {
 
     const sessionRows = await this.eventStore.listSessions({
       limit: options.limit,
+      offset: options.offset,
       excludeSubagents: true,
+      // By default, exclude archived sessions unless explicitly requested
+      archived: options.includeArchived ? undefined : false,
     });
 
     // Filter by working directory if specified
@@ -911,6 +956,7 @@ export class SessionManager {
       createdAt: row.createdAt,
       lastActivity: row.lastActivityAt,
       isActive,
+      isArchived: row.isArchived,
       worktree: workingDir ? buildWorktreeInfo(workingDir) : undefined,
       parentSessionId: row.parentSessionId ?? undefined,
       lastUserPrompt: preview?.lastUserPrompt,

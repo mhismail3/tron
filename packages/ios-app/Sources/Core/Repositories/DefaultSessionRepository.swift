@@ -36,10 +36,6 @@ final class DefaultSessionRepository: NetworkSessionRepository {
         try await sessionClient.unarchive(sessionId)
     }
 
-    func delete(sessionId: String) async throws -> Bool {
-        try await sessionClient.delete(sessionId)
-    }
-
     func fork(sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
         try await sessionClient.fork(sessionId, fromEventId: fromEventId)
     }

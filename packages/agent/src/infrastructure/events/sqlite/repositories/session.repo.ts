@@ -31,7 +31,7 @@ export interface SessionRow {
   forkFromEventId: EventId | null;
   createdAt: string;
   lastActivityAt: string;
-  endedAt: string | null;
+  archivedAt: string | null;
   eventCount: number;
   messageCount: number;
   turnCount: number;
@@ -44,8 +44,8 @@ export interface SessionRow {
   tags: string[];
   /** Backward compatible alias for latestModel */
   model: string;
-  /** Computed: whether session has ended (endedAt !== null) */
-  isEnded: boolean;
+  /** Computed: whether session is archived (archivedAt !== null) */
+  isArchived: boolean;
   /** Session ID that spawned this session (for subagents) */
   spawningSessionId: SessionId | null;
   /** Type of spawn (for subagents) */
@@ -78,8 +78,8 @@ export interface CreateSessionOptions {
  */
 export interface ListSessionsOptions {
   workspaceId?: WorkspaceId;
-  /** Filter by ended state (derived from ended_at) */
-  ended?: boolean;
+  /** Filter by archived state (derived from archived_at) */
+  archived?: boolean;
   /** Exclude subagent sessions (spawning_session_id IS NULL) */
   excludeSubagents?: boolean;
   limit?: number;
@@ -160,7 +160,7 @@ export class SessionRepository extends BaseRepository {
       forkFromEventId: options.forkFromEventId ?? null,
       createdAt: now,
       lastActivityAt: now,
-      endedAt: null,
+      archivedAt: null,
       eventCount: 0,
       messageCount: 0,
       turnCount: 0,
@@ -172,7 +172,7 @@ export class SessionRepository extends BaseRepository {
       totalCost: 0,
       tags: options.tags ?? [],
       model: options.model,
-      isEnded: false,
+      isArchived: false,
       spawningSessionId: options.spawningSessionId ?? null,
       spawnType: options.spawnType ?? null,
       spawnTask: options.spawnTask ?? null,
@@ -222,11 +222,11 @@ export class SessionRepository extends BaseRepository {
       params.push(options.workspaceId);
     }
 
-    if (options.ended !== undefined) {
-      if (options.ended) {
-        sql += ' AND ended_at IS NOT NULL';
+    if (options.archived !== undefined) {
+      if (options.archived) {
+        sql += ' AND archived_at IS NOT NULL';
       } else {
-        sql += ' AND ended_at IS NULL';
+        sql += ' AND archived_at IS NULL';
       }
     }
 
@@ -332,12 +332,12 @@ export class SessionRepository extends BaseRepository {
   }
 
   /**
-   * Mark session as ended
+   * Archive a session (set archived_at timestamp)
    */
-  markEnded(sessionId: SessionId): void {
+  archive(sessionId: SessionId): void {
     const now = this.now();
     this.run(
-      'UPDATE sessions SET ended_at = ?, last_activity_at = ? WHERE id = ?',
+      'UPDATE sessions SET archived_at = ?, last_activity_at = ? WHERE id = ?',
       now,
       now,
       sessionId
@@ -345,12 +345,12 @@ export class SessionRepository extends BaseRepository {
   }
 
   /**
-   * Clear ended status (reactivate session)
+   * Unarchive a session (clear archived_at)
    */
-  clearEnded(sessionId: SessionId): void {
+  unarchive(sessionId: SessionId): void {
     const now = this.now();
     this.run(
-      'UPDATE sessions SET ended_at = NULL, last_activity_at = ? WHERE id = ?',
+      'UPDATE sessions SET archived_at = NULL, last_activity_at = ? WHERE id = ?',
       now,
       sessionId
     );
@@ -457,22 +457,11 @@ export class SessionRepository extends BaseRepository {
   }
 
   /**
-   * Count sessions by workspace
+   * Count non-archived sessions by workspace
    */
   countByWorkspace(workspaceId: WorkspaceId): number {
     const row = this.get<{ count: number }>(
-      'SELECT COUNT(*) as count FROM sessions WHERE workspace_id = ?',
-      workspaceId
-    );
-    return row?.count ?? 0;
-  }
-
-  /**
-   * Count active (non-ended) sessions by workspace
-   */
-  countActiveByWorkspace(workspaceId: WorkspaceId): number {
-    const row = this.get<{ count: number }>(
-      'SELECT COUNT(*) as count FROM sessions WHERE workspace_id = ? AND ended_at IS NULL',
+      'SELECT COUNT(*) as count FROM sessions WHERE workspace_id = ? AND archived_at IS NULL',
       workspaceId
     );
     return row?.count ?? 0;
@@ -538,7 +527,7 @@ export class SessionRepository extends BaseRepository {
    */
   private rowToSession(row: SessionDbRow): SessionRow {
     const latestModel = row.latest_model;
-    const endedAt = row.ended_at;
+    const archivedAt = row.archived_at;
     return {
       id: SessionId(row.id),
       workspaceId: WorkspaceId(row.workspace_id),
@@ -551,7 +540,7 @@ export class SessionRepository extends BaseRepository {
       forkFromEventId: row.fork_from_event_id ? EventId(row.fork_from_event_id) : null,
       createdAt: row.created_at,
       lastActivityAt: row.last_activity_at,
-      endedAt,
+      archivedAt,
       eventCount: row.event_count,
       messageCount: row.message_count,
       turnCount: row.turn_count,
@@ -564,7 +553,7 @@ export class SessionRepository extends BaseRepository {
       tags: rowUtils.parseJson(row.tags, []),
       // Backward compatibility aliases
       model: latestModel,
-      isEnded: endedAt !== null,
+      isArchived: archivedAt !== null,
       // Subagent tracking
       spawningSessionId: row.spawning_session_id ? SessionId(row.spawning_session_id) : null,
       spawnType: row.spawn_type as SpawnType | null,
@@ -592,7 +581,7 @@ export class SessionRepository extends BaseRepository {
     const rows = this.all<SessionDbRow>(
       `SELECT * FROM sessions
        WHERE spawning_session_id = ?
-         AND ended_at IS NULL
+         AND archived_at IS NULL
        ORDER BY created_at DESC`,
       spawningSessionId
     );

@@ -1,0 +1,137 @@
+#!/bin/bash
+#
+# reset-db — Clear session/event/log data while preserving memory vectors.
+#
+# Usage: scripts/reset-db [beta|prod|all]
+#
+# Stops the tron server, clears all session/event/log/task data from the
+# specified database(s), vacuums, and restarts the server. Memory vectors
+# and schema_version are preserved.
+
+set -euo pipefail
+
+TRON_HOME="${TRON_HOME:-$HOME/.tron}"
+DB_DIR="$TRON_HOME/database"
+PLIST_NAME="com.tron.server"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+
+# Tables to clear — everything except memory_vectors* and schema_version
+DATA_TABLES=(
+  sessions events logs blobs
+  workspaces branches projects areas
+  device_tokens
+  tasks task_activity task_backlog task_dependencies
+)
+
+# FTS tables to rebuild (content is deleted via triggers or manually)
+FTS_TABLES=(events_fts logs_fts tasks_fts areas_fts)
+
+usage() {
+  echo "Usage: $(basename "$0") [beta|prod|all]"
+  echo ""
+  echo "Clears session/event/log data while preserving memory vectors."
+  echo "Stops the server, clears data, vacuums, and restarts."
+  exit 1
+}
+
+is_server_running() {
+  launchctl list 2>/dev/null | grep -q "$PLIST_NAME"
+}
+
+stop_server() {
+  if is_server_running; then
+    echo "Stopping tron server..."
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    sleep 1
+  fi
+}
+
+start_server() {
+  if [ -f "$PLIST_PATH" ]; then
+    echo "Starting tron server..."
+    launchctl load "$PLIST_PATH"
+  else
+    echo "Warning: $PLIST_PATH not found — server not started"
+  fi
+}
+
+reset_database() {
+  local db_path="$1"
+  local db_name
+  db_name=$(basename "$db_path" .db)
+
+  if [ ! -f "$db_path" ]; then
+    echo "  $db_name: not found, skipping"
+    return
+  fi
+
+  echo "  $db_name: clearing data..."
+
+  # Build SQL to delete from all data tables (order matters for FK constraints)
+  local sql="PRAGMA foreign_keys = OFF;"
+
+  # Delete from FTS tables first (rebuild command empties them cleanly)
+  for fts in "${FTS_TABLES[@]}"; do
+    sql+="DELETE FROM ${fts} WHERE 1=1;"
+  done
+
+  # Delete from data tables (children before parents)
+  for table in "${DATA_TABLES[@]}"; do
+    sql+="DELETE FROM ${table};"
+  done
+
+  sql+="PRAGMA foreign_keys = ON;"
+
+  sqlite3 "$db_path" "$sql"
+
+  # Get counts to confirm
+  local remaining
+  remaining=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM memory_vectors_rowids;")
+  echo "  $db_name: cleared. Memory vectors preserved: $remaining"
+
+  # Vacuum to reclaim space
+  echo "  $db_name: vacuuming..."
+  sqlite3 "$db_path" "VACUUM;"
+  local size
+  size=$(du -h "$db_path" | cut -f1)
+  echo "  $db_name: done ($size)"
+}
+
+# Parse arguments
+target="${1:-}"
+if [ -z "$target" ]; then
+  usage
+fi
+
+case "$target" in
+  beta)  dbs=("$DB_DIR/beta.db") ;;
+  prod)  dbs=("$DB_DIR/prod.db") ;;
+  all)   dbs=("$DB_DIR/beta.db" "$DB_DIR/prod.db") ;;
+  *)     usage ;;
+esac
+
+# Confirm
+echo "This will DELETE all sessions, events, logs, tasks from: $target"
+echo "Memory vectors will be preserved."
+read -rp "Continue? [y/N] " confirm
+if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+  echo "Aborted."
+  exit 0
+fi
+
+was_running=false
+if is_server_running; then
+  was_running=true
+  stop_server
+fi
+
+echo "Resetting databases..."
+for db in "${dbs[@]}"; do
+  reset_database "$db"
+done
+
+if $was_running; then
+  start_server
+fi
+
+echo "Done."

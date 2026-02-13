@@ -46,7 +46,7 @@ describe('SessionRepository', () => {
       expect(session.workingDirectory).toBe('/test/dir');
       expect(session.headEventId).toBeNull();
       expect(session.rootEventId).toBeNull();
-      expect(session.isEnded).toBe(false);
+      expect(session.isArchived).toBe(false);
     });
 
     it('should create session with title', () => {
@@ -185,26 +185,26 @@ describe('SessionRepository', () => {
       expect(sessions[0].workspaceId).toBe(testWorkspaceId);
     });
 
-    it('should filter by ended state', () => {
+    it('should filter by archived state', () => {
       const active = repo.create({
         workspaceId: testWorkspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
-      const ended = repo.create({
+      const archived = repo.create({
         workspaceId: testWorkspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
-      repo.markEnded(ended.id);
+      repo.archive(archived.id);
 
-      const activeSessions = repo.list({ ended: false });
+      const activeSessions = repo.list({ archived: false });
       expect(activeSessions).toHaveLength(1);
       expect(activeSessions[0].id).toBe(active.id);
 
-      const endedSessions = repo.list({ ended: true });
-      expect(endedSessions).toHaveLength(1);
-      expect(endedSessions[0].id).toBe(ended.id);
+      const archivedSessions = repo.list({ archived: true });
+      expect(archivedSessions).toHaveLength(1);
+      expect(archivedSessions[0].id).toBe(archived.id);
     });
 
     it('should order by createdAt', async () => {
@@ -367,34 +367,34 @@ describe('SessionRepository', () => {
     });
   });
 
-  describe('markEnded / clearEnded', () => {
-    it('should mark session as ended', () => {
+  describe('archive / unarchive', () => {
+    it('should archive session', () => {
       const session = repo.create({
         workspaceId: testWorkspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
 
-      repo.markEnded(session.id);
+      repo.archive(session.id);
 
       const updated = repo.getById(session.id);
-      expect(updated?.endedAt).not.toBeNull();
-      expect(updated?.isEnded).toBe(true);
+      expect(updated?.archivedAt).not.toBeNull();
+      expect(updated?.isArchived).toBe(true);
     });
 
-    it('should clear ended status', () => {
+    it('should unarchive session', () => {
       const session = repo.create({
         workspaceId: testWorkspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
-      repo.markEnded(session.id);
+      repo.archive(session.id);
 
-      repo.clearEnded(session.id);
+      repo.unarchive(session.id);
 
       const updated = repo.getById(session.id);
-      expect(updated?.endedAt).toBeNull();
-      expect(updated?.isEnded).toBe(false);
+      expect(updated?.archivedAt).toBeNull();
+      expect(updated?.isArchived).toBe(false);
     });
   });
 
@@ -554,21 +554,21 @@ describe('SessionRepository', () => {
     });
   });
 
-  describe('countActiveByWorkspace', () => {
-    it('should only count non-ended sessions', () => {
+  describe('countByWorkspace (excluding archived)', () => {
+    it('should only count non-archived sessions', () => {
       const active = repo.create({
         workspaceId: testWorkspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
-      const ended = repo.create({
+      const archived = repo.create({
         workspaceId: testWorkspaceId,
         model: 'claude-3',
         workingDirectory: '/test',
       });
-      repo.markEnded(ended.id);
+      repo.archive(archived.id);
 
-      expect(repo.countActiveByWorkspace(testWorkspaceId)).toBe(1);
+      expect(repo.countByWorkspace(testWorkspaceId)).toBe(1);
     });
   });
 

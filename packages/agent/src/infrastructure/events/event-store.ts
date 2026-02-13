@@ -478,12 +478,12 @@ export class EventStore {
     return this.backend.getSessionMessagePreviews(sessionIds);
   }
 
-  async endSession(sessionId: SessionId): Promise<void> {
-    await this.backend.markSessionEnded(sessionId);
+  async archiveSession(sessionId: SessionId): Promise<void> {
+    await this.backend.archiveSession(sessionId);
   }
 
-  async clearSessionEnded(sessionId: SessionId): Promise<void> {
-    await this.backend.clearSessionEnded(sessionId);
+  async unarchiveSession(sessionId: SessionId): Promise<void> {
+    await this.backend.unarchiveSession(sessionId);
   }
 
   /**

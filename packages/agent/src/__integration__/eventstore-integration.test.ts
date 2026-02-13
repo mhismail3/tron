@@ -102,17 +102,17 @@ describe('EventStore Integration', () => {
       expect(allSessions.length).toBe(2);
     });
 
-    it('should end a session', async () => {
+    it('should archive a session', async () => {
       const created = await eventStore.createSession({
         workspacePath: '/test/project',
         workingDirectory: '/test/project',
         model: 'claude-sonnet-4-20250514',
       });
 
-      await eventStore.endSession(created.session.id);
+      await eventStore.archiveSession(created.session.id);
 
       const session = await eventStore.getSession(created.session.id);
-      expect(session?.isEnded).toBe(true);
+      expect(session?.isArchived).toBe(true);
     });
   });
 

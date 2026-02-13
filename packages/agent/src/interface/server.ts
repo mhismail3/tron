@@ -162,6 +162,14 @@ export class TronServer {
       this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_ENDED, data as Record<string, unknown>));
     });
 
+    this.orchestrator.on('session_archived', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_ARCHIVED, data as Record<string, unknown>));
+    });
+
+    this.orchestrator.on('session_unarchived', (data) => {
+      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_UNARCHIVED, data as Record<string, unknown>));
+    });
+
     this.orchestrator.on('session_updated', (data) => {
       const { sessionId } = data as { sessionId: string };
       this.orchestrator!.getSessionInfo(sessionId).then((info) => {

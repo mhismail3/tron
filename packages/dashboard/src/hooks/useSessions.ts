@@ -26,7 +26,7 @@ export function useSessions(options: ListSessionsOptions = {}) {
       const message = error instanceof Error ? error.message : 'Failed to load sessions';
       dispatch(actions.loadSessionsError(message));
     }
-  }, [dispatch, options.workspaceId, options.ended, options.limit, options.offset]);
+  }, [dispatch, options.workspaceId, options.archived, options.limit, options.offset]);
 
   useEffect(() => {
     loadSessions();

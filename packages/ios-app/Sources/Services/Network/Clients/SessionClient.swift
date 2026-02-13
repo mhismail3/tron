@@ -122,24 +122,6 @@ final class SessionClient {
         return result.messages
     }
 
-    func delete(_ sessionId: String) async throws -> Bool {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
-        let ws = try transport.requireConnection()
-
-        let params = SessionArchiveParams(sessionId: sessionId)
-        let _: EmptyParams = try await ws.send(
-            method: "session.archive",
-            params: params
-        )
-
-        if transport.currentSessionId == sessionId {
-            transport.setCurrentSessionId(nil)
-        }
-
-        logger.info("Archived session (via delete): \(sessionId)", category: .session)
-        return true
-    }
-
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
         guard let transport else {
             logger.error("[FORK] Cannot fork - WebSocket not connected", category: .session)

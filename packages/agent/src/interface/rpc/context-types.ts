@@ -201,6 +201,8 @@ export interface SessionManager {
   resumeSession(sessionId: string): Promise<SessionInfo>;
   listSessions(params: SessionListParams): Promise<SessionInfo[]>;
   deleteSession(sessionId: string): Promise<boolean>;
+  archiveSession(sessionId: string): Promise<boolean>;
+  unarchiveSession(sessionId: string): Promise<boolean>;
   forkSession(sessionId: string, fromEventId?: string): Promise<SessionForkResult>;
   switchModel(sessionId: string, model: string): Promise<ModelSwitchResult>;
 }
@@ -220,6 +222,7 @@ export interface SessionInfo {
   createdAt: string;
   lastActivity: string;
   isActive: boolean;
+  isArchived: boolean;
   parentSessionId?: string;
   messages: unknown[];
   lastUserPrompt?: string;

@@ -19,6 +19,10 @@ import type {
   SessionListResult,
   SessionDeleteParams,
   SessionDeleteResult,
+  SessionArchiveParams,
+  SessionArchiveResult,
+  SessionUnarchiveParams,
+  SessionUnarchiveResult,
   SessionForkParams,
 } from '../types.js';
 import type { MethodRegistration, MethodHandler } from '../registry.js';
@@ -79,6 +83,7 @@ export function createSessionHandlers(): MethodRegistration[] {
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
         isActive: s.isActive,
+        isArchived: s.isArchived,
         parentSessionId: s.parentSessionId,
         lastUserPrompt: s.lastUserPrompt,
         lastAssistantResponse: s.lastAssistantResponse,
@@ -91,6 +96,20 @@ export function createSessionHandlers(): MethodRegistration[] {
     const params = request.params!;
     const deleted = await context.sessionManager.deleteSession(params.sessionId);
     const result: SessionDeleteResult = { deleted };
+    return result;
+  };
+
+  const archiveHandler: MethodHandler<SessionArchiveParams> = async (request, context) => {
+    const params = request.params!;
+    const archived = await context.sessionManager.archiveSession(params.sessionId);
+    const result: SessionArchiveResult = { archived };
+    return result;
+  };
+
+  const unarchiveHandler: MethodHandler<SessionUnarchiveParams> = async (request, context) => {
+    const params = request.params!;
+    const unarchived = await context.sessionManager.unarchiveSession(params.sessionId);
+    const result: SessionUnarchiveResult = { unarchived };
     return result;
   };
 
@@ -133,6 +152,24 @@ export function createSessionHandlers(): MethodRegistration[] {
         requiredParams: ['sessionId'],
         requiredManagers: ['sessionManager'],
         description: 'Delete a session',
+      },
+    },
+    {
+      method: 'session.archive',
+      handler: archiveHandler,
+      options: {
+        requiredParams: ['sessionId'],
+        requiredManagers: ['sessionManager'],
+        description: 'Archive a session',
+      },
+    },
+    {
+      method: 'session.unarchive',
+      handler: unarchiveHandler,
+      options: {
+        requiredParams: ['sessionId'],
+        requiredManagers: ['sessionManager'],
+        description: 'Unarchive a session',
       },
     },
     {

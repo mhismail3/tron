@@ -45,7 +45,7 @@ export interface SessionDbRow {
   fork_from_event_id: string | null;
   created_at: string;
   last_activity_at: string;
-  ended_at: string | null;
+  archived_at: string | null;
   event_count: number;
   message_count: number;
   turn_count: number;

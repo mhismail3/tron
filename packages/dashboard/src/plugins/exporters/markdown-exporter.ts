@@ -38,10 +38,10 @@ async function exportAsMarkdown(
     lines.push(`- **Model:** ${session.model}`);
     lines.push(`- **Created:** ${formatDate(session.createdAt)}`);
     lines.push(`- **Last Activity:** ${formatDate(session.lastActivityAt)}`);
-    if (session.endedAt) {
-      lines.push(`- **Ended:** ${formatDate(session.endedAt)}`);
+    if (session.archivedAt) {
+      lines.push(`- **Archived:** ${formatDate(session.archivedAt)}`);
     }
-    lines.push(`- **Status:** ${session.isEnded ? 'Ended' : 'Active'}`);
+    lines.push(`- **Status:** ${session.isArchived ? 'Archived' : 'Active'}`);
     lines.push('');
 
     // Stats

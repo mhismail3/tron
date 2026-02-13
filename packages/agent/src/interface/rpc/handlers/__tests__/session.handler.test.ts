@@ -1,8 +1,8 @@
 /**
  * @fileoverview Tests for Session RPC Handlers
  *
- * Tests session.create, session.resume, session.list, session.delete, session.fork handlers
- * using the registry dispatch pattern.
+ * Tests session.create, session.resume, session.list, session.delete, session.archive,
+ * session.unarchive, session.fork handlers using the registry dispatch pattern.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -19,6 +19,8 @@ describe('Session Handlers', () => {
   let mockResumeSession: ReturnType<typeof vi.fn>;
   let mockListSessions: ReturnType<typeof vi.fn>;
   let mockDeleteSession: ReturnType<typeof vi.fn>;
+  let mockArchiveSession: ReturnType<typeof vi.fn>;
+  let mockUnarchiveSession: ReturnType<typeof vi.fn>;
   let mockForkSession: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -54,6 +56,7 @@ describe('Session Handlers', () => {
         createdAt: '2024-01-15T09:00:00Z',
         lastActivity: '2024-01-15T10:00:00Z',
         isActive: true,
+        isArchived: false,
         lastUserPrompt: 'Hello',
         lastAssistantResponse: 'Hi there!',
       },
@@ -71,10 +74,15 @@ describe('Session Handlers', () => {
         createdAt: '2024-01-15T08:00:00Z',
         lastActivity: '2024-01-15T11:00:00Z',
         isActive: false,
+        isArchived: true,
       },
     ]);
 
     mockDeleteSession = vi.fn().mockResolvedValue(true);
+
+    mockArchiveSession = vi.fn().mockResolvedValue(true);
+
+    mockUnarchiveSession = vi.fn().mockResolvedValue(true);
 
     mockForkSession = vi.fn().mockResolvedValue({
       newSessionId: 'sess-forked-456',
@@ -88,6 +96,8 @@ describe('Session Handlers', () => {
         resumeSession: mockResumeSession,
         listSessions: mockListSessions,
         deleteSession: mockDeleteSession,
+        archiveSession: mockArchiveSession,
+        unarchiveSession: mockUnarchiveSession,
         forkSession: mockForkSession,
         getSession: vi.fn(),
         switchModel: vi.fn(),
@@ -248,6 +258,19 @@ describe('Session Handlers', () => {
       expect(mockListSessions).toHaveBeenCalledWith({ workingDirectory: '/projects/app1' });
     });
 
+    it('should pass includeArchived filter', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'session.list',
+        params: { includeArchived: true },
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(true);
+      expect(mockListSessions).toHaveBeenCalledWith({ includeArchived: true });
+    });
+
     it('should map all session fields correctly', async () => {
       const request: RpcRequest = {
         id: '1',
@@ -264,6 +287,11 @@ describe('Session Handlers', () => {
       expect(session.inputTokens).toBe(1000);
       expect(session.cacheReadTokens).toBe(100);
       expect(session.lastUserPrompt).toBe('Hello');
+      expect(session.isArchived).toBe(false);
+
+      const archivedSession = result.sessions[1];
+      expect(archivedSession.sessionId).toBe('sess-2');
+      expect(archivedSession.isArchived).toBe(true);
     });
   });
 
@@ -287,6 +315,66 @@ describe('Session Handlers', () => {
       const request: RpcRequest = {
         id: '1',
         method: 'session.delete',
+        params: {},
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+    });
+  });
+
+  describe('session.archive', () => {
+    it('should archive a session', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'session.archive',
+        params: { sessionId: 'sess-123' },
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(true);
+      expect(mockArchiveSession).toHaveBeenCalledWith('sess-123');
+      const result = response.result as { archived: boolean };
+      expect(result.archived).toBe(true);
+    });
+
+    it('should return error for missing sessionId', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'session.archive',
+        params: {},
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(false);
+      expect(response.error?.code).toBe('INVALID_PARAMS');
+    });
+  });
+
+  describe('session.unarchive', () => {
+    it('should unarchive a session', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'session.unarchive',
+        params: { sessionId: 'sess-123' },
+      };
+
+      const response = await registry.dispatch(request, mockContext);
+
+      expect(response.success).toBe(true);
+      expect(mockUnarchiveSession).toHaveBeenCalledWith('sess-123');
+      const result = response.result as { unarchived: boolean };
+      expect(result.unarchived).toBe(true);
+    });
+
+    it('should return error for missing sessionId', async () => {
+      const request: RpcRequest = {
+        id: '1',
+        method: 'session.unarchive',
         params: {},
       };
 
@@ -344,12 +432,14 @@ describe('Session Handlers', () => {
     it('should create handlers for registration', () => {
       const handlers = createSessionHandlers();
 
-      expect(handlers).toHaveLength(5);
+      expect(handlers).toHaveLength(7);
       const methods = handlers.map(h => h.method);
       expect(methods).toContain('session.create');
       expect(methods).toContain('session.resume');
       expect(methods).toContain('session.list');
       expect(methods).toContain('session.delete');
+      expect(methods).toContain('session.archive');
+      expect(methods).toContain('session.unarchive');
       expect(methods).toContain('session.fork');
     });
 

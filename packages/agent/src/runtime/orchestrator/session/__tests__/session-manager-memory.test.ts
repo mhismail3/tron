@@ -1,9 +1,14 @@
 /**
- * @fileoverview Session Manager Memory Injection Tests
+ * @fileoverview Session Manager Memory Injection & Archive/Unarchive Tests
  *
  * Tests that workspace memory (lessons from past sessions) is correctly
  * loaded and injected into agent context during session creation and resumption.
  * Memory loading is conditional on settings (context.memory.autoInject.enabled).
+ *
+ * Also tests archiveSession/unarchiveSession lifecycle:
+ * - archiveSession sets archived_at via eventStore, unloads from session store,
+ *   releases worktree, closes browser, and emits session_archived.
+ * - unarchiveSession clears archived_at via eventStore and emits session_unarchived.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -450,5 +455,138 @@ describe('SessionManager - Memory Injection', () => {
       expect(result).toBeDefined();
       expect(mockAgent.setMemoryContent).not.toHaveBeenCalled();
     });
+  });
+});
+
+// =============================================================================
+// Archive / Unarchive Tests
+// =============================================================================
+
+describe('SessionManager - archiveSession', () => {
+  let config: SessionManagerConfig;
+  let mockAgent: ReturnType<typeof createMockAgent>;
+
+  beforeEach(() => {
+    mockAgent = createMockAgent();
+    config = createConfig({
+      createAgentForSession: vi.fn().mockResolvedValue({ agent: mockAgent }),
+    });
+  });
+
+  it('should call eventStore.archiveSession(sessionId) to set archived_at', async () => {
+    const manager = new SessionManager(config);
+    await manager.archiveSession('sess-1');
+
+    const mockEventStore = config.eventStore as ReturnType<typeof createMockEventStore>;
+    expect(mockEventStore.archiveSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('should unload the session from ActiveSessionStore if loaded', async () => {
+    const manager = new SessionManager(config);
+
+    // Create a session so it gets loaded into the session store
+    await manager.createSession({ workingDirectory: '/project' });
+    expect(config.sessionStore.size).toBe(1);
+
+    await manager.archiveSession('sess-1');
+    expect(config.sessionStore.get('sess-1')).toBeUndefined();
+    expect(config.sessionStore.size).toBe(0);
+  });
+
+  it('should release the worktree', async () => {
+    const manager = new SessionManager(config);
+
+    // Create a session to populate worktree state
+    await manager.createSession({ workingDirectory: '/project' });
+
+    await manager.archiveSession('sess-1');
+
+    const mockCoordinator = config.worktreeCoordinator as ReturnType<typeof createMockWorktreeCoordinator>;
+    expect(mockCoordinator.release).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('should close browser session if active', async () => {
+    const mockHasBrowserSession = vi.fn().mockReturnValue(true);
+    const mockCloseBrowserSession = vi.fn().mockResolvedValue(undefined);
+    config.hasBrowserSession = mockHasBrowserSession;
+    config.closeBrowserSession = mockCloseBrowserSession;
+
+    const manager = new SessionManager(config);
+    await manager.createSession({ workingDirectory: '/project' });
+
+    await manager.archiveSession('sess-1');
+
+    expect(mockHasBrowserSession).toHaveBeenCalledWith('sess-1');
+    expect(mockCloseBrowserSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('should not close browser session if none is active', async () => {
+    const mockHasBrowserSession = vi.fn().mockReturnValue(false);
+    const mockCloseBrowserSession = vi.fn().mockResolvedValue(undefined);
+    config.hasBrowserSession = mockHasBrowserSession;
+    config.closeBrowserSession = mockCloseBrowserSession;
+
+    const manager = new SessionManager(config);
+    await manager.createSession({ workingDirectory: '/project' });
+
+    await manager.archiveSession('sess-1');
+
+    expect(mockHasBrowserSession).toHaveBeenCalledWith('sess-1');
+    expect(mockCloseBrowserSession).not.toHaveBeenCalled();
+  });
+
+  it('should emit session_archived event', async () => {
+    const manager = new SessionManager(config);
+    await manager.archiveSession('sess-1');
+
+    expect(config.emit).toHaveBeenCalledWith('session_archived', { sessionId: 'sess-1' });
+  });
+
+  it('should work when session is not loaded in ActiveSessionStore', async () => {
+    const manager = new SessionManager(config);
+
+    // Do not create a session — archiving an inactive session should still work
+    await manager.archiveSession('sess-1');
+
+    const mockEventStore = config.eventStore as ReturnType<typeof createMockEventStore>;
+    expect(mockEventStore.archiveSession).toHaveBeenCalledWith('sess-1');
+    expect(config.emit).toHaveBeenCalledWith('session_archived', { sessionId: 'sess-1' });
+  });
+
+  it('should not attempt worktree release when session is not loaded', async () => {
+    const manager = new SessionManager(config);
+
+    // No session created — nothing to release
+    await manager.archiveSession('sess-1');
+
+    const mockCoordinator = config.worktreeCoordinator as ReturnType<typeof createMockWorktreeCoordinator>;
+    expect(mockCoordinator.release).not.toHaveBeenCalled();
+  });
+});
+
+describe('SessionManager - unarchiveSession', () => {
+  let config: SessionManagerConfig;
+  let mockAgent: ReturnType<typeof createMockAgent>;
+
+  beforeEach(() => {
+    mockAgent = createMockAgent();
+    config = createConfig({
+      createAgentForSession: vi.fn().mockResolvedValue({ agent: mockAgent }),
+    });
+  });
+
+  it('should call eventStore.unarchiveSession(sessionId) to clear archived_at', async () => {
+    const manager = new SessionManager(config);
+    await manager.unarchiveSession('sess-1');
+
+    const mockEventStore = config.eventStore as ReturnType<typeof createMockEventStore>;
+    expect(mockEventStore.unarchiveSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('should emit session_unarchived event', async () => {
+    const manager = new SessionManager(config);
+    await manager.unarchiveSession('sess-1');
+
+    expect(config.emit).toHaveBeenCalledWith('session_unarchived', { sessionId: 'sess-1' });
   });
 });

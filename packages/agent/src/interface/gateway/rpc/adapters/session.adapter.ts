@@ -30,6 +30,7 @@ function toSessionInfo(
     createdAt: string;
     lastActivity: string;
     isActive: boolean;
+    isArchived: boolean;
     lastUserPrompt?: string;
     lastAssistantResponse?: string;
   },
@@ -49,6 +50,7 @@ function toSessionInfo(
     createdAt: session.createdAt,
     lastActivity: session.lastActivity,
     isActive: session.isActive,
+    isArchived: session.isArchived,
     messages: messages.map(m => ({
       role: m.role,
       content: m.content,
@@ -119,6 +121,8 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
       const sessions = await orchestrator.sessions.listSessions({
         workingDirectory: params.workingDirectory,
         limit: params.limit,
+        offset: params.offset,
+        includeArchived: params.includeArchived,
       });
 
       // For list, we don't include full messages (empty array)
@@ -126,10 +130,26 @@ export function createSessionAdapter(deps: AdapterDependencies): SessionManagerA
     },
 
     /**
-     * Delete (end) a session
+     * Delete (archive) a session
      */
     async deleteSession(sessionId) {
-      await orchestrator.sessions.endSession(sessionId);
+      await orchestrator.sessions.archiveSession(sessionId);
+      return true;
+    },
+
+    /**
+     * Archive a session (hide from default list)
+     */
+    async archiveSession(sessionId) {
+      await orchestrator.sessions.archiveSession(sessionId);
+      return true;
+    },
+
+    /**
+     * Unarchive a session (restore to list)
+     */
+    async unarchiveSession(sessionId) {
+      await orchestrator.sessions.unarchiveSession(sessionId);
       return true;
     },
 

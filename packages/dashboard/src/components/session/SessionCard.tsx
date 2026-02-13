@@ -55,8 +55,8 @@ export const SessionCard = memo(function SessionCard({
       </div>
 
       <div className="session-card-stats">
-        <Badge variant={session.isEnded ? 'default' : 'success'} size="sm">
-          {session.isEnded ? 'Ended' : 'Active'}
+        <Badge variant={session.isArchived ? 'default' : 'success'} size="sm">
+          {session.isArchived ? 'Archived' : 'Active'}
         </Badge>
         <span className="session-card-stat">
           {session.messageCount} msgs
