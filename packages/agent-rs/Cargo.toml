@@ -102,6 +102,9 @@ proptest = "1"
 mockall = "0.13"
 assert_matches = "1"
 
+# Crypto
+sha2 = "0.10"
+
 # Utilities
 async-trait = "0.1"
 bytes = "1"
