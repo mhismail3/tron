@@ -171,6 +171,16 @@ final class EventStoreManager {
                 handleSessionCreated(result)
             }
 
+        case SessionArchivedPlugin.eventType:
+            if let result = event.getResult() as? SessionArchivedPlugin.Result {
+                handleSessionArchived(result)
+            }
+
+        case SessionUnarchivedPlugin.eventType:
+            if let result = event.getResult() as? SessionUnarchivedPlugin.Result {
+                handleSessionUnarchived(result)
+            }
+
         default:
             // Other events are handled by session-specific subscribers
             break
@@ -247,6 +257,28 @@ final class EventStoreManager {
 
         // Persist to local DB
         try? eventDB.sessions.insert(newSession)
+    }
+
+    /// Handle session.archived: remove session from dashboard list
+    private func handleSessionArchived(_ result: SessionArchivedPlugin.Result) {
+        let sessionId = result.sessionId
+        logger.info("Global: session.archived for \(sessionId)", category: .session)
+
+        // Remove from in-memory list
+        sessions.removeAll { $0.id == sessionId }
+
+        // Remove from local DB
+        try? eventDB.events.deleteBySession(sessionId)
+        try? eventDB.sessions.delete(sessionId)
+    }
+
+    /// Handle session.unarchived: re-fetch session from server and add to list
+    private func handleSessionUnarchived(_ result: SessionUnarchivedPlugin.Result) {
+        let sessionId = result.sessionId
+        logger.info("Global: session.unarchived for \(sessionId)", category: .session)
+
+        // Refresh from server to get the restored session
+        Task { await refreshSessionList() }
     }
 
     // MARK: - State Setters (for extensions)

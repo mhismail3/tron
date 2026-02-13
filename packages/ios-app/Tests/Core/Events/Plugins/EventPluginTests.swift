@@ -161,4 +161,73 @@ final class EventPluginTests: XCTestCase {
         // Should have all 27+ plugins registered
         XCTAssertGreaterThanOrEqual(EventRegistry.shared.pluginCount, 27)
     }
+
+    // MARK: - Session Archive/Unarchive Plugin Tests
+
+    func testSessionArchivedPlugin_parsesFromTopLevelSessionId() {
+        EventRegistry.shared.register(SessionArchivedPlugin.self)
+
+        let json = """
+        {
+            "type": "session.archived",
+            "sessionId": "sess-123",
+            "timestamp": "2026-02-12T00:00:00Z",
+            "data": {"sessionId": "sess-123"}
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "session.archived", data: json)
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.sessionId, "sess-123")
+
+        if case .plugin(let type, _, _, let transform) = result {
+            XCTAssertEqual(type, "session.archived")
+            let eventResult = transform() as? SessionArchivedPlugin.Result
+            XCTAssertEqual(eventResult?.sessionId, "sess-123")
+        } else {
+            XCTFail("Expected .plugin case")
+        }
+    }
+
+    func testSessionArchivedPlugin_parsesFromDataSessionId() {
+        EventRegistry.shared.register(SessionArchivedPlugin.self)
+
+        let json = """
+        {
+            "type": "session.archived",
+            "data": {"sessionId": "sess-456"}
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "session.archived", data: json)
+        if case .plugin(_, _, _, let transform) = result {
+            let eventResult = transform() as? SessionArchivedPlugin.Result
+            XCTAssertEqual(eventResult?.sessionId, "sess-456")
+        } else {
+            XCTFail("Expected .plugin case")
+        }
+    }
+
+    func testSessionUnarchivedPlugin_parses() {
+        EventRegistry.shared.register(SessionUnarchivedPlugin.self)
+
+        let json = """
+        {
+            "type": "session.unarchived",
+            "sessionId": "sess-789",
+            "data": {"sessionId": "sess-789"}
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "session.unarchived", data: json)
+        XCTAssertNotNil(result)
+
+        if case .plugin(let type, _, _, let transform) = result {
+            XCTAssertEqual(type, "session.unarchived")
+            let eventResult = transform() as? SessionUnarchivedPlugin.Result
+            XCTAssertEqual(eventResult?.sessionId, "sess-789")
+        } else {
+            XCTFail("Expected .plugin case")
+        }
+    }
 }
