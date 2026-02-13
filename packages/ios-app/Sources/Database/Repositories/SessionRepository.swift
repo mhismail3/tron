@@ -23,7 +23,7 @@ final class SessionRepository {
         let sql = """
             INSERT OR REPLACE INTO sessions
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
-             working_directory, created_at, last_activity_at, ended_at, event_count,
+             working_directory, created_at, last_activity_at, archived_at, event_count,
              message_count, input_tokens, output_tokens, last_turn_input_tokens,
              cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -44,7 +44,7 @@ final class SessionRepository {
         sqlite3_bind_text(stmt, 7, session.workingDirectory, -1, SQLITE_TRANSIENT_DESTRUCTOR)
         sqlite3_bind_text(stmt, 8, session.createdAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
         sqlite3_bind_text(stmt, 9, session.lastActivityAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-        transport.bindOptionalText(stmt, 10, session.endedAt)
+        transport.bindOptionalText(stmt, 10, session.archivedAt)
         sqlite3_bind_int(stmt, 11, Int32(session.eventCount))
         sqlite3_bind_int(stmt, 12, Int32(session.messageCount))
         sqlite3_bind_int(stmt, 13, Int32(session.inputTokens))
@@ -71,7 +71,7 @@ final class SessionRepository {
 
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
-                   working_directory, created_at, last_activity_at, ended_at, event_count,
+                   working_directory, created_at, last_activity_at, archived_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
                    cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
             FROM sessions WHERE id = ?
@@ -100,7 +100,7 @@ final class SessionRepository {
 
         let sql = """
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
-                   working_directory, created_at, last_activity_at, ended_at, event_count,
+                   working_directory, created_at, last_activity_at, archived_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
                    cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
             FROM sessions ORDER BY last_activity_at DESC
@@ -134,7 +134,7 @@ final class SessionRepository {
         if origin != nil {
             sql = """
                 SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
-                       working_directory, created_at, last_activity_at, ended_at, event_count,
+                       working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
                 FROM sessions
@@ -144,7 +144,7 @@ final class SessionRepository {
         } else {
             sql = """
                 SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
-                       working_directory, created_at, last_activity_at, ended_at, event_count,
+                       working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
                 FROM sessions ORDER BY last_activity_at DESC
@@ -300,7 +300,7 @@ final class SessionRepository {
         let workingDirectory = String(cString: sqlite3_column_text(stmt, 6))
         let createdAt = String(cString: sqlite3_column_text(stmt, 7))
         let lastActivityAt = String(cString: sqlite3_column_text(stmt, 8))
-        let endedAt = transport.getOptionalText(stmt, 9)
+        let archivedAt = transport.getOptionalText(stmt, 9)
         let eventCount = Int(sqlite3_column_int(stmt, 10))
         let messageCount = Int(sqlite3_column_int(stmt, 11))
         let inputTokens = Int(sqlite3_column_int(stmt, 12))
@@ -322,7 +322,7 @@ final class SessionRepository {
             workingDirectory: workingDirectory,
             createdAt: createdAt,
             lastActivityAt: lastActivityAt,
-            endedAt: endedAt,
+            archivedAt: archivedAt,
             eventCount: eventCount,
             messageCount: messageCount,
             inputTokens: inputTokens,

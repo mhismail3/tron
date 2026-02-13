@@ -16,7 +16,8 @@ final class MockSessionClientForRepository {
     var listCallCount = 0
     var lastListWorkingDirectory: String?
     var lastListLimit: Int?
-    var lastListIncludeEnded: Bool?
+    var lastListOffset: Int?
+    var lastListIncludeArchived: Bool?
     var listResultToReturn: [SessionInfo] = []
     var listError: Error?
 
@@ -25,9 +26,15 @@ final class MockSessionClientForRepository {
     var lastResumeSessionId: String?
     var resumeError: Error?
 
-    // End
-    var endCallCount = 0
-    var endError: Error?
+    // Archive
+    var archiveCallCount = 0
+    var lastArchiveSessionId: String?
+    var archiveError: Error?
+
+    // Unarchive
+    var unarchiveCallCount = 0
+    var lastUnarchiveSessionId: String?
+    var unarchiveError: Error?
 
     // Delete
     var deleteCallCount = 0
@@ -58,15 +65,16 @@ final class MockSessionClientForRepository {
         return createResultToReturn ?? createMockCreateResult()
     }
 
-    func list(workingDirectory: String? = nil, limit: Int = 50, includeEnded: Bool = false) async throws -> [SessionInfo] {
+    func list(workingDirectory: String? = nil, limit: Int = 50, offset: Int = 0, includeArchived: Bool = false) async throws -> SessionListResult {
         listCallCount += 1
         lastListWorkingDirectory = workingDirectory
         lastListLimit = limit
-        lastListIncludeEnded = includeEnded
+        lastListOffset = offset
+        lastListIncludeArchived = includeArchived
         if let error = listError {
             throw error
         }
-        return listResultToReturn
+        return SessionListResult(sessions: listResultToReturn, totalCount: listResultToReturn.count, hasMore: false)
     }
 
     func resume(sessionId: String) async throws {
@@ -77,9 +85,18 @@ final class MockSessionClientForRepository {
         }
     }
 
-    func end() async throws {
-        endCallCount += 1
-        if let error = endError {
+    func archive(_ sessionId: String) async throws {
+        archiveCallCount += 1
+        lastArchiveSessionId = sessionId
+        if let error = archiveError {
+            throw error
+        }
+    }
+
+    func unarchive(_ sessionId: String) async throws {
+        unarchiveCallCount += 1
+        lastUnarchiveSessionId = sessionId
+        if let error = unarchiveError {
             throw error
         }
     }
@@ -194,14 +211,15 @@ final class DefaultSessionRepositoryTests: XCTestCase {
         mockClient.listResultToReturn = [createMockSession(sessionId: "session-1")]
 
         // When
-        let sessions = try await mockClient.list(workingDirectory: "/path", limit: 25, includeEnded: true)
+        let result = try await mockClient.list(workingDirectory: "/path", limit: 25, offset: 5, includeArchived: true)
 
         // Then
         XCTAssertEqual(mockClient.listCallCount, 1)
         XCTAssertEqual(mockClient.lastListWorkingDirectory, "/path")
         XCTAssertEqual(mockClient.lastListLimit, 25)
-        XCTAssertEqual(mockClient.lastListIncludeEnded, true)
-        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(mockClient.lastListOffset, 5)
+        XCTAssertEqual(mockClient.lastListIncludeArchived, true)
+        XCTAssertEqual(result.sessions.count, 1)
     }
 
     func test_list_usesDefaultParameters() async throws {
@@ -211,7 +229,7 @@ final class DefaultSessionRepositoryTests: XCTestCase {
         // Then
         XCTAssertNil(mockClient.lastListWorkingDirectory)
         XCTAssertEqual(mockClient.lastListLimit, 50)
-        XCTAssertEqual(mockClient.lastListIncludeEnded, false)
+        XCTAssertEqual(mockClient.lastListIncludeArchived, false)
     }
 
     func test_list_throwsError() async throws {
@@ -251,27 +269,39 @@ final class DefaultSessionRepositoryTests: XCTestCase {
         }
     }
 
-    // MARK: - End Tests
+    // MARK: - Archive Tests
 
-    func test_end_callsClient() async throws {
+    func test_archive_callsClient() async throws {
         // When
-        try await mockClient.end()
+        try await mockClient.archive("session-123")
 
         // Then
-        XCTAssertEqual(mockClient.endCallCount, 1)
+        XCTAssertEqual(mockClient.archiveCallCount, 1)
+        XCTAssertEqual(mockClient.lastArchiveSessionId, "session-123")
     }
 
-    func test_end_throwsError() async throws {
+    func test_archive_throwsError() async throws {
         // Given
-        mockClient.endError = NSError(domain: "Test", code: 1, userInfo: nil)
+        mockClient.archiveError = NSError(domain: "Test", code: 1, userInfo: nil)
 
         // When/Then
         do {
-            try await mockClient.end()
+            try await mockClient.archive("session-123")
             XCTFail("Expected error to be thrown")
         } catch {
-            XCTAssertEqual(mockClient.endCallCount, 1)
+            XCTAssertEqual(mockClient.archiveCallCount, 1)
         }
+    }
+
+    // MARK: - Unarchive Tests
+
+    func test_unarchive_callsClient() async throws {
+        // When
+        try await mockClient.unarchive("session-456")
+
+        // Then
+        XCTAssertEqual(mockClient.unarchiveCallCount, 1)
+        XCTAssertEqual(mockClient.lastUnarchiveSessionId, "session-456")
     }
 
     // MARK: - Delete Tests

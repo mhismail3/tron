@@ -41,16 +41,16 @@ export interface CachedSession {
   workingDirectory: string;
   createdAt: string;
   lastActivityAt: string;
-  endedAt: string | null;
+  archivedAt: string | null;
   eventCount: number;
   messageCount: number;
 }
 
 /**
- * Helper to check if a session has ended
+ * Helper to check if a session has been archived
  */
-export function isSessionEnded(session: CachedSession): boolean {
-  return session.endedAt !== null;
+export function isSessionArchived(session: CachedSession): boolean {
+  return session.archivedAt !== null;
 }
 
 /**
@@ -156,7 +156,7 @@ export class EventDB {
       const sessionsStore = db.createObjectStore(STORES.sessions, { keyPath: 'id' });
       sessionsStore.createIndex('workspaceId', 'workspaceId', { unique: false });
       sessionsStore.createIndex('lastActivityAt', 'lastActivityAt', { unique: false });
-      sessionsStore.createIndex('endedAt', 'endedAt', { unique: false });
+      sessionsStore.createIndex('archivedAt', 'archivedAt', { unique: false });
     }
 
     // Sync state store

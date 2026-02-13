@@ -32,7 +32,7 @@ describe('EventDB', () => {
       workingDirectory: '/test/project',
       createdAt: '2024-01-01T00:00:00Z',
       lastActivityAt: '2024-01-01T01:00:00Z',
-      endedAt: null,
+      archivedAt: null,
       eventCount: 3,
       messageCount: 2,
     };
@@ -285,7 +285,7 @@ describe('EventDB', () => {
         workingDirectory: '/test',
         createdAt: '2024-01-01T00:00:00Z',
         lastActivityAt: '2024-01-01T00:02:00Z',
-        endedAt: null,
+        archivedAt: null,
         eventCount: 3,
         messageCount: 2,
       };
@@ -343,7 +343,7 @@ describe('EventDB', () => {
         workingDirectory: '/test',
         createdAt: '2024-01-01T00:00:00Z',
         lastActivityAt: '2024-01-01T00:00:00Z',
-        endedAt: null,
+        archivedAt: null,
         eventCount: 0,
         messageCount: 0,
       };
@@ -373,7 +373,7 @@ describe('EventDB', () => {
         workingDirectory: '/test',
         createdAt: '2024-01-01T00:00:00Z',
         lastActivityAt: '2024-01-01T00:00:00Z',
-        endedAt: null,
+        archivedAt: null,
         eventCount: 3,
         messageCount: 2,
       };
@@ -443,7 +443,7 @@ describe('EventDB', () => {
         workingDirectory: '/test',
         createdAt: '2024-01-01T00:00:00Z',
         lastActivityAt: '2024-01-01T00:00:00Z',
-        endedAt: null,
+        archivedAt: null,
         eventCount: 4,
         messageCount: 3,
       };
@@ -553,7 +553,7 @@ describe('EventDB', () => {
         workingDirectory: '/test',
         createdAt: '2024-01-01T00:00:00Z',
         lastActivityAt: '2024-01-01T00:00:00Z',
-        endedAt: null,
+        archivedAt: null,
         eventCount: 1,
         messageCount: 0,
       };

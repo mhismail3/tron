@@ -8,7 +8,6 @@ import { describe, it, expect } from 'vitest';
 import type { SessionEvent, SessionId, WorkspaceId, EventId } from '@infrastructure/events/types.js';
 import {
   createSessionStartEvent,
-  createSessionEndEvent,
   createSessionForkEvent,
   createUserMessageEvent,
   createAssistantMessageEvent,
@@ -58,15 +57,6 @@ describe('event fixtures', () => {
       it('should be assignable to SessionEvent type', () => {
         const event: SessionEvent = createSessionStartEvent();
         expect(event.type).toBe('session.start');
-      });
-    });
-
-    describe('createSessionEndEvent', () => {
-      it('should create a valid session.end event', () => {
-        const event = createSessionEndEvent({ reason: 'completed' });
-
-        expect(event.type).toBe('session.end');
-        expect(event.payload.reason).toBe('completed');
       });
     });
 
@@ -370,7 +360,6 @@ describe('event fixtures', () => {
     it('all event factories should be assignable to SessionEvent', () => {
       const events: SessionEvent[] = [
         createSessionStartEvent(),
-        createSessionEndEvent(),
         createSessionForkEvent(),
         createUserMessageEvent(),
         createAssistantMessageEvent(),
@@ -383,7 +372,7 @@ describe('event fixtures', () => {
         createStreamTurnEndEvent(),
       ];
 
-      expect(events).toHaveLength(12);
+      expect(events).toHaveLength(11);
       events.forEach(event => {
         expect(event.id).toMatch(/^evt_/);
         expect(event.type).toBeDefined();

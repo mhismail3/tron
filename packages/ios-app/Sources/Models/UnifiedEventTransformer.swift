@@ -387,7 +387,8 @@ extension UnifiedEventTransformer {
                 }
 
             case .sessionEnd:
-                state.sessionInfo.endTime = parseTimestamp(event.timestamp)
+                // Legacy event type — sessions no longer end, just ignore
+                break
 
             case .sessionFork:
                 if let source = event.payload["sourceEventId"]?.value as? String {

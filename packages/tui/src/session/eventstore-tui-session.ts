@@ -310,23 +310,6 @@ export class EventStoreTuiSession {
         ? this.generateSummary()
         : undefined;
 
-      // Append session.end event
-      await this.eventStore.append({
-        sessionId: this.sessionId,
-        type: 'session.end',
-        payload: {
-          reason: 'completed',
-          summary,
-          messageCount,
-          tokenUsage: this.cachedTokenUsage,
-          workingDirectory: this.config.workingDirectory,
-          timestamp: new Date().toISOString(),
-        },
-      });
-
-      // Mark session as ended
-      await this.eventStore.endSession(this.sessionId);
-
       handoffCreated = !!summary;
     }
 

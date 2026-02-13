@@ -182,7 +182,9 @@ function createMockEventStore() {
     getAncestors: vi.fn().mockResolvedValue([]),
     getEvents: vi.fn().mockReturnValue([]),
     getEventsByType: vi.fn().mockReturnValue([]),
-    endSession: vi.fn(),
+    archiveSession: vi.fn(),
+    unarchiveSession: vi.fn(),
+    deleteSession: vi.fn(),
   };
 }
 

@@ -19,7 +19,6 @@
 import type {
   SessionEvent,
   SessionStartEvent,
-  SessionEndEvent,
   SessionForkEvent,
   UserMessageEvent,
   AssistantMessageEvent,
@@ -100,24 +99,7 @@ export function createSessionStartEvent(options: SessionStartEventOptions = {}):
   };
 }
 
-export interface SessionEndEventOptions extends BaseEventOptions {
-  reason?: 'completed' | 'aborted' | 'error' | 'timeout';
-}
-
-export function createSessionEndEvent(options: SessionEndEventOptions = {}): SessionEndEvent {
-  return {
-    id: options.id ?? generateEventId(),
-    parentId: options.parentId ?? null,
-    sessionId: options.sessionId ?? generateSessionId(),
-    workspaceId: options.workspaceId ?? generateWorkspaceId(),
-    timestamp: options.timestamp ?? new Date().toISOString(),
-    type: 'session.end',
-    sequence: options.sequence ?? 0,
-    payload: {
-      reason: options.reason ?? 'completed',
-    },
-  };
-}
+// SessionEndEvent removed — sessions no longer have an "end" concept
 
 export interface SessionForkEventOptions extends BaseEventOptions {
   sourceSessionId?: SessionId;

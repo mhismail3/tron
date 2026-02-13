@@ -565,6 +565,10 @@ export class EventStoreOrchestrator extends EventEmitter {
     return this.activeSessions.get(sessionId);
   }
 
+  async getSessionInfo(sessionId: string): Promise<SessionInfo | null> {
+    return this.sessions.getSession(sessionId);
+  }
+
   // ===========================================================================
   // Health & Stats
   // ===========================================================================

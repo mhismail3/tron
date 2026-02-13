@@ -208,6 +208,7 @@ export interface SessionManager {
 export interface SessionInfo {
   sessionId: string;
   workingDirectory: string;
+  title?: string;
   model: string;
   messageCount: number;
   inputTokens: number;
@@ -219,6 +220,7 @@ export interface SessionInfo {
   createdAt: string;
   lastActivity: string;
   isActive: boolean;
+  parentSessionId?: string;
   messages: unknown[];
   lastUserPrompt?: string;
   lastAssistantResponse?: string;

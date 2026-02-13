@@ -4,6 +4,40 @@ import Foundation
 
 extension EventStoreManager {
 
+    /// Lightweight session list refresh: fetch sessions from server and update local DB.
+    /// Does NOT sync events — just updates the session metadata so all devices see the same list.
+    /// Call this on WebSocket connect for fast session list population.
+    func refreshSessionList() async {
+        let serverOrigin = rpcClient.serverOrigin
+        logger.info("Refreshing session list from server (origin: \(serverOrigin))...", category: .session)
+
+        do {
+            let serverSessions = try await sessionSynchronizer.fetchServerSessions()
+            logger.info("Fetched \(serverSessions.count) sessions from server", category: .session)
+
+            for serverSession in serverSessions {
+                let sessionId = serverSession.sessionId
+
+                if try sessionSynchronizer.sessionHasDifferentOrigin(sessionId, expectedOrigin: serverOrigin) {
+                    continue
+                }
+
+                let cachedSession: CachedSession
+                if try eventDB.sessions.exists(sessionId), let existing = try eventDB.sessions.get(sessionId) {
+                    cachedSession = mergeSessionData(existing: existing, serverInfo: serverSession, serverOrigin: serverOrigin)
+                } else {
+                    cachedSession = serverSessionToCached(serverSession, serverOrigin: serverOrigin)
+                }
+                try eventDB.sessions.insert(cachedSession)
+            }
+
+            loadSessions()
+            logger.info("Session list refreshed: \(self.sessions.count) sessions", category: .session)
+        } catch {
+            logger.error("Session list refresh failed: \(error.localizedDescription)", category: .session)
+        }
+    }
+
     /// Full sync: fetch all sessions and their events from server.
     /// This is origin-aware: only syncs sessions that belong to the current server.
     func fullSync() async {
@@ -111,25 +145,17 @@ extension EventStoreManager {
 
     /// Convert server SessionInfo to CachedSession.
     func serverSessionToCached(_ info: SessionInfo, serverOrigin: String? = nil) -> CachedSession {
-        let title: String?
-        let displayName = info.displayName
-        if displayName.hasPrefix("sess_") || displayName == info.sessionId {
-            title = nil
-        } else {
-            title = displayName
-        }
-
         return CachedSession(
             id: info.sessionId,
             workspaceId: info.workingDirectory ?? "",
             rootEventId: nil,
             headEventId: nil,
-            title: title,
+            title: info.title,
             latestModel: info.model,
             workingDirectory: info.workingDirectory ?? "",
             createdAt: info.createdAt,
-            lastActivityAt: info.createdAt,
-            endedAt: info.isActive ? nil : info.createdAt,
+            lastActivityAt: info.lastActivity ?? info.createdAt,
+            archivedAt: nil,
             eventCount: 0,
             messageCount: info.messageCount,
             inputTokens: info.inputTokens ?? 0,
@@ -145,17 +171,11 @@ extension EventStoreManager {
 
     /// Merge existing local session data with server info.
     func mergeSessionData(existing: CachedSession, serverInfo: SessionInfo, serverOrigin: String) -> CachedSession {
-        let title: String?
-        if let existingTitle = existing.title, !existingTitle.isEmpty, !existingTitle.hasPrefix("sess_") {
-            title = existingTitle
-        } else {
-            let serverTitle = serverInfo.displayName
-            if !serverTitle.hasPrefix("sess_") && serverTitle != serverInfo.sessionId {
-                title = serverTitle
-            } else {
-                title = nil
-            }
-        }
+        // Prefer server title if available, fall back to existing local title
+        let title = serverInfo.title ?? existing.title
+
+        // Use server lastActivity if available, otherwise keep local
+        let lastActivityAt = serverInfo.lastActivity ?? existing.lastActivityAt
 
         return CachedSession(
             id: existing.id,
@@ -166,8 +186,8 @@ extension EventStoreManager {
             latestModel: serverInfo.model,
             workingDirectory: serverInfo.workingDirectory ?? existing.workingDirectory,
             createdAt: serverInfo.createdAt,
-            lastActivityAt: existing.lastActivityAt,
-            endedAt: serverInfo.isActive ? nil : existing.endedAt,
+            lastActivityAt: lastActivityAt,
+            archivedAt: nil,
             eventCount: existing.eventCount,
             messageCount: max(existing.messageCount, serverInfo.messageCount),
             inputTokens: serverInfo.inputTokens ?? existing.inputTokens,

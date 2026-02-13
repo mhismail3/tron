@@ -177,10 +177,92 @@ final class EventStoreManager {
                 )
             }
 
+        case SessionUpdatedPlugin.eventType:
+            if let result = event.getResult() as? SessionUpdatedPlugin.Result {
+                handleSessionUpdated(result)
+            }
+
+        case SessionCreatedPlugin.eventType:
+            if let result = event.getResult() as? SessionCreatedPlugin.Result {
+                handleSessionCreated(result)
+            }
+
         default:
             // Other events are handled by session-specific subscribers
             break
         }
+    }
+
+    /// Handle session.updated: update existing session metadata in the dashboard list
+    private func handleSessionUpdated(_ result: SessionUpdatedPlugin.Result) {
+        let sessionId = result.sessionId
+        guard let index = sessions.firstIndex(where: { $0.id == sessionId }) else {
+            // Session not in our list — might be a new session on another device.
+            // Trigger a full list refresh to pick it up.
+            logger.info("Global: session.updated for unknown session \(sessionId), refreshing list", category: .session)
+            Task { await refreshSessionList() }
+            return
+        }
+
+        logger.info("Global: session.updated for \(sessionId)", category: .session)
+        updateSession(at: index) { session in
+            if let title = result.title { session.title = title }
+            if let model = result.model { session.latestModel = model }
+            if let count = result.messageCount { session.messageCount = count }
+            if let tokens = result.inputTokens { session.inputTokens = tokens }
+            if let tokens = result.outputTokens { session.outputTokens = tokens }
+            if let tokens = result.lastTurnInputTokens { session.lastTurnInputTokens = tokens }
+            if let tokens = result.cacheReadTokens { session.cacheReadTokens = tokens }
+            if let tokens = result.cacheCreationTokens { session.cacheCreationTokens = tokens }
+            if let c = result.cost { session.cost = c }
+            if let activity = result.lastActivity { session.lastActivityAt = activity }
+            if let prompt = result.lastUserPrompt { session.lastUserPrompt = prompt }
+            if let response = result.lastAssistantResponse { session.lastAssistantResponse = response }
+        }
+
+        // Also persist to local DB so the data survives app restarts
+        if let session = sessions.first(where: { $0.id == sessionId }) {
+            try? eventDB.sessions.insert(session)
+        }
+    }
+
+    /// Handle session.created: add new session to dashboard list
+    private func handleSessionCreated(_ result: SessionCreatedPlugin.Result) {
+        let sessionId = result.sessionId
+
+        // Don't add if already in list (e.g., we created it locally)
+        guard !sessions.contains(where: { $0.id == sessionId }) else { return }
+
+        logger.info("Global: session.created for \(sessionId) from another device", category: .session)
+
+        let newSession = CachedSession(
+            id: sessionId,
+            workspaceId: result.workingDirectory ?? "",
+            rootEventId: nil,
+            headEventId: nil,
+            title: result.title,
+            latestModel: result.model ?? "unknown",
+            workingDirectory: result.workingDirectory ?? "",
+            createdAt: result.lastActivity,
+            lastActivityAt: result.lastActivity,
+            archivedAt: nil,
+            eventCount: 0,
+            messageCount: result.messageCount,
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            lastTurnInputTokens: result.lastTurnInputTokens,
+            cacheReadTokens: result.cacheReadTokens,
+            cacheCreationTokens: result.cacheCreationTokens,
+            cost: result.cost,
+            isFork: result.parentSessionId != nil,
+            serverOrigin: rpcClient.serverOrigin
+        )
+
+        // Prepend new session (most recent first)
+        sessions.insert(newSession, at: 0)
+
+        // Persist to local DB
+        try? eventDB.sessions.insert(newSession)
     }
 
     // MARK: - State Setters (for extensions)

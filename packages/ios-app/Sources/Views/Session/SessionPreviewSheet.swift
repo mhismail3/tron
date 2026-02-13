@@ -148,14 +148,6 @@ struct SessionPreviewSheet: View {
                         .padding(.vertical, 2)
                         .background(Color.tronEmerald.opacity(0.2))
                         .clipShape(Capsule())
-                } else {
-                    Text("ENDED")
-                        .font(TronTypography.badge)
-                        .foregroundStyle(.tronTextMuted)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.tronOverlay(0.1))
-                        .clipShape(Capsule())
                 }
             }
         }

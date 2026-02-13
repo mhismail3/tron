@@ -40,15 +40,17 @@ final class SessionClient {
     func list(
         workingDirectory: String? = nil,
         limit: Int = 50,
-        includeEnded: Bool = false
-    ) async throws -> [SessionInfo] {
+        offset: Int = 0,
+        includeArchived: Bool = false
+    ) async throws -> SessionListResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = SessionListParams(
             workingDirectory: workingDirectory,
             limit: limit,
-            includeEnded: includeEnded
+            offset: offset,
+            includeArchived: includeArchived
         )
 
         let result: SessionListResult = try await ws.send(
@@ -61,7 +63,7 @@ final class SessionClient {
             logger.debug("[SESSION-LIST-RAW] \(session.sessionId.prefix(12)): cacheRead=\(session.cacheReadTokens ?? -1) cacheWrite=\(session.cacheCreationTokens ?? -1)", category: .session)
         }
 
-        return result.sessions
+        return result
     }
 
     func resume(sessionId: String) async throws {
@@ -79,15 +81,27 @@ final class SessionClient {
         logger.info("Resumed session: \(sessionId) with \(result.messageCount) messages", category: .session)
     }
 
-    func end() async throws {
-        guard let transport else { return }
-        guard let (ws, sessionId) = try? transport.requireSession() else { return }
+    func archive(_ sessionId: String) async throws {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
 
-        let params = SessionEndParams(sessionId: sessionId)
-        let _: EmptyParams = try await ws.send(method: "session.end", params: params)
+        let params = SessionArchiveParams(sessionId: sessionId)
+        let _: EmptyParams = try await ws.send(method: "session.archive", params: params)
 
-        transport.setCurrentSessionId(nil)
-        logger.info("Ended session: \(sessionId)", category: .session)
+        if transport.currentSessionId == sessionId {
+            transport.setCurrentSessionId(nil)
+        }
+        logger.info("Archived session: \(sessionId)", category: .session)
+    }
+
+    func unarchive(_ sessionId: String) async throws {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+
+        let params = SessionUnarchiveParams(sessionId: sessionId)
+        let _: EmptyParams = try await ws.send(method: "session.unarchive", params: params)
+
+        logger.info("Unarchived session: \(sessionId)", category: .session)
     }
 
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
@@ -112,9 +126,9 @@ final class SessionClient {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
-        let params = SessionDeleteParams(sessionId: sessionId)
-        let result: SessionDeleteResult = try await ws.send(
-            method: "session.delete",
+        let params = SessionArchiveParams(sessionId: sessionId)
+        let _: EmptyParams = try await ws.send(
+            method: "session.archive",
             params: params
         )
 
@@ -122,8 +136,8 @@ final class SessionClient {
             transport.setCurrentSessionId(nil)
         }
 
-        logger.info("Deleted session: \(sessionId)", category: .session)
-        return result.deleted
+        logger.info("Archived session (via delete): \(sessionId)", category: .session)
+        return true
     }
 
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {

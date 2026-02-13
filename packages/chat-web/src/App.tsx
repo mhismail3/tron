@@ -719,7 +719,7 @@ function AppContent() {
           workingDirectory,
           createdAt: now,
           lastActivityAt: now,
-          endedAt: null,
+          archivedAt: null,
           eventCount: 0,
           messageCount: 0,
         });
@@ -765,7 +765,7 @@ function AppContent() {
           workingDirectory,
           createdAt: now,
           lastActivityAt: now,
-          endedAt: null,
+          archivedAt: null,
           eventCount: 0,
           messageCount: 0,
         });

@@ -636,6 +636,10 @@ export class AgentRunner {
     // agent-controller drains them before the next run.
     this.emitAgentReady(options.sessionId, options.runId);
 
+    // Emit session_updated so all connected clients refresh dashboard metadata
+    // (token counts, cost, message count, previews, lastActivity)
+    this.config.emit('session_updated', { sessionId: options.sessionId });
+
     return [runResult];
   }
 

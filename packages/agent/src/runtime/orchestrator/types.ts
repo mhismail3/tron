@@ -246,6 +246,7 @@ export interface CreateSessionOptions {
 export interface SessionInfo {
   sessionId: string;
   workingDirectory: string;
+  title?: string;
   model: string;
   messageCount: number;
   eventCount: number;

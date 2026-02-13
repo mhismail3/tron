@@ -132,11 +132,62 @@ export class TronServer {
     if (!this.orchestrator || !this.wsServer) return;
 
     this.orchestrator.on('session_created', (data) => {
-      this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_CREATED, data as Record<string, unknown>));
+      const { sessionId } = data as { sessionId: string };
+      // Fetch full session info to include metadata for all clients
+      this.orchestrator!.getSessionInfo(sessionId).then((info) => {
+        this.wsServer?.broadcastEvent(createEventEnvelope(
+          BroadcastEventType.SESSION_CREATED,
+          {
+            ...(data as Record<string, unknown>),
+            title: info?.title,
+            messageCount: info?.messageCount ?? 0,
+            inputTokens: info?.inputTokens ?? 0,
+            outputTokens: info?.outputTokens ?? 0,
+            lastTurnInputTokens: info?.lastTurnInputTokens ?? 0,
+            cacheReadTokens: info?.cacheReadTokens ?? 0,
+            cacheCreationTokens: info?.cacheCreationTokens ?? 0,
+            cost: info?.cost ?? 0,
+            lastActivity: info?.lastActivity ?? new Date().toISOString(),
+            isActive: info?.isActive ?? true,
+            parentSessionId: info?.parentSessionId,
+          }
+        ));
+      }).catch(() => {
+        // Fallback: broadcast with original data
+        this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_CREATED, data as Record<string, unknown>));
+      });
     });
 
     this.orchestrator.on('session_ended', (data) => {
       this.wsServer?.broadcastEvent(createEventEnvelope(BroadcastEventType.SESSION_ENDED, data as Record<string, unknown>));
+    });
+
+    this.orchestrator.on('session_updated', (data) => {
+      const { sessionId } = data as { sessionId: string };
+      this.orchestrator!.getSessionInfo(sessionId).then((info) => {
+        if (!info) return;
+        this.wsServer?.broadcastEvent(createEventEnvelope(
+          BroadcastEventType.SESSION_UPDATED,
+          {
+            sessionId: info.sessionId,
+            title: info.title,
+            model: info.model,
+            messageCount: info.messageCount,
+            inputTokens: info.inputTokens,
+            outputTokens: info.outputTokens,
+            lastTurnInputTokens: info.lastTurnInputTokens,
+            cacheReadTokens: info.cacheReadTokens,
+            cacheCreationTokens: info.cacheCreationTokens,
+            cost: info.cost,
+            lastActivity: info.lastActivity,
+            isActive: info.isActive,
+            lastUserPrompt: info.lastUserPrompt,
+            lastAssistantResponse: info.lastAssistantResponse,
+            parentSessionId: info.parentSessionId,
+          },
+          sessionId
+        ));
+      }).catch(() => { /* session may have been deleted */ });
     });
 
     this.orchestrator.on('session_forked', (data) => {
@@ -232,6 +283,34 @@ export class TronServer {
         { title: data.title, entryType: data.entryType },
         data.sessionId
       ));
+
+      // Title changes should also update the session dashboard on all clients
+      if (data.title && data.sessionId) {
+        this.orchestrator!.getSessionInfo(data.sessionId).then((info) => {
+          if (!info) return;
+          this.wsServer?.broadcastEvent(createEventEnvelope(
+            BroadcastEventType.SESSION_UPDATED,
+            {
+              sessionId: info.sessionId,
+              title: info.title,
+              model: info.model,
+              messageCount: info.messageCount,
+              inputTokens: info.inputTokens,
+              outputTokens: info.outputTokens,
+              lastTurnInputTokens: info.lastTurnInputTokens,
+              cacheReadTokens: info.cacheReadTokens,
+              cacheCreationTokens: info.cacheCreationTokens,
+              cost: info.cost,
+              lastActivity: info.lastActivity,
+              isActive: info.isActive,
+              lastUserPrompt: info.lastUserPrompt,
+              lastAssistantResponse: info.lastAssistantResponse,
+              parentSessionId: info.parentSessionId,
+            },
+            data.sessionId
+          ));
+        }).catch(() => { /* session may have been deleted */ });
+      }
     });
 
     // Forward browser frame events for live streaming

@@ -395,12 +395,12 @@ struct NewSessionFlow: View {
         }
 
         do {
-            // Fetch all sessions from server (no workspace filter, include ended)
-            let sessions = try await rpcClient.session.list(
+            // Fetch all sessions from server (no workspace filter)
+            let result = try await rpcClient.session.list(
                 workingDirectory: nil,
-                limit: 50,
-                includeEnded: true
+                limit: 50
             )
+            let sessions = result.sessions
 
             await MainActor.run {
                 serverSessions = sessions

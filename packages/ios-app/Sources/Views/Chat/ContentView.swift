@@ -56,15 +56,28 @@ struct ContentView: View {
                 }
                 // Start polling for session processing states when dashboard is visible
                 eventStoreManager.startDashboardPolling()
+
+                // Refresh session list from server if already connected
+                // (handles the case where WebSocket connected before this view appeared)
+                if rpcClient.connectionState.isConnected {
+                    Task {
+                        await eventStoreManager.refreshSessionList()
+                    }
+                }
             }
             .onDisappear {
                 // Stop polling when leaving the dashboard
                 eventStoreManager.stopDashboardPolling()
             }
             .onChange(of: rpcClient.connectionState) { oldState, newState in
-                // When connection is established, trigger dashboard refresh
+                // When connection is established, refresh session list from server
                 if newState.isConnected && !oldState.isConnected {
                     eventStoreManager.startDashboardPolling()
+
+                    // Fetch session list from server so all devices see the same sessions
+                    Task {
+                        await eventStoreManager.refreshSessionList()
+                    }
 
                     // Re-validate current session's workspace now that we're connected
                     if let sessionId = selectedSessionId,

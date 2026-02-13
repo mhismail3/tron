@@ -78,7 +78,7 @@ enum DatabaseSchema {
                 working_directory TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 last_activity_at TEXT NOT NULL,
-                ended_at TEXT,
+                archived_at TEXT,
                 event_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
@@ -93,7 +93,7 @@ enum DatabaseSchema {
         // Indexes for common queries
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_activity ON sessions(last_activity_at)")
-        try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at)")
+        // Note: idx_sessions_archived created in runSessionsMigrations after ended_at → archived_at rename
     }
 
     private static func runSessionsMigrations(db: OpaquePointer?) throws {
@@ -119,6 +119,15 @@ enum DatabaseSchema {
         if try columnExists(table: "sessions", column: "provider", db: db) {
             try migrateSessionsTableSchema(db: db)
         }
+
+        // Migration: Rename ended_at to archived_at (sessions no longer "end")
+        if try columnExists(table: "sessions", column: "ended_at", db: db) {
+            try execute(db: db, "ALTER TABLE sessions RENAME COLUMN ended_at TO archived_at")
+            try execute(db: db, "DROP INDEX IF EXISTS idx_sessions_ended")
+        }
+
+        // Create archived_at index (safe after migration has run)
+        try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_archived ON sessions(archived_at)")
     }
 
     /// Migrate old sessions table schema by rebuilding the table.
@@ -135,7 +144,7 @@ enum DatabaseSchema {
                 working_directory TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 last_activity_at TEXT NOT NULL,
-                ended_at TEXT,
+                archived_at TEXT,
                 event_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
@@ -149,7 +158,7 @@ enum DatabaseSchema {
             INSERT INTO sessions_new
             SELECT id, workspace_id, root_event_id, head_event_id, title,
                    model, working_directory, created_at, last_activity_at,
-                   CASE WHEN status = 'ended' THEN last_activity_at ELSE NULL END,
+                   NULL,
                    event_count, message_count, input_tokens, output_tokens, 0, cost
             FROM sessions
         """)

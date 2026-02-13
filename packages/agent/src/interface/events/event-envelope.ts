@@ -16,6 +16,7 @@
 export const BroadcastEventType = {
   // Session events
   SESSION_CREATED: 'session.created',
+  SESSION_UPDATED: 'session.updated',
   SESSION_ENDED: 'session.ended',
   SESSION_FORKED: 'session.forked',
   SESSION_REWOUND: 'session.rewound',

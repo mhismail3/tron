@@ -212,17 +212,17 @@ final class RecentSessionsTests: XCTestCase {
     /// Test that both active and ended sessions are included
     @MainActor
     func testIncludesBothActiveAndEndedSessions() async throws {
-        let activeSession = CachedSession(
-            id: "session-active",
+        let regularSession = CachedSession(
+            id: "session-regular",
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            title: "Active",
+            title: "Regular",
             latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-02T00:00:00Z",
             lastActivityAt: "2024-01-02T00:00:00Z",
-            endedAt: nil,
+            archivedAt: nil,
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
@@ -231,17 +231,17 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         )
 
-        let endedSession = CachedSession(
-            id: "session-ended",
+        let archivedSession = CachedSession(
+            id: "session-archived",
             workspaceId: "/workspace",
             rootEventId: nil,
             headEventId: nil,
-            title: "Ended",
+            title: "Archived",
             latestModel: "claude-sonnet-4",
             workingDirectory: "/workspace",
             createdAt: "2024-01-01T00:00:00Z",
             lastActivityAt: "2024-01-01T00:00:00Z",
-            endedAt: "2024-01-01T00:05:00Z",
+            archivedAt: "2024-01-01T00:05:00Z",
             eventCount: 0,
             messageCount: 0,
             inputTokens: 0,
@@ -250,16 +250,16 @@ final class RecentSessionsTests: XCTestCase {
             cost: 0.0
         )
 
-        try database.sessions.insert(activeSession)
-        try database.sessions.insert(endedSession)
+        try database.sessions.insert(regularSession)
+        try database.sessions.insert(archivedSession)
 
         let sessions = try database.sessions.getAll()
         XCTAssertEqual(sessions.count, 2)
 
-        let hasActive = sessions.contains { !$0.isEnded }
-        let hasEnded = sessions.contains { $0.isEnded }
-        XCTAssertTrue(hasActive)
-        XCTAssertTrue(hasEnded)
+        let hasRegular = sessions.contains { !$0.isArchived }
+        let hasArchived = sessions.contains { $0.isArchived }
+        XCTAssertTrue(hasRegular)
+        XCTAssertTrue(hasArchived)
     }
 
     // MARK: - Session Display Data Tests

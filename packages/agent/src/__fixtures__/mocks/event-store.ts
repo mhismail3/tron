@@ -75,8 +75,11 @@ export interface EventStoreMethods {
   getSessionsByIds(sessionIds: SessionId[]): Promise<Map<SessionId, SessionRow>>;
   listSessions(options?: import('../../events/sqlite/facade.js').ListSessionsOptions): Promise<SessionRow[]>;
   getSessionMessagePreviews(sessionIds: SessionId[]): Promise<Map<SessionId, { lastUserPrompt?: string; lastAssistantResponse?: string }>>;
-  endSession(sessionId: SessionId): Promise<void>;
-  clearSessionEnded(sessionId: SessionId): Promise<void>;
+  archiveSession(sessionId: SessionId): Promise<void>;
+  unarchiveSession(sessionId: SessionId): Promise<void>;
+  deleteSession(sessionId: SessionId): Promise<void>;
+  updateSessionTitle(sessionId: SessionId, title: string | null): Promise<void>;
+  listSessionsWithCount(options?: import('../../events/sqlite/facade.js').ListSessionsOptions): Promise<{ sessions: SessionRow[]; totalCount: number }>;
   updateLatestModel(sessionId: SessionId, model: string): Promise<void>;
   deleteMessage(sessionId: SessionId, targetEventId: EventId, reason?: 'user_request' | 'content_policy' | 'context_management'): Promise<SessionEvent>;
   getWorkspaceByPath(path: string): Promise<import('../../events/types.js').Workspace | null>;
@@ -118,7 +121,7 @@ export interface MockSessionRowOptions {
   workingDirectory?: string;
   latestModel?: string;
   title?: string | null;
-  isEnded?: boolean;
+  isArchived?: boolean;
   rootEventId?: EventId | null;
   headEventId?: EventId | null;
   eventCount?: number;
@@ -134,7 +137,7 @@ export interface MockSessionRowOptions {
   forkFromEventId?: EventId | null;
   createdAt?: string;
   lastActivityAt?: string;
-  endedAt?: string | null;
+  archivedAt?: string | null;
   spawningSessionId?: SessionId | null;
   spawnType?: 'subsession' | 'tmux' | 'fork' | null;
   spawnTask?: string | null;
@@ -211,7 +214,7 @@ export function createMockSessionRow(options: MockSessionRowOptions = {}): Sessi
     latestModel,
     model: latestModel, // Alias for latestModel
     title: options.title ?? null,
-    isEnded: options.isEnded ?? false,
+    isArchived: options.isArchived ?? false,
     rootEventId: options.rootEventId ?? null,
     headEventId: options.headEventId ?? null,
     eventCount: options.eventCount ?? 0,
@@ -227,7 +230,7 @@ export function createMockSessionRow(options: MockSessionRowOptions = {}): Sessi
     forkFromEventId: options.forkFromEventId ?? null,
     createdAt: options.createdAt ?? now,
     lastActivityAt: options.lastActivityAt ?? now,
-    endedAt: options.endedAt ?? null,
+    archivedAt: options.archivedAt ?? null,
     spawningSessionId: options.spawningSessionId ?? null,
     spawnType: options.spawnType ?? null,
     spawnTask: options.spawnTask ?? null,
@@ -461,8 +464,11 @@ export function createMockEventStore(options: MockEventStoreOptions = {}): Event
     getSessionsByIds: vi.fn().mockResolvedValue(new Map()),
     listSessions: options.listSessions ?? vi.fn().mockResolvedValue([]),
     getSessionMessagePreviews: vi.fn().mockResolvedValue(new Map()),
-    endSession: vi.fn().mockResolvedValue(undefined),
-    clearSessionEnded: vi.fn().mockResolvedValue(undefined),
+    archiveSession: vi.fn().mockResolvedValue(undefined),
+    unarchiveSession: vi.fn().mockResolvedValue(undefined),
+    deleteSession: vi.fn().mockResolvedValue(undefined),
+    updateSessionTitle: vi.fn().mockResolvedValue(undefined),
+    listSessionsWithCount: vi.fn().mockResolvedValue({ sessions: [], totalCount: 0 }),
     updateLatestModel: vi.fn().mockResolvedValue(undefined),
 
     // Message Deletion

@@ -693,7 +693,8 @@ export class SessionManager {
     const isActive = !!active;
     const session = await this.eventStore.getSession(sessionId as SessionId);
     if (!session) return null;
-    return this.sessionRowToInfo(session, isActive, active?.workingDir);
+    const previews = await this.eventStore.getSessionMessagePreviews([sessionId as SessionId]);
+    return this.sessionRowToInfo(session, isActive, active?.workingDir, previews.get(sessionId as SessionId));
   }
 
   async listSessions(options: {
@@ -897,6 +898,7 @@ export class SessionManager {
     return {
       sessionId: row.id,
       workingDirectory: workingDir?.path ?? row.workingDirectory,
+      title: row.title ?? undefined,
       model: row.latestModel,
       messageCount: row.messageCount ?? 0,
       eventCount: row.eventCount ?? 0,

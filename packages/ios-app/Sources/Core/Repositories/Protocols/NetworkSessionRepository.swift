@@ -17,18 +17,24 @@ protocol NetworkSessionRepository: AnyObject {
     /// - Parameters:
     ///   - workingDirectory: Optional filter by working directory
     ///   - limit: Maximum number of sessions to return
-    ///   - includeEnded: Whether to include ended sessions
-    /// - Returns: Array of session info
-    func list(workingDirectory: String?, limit: Int, includeEnded: Bool) async throws -> [SessionInfo]
+    ///   - offset: Offset for pagination
+    ///   - includeArchived: Whether to include archived sessions
+    /// - Returns: Session list result with pagination info
+    func list(workingDirectory: String?, limit: Int, offset: Int, includeArchived: Bool) async throws -> SessionListResult
 
     /// Resume an existing session.
     /// - Parameter sessionId: The session ID to resume
     func resume(sessionId: String) async throws
 
-    /// End the current session.
-    func end() async throws
+    /// Archive a session.
+    /// - Parameter sessionId: The session ID to archive
+    func archive(sessionId: String) async throws
 
-    /// Delete a session.
+    /// Unarchive a session.
+    /// - Parameter sessionId: The session ID to unarchive
+    func unarchive(sessionId: String) async throws
+
+    /// Delete a session (archives on server).
     /// - Parameter sessionId: The session ID to delete
     /// - Returns: Whether the session was deleted
     func delete(sessionId: String) async throws -> Bool

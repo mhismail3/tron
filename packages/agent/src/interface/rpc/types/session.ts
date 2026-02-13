@@ -53,14 +53,19 @@ export interface SessionListResult {
   sessions: Array<{
     sessionId: string;
     workingDirectory: string;
+    title?: string;
     model: string;
     messageCount: number;
     inputTokens: number;
     outputTokens: number;
+    lastTurnInputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
     cost: number;
     createdAt: string;
     lastActivity: string;
     isActive: boolean;
+    parentSessionId?: string;
     /** Last user prompt text (for preview display) */
     lastUserPrompt?: string;
     /** Last assistant response text (for preview display) */

@@ -20,7 +20,8 @@ struct SessionClientTests {
         var listCallCount = 0
         var listWorkingDirectory: String?
         var listLimit: Int?
-        var listIncludeEnded: Bool?
+        var listOffset: Int?
+        var listIncludeArchived: Bool?
         var listResult: [SessionInfo] = []
         var listShouldThrow = false
 
@@ -28,8 +29,13 @@ struct SessionClientTests {
         var resumeSessionId: String?
         var resumeShouldThrow = false
 
-        var endCallCount = 0
-        var endShouldThrow = false
+        var archiveCallCount = 0
+        var archiveSessionId: String?
+        var archiveShouldThrow = false
+
+        var unarchiveCallCount = 0
+        var unarchiveSessionId: String?
+        var unarchiveShouldThrow = false
 
         var getHistoryCallCount = 0
         var getHistoryLimit: Int?
@@ -66,13 +72,14 @@ struct SessionClientTests {
             return try! JSONDecoder().decode(SessionCreateResult.self, from: json.data(using: .utf8)!)
         }
 
-        func list(workingDirectory: String?, limit: Int, includeEnded: Bool) async throws -> [SessionInfo] {
+        func list(workingDirectory: String?, limit: Int, offset: Int, includeArchived: Bool) async throws -> SessionListResult {
             listCallCount += 1
             listWorkingDirectory = workingDirectory
             listLimit = limit
-            listIncludeEnded = includeEnded
+            listOffset = offset
+            listIncludeArchived = includeArchived
             if listShouldThrow { throw TestError.mockError }
-            return listResult
+            return SessionListResult(sessions: listResult, totalCount: listResult.count, hasMore: false)
         }
 
         func resume(sessionId: String) async throws {
@@ -81,9 +88,16 @@ struct SessionClientTests {
             if resumeShouldThrow { throw TestError.mockError }
         }
 
-        func end() async throws {
-            endCallCount += 1
-            if endShouldThrow { throw TestError.mockError }
+        func archive(_ sessionId: String) async throws {
+            archiveCallCount += 1
+            archiveSessionId = sessionId
+            if archiveShouldThrow { throw TestError.mockError }
+        }
+
+        func unarchive(_ sessionId: String) async throws {
+            unarchiveCallCount += 1
+            unarchiveSessionId = sessionId
+            if unarchiveShouldThrow { throw TestError.mockError }
         }
 
         func getHistory(limit: Int) async throws -> [HistoryMessage] {
@@ -169,18 +183,20 @@ struct SessionClientTests {
         #expect(mock.listCallCount == 1)
         #expect(mock.listWorkingDirectory == nil)
         #expect(mock.listLimit == 50)
-        #expect(mock.listIncludeEnded == false)
+        #expect(mock.listOffset == 0)
+        #expect(mock.listIncludeArchived == false)
     }
 
     @Test("List sessions with custom parameters")
     func testList_withCustomParams() async throws {
         let mock = MockSessionClient()
 
-        _ = try await mock.list(workingDirectory: "/test", limit: 100, includeEnded: true)
+        _ = try await mock.list(workingDirectory: "/test", limit: 100, offset: 10, includeArchived: true)
 
         #expect(mock.listWorkingDirectory == "/test")
         #expect(mock.listLimit == 100)
-        #expect(mock.listIncludeEnded == true)
+        #expect(mock.listOffset == 10)
+        #expect(mock.listIncludeArchived == true)
     }
 
     // MARK: - Resume Tests
@@ -283,24 +299,37 @@ struct SessionClientTests {
         #expect(mock.getHistoryLimit == 50)
     }
 
-    // MARK: - End Tests
+    // MARK: - Archive Tests
 
-    @Test("End session calls correctly")
-    func testEnd_calls() async throws {
+    @Test("Archive session calls correctly")
+    func testArchive_calls() async throws {
         let mock = MockSessionClient()
 
-        try await mock.end()
+        try await mock.archive("session-123")
 
-        #expect(mock.endCallCount == 1)
+        #expect(mock.archiveCallCount == 1)
+        #expect(mock.archiveSessionId == "session-123")
     }
 
-    @Test("End session throws on error")
-    func testEnd_throwsOnError() async throws {
+    @Test("Archive session throws on error")
+    func testArchive_throwsOnError() async throws {
         let mock = MockSessionClient()
-        mock.endShouldThrow = true
+        mock.archiveShouldThrow = true
 
         await #expect(throws: MockSessionClient.TestError.self) {
-            try await mock.end()
+            try await mock.archive("session-123")
         }
+    }
+
+    // MARK: - Unarchive Tests
+
+    @Test("Unarchive session calls correctly")
+    func testUnarchive_calls() async throws {
+        let mock = MockSessionClient()
+
+        try await mock.unarchive("session-123")
+
+        #expect(mock.unarchiveCallCount == 1)
+        #expect(mock.unarchiveSessionId == "session-123")
     }
 }

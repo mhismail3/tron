@@ -83,7 +83,7 @@ struct SettingsView: View {
                         case "prod": newPort = AppConstants.prodPort
                         default: return
                         }
-                        serverPort = ""
+                        serverPort = newPort
                         dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
                     }
                 )

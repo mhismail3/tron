@@ -249,7 +249,7 @@ describe('EventStoreOrchestrator Worktree Integration', () => {
     });
   });
 
-  describe('endSession', () => {
+  describe('unloadSession', () => {
     it('should release working directory when session ends', async () => {
       const mockCoordinator = {
         release: vi.fn().mockResolvedValue(undefined),

@@ -67,6 +67,7 @@ export function createSessionHandlers(): MethodRegistration[] {
       sessions: sessions.map((s) => ({
         sessionId: s.sessionId,
         workingDirectory: s.workingDirectory,
+        title: s.title,
         model: s.model,
         messageCount: s.messageCount,
         inputTokens: s.inputTokens,
@@ -78,6 +79,7 @@ export function createSessionHandlers(): MethodRegistration[] {
         createdAt: s.createdAt,
         lastActivity: s.lastActivity,
         isActive: s.isActive,
+        parentSessionId: s.parentSessionId,
         lastUserPrompt: s.lastUserPrompt,
         lastAssistantResponse: s.lastAssistantResponse,
       })),

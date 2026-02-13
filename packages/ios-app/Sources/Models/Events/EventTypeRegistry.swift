@@ -158,7 +158,7 @@ enum PersistedEventType: String, CaseIterable {
     var displayDescription: String {
         switch self {
         case .sessionStart: return "Session started"
-        case .sessionEnd: return "Session ended"
+        case .sessionEnd: return "Session ended (legacy)"
         case .sessionFork: return "Session forked"
         case .sessionBranch: return "Branch created"
         case .messageUser: return "User message"

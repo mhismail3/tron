@@ -878,7 +878,7 @@ final class EventDatabaseTests: XCTestCase {
             id: "session-1", workspaceId: "/test", rootEventId: nil, headEventId: nil,
             title: "Session 1", latestModel: "claude-sonnet-4", workingDirectory: "/test",
             createdAt: "2024-01-01T00:00:00Z", lastActivityAt: "2024-01-01T00:00:02Z",
-            endedAt: nil, eventCount: 2, messageCount: 2, inputTokens: 0, outputTokens: 0,
+            archivedAt: nil, eventCount: 2, messageCount: 2, inputTokens: 0, outputTokens: 0,
             lastTurnInputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0,
             isFork: false, serverOrigin: nil
         ))
@@ -886,7 +886,7 @@ final class EventDatabaseTests: XCTestCase {
             id: "session-2", workspaceId: "/test", rootEventId: nil, headEventId: nil,
             title: "Session 2", latestModel: "claude-sonnet-4", workingDirectory: "/test",
             createdAt: "2024-01-01T00:00:00Z", lastActivityAt: "2024-01-01T00:00:02Z",
-            endedAt: nil, eventCount: 2, messageCount: 2, inputTokens: 0, outputTokens: 0,
+            archivedAt: nil, eventCount: 2, messageCount: 2, inputTokens: 0, outputTokens: 0,
             lastTurnInputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cost: 0,
             isFork: false, serverOrigin: nil
         ))

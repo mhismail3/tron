@@ -41,8 +41,11 @@ describe('event-store mock factories', () => {
       expect(typeof mockStore.getSessionsByIds).toBe('function');
       expect(typeof mockStore.listSessions).toBe('function');
       expect(typeof mockStore.getSessionMessagePreviews).toBe('function');
-      expect(typeof mockStore.endSession).toBe('function');
-      expect(typeof mockStore.clearSessionEnded).toBe('function');
+      expect(typeof mockStore.archiveSession).toBe('function');
+      expect(typeof mockStore.unarchiveSession).toBe('function');
+      expect(typeof mockStore.deleteSession).toBe('function');
+      expect(typeof mockStore.updateSessionTitle).toBe('function');
+      expect(typeof mockStore.listSessionsWithCount).toBe('function');
       expect(typeof mockStore.updateLatestModel).toBe('function');
       expect(typeof mockStore.deleteMessage).toBe('function');
       expect(typeof mockStore.getWorkspaceByPath).toBe('function');
@@ -200,7 +203,7 @@ describe('event-store mock factories', () => {
       expect(session.workspaceId).toMatch(/^ws_/);
       expect(session.workingDirectory).toBeDefined();
       expect(session.latestModel).toBeDefined();
-      expect(session.isEnded).toBe(false);
+      expect(session.isArchived).toBe(false);
       expect(session.eventCount).toBe(0);
       expect(session.messageCount).toBe(0);
     });
@@ -208,13 +211,13 @@ describe('event-store mock factories', () => {
     it('should allow overriding session properties', () => {
       const session = createMockSessionRow({
         id: 'sess_custom' as SessionId,
-        isEnded: true,
+        isArchived: true,
         eventCount: 10,
         latestModel: 'gpt-4',
       });
 
       expect(session.id).toBe('sess_custom');
-      expect(session.isEnded).toBe(true);
+      expect(session.isArchived).toBe(true);
       expect(session.eventCount).toBe(10);
       expect(session.latestModel).toBe('gpt-4');
     });

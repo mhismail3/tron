@@ -20,16 +20,20 @@ final class DefaultSessionRepository: NetworkSessionRepository {
         try await sessionClient.create(workingDirectory: workingDirectory, model: model)
     }
 
-    func list(workingDirectory: String? = nil, limit: Int = 50, includeEnded: Bool = false) async throws -> [SessionInfo] {
-        try await sessionClient.list(workingDirectory: workingDirectory, limit: limit, includeEnded: includeEnded)
+    func list(workingDirectory: String? = nil, limit: Int = 50, offset: Int = 0, includeArchived: Bool = false) async throws -> SessionListResult {
+        try await sessionClient.list(workingDirectory: workingDirectory, limit: limit, offset: offset, includeArchived: includeArchived)
     }
 
     func resume(sessionId: String) async throws {
         try await sessionClient.resume(sessionId: sessionId)
     }
 
-    func end() async throws {
-        try await sessionClient.end()
+    func archive(sessionId: String) async throws {
+        try await sessionClient.archive(sessionId)
+    }
+
+    func unarchive(sessionId: String) async throws {
+        try await sessionClient.unarchive(sessionId)
     }
 
     func delete(sessionId: String) async throws -> Bool {

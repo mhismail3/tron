@@ -86,6 +86,7 @@ protocol SessionStoreProtocol: AnyObject {
 /// Protocol for server synchronization operations
 @MainActor
 protocol SessionSyncProtocol {
+    func refreshSessionList() async
     func fullSync() async
     func syncSessionEvents(sessionId: String) async throws
     func fullSyncSession(_ sessionId: String) async throws

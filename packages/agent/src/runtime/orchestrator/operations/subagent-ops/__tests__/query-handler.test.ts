@@ -44,7 +44,6 @@ describe('QueryHandler', () => {
     it('should return running status for active session', async () => {
       getSession.mockResolvedValue({
         id: 'sess_123',
-        endedAt: null,
         spawnType: 'subsession',
         spawnTask: 'Test task',
         turnCount: 3,
@@ -66,11 +65,10 @@ describe('QueryHandler', () => {
       expect(result.status?.turnCount).toBe(3);
     });
 
-    it('should return completed status for ended session without errors', async () => {
+    it('should return completed status for unloaded session without errors', async () => {
       getSession.mockResolvedValue({
         id: 'sess_123',
         headEventId: 'evt_head',
-        endedAt: '2024-01-01T00:02:00Z',
         spawnType: 'subsession',
         spawnTask: 'Test task',
         turnCount: 5,
@@ -87,11 +85,10 @@ describe('QueryHandler', () => {
       expect(result.status?.status).toBe('completed');
     });
 
-    it('should return failed status for ended session with error event', async () => {
+    it('should return failed status for unloaded session with error event', async () => {
       getSession.mockResolvedValue({
         id: 'sess_123',
         headEventId: 'evt_head',
-        endedAt: '2024-01-01T00:02:00Z',
         spawnType: 'subsession',
         spawnTask: 'Test task',
         turnCount: 2,

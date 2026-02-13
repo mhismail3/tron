@@ -123,7 +123,8 @@ final class SessionSynchronizer {
 
     /// Fetch sessions from server for a given origin.
     func fetchServerSessions() async throws -> [SessionInfo] {
-        try await rpcClient.session.list(includeEnded: true)
+        let result = try await rpcClient.session.list()
+        return result.sessions
     }
 
     /// Check if a session exists locally with a different origin.

@@ -12,12 +12,15 @@ protocol SessionClientProtocol {
     func list(
         workingDirectory: String?,
         limit: Int,
-        includeEnded: Bool
-    ) async throws -> [SessionInfo]
+        offset: Int,
+        includeArchived: Bool
+    ) async throws -> SessionListResult
 
     func resume(sessionId: String) async throws
 
-    func end() async throws
+    func archive(_ sessionId: String) async throws
+
+    func unarchive(_ sessionId: String) async throws
 
     func getHistory(limit: Int) async throws -> [HistoryMessage]
 
@@ -39,9 +42,10 @@ extension SessionClientProtocol {
     func list(
         workingDirectory: String? = nil,
         limit: Int = 50,
-        includeEnded: Bool = false
-    ) async throws -> [SessionInfo] {
-        try await list(workingDirectory: workingDirectory, limit: limit, includeEnded: includeEnded)
+        offset: Int = 0,
+        includeArchived: Bool = false
+    ) async throws -> SessionListResult {
+        try await list(workingDirectory: workingDirectory, limit: limit, offset: offset, includeArchived: includeArchived)
     }
 
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {

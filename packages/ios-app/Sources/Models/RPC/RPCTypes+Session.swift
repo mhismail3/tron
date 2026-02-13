@@ -27,7 +27,8 @@ struct SessionCreateResult: Decodable {
 struct SessionListParams: Encodable {
     let workingDirectory: String?
     let limit: Int?
-    let includeEnded: Bool?
+    let offset: Int?
+    let includeArchived: Bool?
 }
 
 struct SessionInfo: Decodable, Identifiable, Hashable {
@@ -44,9 +45,12 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     /// Total tokens written to prompt cache
     let cacheCreationTokens: Int?
     let cost: Double?
+    let lastActivity: String?
     let isActive: Bool
+    let isArchived: Bool?
     let workingDirectory: String?
     let parentSessionId: String?
+    let title: String?
     /// Last user prompt text (for preview display)
     let lastUserPrompt: String?
     /// Last assistant response text (for preview display)
@@ -106,6 +110,8 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
 
 struct SessionListResult: Decodable {
     let sessions: [SessionInfo]
+    let totalCount: Int?
+    let hasMore: Bool?
 }
 
 struct SessionResumeParams: Encodable {
@@ -119,7 +125,11 @@ struct SessionResumeResult: Decodable {
     let lastActivity: String
 }
 
-struct SessionEndParams: Encodable {
+struct SessionArchiveParams: Encodable {
+    let sessionId: String
+}
+
+struct SessionUnarchiveParams: Encodable {
     let sessionId: String
 }
 
@@ -187,7 +197,6 @@ struct ServerSessionInfo: Decodable {
     let workspaceId: String?
     let headEventId: String?
     let rootEventId: String?
-    let status: String?
     let title: String?
     let model: String
     let provider: String?
@@ -199,4 +208,6 @@ struct ServerSessionInfo: Decodable {
     let inputTokens: Int?
     let outputTokens: Int?
     let isActive: Bool
+    let isArchived: Bool?
+    let archivedAt: String?
 }

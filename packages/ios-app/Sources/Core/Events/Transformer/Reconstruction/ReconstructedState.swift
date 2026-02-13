@@ -219,27 +219,21 @@ extension ReconstructedState {
     /// Session start information
     struct SessionInfo {
         var startTime: Date?
-        var endTime: Date?
         var initialModel: String?
         var branchName: String?
         var forkSource: String?
 
         init() {
             self.startTime = nil
-            self.endTime = nil
             self.initialModel = nil
             self.branchName = nil
             self.forkSource = nil
         }
 
-        /// Whether the session is currently active (started but not ended)
-        var isActive: Bool { startTime != nil && endTime == nil }
-
-        /// Duration of the session (nil if not started)
+        /// Duration since session started (nil if not started)
         var duration: TimeInterval? {
             guard let start = startTime else { return nil }
-            let end = endTime ?? Date()
-            return end.timeIntervalSince(start)
+            return Date().timeIntervalSince(start)
         }
     }
 

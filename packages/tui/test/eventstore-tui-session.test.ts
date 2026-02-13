@@ -610,7 +610,7 @@ describe('EventStoreTuiSession', () => {
   // ===========================================================================
 
   describe('session end', () => {
-    it('should record session.end event', async () => {
+    it('should return session info on end', async () => {
       const tuiSession = new EventStoreTuiSession(config);
       await tuiSession.initialize();
 
@@ -619,16 +619,9 @@ describe('EventStoreTuiSession', () => {
       const endResult = await tuiSession.end();
 
       expect(endResult.sessionId).toBe(tuiSession.getSessionId());
-
-      const sessionId = tuiSession.getSessionId();
-      const events = await eventStore.getEventsBySession(sessionId);
-      const endEvent = events.find(e => e.type === 'session.end');
-
-      expect(endEvent).toBeDefined();
-      expect(endEvent?.payload.reason).toBe('completed');
     });
 
-    it('should include summary in end event when enough messages', async () => {
+    it('should set handoffCreated when enough messages', async () => {
       const tuiSession = new EventStoreTuiSession({
         ...config,
         minMessagesForHandoff: 2,
@@ -642,24 +635,6 @@ describe('EventStoreTuiSession', () => {
       const endResult = await tuiSession.end();
 
       expect(endResult.handoffCreated).toBe(true);
-
-      const sessionId = tuiSession.getSessionId();
-      const events = await eventStore.getEventsBySession(sessionId);
-      const endEvent = events.find(e => e.type === 'session.end');
-
-      expect(endEvent?.payload.summary).toBeDefined();
-    });
-
-    it('should mark session as ended', async () => {
-      const tuiSession = new EventStoreTuiSession(config);
-      await tuiSession.initialize();
-
-      await tuiSession.end();
-
-      const sessionId = tuiSession.getSessionId();
-      const session = await eventStore.getSession(sessionId);
-
-      expect(session?.isEnded).toBe(true);
     });
 
     it('should not allow operations after end', async () => {

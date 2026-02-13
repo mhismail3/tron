@@ -497,8 +497,8 @@ struct CachedSession: Identifiable, Codable {
     var workingDirectory: String
     var createdAt: String
     var lastActivityAt: String
-    /// Whether session has ended (derived from ended_at IS NOT NULL)
-    var endedAt: String?
+    /// Whether session has been archived (derived from archived_at IS NOT NULL)
+    var archivedAt: String?
     var eventCount: Int
     var messageCount: Int
     var inputTokens: Int
@@ -514,8 +514,8 @@ struct CachedSession: Identifiable, Codable {
     /// Backward compatibility: expose latestModel as model
     var model: String { latestModel }
 
-    /// Whether session has ended
-    var isEnded: Bool { endedAt != nil }
+    /// Whether session has been archived
+    var isArchived: Bool { archivedAt != nil }
 
     // Dashboard display fields
     var lastUserPrompt: String?

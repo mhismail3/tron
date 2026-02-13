@@ -22,14 +22,14 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(sessionNoTitle.displayTitle, "project")
     }
 
-    func testCachedSessionIsEnded() {
-        // Active session (no endedAt)
-        let activeSession = createTestSession(id: "s1", endedAt: nil)
-        XCTAssertFalse(activeSession.isEnded)
+    func testCachedSessionIsArchived() {
+        // Non-archived session (no archivedAt)
+        let activeSession = createTestSession(id: "s1", archivedAt: nil)
+        XCTAssertFalse(activeSession.isArchived)
 
-        // Ended session
-        let endedSession = createTestSession(id: "s2", endedAt: "2024-01-01T00:00:00Z")
-        XCTAssertTrue(endedSession.isEnded)
+        // Archived session
+        let archivedSession = createTestSession(id: "s2", archivedAt: "2024-01-01T00:00:00Z")
+        XCTAssertTrue(archivedSession.isArchived)
     }
 
     func testCachedSessionTokenCounts() {
@@ -53,7 +53,7 @@ final class CachedSessionTests: XCTestCase {
         id: String,
         title: String? = nil,
         workingDirectory: String = "/test/dir",
-        endedAt: String? = nil,
+        archivedAt: String? = nil,
         inputTokens: Int = 0,
         outputTokens: Int = 0,
         cacheReadTokens: Int = 0,
@@ -69,7 +69,7 @@ final class CachedSessionTests: XCTestCase {
             workingDirectory: workingDirectory,
             createdAt: ISO8601DateFormatter().string(from: Date()),
             lastActivityAt: ISO8601DateFormatter().string(from: Date()),
-            endedAt: endedAt,
+            archivedAt: archivedAt,
             eventCount: 0,
             messageCount: 0,
             inputTokens: inputTokens,
