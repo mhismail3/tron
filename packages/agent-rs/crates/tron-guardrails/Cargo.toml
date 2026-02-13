@@ -1,0 +1,22 @@
+[package]
+name = "tron-guardrails"
+description = "Guardrail engine and rule system for safety enforcement"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tron-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+regex.workspace = true
+globset.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

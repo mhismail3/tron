@@ -1,0 +1,32 @@
+[package]
+name = "tron-llm"
+description = "LLM provider trait and shared streaming utilities"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tron-core.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+eventsource-stream.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+pin-project-lite.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+proptest.workspace = true
+insta.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+mockall.workspace = true

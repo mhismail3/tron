@@ -1,0 +1,24 @@
+[package]
+name = "tron-rpc"
+description = "JSON-RPC 2.0 protocol, method registry, and handlers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tron-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+mockall.workspace = true
+insta.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

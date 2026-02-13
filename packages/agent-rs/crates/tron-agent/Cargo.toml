@@ -1,0 +1,43 @@
+[package]
+name = "tron-agent"
+description = "Tron agent server binary - main entry point"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "tron-agent"
+path = "src/main.rs"
+
+[dependencies]
+tron-core.workspace = true
+tron-events.workspace = true
+tron-settings.workspace = true
+tron-logging.workspace = true
+tron-auth.workspace = true
+tron-tokens.workspace = true
+tron-llm.workspace = true
+tron-llm-anthropic.workspace = true
+tron-llm-google.workspace = true
+tron-llm-openai.workspace = true
+tron-context.workspace = true
+tron-runtime.workspace = true
+tron-tools.workspace = true
+tron-hooks.workspace = true
+tron-skills.workspace = true
+tron-guardrails.workspace = true
+tron-memory.workspace = true
+tron-tasks.workspace = true
+tron-rpc.workspace = true
+tron-server.workspace = true
+tron-platform.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

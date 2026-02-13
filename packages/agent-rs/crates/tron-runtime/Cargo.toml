@@ -1,0 +1,33 @@
+[package]
+name = "tron-runtime"
+description = "Agent execution loop, session management, and orchestration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tron-core.workspace = true
+tron-events.workspace = true
+tron-llm.workspace = true
+tron-context.workspace = true
+tron-tools.workspace = true
+tron-hooks.workspace = true
+tron-settings.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+mockall.workspace = true
+insta.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

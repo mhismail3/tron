@@ -1,0 +1,154 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tron-core",
+    "crates/tron-events",
+    "crates/tron-settings",
+    "crates/tron-logging",
+    "crates/tron-auth",
+    "crates/tron-tokens",
+    "crates/tron-embeddings",
+    "crates/tron-llm",
+    "crates/tron-llm-anthropic",
+    "crates/tron-llm-google",
+    "crates/tron-llm-openai",
+    "crates/tron-context",
+    "crates/tron-runtime",
+    "crates/tron-tools",
+    "crates/tron-hooks",
+    "crates/tron-skills",
+    "crates/tron-guardrails",
+    "crates/tron-memory",
+    "crates/tron-tasks",
+    "crates/tron-rpc",
+    "crates/tron-server",
+    "crates/tron-platform",
+    "crates/tron-agent",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/moose/tron"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP / WebSocket
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = "0.10"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tokio-tungstenite = "0.26"
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+eventsource-stream = "0.2"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "serde_json", "functions"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Configuration
+figment = { version = "0.10", features = ["json", "env"] }
+
+# Logging / Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# IDs and time
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# OAuth / JWT
+jsonwebtoken = "9"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Filesystem
+globset = "0.4"
+walkdir = "2"
+notify = "7"
+tempfile = "3"
+
+# Regex
+regex = "1"
+
+# Git
+gix = { version = "0.70", default-features = false, features = ["worktree-mutation"] }
+
+# HTML
+scraper = "0.22"
+html2text = "0.14"
+
+# Embeddings (feature-gated)
+ort = "2"
+
+# Testing
+wiremock = "0.6"
+insta = { version = "1", features = ["json", "redactions"] }
+proptest = "1"
+mockall = "0.13"
+assert_matches = "1"
+
+# Utilities
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+pin-project-lite = "0.2"
+tokio-util = { version = "0.7", features = ["codec", "io"] }
+tokio-stream = "0.1"
+
+# Internal crates
+tron-core = { path = "crates/tron-core" }
+tron-events = { path = "crates/tron-events" }
+tron-settings = { path = "crates/tron-settings" }
+tron-logging = { path = "crates/tron-logging" }
+tron-auth = { path = "crates/tron-auth" }
+tron-tokens = { path = "crates/tron-tokens" }
+tron-embeddings = { path = "crates/tron-embeddings" }
+tron-llm = { path = "crates/tron-llm" }
+tron-llm-anthropic = { path = "crates/tron-llm-anthropic" }
+tron-llm-google = { path = "crates/tron-llm-google" }
+tron-llm-openai = { path = "crates/tron-llm-openai" }
+tron-context = { path = "crates/tron-context" }
+tron-runtime = { path = "crates/tron-runtime" }
+tron-tools = { path = "crates/tron-tools" }
+tron-hooks = { path = "crates/tron-hooks" }
+tron-skills = { path = "crates/tron-skills" }
+tron-guardrails = { path = "crates/tron-guardrails" }
+tron-memory = { path = "crates/tron-memory" }
+tron-tasks = { path = "crates/tron-tasks" }
+tron-rpc = { path = "crates/tron-rpc" }
+tron-server = { path = "crates/tron-server" }
+tron-platform = { path = "crates/tron-platform" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_results = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow common pedantic false positives
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
