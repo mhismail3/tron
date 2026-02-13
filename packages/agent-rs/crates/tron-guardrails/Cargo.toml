@@ -17,6 +17,7 @@ thiserror.workspace = true
 regex.workspace = true
 globset.workspace = true
 tracing.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

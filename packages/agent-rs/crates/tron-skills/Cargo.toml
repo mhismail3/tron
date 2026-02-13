@@ -16,6 +16,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 walkdir.workspace = true
 tracing.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

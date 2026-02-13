@@ -3773,6 +3773,7 @@ dependencies = [
 name = "tron-guardrails"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "globset",
  "insta",
  "regex",
@@ -3788,6 +3789,7 @@ name = "tron-hooks"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "mockall",
  "serde",
  "serde_json",
@@ -3901,7 +3903,9 @@ dependencies = [
 name = "tron-memory"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "mockall",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
@@ -4005,6 +4009,7 @@ name = "tron-skills"
 version = "0.1.0"
 dependencies = [
  "insta",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
@@ -4027,6 +4032,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "tron-core",
+ "uuid",
 ]
 
 [[package]]
