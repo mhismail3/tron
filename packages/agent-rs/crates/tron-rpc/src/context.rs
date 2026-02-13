@@ -1,9 +1,13 @@
 //! RPC dependency-injection context.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use parking_lot::RwLock;
+use tron_events::{ConnectionPool, EventStore};
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
+use tron_skills::registry::SkillRegistry;
 
 /// Shared context passed to every RPC handler.
 pub struct RpcContext {
@@ -11,11 +15,19 @@ pub struct RpcContext {
     pub orchestrator: Arc<Orchestrator>,
     /// Session lifecycle manager.
     pub session_manager: Arc<SessionManager>,
+    /// Event store for direct event queries.
+    pub event_store: Arc<EventStore>,
+    /// Skill registry (read/write).
+    pub skill_registry: Arc<RwLock<SkillRegistry>>,
+    /// Connection pool for task database (separate from events DB).
+    pub task_pool: Option<ConnectionPool>,
+    /// Path to settings JSON file.
+    pub settings_path: PathBuf,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::test_helpers::make_test_context;
+    use crate::handlers::test_helpers::{make_test_context, make_test_context_with_tasks};
 
     #[test]
     fn context_has_orchestrator() {
@@ -36,7 +48,86 @@ mod tests {
             .session_manager
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
-        // Orchestrator sees it because they share the same SessionManager.
         assert_eq!(ctx.orchestrator.active_session_count(), 1);
+    }
+
+    #[test]
+    fn context_has_event_store() {
+        let ctx = make_test_context();
+        let result = ctx.event_store.list_workspaces();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn context_event_store_matches_session_manager() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("model", "/tmp", Some("test"))
+            .unwrap();
+        let session = ctx.event_store.get_session(&sid).unwrap();
+        assert!(session.is_some());
+    }
+
+    #[test]
+    fn context_has_skill_registry() {
+        let ctx = make_test_context();
+        let guard = ctx.skill_registry.read();
+        assert_eq!(guard.list(None).len(), 0);
+    }
+
+    #[test]
+    fn context_skill_registry_writable() {
+        let ctx = make_test_context();
+        let _guard = ctx.skill_registry.write();
+    }
+
+    #[test]
+    fn context_has_settings_path() {
+        let ctx = make_test_context();
+        assert!(!ctx.settings_path.as_os_str().is_empty());
+    }
+
+    #[tokio::test]
+    async fn context_event_store_operations_work() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("model", "/tmp", Some("test"))
+            .unwrap();
+
+        let event = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: serde_json::json!({"text": "hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        assert_eq!(event.session_id, sid);
+    }
+
+    #[test]
+    fn make_test_context_populates_all_fields() {
+        let ctx = make_test_context();
+        assert_eq!(ctx.orchestrator.max_concurrent_sessions(), 10);
+        assert_eq!(ctx.session_manager.active_count(), 0);
+        assert!(ctx.event_store.list_workspaces().is_ok());
+        assert_eq!(ctx.skill_registry.read().list(None).len(), 0);
+        assert!(ctx.task_pool.is_none());
+        assert!(!ctx.settings_path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn make_test_context_with_tasks_has_pool() {
+        let ctx = make_test_context_with_tasks();
+        assert!(ctx.task_pool.is_some());
+        let pool = ctx.task_pool.as_ref().unwrap();
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }

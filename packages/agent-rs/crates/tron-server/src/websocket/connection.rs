@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 /// Represents a connected WebSocket client.
@@ -10,7 +11,7 @@ pub struct ClientConnection {
     /// Unique connection ID.
     pub id: String,
     /// Bound session ID (set after `session.create` / `session.resume`).
-    pub session_id: Option<String>,
+    session_id: Mutex<Option<String>>,
     /// Send channel to the client's WebSocket write task.
     tx: mpsc::Sender<String>,
     /// When this connection was established.
@@ -24,7 +25,7 @@ impl ClientConnection {
     pub fn new(id: String, tx: mpsc::Sender<String>) -> Self {
         Self {
             id,
-            session_id: None,
+            session_id: Mutex::new(None),
             tx,
             connected_at: Instant::now(),
             is_alive: AtomicBool::new(true),
@@ -32,8 +33,13 @@ impl ClientConnection {
     }
 
     /// Bind this connection to a session.
-    pub fn bind_session(&mut self, session_id: String) {
-        self.session_id = Some(session_id);
+    pub fn bind_session(&self, session_id: String) {
+        *self.session_id.lock() = Some(session_id);
+    }
+
+    /// Get the current bound session ID.
+    pub fn session_id(&self) -> Option<String> {
+        self.session_id.lock().clone()
     }
 
     /// Send a text message to the client.
@@ -83,7 +89,7 @@ mod tests {
     fn create_connection() {
         let (conn, _rx) = make_connection();
         assert_eq!(conn.id, "conn_1");
-        assert!(conn.session_id.is_none());
+        assert!(conn.session_id().is_none());
         assert!(conn.is_alive.load(Ordering::Relaxed));
     }
 
@@ -119,10 +125,10 @@ mod tests {
 
     #[test]
     fn bind_session() {
-        let (mut conn, _rx) = make_connection();
-        assert!(conn.session_id.is_none());
+        let (conn, _rx) = make_connection();
+        assert!(conn.session_id().is_none());
         conn.bind_session("sess_42".into());
-        assert_eq!(conn.session_id.as_deref(), Some("sess_42"));
+        assert_eq!(conn.session_id().as_deref(), Some("sess_42"));
     }
 
     #[test]
@@ -178,11 +184,11 @@ mod tests {
 
     #[test]
     fn rebind_session() {
-        let (mut conn, _rx) = make_connection();
+        let (conn, _rx) = make_connection();
         conn.bind_session("sess_1".into());
-        assert_eq!(conn.session_id.as_deref(), Some("sess_1"));
+        assert_eq!(conn.session_id().as_deref(), Some("sess_1"));
         conn.bind_session("sess_2".into());
-        assert_eq!(conn.session_id.as_deref(), Some("sess_2"));
+        assert_eq!(conn.session_id().as_deref(), Some("sess_2"));
     }
 
     #[tokio::test]

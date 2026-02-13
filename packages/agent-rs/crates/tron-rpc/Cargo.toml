@@ -17,6 +17,7 @@ tron-settings = { path = "../tron-settings" }
 tron-context = { path = "../tron-context" }
 tron-skills = { path = "../tron-skills" }
 tron-tasks = { path = "../tron-tasks" }
+parking_lot.workspace = true
 async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -29,4 +30,5 @@ uuid.workspace = true
 [dev-dependencies]
 mockall.workspace = true
 insta.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

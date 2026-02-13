@@ -27,10 +27,15 @@ tracing.workspace = true
 futures.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tokio-tungstenite.workspace = true
 insta.workspace = true
 async-trait.workspace = true
 tron-events.workspace = true
+tron-tasks.workspace = true
+tron-skills.workspace = true
+parking_lot.workspace = true

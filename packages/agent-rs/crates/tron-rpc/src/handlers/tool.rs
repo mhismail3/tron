@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::context::RpcContext;
-use crate::errors::RpcError;
-use crate::handlers::require_string_param;
+use crate::errors::{self, RpcError};
+use crate::handlers::{require_param, require_string_param};
 use crate::registry::MethodHandler;
 
 /// Submit a tool result back to the agent.
@@ -13,10 +13,26 @@ pub struct ToolResultHandler;
 
 #[async_trait]
 impl MethodHandler for ToolResultHandler {
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let _tool_use_id = require_string_param(params.as_ref(), "toolUseId")?;
-        Ok(serde_json::json!({ "accepted": true }))
+        let tool_use_id = require_string_param(params.as_ref(), "toolUseId")?;
+        let result = require_param(params.as_ref(), "result")?;
+
+        let resolved = ctx
+            .orchestrator
+            .resolve_tool_call(&tool_use_id, result.clone());
+
+        if resolved {
+            Ok(serde_json::json!({
+                "success": true,
+                "toolCallId": tool_use_id,
+            }))
+        } else {
+            Err(RpcError::NotFound {
+                code: errors::NOT_FOUND.into(),
+                message: format!("No pending tool call '{tool_use_id}'"),
+            })
+        }
     }
 }
 
@@ -27,16 +43,41 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn tool_result_success() {
+    async fn tool_result_resolves_pending() {
         let ctx = make_test_context();
+        // Register a pending tool call
+        let _rx = ctx.orchestrator.register_tool_call("tc_1");
+
         let result = ToolResultHandler
             .handle(
-                Some(json!({"sessionId": "s1", "toolUseId": "tu1"})),
+                Some(json!({
+                    "sessionId": "s1",
+                    "toolUseId": "tc_1",
+                    "result": {"output": "hello"}
+                })),
                 &ctx,
             )
             .await
             .unwrap();
-        assert_eq!(result["accepted"], true);
+        assert_eq!(result["success"], true);
+        assert_eq!(result["toolCallId"], "tc_1");
+    }
+
+    #[tokio::test]
+    async fn tool_result_not_pending() {
+        let ctx = make_test_context();
+        let err = ToolResultHandler
+            .handle(
+                Some(json!({
+                    "sessionId": "s1",
+                    "toolUseId": "nonexistent",
+                    "result": null
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_FOUND");
     }
 
     #[tokio::test]
@@ -44,6 +85,19 @@ mod tests {
         let ctx = make_test_context();
         let err = ToolResultHandler
             .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn tool_result_missing_result_param() {
+        let ctx = make_test_context();
+        let err = ToolResultHandler
+            .handle(
+                Some(json!({"sessionId": "s1", "toolUseId": "tc_1"})),
+                &ctx,
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");

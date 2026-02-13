@@ -8,3 +8,4 @@ pub mod orchestrator;
 pub mod session_context;
 pub mod session_manager;
 pub mod session_reconstructor;
+pub mod tool_call_tracker;

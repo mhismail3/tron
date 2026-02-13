@@ -41,7 +41,7 @@ impl BroadcastManager {
         };
         let conns = self.connections.read().await;
         for conn in conns.values() {
-            if conn.session_id.as_deref() == Some(session_id) {
+            if conn.session_id().as_deref() == Some(session_id) {
                 conn.send(json.clone());
             }
         }
@@ -68,7 +68,7 @@ impl BroadcastManager {
         let conns = self.connections.read().await;
         conns
             .values()
-            .filter(|c| c.session_id.as_deref() == Some(session_id))
+            .filter(|c| c.session_id().as_deref() == Some(session_id))
             .cloned()
             .collect()
     }
@@ -90,7 +90,7 @@ mod tests {
         session: Option<&str>,
     ) -> (Arc<ClientConnection>, mpsc::Receiver<String>) {
         let (tx, rx) = mpsc::channel(32);
-        let mut conn = ClientConnection::new(id.into(), tx);
+        let conn = ClientConnection::new(id.into(), tx);
         if let Some(sid) = session {
             conn.bind_session(sid.into());
         }

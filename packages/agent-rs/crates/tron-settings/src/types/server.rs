@@ -54,7 +54,7 @@ impl Default for ServerSettings {
             max_concurrent_sessions: 10,
             sessions_dir: "sessions".to_string(),
             memory_db_path: "memory.db".to_string(),
-            default_model: "claude-opus-4-6".to_string(),
+            default_model: "claude-sonnet-4-20250514".to_string(),
             default_provider: "anthropic".to_string(),
             default_workspace: None,
             anthropic_account: None,

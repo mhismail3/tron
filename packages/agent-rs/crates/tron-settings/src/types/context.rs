@@ -59,7 +59,7 @@ impl Default for CompactorSettings {
             target_tokens: 10_000,
             preserve_recent_count: 5,
             chars_per_token: 4,
-            buffer_tokens: 2000,
+            buffer_tokens: 4000,
             force_always: None,
             trigger_token_threshold: Some(0.70),
             alert_zone_threshold: Some(0.50),

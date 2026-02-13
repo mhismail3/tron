@@ -3674,7 +3674,11 @@ dependencies = [
 name = "tron-agent"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
+ "parking_lot",
+ "reqwest",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
@@ -3960,8 +3964,10 @@ dependencies = [
  "chrono",
  "insta",
  "mockall",
+ "parking_lot",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
@@ -3986,6 +3992,7 @@ dependencies = [
  "futures",
  "insta",
  "mockall",
+ "parking_lot",
  "regex",
  "serde",
  "serde_json",
@@ -4018,6 +4025,7 @@ dependencies = [
  "chrono",
  "futures",
  "insta",
+ "parking_lot",
  "reqwest",
  "serde",
  "serde_json",
@@ -4032,6 +4040,8 @@ dependencies = [
  "tron-events",
  "tron-rpc",
  "tron-runtime",
+ "tron-skills",
+ "tron-tasks",
  "uuid",
 ]
 

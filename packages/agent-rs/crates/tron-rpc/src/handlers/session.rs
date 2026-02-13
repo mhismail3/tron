@@ -32,7 +32,19 @@ impl MethodHandler for CreateSessionHandler {
                 message: e.to_string(),
             })?;
 
-        Ok(serde_json::json!({ "sessionId": session_id }))
+        Ok(serde_json::json!({
+            "sessionId": session_id,
+            "model": model,
+            "workingDirectory": working_dir,
+            "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "isActive": true,
+            "isArchived": false,
+            "messageCount": 0,
+            "eventCount": 1,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cost": 0.0,
+        }))
     }
 }
 
@@ -51,9 +63,14 @@ impl MethodHandler for ResumeSessionHandler {
             }
         })?;
 
+        let message_count = active.state.messages.len();
+        let last_activity = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
         Ok(serde_json::json!({
             "sessionId": session_id,
             "model": active.state.model,
+            "messageCount": message_count,
+            "lastActivity": last_activity,
         }))
     }
 }
@@ -93,12 +110,23 @@ impl MethodHandler for ListSessionsHandler {
         let items: Vec<Value> = sessions
             .into_iter()
             .map(|s| {
+                let is_active = ctx.session_manager.is_active(&s.id);
                 serde_json::json!({
-                    "id": s.id,
+                    "sessionId": s.id,
                     "model": s.latest_model,
                     "title": s.title,
+                    "workingDirectory": s.working_directory,
                     "createdAt": s.created_at,
+                    "lastActivity": s.last_activity_at,
                     "endedAt": s.ended_at,
+                    "isActive": is_active,
+                    "isArchived": s.ended_at.is_some(),
+                    "eventCount": s.event_count,
+                    "messageCount": s.message_count,
+                    "inputTokens": s.total_input_tokens,
+                    "outputTokens": s.total_output_tokens,
+                    "cost": 0.0,
+                    "parentSessionId": s.parent_session_id,
                 })
             })
             .collect();
@@ -183,6 +211,18 @@ impl MethodHandler for GetStateHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
+        // Get session row for metadata
+        let session = ctx
+            .session_manager
+            .get_session(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| RpcError::NotFound {
+                code: errors::SESSION_NOT_FOUND.into(),
+                message: format!("Session '{session_id}' not found"),
+            })?;
+
         let active = ctx.session_manager.resume_session(&session_id).map_err(|e| {
             RpcError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
@@ -190,13 +230,60 @@ impl MethodHandler for GetStateHandler {
             }
         })?;
 
+        let event_count = ctx
+            .event_store
+            .count_events(&session_id)
+            .unwrap_or(0);
+
         Ok(serde_json::json!({
             "sessionId": session_id,
+            "headEventId": session.head_event_id,
             "model": active.state.model,
             "turnCount": active.state.turn_count,
             "isEnded": active.state.is_ended,
             "workingDirectory": active.state.working_directory,
+            "eventCount": event_count,
+            "tokenUsage": {
+                "inputTokens": active.state.token_usage.input_tokens,
+                "outputTokens": active.state.token_usage.output_tokens,
+            },
         }))
+    }
+}
+
+/// Archive a session.
+pub struct ArchiveSessionHandler;
+
+#[async_trait]
+impl MethodHandler for ArchiveSessionHandler {
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+
+        ctx.session_manager
+            .archive_session(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
+
+        Ok(serde_json::json!({ "archived": true }))
+    }
+}
+
+/// Unarchive a session.
+pub struct UnarchiveSessionHandler;
+
+#[async_trait]
+impl MethodHandler for UnarchiveSessionHandler {
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+
+        ctx.session_manager
+            .unarchive_session(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
+
+        Ok(serde_json::json!({ "unarchived": true }))
     }
 }
 

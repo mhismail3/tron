@@ -8,25 +8,114 @@ use crate::errors::RpcError;
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
 
-/// Search file contents.
+/// Search event content using FTS5.
 pub struct ContentSearchHandler;
 
 #[async_trait]
 impl MethodHandler for ContentSearchHandler {
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _query = require_string_param(params.as_ref(), "query")?;
-        Ok(serde_json::json!({ "results": [] }))
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let query = require_string_param(params.as_ref(), "query")?;
+
+        let session_id = params
+            .as_ref()
+            .and_then(|p| p.get("sessionId"))
+            .and_then(Value::as_str);
+
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(Value::as_i64);
+
+        let results = if let Some(sid) = session_id {
+            ctx.event_store
+                .search_in_session(sid, &query, limit)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?
+        } else {
+            ctx.event_store
+                .search(
+                    &query,
+                    &tron_events::sqlite::repositories::search::SearchOptions {
+                        limit,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?
+        };
+
+        let wire: Vec<Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "eventId": r.event_id,
+                    "sessionId": r.session_id,
+                    "type": r.event_type.to_string(),
+                    "timestamp": r.timestamp,
+                    "snippet": r.snippet,
+                    "score": r.score,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({ "results": wire }))
     }
 }
 
-/// Search events.
+/// Search events in a session.
 pub struct EventSearchHandler;
 
 #[async_trait]
 impl MethodHandler for EventSearchHandler {
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _query = require_string_param(params.as_ref(), "query")?;
-        Ok(serde_json::json!({ "results": [] }))
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let query = require_string_param(params.as_ref(), "query")?;
+
+        let session_id = params
+            .as_ref()
+            .and_then(|p| p.get("sessionId"))
+            .and_then(Value::as_str);
+
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(Value::as_i64);
+
+        let results = if let Some(sid) = session_id {
+            ctx.event_store
+                .search_in_session(sid, &query, limit)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?
+        } else {
+            ctx.event_store
+                .search(
+                    &query,
+                    &tron_events::sqlite::repositories::search::SearchOptions {
+                        limit,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?
+        };
+
+        let wire: Vec<Value> = results
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "eventId": r.event_id,
+                    "sessionId": r.session_id,
+                    "type": r.event_type.to_string(),
+                    "snippet": r.snippet,
+                    "score": r.score,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({ "results": wire }))
     }
 }
 
@@ -37,13 +126,13 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn content_search_success() {
+    async fn content_search_no_results() {
         let ctx = make_test_context();
         let result = ContentSearchHandler
-            .handle(Some(json!({"query": "hello"})), &ctx)
+            .handle(Some(json!({"query": "nonexistent"})), &ctx)
             .await
             .unwrap();
-        assert!(result["results"].is_array());
+        assert!(result["results"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -57,13 +146,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_search_success() {
+    async fn content_search_with_session_filter() {
         let ctx = make_test_context();
-        let result = EventSearchHandler
-            .handle(Some(json!({"query": "error"})), &ctx)
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = ContentSearchHandler
+            .handle(Some(json!({"query": "hello", "sessionId": sid})), &ctx)
             .await
             .unwrap();
         assert!(result["results"].is_array());
+    }
+
+    #[tokio::test]
+    async fn event_search_no_results() {
+        let ctx = make_test_context();
+        let result = EventSearchHandler
+            .handle(Some(json!({"query": "nothing"})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["results"].as_array().unwrap().is_empty());
     }
 
     #[tokio::test]

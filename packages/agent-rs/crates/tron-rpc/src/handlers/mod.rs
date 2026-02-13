@@ -9,6 +9,8 @@ pub mod device;
 pub mod events;
 pub mod filesystem;
 pub mod git;
+pub mod logs;
+pub mod memory;
 pub mod message;
 pub mod model;
 pub mod plan;
@@ -27,7 +29,14 @@ pub mod worktree;
 use crate::registry::MethodRegistry;
 
 /// Register all RPC handlers with the registry.
+#[allow(clippy::too_many_lines)]
 pub fn register_all(registry: &mut MethodRegistry) {
+    register_core(registry);
+    register_capabilities(registry);
+    register_platform(registry);
+}
+
+fn register_core(registry: &mut MethodRegistry) {
     // System
     registry.register("system.ping", system::PingHandler);
     registry.register("system.getInfo", system::GetInfoHandler);
@@ -41,6 +50,8 @@ pub fn register_all(registry: &mut MethodRegistry) {
     registry.register("session.fork", session::ForkSessionHandler);
     registry.register("session.getHead", session::GetHeadHandler);
     registry.register("session.getState", session::GetStateHandler);
+    registry.register("session.archive", session::ArchiveSessionHandler);
+    registry.register("session.unarchive", session::UnarchiveSessionHandler);
 
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
@@ -53,19 +64,10 @@ pub fn register_all(registry: &mut MethodRegistry) {
 
     // Context
     registry.register("context.getSnapshot", context::GetSnapshotHandler);
-    registry.register(
-        "context.getDetailedSnapshot",
-        context::GetDetailedSnapshotHandler,
-    );
+    registry.register("context.getDetailedSnapshot", context::GetDetailedSnapshotHandler);
     registry.register("context.shouldCompact", context::ShouldCompactHandler);
-    registry.register(
-        "context.previewCompaction",
-        context::PreviewCompactionHandler,
-    );
-    registry.register(
-        "context.confirmCompaction",
-        context::ConfirmCompactionHandler,
-    );
+    registry.register("context.previewCompaction", context::PreviewCompactionHandler);
+    registry.register("context.confirmCompaction", context::ConfirmCompactionHandler);
     registry.register("context.canAcceptTurn", context::CanAcceptTurnHandler);
     registry.register("context.clear", context::ClearHandler);
     registry.register("context.compact", context::CompactHandler);
@@ -80,6 +82,21 @@ pub fn register_all(registry: &mut MethodRegistry) {
     registry.register("settings.get", settings::GetSettingsHandler);
     registry.register("settings.update", settings::UpdateSettingsHandler);
 
+    // Tool
+    registry.register("tool.result", tool::ToolResultHandler);
+
+    // Message
+    registry.register("message.delete", message::DeleteMessageHandler);
+
+    // Memory
+    registry.register("memory.getLedger", memory::GetLedgerHandler);
+    registry.register("memory.updateLedger", memory::UpdateLedgerHandler);
+
+    // Logs
+    registry.register("logs.export", logs::ExportLogsHandler);
+}
+
+fn register_capabilities(registry: &mut MethodRegistry) {
     // Skills
     registry.register("skill.list", skills::ListSkillsHandler);
     registry.register("skill.get", skills::GetSkillHandler);
@@ -96,22 +113,29 @@ pub fn register_all(registry: &mut MethodRegistry) {
     registry.register("search.content", search::ContentSearchHandler);
     registry.register("search.events", search::EventSearchHandler);
 
-    // Browser
-    registry.register("browser.startStream", browser::StartStreamHandler);
-    registry.register("browser.stopStream", browser::StopStreamHandler);
-    registry.register("browser.getStatus", browser::GetStatusHandler);
+    // Tasks (plural to match TypeScript wire format)
+    registry.register("tasks.create", task::CreateTaskHandler);
+    registry.register("tasks.get", task::GetTaskHandler);
+    registry.register("tasks.update", task::UpdateTaskHandler);
+    registry.register("tasks.list", task::ListTasksHandler);
+    registry.register("tasks.delete", task::DeleteTaskHandler);
+    registry.register("tasks.search", task::SearchTasksHandler);
+    registry.register("tasks.getActivity", task::GetTaskActivityHandler);
 
-    // Task
-    registry.register("task.create", task::CreateTaskHandler);
-    registry.register("task.update", task::UpdateTaskHandler);
-    registry.register("task.list", task::ListTasksHandler);
-    registry.register("task.delete", task::DeleteTaskHandler);
+    // Projects (plural to match TypeScript wire format)
+    registry.register("projects.create", task::CreateProjectHandler);
+    registry.register("projects.list", task::ListProjectsHandler);
+    registry.register("projects.get", task::GetProjectHandler);
+    registry.register("projects.update", task::UpdateProjectHandler);
+    registry.register("projects.delete", task::DeleteProjectHandler);
+    registry.register("projects.getDetails", task::GetProjectDetailsHandler);
 
-    // Canvas
-    registry.register("canvas.get", canvas::GetCanvasHandler);
-
-    // Tool
-    registry.register("tool.result", tool::ToolResultHandler);
+    // Areas (plural to match TypeScript wire format)
+    registry.register("areas.create", task::CreateAreaHandler);
+    registry.register("areas.list", task::ListAreasHandler);
+    registry.register("areas.get", task::GetAreaHandler);
+    registry.register("areas.update", task::UpdateAreaHandler);
+    registry.register("areas.delete", task::DeleteAreaHandler);
 
     // Tree
     registry.register("tree.getVisualization", tree::GetVisualizationHandler);
@@ -119,6 +143,16 @@ pub fn register_all(registry: &mut MethodRegistry) {
     registry.register("tree.getSubtree", tree::GetSubtreeHandler);
     registry.register("tree.getAncestors", tree::GetAncestorsHandler);
     registry.register("tree.compareBranches", tree::CompareBranchesHandler);
+}
+
+fn register_platform(registry: &mut MethodRegistry) {
+    // Browser
+    registry.register("browser.startStream", browser::StartStreamHandler);
+    registry.register("browser.stopStream", browser::StopStreamHandler);
+    registry.register("browser.getStatus", browser::GetStatusHandler);
+
+    // Canvas
+    registry.register("canvas.get", canvas::GetCanvasHandler);
 
     // Worktree
     registry.register("worktree.getStatus", worktree::GetStatusHandler);
@@ -131,10 +165,8 @@ pub fn register_all(registry: &mut MethodRegistry) {
     registry.register("transcribe.listModels", transcription::ListModelsHandler);
 
     // Device
-    registry.register("device.registerToken", device::RegisterTokenHandler);
-
-    // Message
-    registry.register("message.delete", message::DeleteMessageHandler);
+    registry.register("device.register", device::RegisterTokenHandler);
+    registry.register("device.unregister", device::UnregisterTokenHandler);
 
     // Plan
     registry.register("plan.enter", plan::EnterPlanHandler);
@@ -145,10 +177,7 @@ pub fn register_all(registry: &mut MethodRegistry) {
     registry.register("communication.send", communication::SendHandler);
     registry.register("communication.receive", communication::ReceiveHandler);
     registry.register("communication.subscribe", communication::SubscribeHandler);
-    registry.register(
-        "communication.unsubscribe",
-        communication::UnsubscribeHandler,
-    );
+    registry.register("communication.unsubscribe", communication::UnsubscribeHandler);
 
     // Voice Notes
     registry.register("voiceNotes.save", voice_notes::SaveHandler);
@@ -186,11 +215,14 @@ pub(crate) fn require_string_param(
 
 #[cfg(test)]
 pub(crate) mod test_helpers {
+    use std::path::PathBuf;
     use std::sync::Arc;
 
+    use parking_lot::RwLock;
     use tron_events::EventStore;
     use tron_runtime::orchestrator::orchestrator::Orchestrator;
     use tron_runtime::orchestrator::session_manager::SessionManager;
+    use tron_skills::registry::SkillRegistry;
 
     use crate::context::RpcContext;
 
@@ -203,11 +235,45 @@ pub(crate) mod test_helpers {
             tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
-        let mgr = Arc::new(SessionManager::new(store));
+        let mgr = Arc::new(SessionManager::new(store.clone()));
         let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
         RpcContext {
             orchestrator: orch,
             session_manager: mgr,
+            event_store: store,
+            skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+            task_pool: None,
+            settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
+        }
+    }
+
+    /// Build an `RpcContext` with a task database pool.
+    pub fn make_test_context_with_tasks() -> RpcContext {
+        let pool =
+            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = Arc::new(SessionManager::new(store.clone()));
+        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+
+        // Create a separate in-memory pool for tasks
+        let task_pool =
+            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = task_pool.get().unwrap();
+            tron_tasks::migrations::run_migrations(&conn).unwrap();
+        }
+
+        RpcContext {
+            orchestrator: orch,
+            session_manager: mgr,
+            event_store: store,
+            skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+            task_pool: Some(task_pool),
+            settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         }
     }
 }

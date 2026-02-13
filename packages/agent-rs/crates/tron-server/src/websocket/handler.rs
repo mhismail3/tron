@@ -48,11 +48,17 @@ mod tests {
             tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
-        let mgr = Arc::new(SessionManager::new(store));
+        let mgr = Arc::new(SessionManager::new(store.clone()));
         let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
         RpcContext {
             orchestrator: orch,
             session_manager: mgr,
+            event_store: store,
+            skill_registry: Arc::new(parking_lot::RwLock::new(
+                tron_skills::registry::SkillRegistry::new(),
+            )),
+            task_pool: None,
+            settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
         }
     }
 
