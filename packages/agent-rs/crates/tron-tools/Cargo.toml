@@ -16,6 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 regex.workspace = true
 globset.workspace = true
 walkdir.workspace = true
@@ -23,9 +24,14 @@ reqwest.workspace = true
 scraper.workspace = true
 html2text.workspace = true
 tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+url = "2"
+urlencoding = "2"
 
 [dev-dependencies]
 tempfile.workspace = true
 mockall.workspace = true
 insta.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+wiremock.workspace = true
