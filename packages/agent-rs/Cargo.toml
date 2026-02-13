@@ -104,6 +104,8 @@ assert_matches = "1"
 
 # Crypto
 sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
 
 # Utilities
 async-trait = "0.1"

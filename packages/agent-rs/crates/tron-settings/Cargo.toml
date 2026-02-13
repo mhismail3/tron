@@ -10,13 +10,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-tron-core.workspace = true
-figment.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
-notify.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
