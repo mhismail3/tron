@@ -18,7 +18,11 @@ impl MethodHandler for ListSkillsHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let registry = ctx.skill_registry.read();
         let skills = registry.list(None);
-        Ok(serde_json::json!({ "skills": skills }))
+        let mut response = serde_json::json!({ "skills": skills });
+        // ADAPTER(ios-compat): iOS expects totalCount in skill.list response.
+        // REMOVE: revert to `Ok(json!({ "skills": skills }))`
+        crate::adapters::adapt_skill_list(&mut response);
+        Ok(response)
     }
 }
 
@@ -243,5 +247,15 @@ mod tests {
         let ctx = make_test_context();
         let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["skills"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_skills_has_total_count() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("alpha"));
+        ctx.skill_registry.write().insert(make_skill("beta"));
+
+        let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(result["totalCount"], 2);
     }
 }

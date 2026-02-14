@@ -16,6 +16,7 @@ use crate::registry::MethodHandler;
 /// After an agent run, the context manager contains all messages (initial + new).
 /// We skip `initial_count` (from reconstruction) + 1 (user message already persisted)
 /// and persist each remaining message as the appropriate event type.
+#[allow(clippy::too_many_lines)]
 fn persist_agent_messages(
     context_manager: &tron_context::context_manager::ContextManager,
     event_store: &Arc<tron_events::EventStore>,
@@ -95,6 +96,18 @@ fn persist_agent_messages(
                         tu["cacheCreationTokens"] = json!(cache_create);
                     }
                     payload["tokenUsage"] = tu;
+
+                    // ADAPTER(ios-compat): iOS reads tokenRecord from persisted events for session resume analytics.
+                    // REMOVE: delete this block; iOS should read tokenUsage directly from persisted events.
+                    payload["tokenRecord"] = crate::adapters::build_token_record(
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cache_read_tokens,
+                        usage.cache_creation_tokens,
+                        "anthropic",
+                        session_id,
+                        turn_number,
+                    );
                 }
 
                 let _ = event_store.append(&tron_events::AppendOptions {
@@ -1184,5 +1197,33 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         assert!(!ctx.orchestrator.has_active_run(&sid));
+    }
+
+    #[tokio::test]
+    async fn prompt_persists_token_record_in_assistant_events() {
+        let ctx = make_text_context("Hello!");
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hi"})), &ctx)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["message.assistant"], None)
+            .unwrap();
+        assert!(!events.is_empty(), "expected at least one message.assistant event");
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert!(
+            payload["tokenRecord"]["source"]["rawInputTokens"].is_number(),
+            "tokenRecord.source.rawInputTokens should be a number, got: {}",
+            payload["tokenRecord"]
+        );
     }
 }

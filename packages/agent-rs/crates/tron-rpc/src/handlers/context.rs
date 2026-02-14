@@ -347,6 +347,16 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             }
         };
 
+        // ADAPTER(ios-compat): iOS splits tools on ":" to show name + description.
+        // REMOVE: revert to `"toolsContent": detailed.tools_content,`
+        let tool_defs = ctx
+            .agent_deps
+            .as_ref()
+            .map(|d| (d.tool_factory)().definitions())
+            .unwrap_or_default();
+        let tools_content =
+            crate::adapters::adapt_tools_content(&detailed.tools_content, &tool_defs);
+
         Ok(json!({
             "currentTokens": detailed.snapshot.current_tokens,
             "contextLimit": detailed.snapshot.context_limit,
@@ -361,7 +371,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             "messages": messages,
             "systemPromptContent": detailed.system_prompt_content,
             "toolClarificationContent": detailed.tool_clarification_content,
-            "toolsContent": detailed.tools_content,
+            "toolsContent": tools_content,
             "addedSkills": added_skills,
             "rules": rules_info,
             "memory": memory_info,

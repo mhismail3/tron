@@ -14,6 +14,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod adapters;
 pub mod context;
 pub mod errors;
 pub mod handlers;

@@ -87,6 +87,9 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             if let Some(limit) = context_limit {
                 data["contextLimit"] = serde_json::json!(limit);
             }
+            // ADAPTER(ios-compat): iOS reads tokenRecord.source.rawXxxTokens for stats line.
+            // REMOVE: delete these two lines; iOS should read tokenUsage directly.
+            tron_rpc::adapters::adapt_turn_end_data(&mut data, session_id, *turn);
             Some(data)
         }
         TronEvent::ToolExecutionStart {
@@ -665,6 +668,30 @@ mod tests {
 
         drop(tx);
         let _ = handle.await;
+    }
+
+    #[test]
+    fn turn_end_includes_token_record() {
+        let event = TronEvent::TurnEnd {
+            base: BaseEvent::now("s1"),
+            turn: 2,
+            duration: 5000,
+            token_usage: Some(tron_core::events::TurnTokenUsage {
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_read_tokens: Some(10),
+                cache_creation_tokens: None,
+            }),
+            token_record: None,
+            cost: None,
+            context_limit: None,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        assert!(data["tokenRecord"]["source"]["rawInputTokens"].is_number());
+        assert_eq!(data["tokenRecord"]["source"]["rawInputTokens"], 100);
+        assert_eq!(data["tokenRecord"]["source"]["rawOutputTokens"], 50);
+        assert_eq!(data["tokenRecord"]["source"]["rawCacheReadTokens"], 10);
     }
 
     #[test]
