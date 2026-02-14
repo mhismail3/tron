@@ -140,6 +140,75 @@ mod tests {
         // but the reconstruction should not error
     }
 
+    /// Verify that assistant messages with tool_use blocks survive the serde
+    /// roundtrip. Persistence stores `"input"` (API wire format) but the typed
+    /// `AssistantContent::ToolUse` expects `"arguments"`. The `#[serde(alias)]`
+    /// on `arguments` makes this work.
+    #[test]
+    fn reconstruct_tool_use_survives_serde_roundtrip() {
+        let store = make_store();
+        let session = store.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = &session.session.id;
+
+        store.append(&AppendOptions {
+            session_id: sid,
+            event_type: EventType::MessageUser,
+            payload: serde_json::json!({"content": "write a file"}),
+            parent_id: None,
+        }).unwrap();
+
+        // Assistant message with tool_use using "input" (API wire format, as persistence stores it)
+        store.append(&AppendOptions {
+            session_id: sid,
+            event_type: EventType::MessageAssistant,
+            payload: serde_json::json!({
+                "content": [
+                    {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
+                    {"type": "tool_use", "id": "toolu_01abc", "name": "Write", "input": {"file_path": "/tmp/test.txt", "content": "hello"}}
+                ],
+                "turn": 1
+            }),
+            parent_id: None,
+        }).unwrap();
+
+        store.append(&AppendOptions {
+            session_id: sid,
+            event_type: EventType::ToolResult,
+            payload: serde_json::json!({"toolCallId": "toolu_01abc", "content": "File written", "isError": false}),
+            parent_id: None,
+        }).unwrap();
+
+        store.append(&AppendOptions {
+            session_id: sid,
+            event_type: EventType::MessageAssistant,
+            payload: serde_json::json!({
+                "content": [{"type": "text", "text": "Done!"}],
+                "turn": 2
+            }),
+            parent_id: None,
+        }).unwrap();
+
+        let state = reconstruct(&store, sid).unwrap();
+        // All 4 messages must survive: user, assistant(tool_use), toolResult, assistant(text)
+        assert_eq!(state.messages.len(), 4, "All messages must survive serde roundtrip, got: {:?}", state.messages.iter().map(|m| format!("{:?}", m)).collect::<Vec<_>>());
+        assert!(state.messages[0].is_user());
+        assert!(state.messages[1].is_assistant());
+        assert!(state.messages[2].is_tool_result());
+        assert!(state.messages[3].is_assistant());
+
+        // Verify the tool_use arguments are preserved
+        if let Message::Assistant { content, .. } = &state.messages[1] {
+            let tool_use = content.iter().find(|c| c.is_tool_use()).expect("should have tool_use");
+            if let tron_core::content::AssistantContent::ToolUse { id, name, arguments, .. } = tool_use {
+                assert_eq!(id, "toolu_01abc");
+                assert_eq!(name, "Write");
+                assert_eq!(arguments["file_path"], "/tmp/test.txt");
+            }
+        } else {
+            panic!("Expected assistant message at index 1");
+        }
+    }
+
     #[test]
     fn reconstruct_session_not_found() {
         let store = make_store();

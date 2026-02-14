@@ -192,6 +192,37 @@ impl MethodHandler for PromptHandler {
                 // 9. Invalidate cached session so next resume reconstructs from events
                 session_manager.invalidate_session(&session_id_clone);
 
+                // 10. Emit session_updated — iOS uses this to refresh the stat line
+                if let Ok(Some(updated_session)) = session_manager.get_session(&session_id_clone) {
+                    // Get message previews for last_user_prompt / last_assistant_response
+                    let preview = event_store
+                        .get_session_message_previews(&[session_id_clone.as_str()])
+                        .ok()
+                        .and_then(|mut map| map.remove(&session_id_clone));
+
+                    let _ = broadcast.emit(tron_core::events::TronEvent::SessionUpdated {
+                        base: tron_core::events::BaseEvent::now(&session_id_clone),
+                        title: updated_session.title.clone(),
+                        model: updated_session.latest_model.clone(),
+                        message_count: updated_session.message_count,
+                        input_tokens: updated_session.total_input_tokens,
+                        output_tokens: updated_session.total_output_tokens,
+                        last_turn_input_tokens: updated_session.last_turn_input_tokens,
+                        cache_read_tokens: updated_session.total_cache_read_tokens,
+                        cache_creation_tokens: updated_session.total_cache_creation_tokens,
+                        cost: updated_session.total_cost,
+                        last_activity: updated_session.last_activity_at.clone(),
+                        is_active: false,
+                        last_user_prompt: preview
+                            .as_ref()
+                            .and_then(|p| p.last_user_prompt.clone()),
+                        last_assistant_response: preview
+                            .as_ref()
+                            .and_then(|p| p.last_assistant_response.clone()),
+                        parent_session_id: updated_session.parent_session_id.clone(),
+                    });
+                }
+
                 info!(
                     session_id = %session_id_clone,
                     run_id = %run_id_clone,
@@ -248,21 +279,19 @@ impl MethodHandler for GetAgentStateHandler {
                 let model = session.latest_model.clone();
                 let input = session.total_input_tokens;
                 let output = session.total_output_tokens;
-                // Try reconstructing state for turn/message counts
-                if let Ok(active) = ctx.session_manager.resume_session(&session_id) {
-                    (
-                        model,
-                        active.state.turn_count,
-                        active.state.messages.len(),
-                        input,
-                        output,
-                    )
-                } else {
-                    (model, 0, 0, input, output)
-                }
+                let turn = session.turn_count;
+                let msg = session.message_count;
+                (model, turn, msg, input, output)
             } else {
                 (String::new(), 0, 0, 0, 0)
             };
+
+        // Get tool names from the tool factory (if configured)
+        let tool_names: Vec<String> = ctx
+            .agent_deps
+            .as_ref()
+            .map(|deps| (deps.tool_factory)().names())
+            .unwrap_or_default();
 
         Ok(serde_json::json!({
             "sessionId": session_id,
@@ -275,7 +304,7 @@ impl MethodHandler for GetAgentStateHandler {
                 "input": total_input,
                 "output": total_output,
             },
-            "tools": [],
+            "tools": tool_names,
             "wasInterrupted": false,
         }))
     }

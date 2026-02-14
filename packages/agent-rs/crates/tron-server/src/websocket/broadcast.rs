@@ -56,10 +56,10 @@ impl BroadcastManager {
             "broadcast event to session"
         );
         for conn in conns.values() {
-            if conn.session_id().as_deref() == Some(session_id) {
-                if !conn.send(json.clone()) {
-                    warn!(conn_id = %conn.id, session_id, "failed to send event to client");
-                }
+            if conn.session_id().as_deref() == Some(session_id)
+                && !conn.send(json.clone())
+            {
+                warn!(conn_id = %conn.id, session_id, "failed to send event to client");
             }
         }
     }

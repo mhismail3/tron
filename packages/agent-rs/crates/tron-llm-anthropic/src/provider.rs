@@ -26,6 +26,7 @@ use crate::cache_pruning::{
     is_cache_cold, prune_tool_results_for_recache, DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS,
 };
 use crate::message_converter::convert_messages;
+use crate::message_sanitizer::sanitize_messages;
 use crate::stream_handler::{create_stream_state, process_sse_event};
 use crate::types::{
     get_claude_model, AnthropicAuth, AnthropicConfig, AnthropicMessageParam,
@@ -343,7 +344,8 @@ impl AnthropicProvider {
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
-        let mut messages = convert_messages(&context.messages);
+        let sanitized = sanitize_messages(context.messages.clone());
+        let mut messages = convert_messages(&sanitized);
 
         // Cache cold detection and pruning (OAuth only)
         if self.is_oauth() && self.last_api_call_ms > 0 {

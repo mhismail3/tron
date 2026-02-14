@@ -21,6 +21,7 @@
 #![allow(clippy::unnecessary_literal_bound)]
 
 pub mod errors;
+pub mod providers;
 pub mod registry;
 pub mod traits;
 pub mod utils;

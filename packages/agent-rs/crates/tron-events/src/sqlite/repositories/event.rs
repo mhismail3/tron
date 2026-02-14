@@ -579,8 +579,8 @@ fn extract_i64(val: &Value, key: &str) -> Option<i64> {
     val.get(key)?.as_i64()
 }
 
-/// Extract a boolean or integer value as SQLite integer (0/1).
-/// Handles both `"hasThinking": true` and `"hasThinking": 1`.
+/// Extract a boolean or integer value as `SQLite` integer (0/1).
+/// Handles both `hasThinking`: `true` and `hasThinking`: `1`.
 fn extract_bool_as_int(val: &Value, key: &str) -> Option<i64> {
     let v = val.get(key)?;
     if let Some(b) = v.as_bool() {

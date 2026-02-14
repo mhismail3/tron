@@ -108,7 +108,26 @@ fn convert_messages_impl(
         }
     }
 
-    result
+    merge_consecutive_roles(result)
+}
+
+/// Merge consecutive messages with the same role into a single message.
+///
+/// The Anthropic API requires alternating user/assistant roles. Multiple
+/// consecutive `ToolResult` messages (each converted to `role: "user"`) would
+/// violate this. This function merges their content blocks into a single message.
+fn merge_consecutive_roles(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessageParam> {
+    let mut merged: Vec<AnthropicMessageParam> = Vec::with_capacity(messages.len());
+    for msg in messages {
+        if let Some(prev) = merged.last_mut() {
+            if prev.role == msg.role {
+                prev.content.extend(msg.content);
+                continue;
+            }
+        }
+        merged.push(msg);
+    }
+    merged
 }
 
 /// Convert a user message to Anthropic format.
@@ -741,5 +760,118 @@ mod tests {
         let mapping = build_id_mapping(&messages);
         // Anthropic-format IDs don't need remapping
         assert!(mapping.is_empty());
+    }
+
+    // ── merge_consecutive_roles ─────────────────────────────────────────
+
+    #[test]
+    fn merge_consecutive_user_messages() {
+        let messages = vec![
+            AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![json!({"type": "tool_result", "tool_use_id": "tc-1", "content": [{"type": "text", "text": "out1"}]})],
+            },
+            AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![json!({"type": "tool_result", "tool_use_id": "tc-2", "content": [{"type": "text", "text": "out2"}]})],
+            },
+            AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![json!({"type": "tool_result", "tool_use_id": "tc-3", "content": [{"type": "text", "text": "out3"}]})],
+            },
+        ];
+        let merged = merge_consecutive_roles(messages);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].role, "user");
+        assert_eq!(merged[0].content.len(), 3);
+    }
+
+    #[test]
+    fn merge_preserves_alternating_roles() {
+        let messages = vec![
+            AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![json!({"type": "text", "text": "hello"})],
+            },
+            AnthropicMessageParam {
+                role: "assistant".into(),
+                content: vec![json!({"type": "text", "text": "hi"})],
+            },
+            AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![json!({"type": "text", "text": "bye"})],
+            },
+        ];
+        let merged = merge_consecutive_roles(messages);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn merge_empty_input() {
+        let merged = merge_consecutive_roles(vec![]);
+        assert!(merged.is_empty());
+    }
+
+    // ── Full flow: tool results merge into single user message ──────────
+
+    #[test]
+    fn full_flow_multiple_tool_results_become_single_user_message() {
+        let mut args = Map::new();
+        let _ = args.insert("cmd".into(), json!("ls"));
+        let messages = vec![
+            Message::user("do three things"),
+            Message::Assistant {
+                content: vec![
+                    AssistantContent::ToolUse {
+                        id: "toolu_01a".into(),
+                        name: "bash".into(),
+                        arguments: args.clone(),
+                        thought_signature: None,
+                    },
+                    AssistantContent::ToolUse {
+                        id: "toolu_01b".into(),
+                        name: "read".into(),
+                        arguments: args.clone(),
+                        thought_signature: None,
+                    },
+                    AssistantContent::ToolUse {
+                        id: "toolu_01c".into(),
+                        name: "write".into(),
+                        arguments: args,
+                        thought_signature: None,
+                    },
+                ],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01a".into(),
+                content: tron_core::messages::ToolResultMessageContent::Text("out1".into()),
+                is_error: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01b".into(),
+                content: tron_core::messages::ToolResultMessageContent::Text("out2".into()),
+                is_error: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "toolu_01c".into(),
+                content: tron_core::messages::ToolResultMessageContent::Text("out3".into()),
+                is_error: None,
+            },
+        ];
+        let converted = convert_messages(&messages);
+        // Should be: user, assistant, user (3 tool_results merged)
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[0].role, "user");
+        assert_eq!(converted[1].role, "assistant");
+        assert_eq!(converted[2].role, "user");
+        // The merged user message has 3 tool_result content blocks
+        assert_eq!(converted[2].content.len(), 3);
+        assert_eq!(converted[2].content[0]["type"], "tool_result");
+        assert_eq!(converted[2].content[1]["type"], "tool_result");
+        assert_eq!(converted[2].content[2]["type"], "tool_result");
     }
 }

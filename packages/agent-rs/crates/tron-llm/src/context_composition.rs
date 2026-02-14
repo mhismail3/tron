@@ -21,6 +21,7 @@ use tron_core::messages::Context;
 /// 5. `skill_context`
 /// 6. `subagent_results_context`
 /// 7. `task_context` (wrapped in `<task-context>` tags)
+/// 8. `working_directory` (appended as `"Current working directory: <path>"`)
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -63,6 +64,12 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
     if let Some(ref tasks) = context.task_context {
         if !tasks.is_empty() {
             parts.push(format!("<task-context>\n{tasks}\n</task-context>"));
+        }
+    }
+
+    if let Some(ref wd) = context.working_directory {
+        if !wd.is_empty() {
+            parts.push(format!("Current working directory: {wd}"));
         }
     }
 
@@ -110,6 +117,12 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
         }
     }
 
+    if let Some(ref wd) = context.working_directory {
+        if !wd.is_empty() {
+            stable.push(format!("Current working directory: {wd}"));
+        }
+    }
+
     // Volatile parts
     if let Some(ref dynamic) = context.dynamic_rules_context {
         if !dynamic.is_empty() {
@@ -151,7 +164,7 @@ mod tests {
             system_prompt: Some("You are a helpful assistant.".into()),
             messages: vec![],
             tools: None,
-            working_directory: None,
+            working_directory: Some("/Users/test/project".into()),
             rules_content: Some("Always use Rust.".into()),
             memory_content: Some("User prefers concise responses.".into()),
             skill_context: Some("Available skill: /commit".into()),
@@ -168,7 +181,7 @@ mod tests {
         let ctx = make_context();
         let parts = compose_context_parts(&ctx);
 
-        assert_eq!(parts.len(), 6);
+        assert_eq!(parts.len(), 7);
         assert_eq!(parts[0], "You are a helpful assistant.");
         assert!(parts[1].starts_with("# Project Rules"));
         assert!(parts[1].contains("Always use Rust."));
@@ -179,6 +192,7 @@ mod tests {
         assert!(parts[5].starts_with("<task-context>"));
         assert!(parts[5].contains("Fix the bug"));
         assert!(parts[5].ends_with("</task-context>"));
+        assert_eq!(parts[6], "Current working directory: /Users/test/project");
     }
 
     #[test]
@@ -244,11 +258,12 @@ mod tests {
         let ctx = make_context();
         let grouped = compose_context_parts_grouped(&ctx);
 
-        // Stable: system_prompt, rules_content, memory_content
-        assert_eq!(grouped.stable.len(), 3);
+        // Stable: system_prompt, rules_content, memory_content, working_directory
+        assert_eq!(grouped.stable.len(), 4);
         assert_eq!(grouped.stable[0], "You are a helpful assistant.");
         assert!(grouped.stable[1].contains("Always use Rust."));
         assert_eq!(grouped.stable[2], "User prefers concise responses.");
+        assert_eq!(grouped.stable[3], "Current working directory: /Users/test/project");
 
         // Volatile: dynamic_rules, skill, task (subagent_results is None)
         assert_eq!(grouped.volatile.len(), 3);

@@ -130,14 +130,22 @@ final class TurnLifecycleCoordinator {
         } else if let startIndex = context.turnStartMessageIndex,
                   startIndex < context.messages.count {
             // Fallback: both streamingMessageId and firstTextMessageIdForTurn unavailable.
-            // This indicates a state tracking gap — log at info level for observability.
+            // Common for intermediate turns where the LLM produces [thinking, tool_use]
+            // with no visible text. Prefer .text messages, fall back to .toolUse.
             for i in startIndex..<context.messages.count {
-                if context.messages[i].role == .assistant,
-                   case .text = context.messages[i].content {
-                    targetIndex = i
-                    context.logInfo("Turn metadata: fell through to brute-force search, found at index \(i) (turn=\(result.turnNumber))")
-                    break
+                if context.messages[i].role == .assistant {
+                    switch context.messages[i].content {
+                    case .text:
+                        targetIndex = i
+                    case .toolUse:
+                        if targetIndex == nil { targetIndex = i }
+                    default:
+                        break
+                    }
                 }
+            }
+            if let idx = targetIndex {
+                context.logInfo("Turn metadata: fell through to brute-force search, found at index \(idx) (turn=\(result.turnNumber))")
             }
         }
 

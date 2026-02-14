@@ -11,7 +11,7 @@ use tron_llm::models::types::ProviderType;
 
 /// Build a JSON content array from assistant content blocks.
 ///
-/// Renames `arguments` → `input` on tool_use blocks (Anthropic API wire format
+/// Renames `arguments` → `input` on `tool_use` blocks (Anthropic API wire format
 /// that iOS expects).
 pub fn build_content_json(content: &[AssistantContent]) -> Vec<Value> {
     content.iter().map(content_block_to_json).collect()
@@ -44,15 +44,17 @@ pub fn build_token_record(
 ) -> Value {
     let now = chrono::Utc::now().to_rfc3339();
     let cr = usage.cache_read_tokens.unwrap_or(0);
-    let cc = usage.cache_creation_tokens.unwrap_or(0);
-    let new_input = usage.input_tokens.saturating_sub(cr).saturating_sub(cc);
+    // New input = total input minus cached portion. cache_creation tokens are
+    // NEW tokens written to cache (already part of non-cached input), so we
+    // only subtract cache_read.
+    let new_input = usage.input_tokens.saturating_sub(cr);
 
     json!({
         "source": {
             "rawInputTokens": usage.input_tokens,
             "rawOutputTokens": usage.output_tokens,
             "rawCacheReadTokens": cr,
-            "rawCacheCreationTokens": cc,
+            "rawCacheCreationTokens": usage.cache_creation_tokens.unwrap_or(0),
             "rawCacheCreation5mTokens": usage.cache_creation_5m_tokens.unwrap_or(0),
             "rawCacheCreation1hTokens": usage.cache_creation_1h_tokens.unwrap_or(0),
             "provider": provider_type.as_str(),
@@ -61,12 +63,14 @@ pub fn build_token_record(
         "computed": {
             "contextWindowTokens": usage.input_tokens + usage.output_tokens,
             "newInputTokens": new_input,
+            "previousContextBaseline": 0,
             "calculationMethod": "default",
         },
         "meta": {
             "turn": turn,
             "sessionId": session_id,
             "extractedAt": now,
+            "normalizedAt": now,
         }
     })
 }
@@ -283,7 +287,9 @@ mod tests {
         };
         let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1);
         assert_eq!(record["computed"]["contextWindowTokens"], 150); // 100 + 50
-        assert_eq!(record["computed"]["newInputTokens"], 85); // 100 - 10 - 5
+        // newInputTokens = input - cache_read (cache_creation is new tokens, not deducted)
+        assert_eq!(record["computed"]["newInputTokens"], 90); // 100 - 10
+        assert_eq!(record["computed"]["previousContextBaseline"], 0);
         assert_eq!(record["computed"]["calculationMethod"], "default");
     }
 

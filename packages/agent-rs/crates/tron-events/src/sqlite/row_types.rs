@@ -107,7 +107,7 @@ pub struct EventRow {
     pub model: Option<String>,
     /// Turn duration in milliseconds.
     pub latency_ms: Option<i64>,
-    /// LLM stop reason (e.g. "end_turn", "tool_use").
+    /// LLM stop reason (e.g. `end_turn`, `tool_use`).
     pub stop_reason: Option<String>,
     /// Whether the response contained thinking blocks (0 or 1).
     pub has_thinking: Option<i64>,

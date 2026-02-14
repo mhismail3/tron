@@ -60,7 +60,10 @@ pub fn build_token_record(
     let now = chrono::Utc::now().to_rfc3339();
     let cr = cache_read.unwrap_or(0);
     let cc = cache_create.unwrap_or(0);
-    let new_input = input.saturating_sub(cr).saturating_sub(cc);
+    // New input = total input minus cached portion. cache_creation tokens are
+    // NEW tokens written to cache (already part of non-cached input), so we
+    // only subtract cache_read.
+    let new_input = input.saturating_sub(cr);
 
     json!({
         "source": {
@@ -76,14 +79,43 @@ pub fn build_token_record(
         "computed": {
             "contextWindowTokens": input + output,
             "newInputTokens": new_input,
+            "previousContextBaseline": 0,
             "calculationMethod": "default",
         },
         "meta": {
             "turn": turn,
             "sessionId": session_id,
             "extractedAt": now,
+            "normalizedAt": now,
         }
     })
+}
+
+/// ADAPTER(ios-compat): iOS expects `input` not `arguments` on `tool_use` content blocks.
+///
+/// Persistence stores assistant content with `"input"` (Anthropic API wire format)
+/// because iOS reads it directly. The Rust typed `AssistantContent::ToolUse` uses
+/// `arguments` internally. Currently handled by:
+///
+/// 1. **Write path**: `tron_runtime::pipeline::persistence::build_content_json()` renames
+///    `arguments` → `input` when persisting `message.assistant` events.
+/// 2. **Read path**: `#[serde(alias = "input")]` on `AssistantContent::ToolUse.arguments`
+///    allows deserialization from either field name during reconstruction.
+///
+/// REMOVE: When iOS is updated to read `arguments` natively, remove the alias from
+/// `AssistantContent`, remove the rename in `build_content_json`, and delete this comment.
+/// The Rust server should use `arguments` consistently; iOS adapts to the server's format.
+pub fn adapt_assistant_content_for_ios(content: &mut [Value]) {
+    for block in content.iter_mut() {
+        if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+            if let Some(args) = block.get("arguments").cloned() {
+                if let Some(obj) = block.as_object_mut() {
+                    obj.remove("arguments");
+                    let _ = obj.insert("input".into(), args);
+                }
+            }
+        }
+    }
 }
 
 /// ADAPTER(ios-compat): iOS expects `totalCount` in `skill.list` response.
@@ -217,7 +249,9 @@ mod tests {
         let record = build_token_record(100, 50, Some(10), Some(5), "anthropic", "s1", 1);
         let computed = &record["computed"];
         assert_eq!(computed["contextWindowTokens"], 150); // 100 + 50
-        assert_eq!(computed["newInputTokens"], 85); // 100 - 10 - 5
+        // newInputTokens = input - cache_read (cache_creation is new tokens, not deducted)
+        assert_eq!(computed["newInputTokens"], 90); // 100 - 10
+        assert_eq!(computed["previousContextBaseline"], 0);
         assert_eq!(computed["calculationMethod"], "default");
     }
 
@@ -228,6 +262,33 @@ mod tests {
         assert_eq!(meta["turn"], 3);
         assert_eq!(meta["sessionId"], "sess-42");
         assert!(meta["extractedAt"].is_string());
+        assert!(meta["normalizedAt"].is_string());
+    }
+
+    // --- adapt_assistant_content_for_ios ---
+
+    #[test]
+    fn adapt_assistant_content_renames_arguments_to_input() {
+        let mut content = vec![
+            json!({"type": "text", "text": "I'll run that"}),
+            json!({"type": "tool_use", "id": "tc1", "name": "bash", "arguments": {"cmd": "ls"}}),
+        ];
+        adapt_assistant_content_for_ios(&mut content);
+        // text block unchanged
+        assert_eq!(content[0]["text"], "I'll run that");
+        // tool_use: arguments renamed to input
+        assert!(content[1].get("arguments").is_none());
+        assert_eq!(content[1]["input"]["cmd"], "ls");
+    }
+
+    #[test]
+    fn adapt_assistant_content_already_has_input_unchanged() {
+        let mut content = vec![
+            json!({"type": "tool_use", "id": "tc1", "name": "bash", "input": {"cmd": "ls"}}),
+        ];
+        adapt_assistant_content_for_ios(&mut content);
+        // Already has input, no arguments to rename
+        assert_eq!(content[0]["input"]["cmd"], "ls");
     }
 
     // --- adapt_skill_list ---

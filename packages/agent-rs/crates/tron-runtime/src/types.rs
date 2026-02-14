@@ -124,6 +124,7 @@ pub struct RunContext {
 /// Result of a single turn execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct TurnResult {
     /// Whether the turn completed successfully.
     pub success: bool,
@@ -152,7 +153,7 @@ pub struct TurnResult {
     pub latency_ms: u64,
     /// Whether the response contained thinking blocks.
     pub has_thinking: bool,
-    /// Raw LLM stop reason string (e.g. "end_turn", "tool_use").
+    /// Raw LLM stop reason string (e.g. `end_turn`, `tool_use`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_stop_reason: Option<String>,
 }

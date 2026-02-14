@@ -234,6 +234,11 @@ impl EventStore {
             counters.message_count = Some(1);
         }
 
+        // Turn count: increment on each assistant message (one assistant message = one turn)
+        if opts.event_type == EventType::MessageAssistant {
+            counters.turn_count = Some(1);
+        }
+
         // Token usage from payload
         if let Some(tu) = opts.payload.get("tokenUsage") {
             counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
@@ -241,6 +246,12 @@ impl EventStore {
             counters.cache_read_tokens = tu.get("cacheReadInputTokens").and_then(Value::as_i64);
             counters.cache_creation_tokens =
                 tu.get("cacheCreationInputTokens").and_then(Value::as_i64);
+
+            // Last turn input tokens: SET (not increment) to latest turn's context window size
+            if opts.event_type == EventType::MessageAssistant {
+                counters.last_turn_input_tokens =
+                    tu.get("inputTokens").and_then(Value::as_i64);
+            }
         }
 
         // Cost from payload

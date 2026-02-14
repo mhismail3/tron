@@ -320,6 +320,81 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.contextStateCurrentContextWindow, 200000)
     }
 
+    func testTurnEndFallsBackToToolUseMessageWhenNoTextExists() {
+        // Given - intermediate turn: [thinking, tool_use] with NO visible text
+        // streamingMessageId and firstTextMessageIdForTurn are both nil
+        mockContext.streamingMessageId = nil
+        mockContext.firstTextMessageIdForTurn = nil
+        mockContext.turnStartMessageIndex = 0
+        mockContext.currentModel = "claude-opus-4-6"
+
+        let toolUseMessage = ChatMessage(
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "Bash",
+                toolCallId: "tc-1",
+                arguments: "{}",
+                status: .running
+            ))
+        )
+        mockContext.messages = [toolUseMessage]
+
+        // When
+        let event = makeTurnEndResult(turnNumber: 1)
+        let tokenRecord = makeTokenRecord(inputTokens: 100, outputTokens: 50)
+        let result = TurnEndResult(
+            turnNumber: 1,
+            stopReason: "tool_use",
+            tokenRecord: tokenRecord,
+            contextLimit: nil,
+            cost: nil,
+            durationMs: 500
+        )
+        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+
+        // Then - should find the toolUse message via brute-force fallback
+        XCTAssertNotNil(mockContext.messages[0].tokenRecord)
+        XCTAssertEqual(mockContext.messages[0].tokenRecord?.source.rawInputTokens, 100)
+        XCTAssertEqual(mockContext.messages[0].turnNumber, 1)
+    }
+
+    func testTurnEndPrefersTextOverToolUseInBruteForceFallback() {
+        // Given - turn has both .toolUse and .text messages
+        mockContext.streamingMessageId = nil
+        mockContext.firstTextMessageIdForTurn = nil
+        mockContext.turnStartMessageIndex = 0
+        mockContext.currentModel = "claude-opus-4-6"
+
+        let toolUseMessage = ChatMessage(
+            role: .assistant,
+            content: .toolUse(ToolUseData(
+                toolName: "Bash",
+                toolCallId: "tc-1",
+                arguments: "{}",
+                status: .success
+            ))
+        )
+        let textMessage = ChatMessage(role: .assistant, content: .text("some response"))
+        mockContext.messages = [toolUseMessage, textMessage]
+
+        // When
+        let event = makeTurnEndResult(turnNumber: 1)
+        let tokenRecord = makeTokenRecord(inputTokens: 200, outputTokens: 100)
+        let result = TurnEndResult(
+            turnNumber: 1,
+            stopReason: "end_turn",
+            tokenRecord: tokenRecord,
+            contextLimit: nil,
+            cost: nil,
+            durationMs: 800
+        )
+        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+
+        // Then - should prefer the .text message (index 1) over .toolUse (index 0)
+        XCTAssertNil(mockContext.messages[0].tokenRecord) // toolUse message
+        XCTAssertNotNil(mockContext.messages[1].tokenRecord) // text message gets the stats
+    }
+
     func testTurnEndClearsTurnTracking() {
         // Given
         mockContext.turnStartMessageIndex = 5

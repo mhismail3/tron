@@ -29,6 +29,7 @@
 
 pub mod cache_pruning;
 pub mod message_converter;
+pub mod message_sanitizer;
 pub mod provider;
 pub mod stream_handler;
 pub mod types;

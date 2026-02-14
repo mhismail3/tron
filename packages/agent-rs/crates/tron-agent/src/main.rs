@@ -307,6 +307,103 @@ async fn create_google_provider(model: &str) -> Option<Arc<dyn Provider>> {
     ))
 }
 
+/// Create a populated tool registry with ALL built-in tools.
+///
+/// Called once per agent run to create a fresh registry. All 20 tools are
+/// registered to match the TypeScript server. Tools with backends not yet
+/// wired use stub delegates that return "not available" errors at execution.
+fn create_tool_registry() -> ToolRegistry {
+    use tron_tools::providers::{
+        RealFileSystem, ReqwestHttpClient, StubBrowserDelegate, StubEventStoreQuery,
+        StubMessageBus, StubNotifyDelegate, StubSubagentSpawner, StubTaskManagerDelegate,
+        TokioProcessRunner,
+    };
+
+    let fs: Arc<dyn tron_tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
+    let runner: Arc<dyn tron_tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
+    let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(ReqwestHttpClient::new());
+    let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = Arc::new(StubSubagentSpawner);
+    let browser: Arc<dyn tron_tools::traits::BrowserDelegate> = Arc::new(StubBrowserDelegate);
+    let notify: Arc<dyn tron_tools::traits::NotifyDelegate> = Arc::new(StubNotifyDelegate);
+    let bus: Arc<dyn tron_tools::traits::MessageBus> = Arc::new(StubMessageBus);
+    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> =
+        Arc::new(StubEventStoreQuery);
+    let task_mgr: Arc<dyn tron_tools::traits::TaskManagerDelegate> =
+        Arc::new(StubTaskManagerDelegate);
+
+    let mut registry = ToolRegistry::new();
+
+    // 1–4: Filesystem tools
+    registry.register(Arc::new(tron_tools::fs::read::ReadTool::new(fs.clone())));
+    registry.register(Arc::new(tron_tools::fs::write::WriteTool::new(fs.clone())));
+    registry.register(Arc::new(tron_tools::fs::edit::EditTool::new(fs.clone())));
+    registry.register(Arc::new(tron_tools::fs::find::FindTool::new()));
+
+    // 5–6: System tools
+    registry.register(Arc::new(tron_tools::system::bash::BashTool::new(
+        runner.clone(),
+    )));
+    registry.register(Arc::new(tron_tools::system::remember::RememberTool::new(
+        store_query,
+    )));
+
+    // 7: Search tool
+    registry.register(Arc::new(
+        tron_tools::search::search_tool::SearchTool::new(runner),
+    ));
+
+    // 8–9: Web tools
+    registry.register(Arc::new(tron_tools::web::web_fetch::WebFetchTool::new(
+        http.clone(),
+    )));
+    registry.register(Arc::new(tron_tools::web::web_search::WebSearchTool::new(
+        http,
+        String::new(), // API key — will use settings when wired
+    )));
+
+    // 10–11: Browser tools
+    registry.register(Arc::new(
+        tron_tools::browser::browse_the_web::BrowseTheWebTool::new(browser),
+    ));
+    registry.register(Arc::new(tron_tools::browser::open_url::OpenURLTool::new(
+        notify.clone(),
+    )));
+
+    // 12–13: Communication tools
+    registry.register(Arc::new(
+        tron_tools::communication::send_message::SendMessageTool::new(bus.clone()),
+    ));
+    registry.register(Arc::new(
+        tron_tools::communication::receive_messages::ReceiveMessagesTool::new(bus),
+    ));
+
+    // 14–16: Subagent tools
+    registry.register(Arc::new(
+        tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
+    ));
+    registry.register(Arc::new(
+        tron_tools::subagent::query::QueryAgentTool::new(spawner.clone()),
+    ));
+    registry.register(Arc::new(
+        tron_tools::subagent::wait::WaitForAgentsTool::new(spawner),
+    ));
+
+    // 17–20: UI tools
+    registry.register(Arc::new(tron_tools::ui::notify::NotifyAppTool::new(notify)));
+    registry.register(Arc::new(
+        tron_tools::ui::ask_user::AskUserQuestionTool::new(),
+    ));
+    registry.register(Arc::new(
+        tron_tools::ui::task_manager::TaskManagerTool::new(task_mgr),
+    ));
+    registry.register(Arc::new(
+        tron_tools::ui::render_app_ui::RenderAppUITool::new(),
+    ));
+
+    tracing::debug!(tool_count = registry.len(), tools = ?registry.names(), "tool registry created");
+    registry
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
@@ -352,7 +449,7 @@ async fn main() -> Result<()> {
         );
         AgentDeps {
             provider,
-            tool_factory: Arc::new(ToolRegistry::new),
+            tool_factory: Arc::new(create_tool_registry),
             guardrails: None,
             hooks: None,
         }

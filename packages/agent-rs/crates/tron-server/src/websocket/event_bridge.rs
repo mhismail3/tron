@@ -112,15 +112,44 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             tool_call_id,
             duration,
             is_error,
+            result,
             ..
         } => {
+            let success = !is_error.unwrap_or(false);
             let mut data = serde_json::json!({
                 "toolName": tool_name,
                 "toolCallId": tool_call_id,
                 "duration": duration,
+                "durationMs": duration,
+                "success": success,
             });
-            if let Some(err) = is_error {
-                data["isError"] = serde_json::json!(err);
+            // Extract result text from TronToolResult
+            if let Some(tool_result) = result {
+                let result_text = match &tool_result.content {
+                    tron_core::tools::ToolResultBody::Text(t) => t.clone(),
+                    tron_core::tools::ToolResultBody::Blocks(blocks) => {
+                        blocks
+                            .iter()
+                            .filter_map(|b| {
+                                if let tron_core::content::ToolResultContent::Text { text } = b {
+                                    Some(text.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                };
+                if success {
+                    data["output"] = serde_json::json!(result_text);
+                    data["result"] = serde_json::json!(result_text);
+                } else {
+                    data["error"] = serde_json::json!(result_text);
+                }
+                if let Some(ref details) = tool_result.details {
+                    data["details"] = details.clone();
+                }
             }
             Some(data)
         }
@@ -722,21 +751,126 @@ mod tests {
     }
 
     #[test]
-    fn tool_end_includes_duration_and_error() {
+    fn tool_end_success_has_required_ios_fields() {
+        use tron_core::tools::{TronToolResult, ToolResultBody};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
             tool_name: "bash".into(),
             duration: 1500,
-            is_error: Some(true),
-            result: None,
+            is_error: Some(false),
+            result: Some(TronToolResult {
+                content: ToolResultBody::Text("file1.txt\nfile2.txt".into()),
+                details: None,
+                is_error: Some(false),
+                stop_turn: None,
+            }),
         };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.tool_end");
         let data = rpc.data.unwrap();
-        assert_eq!(data["duration"], 1500);
-        assert_eq!(data["isError"], true);
+        // iOS REQUIRED field: success (non-optional Bool)
+        assert_eq!(data["success"], true);
+        assert_eq!(data["toolCallId"], "tc_1");
         assert_eq!(data["toolName"], "bash");
+        assert_eq!(data["duration"], 1500);
+        assert_eq!(data["durationMs"], 1500);
+        assert_eq!(data["output"], "file1.txt\nfile2.txt");
+        assert_eq!(data["result"], "file1.txt\nfile2.txt");
+    }
+
+    #[test]
+    fn tool_end_error_has_required_ios_fields() {
+        use tron_core::tools::{TronToolResult, ToolResultBody};
+        let event = TronEvent::ToolExecutionEnd {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "bash".into(),
+            duration: 500,
+            is_error: Some(true),
+            result: Some(TronToolResult {
+                content: ToolResultBody::Text("command not found".into()),
+                details: None,
+                is_error: Some(true),
+                stop_turn: None,
+            }),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        assert_eq!(data["success"], false);
+        assert_eq!(data["error"], "command not found");
+        // On error, output/result should NOT be set
+        assert!(data.get("output").is_none());
+        assert!(data.get("result").is_none());
+        assert_eq!(data["durationMs"], 500);
+    }
+
+    #[test]
+    fn tool_end_with_details() {
+        use tron_core::tools::{TronToolResult, ToolResultBody};
+        let event = TronEvent::ToolExecutionEnd {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "browser".into(),
+            duration: 2000,
+            is_error: Some(false),
+            result: Some(TronToolResult {
+                content: ToolResultBody::Text("page loaded".into()),
+                details: Some(serde_json::json!({
+                    "screenshot": "base64data",
+                    "format": "png",
+                })),
+                is_error: Some(false),
+                stop_turn: None,
+            }),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        assert_eq!(data["success"], true);
+        assert_eq!(data["details"]["screenshot"], "base64data");
+        assert_eq!(data["details"]["format"], "png");
+    }
+
+    #[test]
+    fn tool_end_no_result_still_has_success() {
+        let event = TronEvent::ToolExecutionEnd {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "bash".into(),
+            duration: 1500,
+            is_error: None,
+            result: None,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        // Even without result, success must be present (iOS requires it)
+        assert_eq!(data["success"], true);
+        assert_eq!(data["durationMs"], 1500);
+    }
+
+    #[test]
+    fn tool_end_content_blocks_joined() {
+        use tron_core::tools::{TronToolResult, ToolResultBody};
+        use tron_core::content::ToolResultContent;
+        let event = TronEvent::ToolExecutionEnd {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "read".into(),
+            duration: 100,
+            is_error: Some(false),
+            result: Some(TronToolResult {
+                content: ToolResultBody::Blocks(vec![
+                    ToolResultContent::Text { text: "line 1".into() },
+                    ToolResultContent::Text { text: "line 2".into() },
+                ]),
+                details: None,
+                is_error: Some(false),
+                stop_turn: None,
+            }),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        assert_eq!(data["output"], "line 1\nline 2");
     }
 
     #[test]

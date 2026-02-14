@@ -110,6 +110,11 @@ pub enum AssistantContent {
         /// Tool name.
         name: String,
         /// Tool arguments.
+        ///
+        /// Accepts both `"arguments"` (internal) and `"input"` (API wire format)
+        /// during deserialization. Persistence stores as `"input"` for iOS/API
+        /// compatibility, so reconstruction needs this alias.
+        #[serde(alias = "input")]
         arguments: serde_json::Map<String, serde_json::Value>,
         /// Thought signature (Gemini models).
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
@@ -467,6 +472,26 @@ mod tests {
         assert_eq!(json["arguments"]["command"], "ls");
         let back: AssistantContent = serde_json::from_value(json).unwrap();
         assert_eq!(ac, back);
+    }
+
+    #[test]
+    fn assistant_content_tool_use_deserializes_from_input_alias() {
+        // Persistence stores "input" (API wire format), not "arguments".
+        // The alias ensures reconstruction roundtrips work.
+        let json = json!({
+            "type": "tool_use",
+            "id": "toolu_01abc",
+            "name": "bash",
+            "input": {"command": "ls"}
+        });
+        let ac: AssistantContent = serde_json::from_value(json).unwrap();
+        if let AssistantContent::ToolUse { id, name, arguments, .. } = &ac {
+            assert_eq!(id, "toolu_01abc");
+            assert_eq!(name, "bash");
+            assert_eq!(arguments["command"], "ls");
+        } else {
+            panic!("Expected ToolUse variant");
+        }
     }
 
     // -- ToolResultContent enum --
