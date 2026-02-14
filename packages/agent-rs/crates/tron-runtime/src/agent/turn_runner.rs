@@ -44,6 +44,7 @@ pub async fn execute_turn(
     cancel: &tokio_util::sync::CancellationToken,
     run_context: &RunContext,
     persister: Option<&EventPersister>,
+    previous_context_baseline: u64,
 ) -> TurnResult {
     let turn_start = Instant::now();
 
@@ -224,7 +225,18 @@ pub async fn execute_turn(
         context_manager.set_api_context_tokens(usage.input_tokens + usage.output_tokens);
     }
 
-    // 8b. Persist message.assistant inline
+    // 8b. Build token record once — reused for persistence AND TurnEnd event
+    let token_record_json = stream_result.token_usage.as_ref().map(|usage| {
+        persistence::build_token_record(
+            usage,
+            provider.provider_type(),
+            session_id,
+            turn,
+            previous_context_baseline,
+        )
+    });
+
+    // 8c. Persist message.assistant inline
     if let Some(p) = persister {
         let content_json = persistence::build_content_json(&stream_result.message.content);
         let mut payload = json!({
@@ -238,12 +250,9 @@ pub async fn execute_turn(
         });
         if let Some(ref usage) = stream_result.token_usage {
             payload["tokenUsage"] = persistence::build_token_usage_json(usage);
-            payload["tokenRecord"] = persistence::build_token_record(
-                usage,
-                provider.provider_type(),
-                session_id,
-                turn,
-            );
+        }
+        if let Some(ref record) = token_record_json {
+            payload["tokenRecord"] = record.clone();
         }
         p.append_fire_and_forget(session_id, EventType::MessageAssistant, payload);
     }
@@ -344,17 +353,12 @@ pub async fn execute_turn(
         cache_creation_tokens: u.cache_creation_tokens,
     });
 
-    // Build token_record (fix: was None)
-    let token_record = stream_result.token_usage.as_ref().map(|usage| {
-        persistence::build_token_record(usage, provider.provider_type(), session_id, turn)
-    });
-
     let _ = emitter.emit(TronEvent::TurnEnd {
         base: BaseEvent::now(session_id),
         turn,
         duration,
         token_usage: turn_token_usage,
-        token_record,
+        token_record: token_record_json.clone(),
         cost: None,
         context_limit: Some(context_manager.get_context_limit()),
     });
@@ -384,6 +388,10 @@ pub async fn execute_turn(
         None
     };
 
+    let context_window_tokens = token_record_json
+        .as_ref()
+        .and_then(|r| r["computed"]["contextWindowTokens"].as_u64());
+
     TurnResult {
         success: true,
         tool_calls_executed,
@@ -394,6 +402,7 @@ pub async fn execute_turn(
         latency_ms: duration,
         has_thinking,
         llm_stop_reason: Some(stream_result.stop_reason.clone()),
+        context_window_tokens,
         ..Default::default()
     }
 }

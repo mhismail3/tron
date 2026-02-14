@@ -70,6 +70,27 @@ impl BrowserDelegate for StubBrowserDelegate {
 
 // ─── NotifyDelegate ──────────────────────────────────────────────────────────
 
+/// ADAPTER(tool-compat): Fire-and-forget notify delegate for OpenURL.
+///
+/// OpenURL doesn't need real APNS — it validates the URL and returns success.
+/// iOS opens Safari when it receives the tool_execution_start event.
+///
+/// REMOVE: When OpenURL is refactored to not require a NotifyDelegate.
+pub struct NoOpOpenUrlDelegate;
+
+#[async_trait]
+impl NotifyDelegate for NoOpOpenUrlDelegate {
+    async fn send_notification(
+        &self,
+        _notification: &Notification,
+    ) -> Result<NotifyResult, ToolError> {
+        Err(not_available("Push notifications"))
+    }
+    async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
+        Ok(()) // Fire-and-forget — iOS handles via tool event
+    }
+}
+
 /// Stub notification delegate — APNS push isn't wired yet.
 pub struct StubNotifyDelegate;
 

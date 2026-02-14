@@ -45,14 +45,13 @@ fn endpoint_path(endpoint: &str) -> &'static str {
 /// The `WebSearch` tool searches the web using the Brave Search API.
 pub struct WebSearchTool {
     http: Arc<dyn HttpClient>,
-    /// API key passed to the HTTP client (runtime injects as header).
-    _api_key: String,
+    api_key: String,
 }
 
 impl WebSearchTool {
     /// Create a new `WebSearch` tool with the given HTTP client and API key.
     pub fn new(http: Arc<dyn HttpClient>, api_key: String) -> Self {
-        Self { http, _api_key: api_key }
+        Self { http, api_key }
     }
 }
 
@@ -141,11 +140,18 @@ impl TronTool for WebSearchTool {
             .join("&");
         let url = format!("{BRAVE_BASE_URL}{path}?{qs}");
 
-        // In a real implementation, we'd pass headers to the HTTP client.
-        // For now, the HTTP client trait is simple — the runtime impl adds the API key header.
-        let response = self.http.get(&url).await.map_err(|e| ToolError::Internal {
-            message: format!("Brave API request failed: {e}"),
-        })?;
+        let mut headers: Vec<(&str, &str)> = vec![("Accept", "application/json")];
+        if !self.api_key.is_empty() {
+            headers.push(("X-Subscription-Token", &self.api_key));
+        }
+
+        let response = self
+            .http
+            .get_with_headers(&url, &headers)
+            .await
+            .map_err(|e| ToolError::Internal {
+                message: format!("Brave API request failed: {e}"),
+            })?;
 
         if response.status != 200 {
             return Ok(error_result(format!("Brave API error: HTTP {}", response.status)));

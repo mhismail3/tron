@@ -5,6 +5,8 @@
 
 #![deny(unsafe_code)]
 
+mod providers;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -307,15 +309,27 @@ async fn create_google_provider(model: &str) -> Option<Arc<dyn Provider>> {
     ))
 }
 
-/// Create a populated tool registry with ALL built-in tools.
+/// Configuration for tool registry creation.
 ///
-/// Called once per agent run to create a fresh registry. All 20 tools are
-/// registered to match the TypeScript server. Tools with backends not yet
-/// wired use stub delegates that return "not available" errors at execution.
-fn create_tool_registry() -> ToolRegistry {
+/// Captures shared resources (event store, task pool, API keys) so the
+/// tool factory closure can create real provider implementations.
+struct ToolRegistryConfig {
+    event_store: Arc<tron_events::EventStore>,
+    task_pool: tron_events::ConnectionPool,
+    brave_api_key: Option<String>,
+}
+
+/// Create a populated tool registry with built-in tools.
+///
+/// Called once per agent run to create a fresh registry. Registration matches
+/// the TypeScript server:
+/// - Tools with real backends use real providers
+/// - BrowseTheWeb/NotifyApp: conditionally registered (only with backend)
+/// - Communication tools: not registered (not in TS server)
+/// - Subagent tools: registered with stubs (complex infra, future work)
+fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron_tools::providers::{
-        RealFileSystem, ReqwestHttpClient, StubBrowserDelegate, StubEventStoreQuery,
-        StubMessageBus, StubNotifyDelegate, StubSubagentSpawner, StubTaskManagerDelegate,
+        NoOpOpenUrlDelegate, RealFileSystem, ReqwestHttpClient, StubSubagentSpawner,
         TokioProcessRunner,
     };
 
@@ -323,13 +337,19 @@ fn create_tool_registry() -> ToolRegistry {
     let runner: Arc<dyn tron_tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
     let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(ReqwestHttpClient::new());
     let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = Arc::new(StubSubagentSpawner);
-    let browser: Arc<dyn tron_tools::traits::BrowserDelegate> = Arc::new(StubBrowserDelegate);
-    let notify: Arc<dyn tron_tools::traits::NotifyDelegate> = Arc::new(StubNotifyDelegate);
-    let bus: Arc<dyn tron_tools::traits::MessageBus> = Arc::new(StubMessageBus);
-    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> =
-        Arc::new(StubEventStoreQuery);
-    let task_mgr: Arc<dyn tron_tools::traits::TaskManagerDelegate> =
-        Arc::new(StubTaskManagerDelegate);
+
+    // Real providers backed by SQLite
+    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> = Arc::new(
+        providers::SqliteEventStoreQuery::new(config.event_store.clone()),
+    );
+    let task_mgr: Arc<dyn tron_tools::traits::TaskManagerDelegate> = Arc::new(
+        providers::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
+    );
+
+    // ADAPTER(tool-compat): fire-and-forget delegate for OpenURL.
+    // iOS opens Safari on receiving tool_execution_start — no real backend needed.
+    let open_url_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
+        Arc::new(NoOpOpenUrlDelegate);
 
     let mut registry = ToolRegistry::new();
 
@@ -352,32 +372,29 @@ fn create_tool_registry() -> ToolRegistry {
         tron_tools::search::search_tool::SearchTool::new(runner),
     ));
 
-    // 8–9: Web tools
+    // 8: WebFetch (always available)
     registry.register(Arc::new(tron_tools::web::web_fetch::WebFetchTool::new(
         http.clone(),
     )));
-    registry.register(Arc::new(tron_tools::web::web_search::WebSearchTool::new(
-        http,
-        String::new(), // API key — will use settings when wired
-    )));
 
-    // 10–11: Browser tools
-    registry.register(Arc::new(
-        tron_tools::browser::browse_the_web::BrowseTheWebTool::new(browser),
-    ));
+    // 9: WebSearch — conditional on Brave API key (matches TS server)
+    if let Some(ref api_key) = config.brave_api_key {
+        registry.register(Arc::new(tron_tools::web::web_search::WebSearchTool::new(
+            http,
+            api_key.clone(),
+        )));
+    }
+
+    // 10: OpenURL — fire-and-forget (iOS opens Safari via tool event)
     registry.register(Arc::new(tron_tools::browser::open_url::OpenURLTool::new(
-        notify.clone(),
+        open_url_delegate,
     )));
 
-    // 12–13: Communication tools
-    registry.register(Arc::new(
-        tron_tools::communication::send_message::SendMessageTool::new(bus.clone()),
-    ));
-    registry.register(Arc::new(
-        tron_tools::communication::receive_messages::ReceiveMessagesTool::new(bus),
-    ));
+    // BrowseTheWeb: NOT registered (TS only registers with browser service)
+    // NotifyApp: NOT registered (TS only registers with APNS callback)
+    // Communication tools: NOT registered (not in TS server)
 
-    // 14–16: Subagent tools
+    // 11–13: Subagent tools (stubs — complex infrastructure, future work)
     registry.register(Arc::new(
         tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
     ));
@@ -388,8 +405,7 @@ fn create_tool_registry() -> ToolRegistry {
         tron_tools::subagent::wait::WaitForAgentsTool::new(spawner),
     ));
 
-    // 17–20: UI tools
-    registry.register(Arc::new(tron_tools::ui::notify::NotifyAppTool::new(notify)));
+    // 14–16: UI tools
     registry.register(Arc::new(
         tron_tools::ui::ask_user::AskUserQuestionTool::new(),
     ));
@@ -439,6 +455,21 @@ async fn main() -> Result<()> {
     ));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
+    // Load Brave API key for web search (matches TS server conditional registration)
+    let brave_api_key = tron_auth::storage::get_service_api_keys(&auth_path(), "brave")
+        .into_iter()
+        .next();
+    if brave_api_key.is_some() {
+        tracing::info!("Brave API key loaded — WebSearch tool enabled");
+    }
+
+    // Tool registry config (shared resources for per-session tool factories)
+    let tool_config = Arc::new(ToolRegistryConfig {
+        event_store: event_store.clone(),
+        task_pool: task_pool.clone(),
+        brave_api_key,
+    });
+
     // Agent dependencies (LLM provider + tool factory)
     // OAuth is primary auth, API key is fallback — matching the TypeScript server.
     let agent_deps = create_provider(&settings).await.map(|provider| {
@@ -447,9 +478,10 @@ async fn main() -> Result<()> {
             model = settings.server.default_model.as_str(),
             "agent execution enabled"
         );
+        let config = tool_config.clone();
         AgentDeps {
             provider,
-            tool_factory: Arc::new(create_tool_registry),
+            tool_factory: Arc::new(move || create_tool_registry(&config)),
             guardrails: None,
             hooks: None,
         }

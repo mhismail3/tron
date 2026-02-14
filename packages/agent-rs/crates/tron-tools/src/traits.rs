@@ -538,6 +538,18 @@ pub struct HttpResponse {
 pub trait HttpClient: Send + Sync {
     /// Perform a GET request and return the response.
     async fn get(&self, url: &str) -> Result<HttpResponse, ToolError>;
+
+    /// Perform a GET request with custom headers.
+    ///
+    /// Default implementation ignores headers and falls back to `get()`.
+    async fn get_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, ToolError> {
+        let _ = headers;
+        self.get(url).await
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

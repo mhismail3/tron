@@ -35,7 +35,9 @@ tron-tasks.workspace = true
 tron-rpc.workspace = true
 tron-server.workspace = true
 tron-platform = { workspace = true, features = ["apns"] }
+async-trait.workspace = true
 clap.workspace = true
+rusqlite.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 anyhow.workspace = true

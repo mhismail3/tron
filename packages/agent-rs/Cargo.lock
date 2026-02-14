@@ -3916,9 +3916,11 @@ name = "tron-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "parking_lot",
  "reqwest",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",

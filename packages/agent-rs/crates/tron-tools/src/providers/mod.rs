@@ -14,6 +14,6 @@ pub use filesystem::RealFileSystem;
 pub use http::ReqwestHttpClient;
 pub use process::TokioProcessRunner;
 pub use stubs::{
-    StubBrowserDelegate, StubEventStoreQuery, StubMessageBus, StubNotifyDelegate,
-    StubSubagentSpawner, StubTaskManagerDelegate,
+    NoOpOpenUrlDelegate, StubBrowserDelegate, StubEventStoreQuery, StubMessageBus,
+    StubNotifyDelegate, StubSubagentSpawner, StubTaskManagerDelegate,
 };

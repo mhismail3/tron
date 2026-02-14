@@ -32,14 +32,22 @@ impl Default for ReqwestHttpClient {
 #[async_trait]
 impl HttpClient for ReqwestHttpClient {
     async fn get(&self, url: &str) -> Result<HttpResponse, ToolError> {
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| ToolError::Internal {
-                message: format!("HTTP request failed: {e}"),
-            })?;
+        self.get_with_headers(url, &[]).await
+    }
+
+    async fn get_with_headers(
+        &self,
+        url: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<HttpResponse, ToolError> {
+        let mut request = self.client.get(url);
+        for &(key, value) in headers {
+            request = request.header(key, value);
+        }
+
+        let response = request.send().await.map_err(|e| ToolError::Internal {
+            message: format!("HTTP request failed: {e}"),
+        })?;
 
         let status = response.status().as_u16();
         let content_type = response

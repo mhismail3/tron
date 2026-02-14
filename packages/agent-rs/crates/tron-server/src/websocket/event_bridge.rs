@@ -70,6 +70,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             turn,
             duration,
             token_usage,
+            token_record,
             cost,
             context_limit,
             ..
@@ -81,15 +82,15 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             if let Some(usage) = token_usage {
                 data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
             }
+            if let Some(record) = token_record {
+                data["tokenRecord"] = record.clone();
+            }
             if let Some(c) = cost {
                 data["cost"] = serde_json::json!(c);
             }
             if let Some(limit) = context_limit {
                 data["contextLimit"] = serde_json::json!(limit);
             }
-            // ADAPTER(ios-compat): iOS reads tokenRecord.source.rawXxxTokens for stats line.
-            // REMOVE: delete these two lines; iOS should read tokenUsage directly.
-            tron_rpc::adapters::adapt_turn_end_data(&mut data, session_id, *turn);
             Some(data)
         }
         TronEvent::ToolExecutionStart {
@@ -700,7 +701,31 @@ mod tests {
     }
 
     #[test]
-    fn turn_end_includes_token_record() {
+    fn turn_end_passes_through_token_record() {
+        let token_record = serde_json::json!({
+            "source": {
+                "rawInputTokens": 100,
+                "rawOutputTokens": 50,
+                "rawCacheReadTokens": 10,
+                "rawCacheCreationTokens": 0,
+                "rawCacheCreation5mTokens": 0,
+                "rawCacheCreation1hTokens": 0,
+                "provider": "anthropic",
+                "timestamp": "2024-01-01T00:00:00Z",
+            },
+            "computed": {
+                "contextWindowTokens": 110,
+                "newInputTokens": 110,
+                "previousContextBaseline": 0,
+                "calculationMethod": "anthropic_cache_aware",
+            },
+            "meta": {
+                "turn": 2,
+                "sessionId": "s1",
+                "extractedAt": "2024-01-01T00:00:00Z",
+                "normalizedAt": "2024-01-01T00:00:00Z",
+            }
+        });
         let event = TronEvent::TurnEnd {
             base: BaseEvent::now("s1"),
             turn: 2,
@@ -711,16 +736,35 @@ mod tests {
                 cache_read_tokens: Some(10),
                 cache_creation_tokens: None,
             }),
+            token_record: Some(token_record.clone()),
+            cost: None,
+            context_limit: None,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        // The token record is passed through unchanged from the runtime
+        assert_eq!(data["tokenRecord"], token_record);
+    }
+
+    #[test]
+    fn turn_end_no_token_record_omits_field() {
+        let event = TronEvent::TurnEnd {
+            base: BaseEvent::now("s1"),
+            turn: 1,
+            duration: 1000,
+            token_usage: Some(tron_core::events::TurnTokenUsage {
+                input_tokens: 50,
+                output_tokens: 25,
+                cache_read_tokens: None,
+                cache_creation_tokens: None,
+            }),
             token_record: None,
             cost: None,
             context_limit: None,
         };
         let rpc = tron_event_to_rpc(&event);
         let data = rpc.data.unwrap();
-        assert!(data["tokenRecord"]["source"]["rawInputTokens"].is_number());
-        assert_eq!(data["tokenRecord"]["source"]["rawInputTokens"], 100);
-        assert_eq!(data["tokenRecord"]["source"]["rawOutputTokens"], 50);
-        assert_eq!(data["tokenRecord"]["source"]["rawCacheReadTokens"], 10);
+        assert!(data.get("tokenRecord").is_none());
     }
 
     #[test]

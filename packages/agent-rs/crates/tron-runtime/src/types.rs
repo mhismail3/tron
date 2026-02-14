@@ -156,6 +156,9 @@ pub struct TurnResult {
     /// Raw LLM stop reason string (e.g. `end_turn`, `tool_use`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_stop_reason: Option<String>,
+    /// Context window tokens this turn (for cross-turn baseline tracking).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u64>,
 }
 
 impl Default for TurnResult {
@@ -173,6 +176,7 @@ impl Default for TurnResult {
             latency_ms: 0,
             has_thinking: false,
             llm_stop_reason: None,
+            context_window_tokens: None,
         }
     }
 }

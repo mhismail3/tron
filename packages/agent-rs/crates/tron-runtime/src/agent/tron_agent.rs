@@ -131,6 +131,7 @@ impl TronAgent {
         let max_turns = self.config.max_turns;
         let mut turn = 0u32;
         let mut exited_via_break = false;
+        let mut previous_context_baseline: u64 = 0;
 
         while turn < max_turns {
             turn += 1;
@@ -149,8 +150,14 @@ impl TronAgent {
                 &self.abort_token,
                 &ctx,
                 self.persister.as_deref(),
+                previous_context_baseline,
             )
             .await;
+
+            // Update baseline for next turn
+            if let Some(cw) = result.context_window_tokens {
+                previous_context_baseline = cw;
+            }
 
             // Accumulate token usage
             if let Some(ref usage) = result.token_usage {

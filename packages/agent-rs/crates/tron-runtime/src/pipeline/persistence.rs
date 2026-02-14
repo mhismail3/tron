@@ -1,13 +1,15 @@
 //! Persistence helpers — build JSON structures for event payloads.
 //!
 //! These transform Rust types into the JSON shapes that the event store
-//! and iOS client expect. The key fix: provider type is now **dynamic**
-//! (not hardcoded to "anthropic").
+//! and iOS client expect. Token normalization delegates to `tron-tokens`
+//! for correct per-turn deltas.
 
 use serde_json::{json, Value};
 use tron_core::content::AssistantContent;
 use tron_core::messages::TokenUsage;
 use tron_llm::models::types::ProviderType;
+use tron_tokens::normalization::normalize_tokens;
+use tron_tokens::types::{TokenMeta, TokenSource};
 
 /// Build a JSON content array from assistant content blocks.
 ///
@@ -35,46 +37,43 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
 
 /// Build the nested `tokenRecord` structure for iOS compatibility.
 ///
-/// Provider type is **dynamic** — uses the actual provider, not hardcoded "anthropic".
+/// Delegates to `tron_tokens::normalize_tokens()` for correct per-turn
+/// delta calculation using cross-turn baseline tracking.
 pub fn build_token_record(
     usage: &TokenUsage,
     provider_type: ProviderType,
     session_id: &str,
     turn: u32,
+    previous_baseline: u64,
 ) -> Value {
     let now = chrono::Utc::now().to_rfc3339();
-    let cr = usage.cache_read_tokens.unwrap_or(0);
-    let cc = usage.cache_creation_tokens.unwrap_or(0);
-    // Anthropic API: input/cacheRead/cacheCreation are MUTUALLY EXCLUSIVE.
-    // input = non-cached new input only, cacheRead = reused from prior context,
-    // cacheCreation = new tokens written to cache. Total context = sum of all three.
-    let context_window = usage.input_tokens + cr + cc;
-    let new_input = usage.input_tokens + cc;
+    let source = TokenSource {
+        provider: llm_to_core_provider(provider_type),
+        timestamp: now.clone(),
+        raw_input_tokens: usage.input_tokens,
+        raw_output_tokens: usage.output_tokens,
+        raw_cache_read_tokens: usage.cache_read_tokens.unwrap_or(0),
+        raw_cache_creation_tokens: usage.cache_creation_tokens.unwrap_or(0),
+        raw_cache_creation_5m_tokens: usage.cache_creation_5m_tokens.unwrap_or(0),
+        raw_cache_creation_1h_tokens: usage.cache_creation_1h_tokens.unwrap_or(0),
+    };
+    let meta = TokenMeta {
+        turn: u64::from(turn),
+        session_id: session_id.to_string(),
+        extracted_at: now,
+        normalized_at: String::new(),
+    };
+    let record = normalize_tokens(source, previous_baseline, meta);
+    serde_json::to_value(&record).unwrap_or_default()
+}
 
-    json!({
-        "source": {
-            "rawInputTokens": usage.input_tokens,
-            "rawOutputTokens": usage.output_tokens,
-            "rawCacheReadTokens": cr,
-            "rawCacheCreationTokens": cc,
-            "rawCacheCreation5mTokens": usage.cache_creation_5m_tokens.unwrap_or(0),
-            "rawCacheCreation1hTokens": usage.cache_creation_1h_tokens.unwrap_or(0),
-            "provider": provider_type.as_str(),
-            "timestamp": now,
-        },
-        "computed": {
-            "contextWindowTokens": context_window,
-            "newInputTokens": new_input,
-            "previousContextBaseline": cr,
-            "calculationMethod": "default",
-        },
-        "meta": {
-            "turn": turn,
-            "sessionId": session_id,
-            "extractedAt": now,
-            "normalizedAt": now,
-        }
-    })
+/// Convert `tron_llm` provider type to `tron_core` provider type.
+fn llm_to_core_provider(pt: ProviderType) -> tron_core::messages::ProviderType {
+    match pt {
+        ProviderType::Anthropic => tron_core::messages::ProviderType::Anthropic,
+        ProviderType::OpenAi => tron_core::messages::ProviderType::OpenAi,
+        ProviderType::Google => tron_core::messages::ProviderType::Google,
+    }
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -253,13 +252,13 @@ mod tests {
             ..Default::default()
         };
 
-        let anthropic = build_token_record(&usage, ProviderType::Anthropic, "sess-1", 1);
+        let anthropic = build_token_record(&usage, ProviderType::Anthropic, "sess-1", 1, 0);
         assert_eq!(anthropic["source"]["provider"], "anthropic");
 
-        let google = build_token_record(&usage, ProviderType::Google, "sess-1", 1);
+        let google = build_token_record(&usage, ProviderType::Google, "sess-1", 1, 0);
         assert_eq!(google["source"]["provider"], "google");
 
-        let openai = build_token_record(&usage, ProviderType::OpenAi, "sess-1", 1);
+        let openai = build_token_record(&usage, ProviderType::OpenAi, "sess-1", 1, 0);
         assert_eq!(openai["source"]["provider"], "openai");
     }
 
@@ -270,7 +269,7 @@ mod tests {
             output_tokens: 50,
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "sess-1", 3);
+        let record = build_token_record(&usage, ProviderType::Anthropic, "sess-1", 3, 0);
         assert!(record.get("source").is_some());
         assert!(record.get("computed").is_some());
         assert!(record.get("meta").is_some());
@@ -279,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn build_token_record_computed_fields() {
+    fn build_token_record_first_turn_all_new() {
         let usage = TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
@@ -287,17 +286,17 @@ mod tests {
             cache_creation_tokens: Some(5),
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1);
-        // contextWindowTokens = input + cacheRead + cacheCreation (mutually exclusive)
-        assert_eq!(record["computed"]["contextWindowTokens"], 115); // 100 + 10 + 5
-        // newInputTokens = input + cacheCreation (non-cached-read = new content)
-        assert_eq!(record["computed"]["newInputTokens"], 105); // 100 + 5
-        assert_eq!(record["computed"]["previousContextBaseline"], 10); // cacheRead
-        assert_eq!(record["computed"]["calculationMethod"], "default");
+        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
+        // contextWindowTokens = input + cacheRead + cacheCreation
+        assert_eq!(record["computed"]["contextWindowTokens"], 115);
+        // First turn (baseline=0): newInput = contextWindow
+        assert_eq!(record["computed"]["newInputTokens"], 115);
+        assert_eq!(record["computed"]["previousContextBaseline"], 0);
+        assert_eq!(record["computed"]["calculationMethod"], "anthropic_cache_aware");
     }
 
     #[test]
-    fn build_token_record_heavy_cache_read_nonzero_new_input() {
+    fn build_token_record_second_turn_delta() {
         let usage = TokenUsage {
             input_tokens: 14,
             output_tokens: 149,
@@ -305,10 +304,37 @@ mod tests {
             cache_creation_tokens: Some(200),
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 2);
+        // Previous baseline was 9521 (from turn 1 context window)
+        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 2, 9521);
         assert_eq!(record["computed"]["contextWindowTokens"], 9735); // 14 + 9521 + 200
-        assert_eq!(record["computed"]["newInputTokens"], 214); // 14 + 200 (NOT 0)
+        // Delta: 9735 - 9521 = 214
+        assert_eq!(record["computed"]["newInputTokens"], 214);
         assert_eq!(record["computed"]["previousContextBaseline"], 9521);
+    }
+
+    #[test]
+    fn build_token_record_context_shrink_zero_delta() {
+        let usage = TokenUsage {
+            input_tokens: 5000,
+            output_tokens: 100,
+            ..Default::default()
+        };
+        // Previous baseline was 10000, context shrank (compaction)
+        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 3, 10_000);
+        assert_eq!(record["computed"]["contextWindowTokens"], 5000);
+        assert_eq!(record["computed"]["newInputTokens"], 0);
+    }
+
+    #[test]
+    fn build_token_record_google_direct_method() {
+        let usage = TokenUsage {
+            input_tokens: 5000,
+            output_tokens: 200,
+            ..Default::default()
+        };
+        let record = build_token_record(&usage, ProviderType::Google, "s1", 1, 0);
+        assert_eq!(record["computed"]["contextWindowTokens"], 5000);
+        assert_eq!(record["computed"]["calculationMethod"], "direct");
     }
 
     #[test]
@@ -322,7 +348,7 @@ mod tests {
             cache_creation_1h_tokens: Some(3),
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1);
+        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
         let source = &record["source"];
         assert_eq!(source["rawInputTokens"], 200);
         assert_eq!(source["rawOutputTokens"], 100);
@@ -340,8 +366,9 @@ mod tests {
             output_tokens: 50,
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1);
+        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
         assert_eq!(record["source"]["rawCacheReadTokens"], 0);
         assert_eq!(record["source"]["rawCacheCreationTokens"], 0);
     }
+
 }
