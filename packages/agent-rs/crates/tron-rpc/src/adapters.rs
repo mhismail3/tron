@@ -60,10 +60,11 @@ pub fn build_token_record(
     let now = chrono::Utc::now().to_rfc3339();
     let cr = cache_read.unwrap_or(0);
     let cc = cache_create.unwrap_or(0);
-    // New input = total input minus cached portion. cache_creation tokens are
-    // NEW tokens written to cache (already part of non-cached input), so we
-    // only subtract cache_read.
-    let new_input = input.saturating_sub(cr);
+    // Anthropic API: input/cacheRead/cacheCreation are MUTUALLY EXCLUSIVE.
+    // input = non-cached new input only, cacheRead = reused from prior context,
+    // cacheCreation = new tokens written to cache. Total context = sum of all three.
+    let context_window = input + cr + cc;
+    let new_input = input + cc;
 
     json!({
         "source": {
@@ -77,9 +78,9 @@ pub fn build_token_record(
             "timestamp": now,
         },
         "computed": {
-            "contextWindowTokens": input + output,
+            "contextWindowTokens": context_window,
             "newInputTokens": new_input,
-            "previousContextBaseline": 0,
+            "previousContextBaseline": cr,
             "calculationMethod": "default",
         },
         "meta": {
@@ -248,11 +249,22 @@ mod tests {
     fn build_token_record_computed_context_window() {
         let record = build_token_record(100, 50, Some(10), Some(5), "anthropic", "s1", 1);
         let computed = &record["computed"];
-        assert_eq!(computed["contextWindowTokens"], 150); // 100 + 50
-        // newInputTokens = input - cache_read (cache_creation is new tokens, not deducted)
-        assert_eq!(computed["newInputTokens"], 90); // 100 - 10
-        assert_eq!(computed["previousContextBaseline"], 0);
+        // contextWindowTokens = input + cacheRead + cacheCreation (mutually exclusive)
+        assert_eq!(computed["contextWindowTokens"], 115); // 100 + 10 + 5
+        // newInputTokens = input + cacheCreation (non-cached-read = new content)
+        assert_eq!(computed["newInputTokens"], 105); // 100 + 5
+        assert_eq!(computed["previousContextBaseline"], 10); // cacheRead = prior context
         assert_eq!(computed["calculationMethod"], "default");
+    }
+
+    #[test]
+    fn build_token_record_heavy_cache_read_nonzero_new_input() {
+        // Simulates turn 2+: most input comes from cache, small new input
+        let record = build_token_record(14, 149, Some(9521), Some(200), "anthropic", "s1", 2);
+        let computed = &record["computed"];
+        assert_eq!(computed["contextWindowTokens"], 9735); // 14 + 9521 + 200
+        assert_eq!(computed["newInputTokens"], 214); // 14 + 200 (NOT 0)
+        assert_eq!(computed["previousContextBaseline"], 9521);
     }
 
     #[test]

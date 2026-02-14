@@ -44,26 +44,28 @@ pub fn build_token_record(
 ) -> Value {
     let now = chrono::Utc::now().to_rfc3339();
     let cr = usage.cache_read_tokens.unwrap_or(0);
-    // New input = total input minus cached portion. cache_creation tokens are
-    // NEW tokens written to cache (already part of non-cached input), so we
-    // only subtract cache_read.
-    let new_input = usage.input_tokens.saturating_sub(cr);
+    let cc = usage.cache_creation_tokens.unwrap_or(0);
+    // Anthropic API: input/cacheRead/cacheCreation are MUTUALLY EXCLUSIVE.
+    // input = non-cached new input only, cacheRead = reused from prior context,
+    // cacheCreation = new tokens written to cache. Total context = sum of all three.
+    let context_window = usage.input_tokens + cr + cc;
+    let new_input = usage.input_tokens + cc;
 
     json!({
         "source": {
             "rawInputTokens": usage.input_tokens,
             "rawOutputTokens": usage.output_tokens,
             "rawCacheReadTokens": cr,
-            "rawCacheCreationTokens": usage.cache_creation_tokens.unwrap_or(0),
+            "rawCacheCreationTokens": cc,
             "rawCacheCreation5mTokens": usage.cache_creation_5m_tokens.unwrap_or(0),
             "rawCacheCreation1hTokens": usage.cache_creation_1h_tokens.unwrap_or(0),
             "provider": provider_type.as_str(),
             "timestamp": now,
         },
         "computed": {
-            "contextWindowTokens": usage.input_tokens + usage.output_tokens,
+            "contextWindowTokens": context_window,
             "newInputTokens": new_input,
-            "previousContextBaseline": 0,
+            "previousContextBaseline": cr,
             "calculationMethod": "default",
         },
         "meta": {
@@ -286,11 +288,27 @@ mod tests {
             ..Default::default()
         };
         let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1);
-        assert_eq!(record["computed"]["contextWindowTokens"], 150); // 100 + 50
-        // newInputTokens = input - cache_read (cache_creation is new tokens, not deducted)
-        assert_eq!(record["computed"]["newInputTokens"], 90); // 100 - 10
-        assert_eq!(record["computed"]["previousContextBaseline"], 0);
+        // contextWindowTokens = input + cacheRead + cacheCreation (mutually exclusive)
+        assert_eq!(record["computed"]["contextWindowTokens"], 115); // 100 + 10 + 5
+        // newInputTokens = input + cacheCreation (non-cached-read = new content)
+        assert_eq!(record["computed"]["newInputTokens"], 105); // 100 + 5
+        assert_eq!(record["computed"]["previousContextBaseline"], 10); // cacheRead
         assert_eq!(record["computed"]["calculationMethod"], "default");
+    }
+
+    #[test]
+    fn build_token_record_heavy_cache_read_nonzero_new_input() {
+        let usage = TokenUsage {
+            input_tokens: 14,
+            output_tokens: 149,
+            cache_read_tokens: Some(9521),
+            cache_creation_tokens: Some(200),
+            ..Default::default()
+        };
+        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 2);
+        assert_eq!(record["computed"]["contextWindowTokens"], 9735); // 14 + 9521 + 200
+        assert_eq!(record["computed"]["newInputTokens"], 214); // 14 + 200 (NOT 0)
+        assert_eq!(record["computed"]["previousContextBaseline"], 9521);
     }
 
     #[test]
