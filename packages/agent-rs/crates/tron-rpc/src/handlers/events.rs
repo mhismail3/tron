@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 use tron_events::sqlite::row_types::EventRow;
 
 use crate::context::RpcContext;
@@ -58,6 +59,7 @@ pub struct GetHistoryHandler;
 
 #[async_trait]
 impl MethodHandler for GetHistoryHandler {
+    #[instrument(skip(self, ctx), fields(method = "events.getHistory", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
@@ -138,6 +140,7 @@ pub struct GetSinceHandler;
 
 #[async_trait]
 impl MethodHandler for GetSinceHandler {
+    #[instrument(skip(self, ctx), fields(method = "events.getSince", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
@@ -182,10 +185,23 @@ pub struct SubscribeHandler;
 
 #[async_trait]
 impl MethodHandler for SubscribeHandler {
+    #[instrument(skip(self, _ctx), fields(method = "events.subscribe", session_id))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
         // Subscription is handled at the WebSocket layer; this just acknowledges.
         Ok(serde_json::json!({ "subscribed": true }))
+    }
+}
+
+/// Unsubscribe from real-time events for a session.
+pub struct UnsubscribeHandler;
+
+#[async_trait]
+impl MethodHandler for UnsubscribeHandler {
+    #[instrument(skip(self, _ctx), fields(method = "events.unsubscribe", session_id))]
+    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
+        Ok(serde_json::json!({ "unsubscribed": true }))
     }
 }
 
@@ -194,6 +210,7 @@ pub struct AppendHandler;
 
 #[async_trait]
 impl MethodHandler for AppendHandler {
+    #[instrument(skip(self, ctx), fields(method = "events.append", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let event_type_str = require_string_param(params.as_ref(), "type")?;
@@ -456,6 +473,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["subscribed"], true);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_returns_success() {
+        let ctx = make_test_context();
+        let result = UnsubscribeHandler
+            .handle(Some(json!({"sessionId": "s1"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["unsubscribed"], true);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_requires_session_id() {
+        let ctx = make_test_context();
+        let err = UnsubscribeHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     #[tokio::test]

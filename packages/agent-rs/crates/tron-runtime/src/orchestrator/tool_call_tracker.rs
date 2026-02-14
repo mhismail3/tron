@@ -21,7 +21,7 @@ impl ToolCallTracker {
     /// Register a tool call, returning a receiver that will deliver the result.
     pub fn register(&mut self, tool_call_id: &str) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
-        self.pending.insert(tool_call_id.to_string(), tx);
+        let _ = self.pending.insert(tool_call_id.to_string(), tx);
         rx
     }
 

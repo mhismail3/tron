@@ -36,6 +36,7 @@ pub use sqlite::{
     new_file, new_in_memory, run_migrations, ConnectionConfig, ConnectionPool, PooledConnection,
 };
 pub use sqlite::repositories::session::MessagePreview;
+pub use sqlite::repositories::device_token::RegisterTokenResult;
 pub use store::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
 pub use types::{
     EventType, SessionEvent, SessionEventPayload, TokenUsage, ALL_EVENT_TYPES,

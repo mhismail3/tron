@@ -1,12 +1,31 @@
 //! # tron-embeddings
 //!
-//! `ONNX`-based semantic embeddings and vector search.
+//! Semantic embeddings and vector search for the Tron agent.
 //!
 //! Uses Qwen3-Embedding-0.6B with q4 quantization via `ort`:
 //! - Tokenize -> inference -> last-token pooling
 //! - Matryoshka truncation (1024d -> 512d) + L2 normalization
-//! - `sqlite-vec` integration for vector similarity search
-//!
-//! This crate is feature-gated and only compiled when embeddings are needed.
+//! - `SQLite` BLOB storage with brute-force KNN search
 
 #![deny(unsafe_code)]
+
+pub mod config;
+pub mod controller;
+pub mod errors;
+pub mod normalize;
+#[cfg(feature = "ort")]
+pub mod ort_service;
+pub mod service;
+pub mod text;
+pub mod vector_repo;
+
+pub use config::EmbeddingConfig;
+pub use controller::EmbeddingController;
+pub use errors::{EmbeddingError, Result};
+pub use normalize::{
+    batch_truncate_normalize, cosine_similarity, euclidean_distance, l2_norm, l2_normalize,
+    matryoshka_truncate,
+};
+pub use service::{EmbeddingService, MockEmbeddingService};
+pub use text::build_embedding_text;
+pub use vector_repo::{SearchOptions, VectorRepository, VectorSearchResult};

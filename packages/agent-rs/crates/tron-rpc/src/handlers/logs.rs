@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -13,6 +14,7 @@ pub struct ExportLogsHandler;
 
 #[async_trait]
 impl MethodHandler for ExportLogsHandler {
+    #[instrument(skip(self, _ctx), fields(method = "logs.export"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let content = require_string_param(params.as_ref(), "content")?;
 

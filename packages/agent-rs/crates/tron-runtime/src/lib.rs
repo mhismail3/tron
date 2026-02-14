@@ -10,7 +10,6 @@
 //! - **Orchestrator**: Multi-session management with event broadcasting
 
 #![deny(unsafe_code)]
-#![allow(unused_results)]
 
 pub mod agent;
 pub mod errors;

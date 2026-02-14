@@ -8,6 +8,7 @@ struct LogViewer: View {
     @State private var logs: [(Date, LogCategory, LogLevel, String)] = []
     @State private var isExporting = false
     @State private var exportSuccess = false
+    @State private var copySuccess = false
     @State private var exportResult: String?
     @State private var selectedLevel: LogLevel = .verbose
     @State private var selectedCategory: LogCategory?
@@ -49,16 +50,26 @@ struct LogViewer: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        exportLogsToServer()
-                    } label: {
-                        Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
-                            .contentTransition(.symbolEffect(.replace.downUp))
+                    HStack(spacing: 12) {
+                        Button {
+                            copyLogsToClipboard()
+                        } label: {
+                            Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
+                                .contentTransition(.symbolEffect(.replace.downUp))
+                        }
+
+                        Button {
+                            exportLogsToServer()
+                        } label: {
+                            Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
+                                .contentTransition(.symbolEffect(.replace.downUp))
+                        }
+                        .disabled(isExporting)
                     }
-                    .disabled(isExporting)
                 }
             }
             .sensoryFeedback(.success, trigger: exportSuccess)
+            .sensoryFeedback(.success, trigger: copySuccess)
             .onAppear { refreshLogs() }
             .onReceive(timer) { _ in
                 if autoScroll {
@@ -216,6 +227,29 @@ struct LogViewer: View {
     private func refreshLogs() {
         // Each category maintains its own buffer of 250 entries, so we can request more
         logs = logger.getRecentLogs(count: 1000, level: selectedLevel, category: selectedCategory)
+    }
+
+    private func copyLogsToClipboard() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+
+        let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
+
+        let logText = allLogs.map { entry in
+            let timestamp = formatter.string(from: entry.0)
+            let category = entry.1.rawValue
+            let level = String(describing: entry.2).uppercased()
+            let message = entry.3
+            return "\(timestamp) [\(level)] [\(category)] \(message)"
+        }.joined(separator: "\n")
+
+        UIPasteboard.general.string = logText
+        copySuccess = true
+
+        Task {
+            try? await Task.sleep(for: .seconds(0.6))
+            copySuccess = false
+        }
     }
 
     private func exportLogsToServer() {

@@ -8,7 +8,6 @@
 //! - Graceful shutdown via `CancellationToken` coordination
 
 #![deny(unsafe_code)]
-#![allow(unused_results)]
 
 pub mod config;
 pub mod health;

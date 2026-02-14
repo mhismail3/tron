@@ -34,7 +34,7 @@ tron-memory.workspace = true
 tron-tasks.workspace = true
 tron-rpc.workspace = true
 tron-server.workspace = true
-tron-platform.workspace = true
+tron-platform = { workspace = true, features = ["apns"] }
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true

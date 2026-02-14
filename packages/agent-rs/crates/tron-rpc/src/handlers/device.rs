@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -13,9 +14,37 @@ pub struct RegisterTokenHandler;
 
 #[async_trait]
 impl MethodHandler for RegisterTokenHandler {
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _token = require_string_param(params.as_ref(), "token")?;
-        Ok(serde_json::json!({ "registered": true }))
+    #[instrument(skip(self, ctx), fields(method = "device.register"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let device_token = require_string_param(params.as_ref(), "deviceToken")?;
+
+        let session_id = params
+            .as_ref()
+            .and_then(|p| p.get("sessionId"))
+            .and_then(Value::as_str);
+
+        let workspace_id = params
+            .as_ref()
+            .and_then(|p| p.get("workspaceId"))
+            .and_then(Value::as_str);
+
+        let environment = params
+            .as_ref()
+            .and_then(|p| p.get("environment"))
+            .and_then(Value::as_str)
+            .unwrap_or("production");
+
+        let result = ctx
+            .event_store
+            .register_device_token(&device_token, session_id, workspace_id, environment)
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to register device token: {e}"),
+            })?;
+
+        Ok(serde_json::json!({
+            "id": result.id,
+            "created": result.created,
+        }))
     }
 }
 
@@ -24,9 +53,18 @@ pub struct UnregisterTokenHandler;
 
 #[async_trait]
 impl MethodHandler for UnregisterTokenHandler {
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _token = require_string_param(params.as_ref(), "token")?;
-        Ok(serde_json::json!({ "unregistered": true }))
+    #[instrument(skip(self, ctx), fields(method = "device.unregister"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let device_token = require_string_param(params.as_ref(), "deviceToken")?;
+
+        let success = ctx
+            .event_store
+            .unregister_device_token(&device_token)
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to unregister device token: {e}"),
+            })?;
+
+        Ok(serde_json::json!({ "success": success }))
     }
 }
 
@@ -37,13 +75,40 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn register_token_success() {
+    async fn register_token_returns_id_and_created() {
         let ctx = make_test_context();
         let result = RegisterTokenHandler
-            .handle(Some(json!({"token": "abc123"})), &ctx)
+            .handle(
+                Some(json!({
+                    "deviceToken": "a".repeat(64),
+                    "environment": "sandbox"
+                })),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert_eq!(result["registered"], true);
+
+        assert!(result["id"].is_string());
+        assert!(!result["id"].as_str().unwrap().is_empty());
+        assert_eq!(result["created"], true);
+    }
+
+    #[tokio::test]
+    async fn register_token_existing_returns_created_false() {
+        let ctx = make_test_context();
+        let token = "b".repeat(64);
+        let first = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .await
+            .unwrap();
+        let second = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(first["id"], second["id"]);
+        assert_eq!(first["created"], true);
+        assert_eq!(second["created"], false);
     }
 
     #[tokio::test]
@@ -57,13 +122,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unregister_token_success() {
+    async fn register_token_with_optional_params() {
         let ctx = make_test_context();
-        let result = UnregisterTokenHandler
-            .handle(Some(json!({"token": "abc123"})), &ctx)
+        // Register without session/workspace (FK constraints prevent fake IDs in test DB)
+        let result = RegisterTokenHandler
+            .handle(
+                Some(json!({
+                    "deviceToken": "c".repeat(64),
+                    "environment": "production"
+                })),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert_eq!(result["unregistered"], true);
+        assert!(result["id"].is_string());
+        assert_eq!(result["created"], true);
+    }
+
+    #[tokio::test]
+    async fn register_token_default_environment() {
+        let ctx = make_test_context();
+        let result = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": "d".repeat(64)})), &ctx)
+            .await
+            .unwrap();
+        // Should succeed with default "production" environment
+        assert_eq!(result["created"], true);
+    }
+
+    #[tokio::test]
+    async fn unregister_token_success() {
+        let ctx = make_test_context();
+        let token = "e".repeat(64);
+        // Register first
+        RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .await
+            .unwrap();
+        // Then unregister
+        let result = UnregisterTokenHandler
+            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+    }
+
+    #[tokio::test]
+    async fn unregister_token_not_found() {
+        let ctx = make_test_context();
+        let result = UnregisterTokenHandler
+            .handle(Some(json!({"deviceToken": "nonexistent"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["success"], false);
     }
 
     #[tokio::test]
@@ -74,5 +185,34 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn register_response_matches_ios_decodable() {
+        // iOS expects: struct DeviceTokenRegisterResult { id: String, created: Bool }
+        let ctx = make_test_context();
+        let result = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": "f".repeat(64)})), &ctx)
+            .await
+            .unwrap();
+
+        // Both fields must be present and correct types
+        assert!(result.get("id").is_some(), "missing 'id' field");
+        assert!(result.get("created").is_some(), "missing 'created' field");
+        assert!(result["id"].is_string(), "'id' must be String");
+        assert!(result["created"].is_boolean(), "'created' must be Bool");
+    }
+
+    #[tokio::test]
+    async fn unregister_response_matches_ios_decodable() {
+        // iOS expects: struct DeviceTokenUnregisterResult { success: Bool }
+        let ctx = make_test_context();
+        let result = UnregisterTokenHandler
+            .handle(Some(json!({"deviceToken": "x"})), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result.get("success").is_some(), "missing 'success' field");
+        assert!(result["success"].is_boolean(), "'success' must be Bool");
     }
 }

@@ -12,7 +12,7 @@ workspace = true
 [features]
 default = []
 browser = []
-apns = ["dep:jsonwebtoken"]
+apns = ["dep:jsonwebtoken", "dep:base64"]
 
 [dependencies]
 tron-core.workspace = true
@@ -21,9 +21,12 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+chrono.workspace = true
 gix.workspace = true
 reqwest.workspace = true
+futures.workspace = true
 jsonwebtoken = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

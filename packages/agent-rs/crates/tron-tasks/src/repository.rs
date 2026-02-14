@@ -63,7 +63,7 @@ impl TaskRepository {
         let metadata_json = params
             .metadata
             .as_ref()
-            .map(|m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
+            .map_or_else(|| "{}".to_string(), |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
 
         let started_at = if status == TaskStatus::InProgress {
             Some(now.clone())
@@ -421,7 +421,7 @@ impl TaskRepository {
         let metadata_json = params
             .metadata
             .as_ref()
-            .map(|m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
+            .map_or_else(|| "{}".to_string(), |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
 
         let _ = conn.execute(
             "INSERT INTO projects (id, workspace_id, area_id, title, description, status,
@@ -627,7 +627,7 @@ impl TaskRepository {
         let metadata_json = params
             .metadata
             .as_ref()
-            .map(|m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
+            .map_or_else(|| "{}".to_string(), |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
 
         let _ = conn.execute(
             "INSERT INTO areas (id, workspace_id, title, description, status,

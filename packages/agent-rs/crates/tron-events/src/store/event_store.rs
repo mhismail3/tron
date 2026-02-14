@@ -5,6 +5,7 @@
 //! never observe partial state.
 
 use serde_json::Value;
+use tracing::{debug, instrument};
 use uuid::Uuid;
 
 use std::collections::HashMap;
@@ -19,8 +20,9 @@ use crate::sqlite::repositories::search::{SearchOptions, SearchRepo};
 use crate::sqlite::repositories::session::{
     CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
+use crate::sqlite::repositories::device_token::{DeviceTokenRepo, RegisterTokenResult};
 use crate::sqlite::repositories::workspace::WorkspaceRepo;
-use crate::sqlite::row_types::{BlobRow, EventRow, SessionRow, WorkspaceRow};
+use crate::sqlite::row_types::{BlobRow, DeviceTokenRow, EventRow, SessionRow, WorkspaceRow};
 use crate::types::base::SessionEvent;
 use crate::types::state::{SearchResult, SessionState};
 use crate::types::EventType;
@@ -92,6 +94,7 @@ impl EventStore {
     /// Atomic: workspace creation (get-or-create), session insertion, root event
     /// insertion, head/root pointer updates, and counter increments all happen
     /// in a single transaction.
+    #[instrument(skip(self), fields(model, workspace_path))]
     pub fn create_session(
         &self,
         model: &str,
@@ -165,6 +168,8 @@ impl EventStore {
         let root_event = EventRepo::get_by_id(&conn, &event.id)?
             .ok_or(EventStoreError::EventNotFound(event.id))?;
 
+        debug!(session_id = %updated_session.id, "session created");
+
         Ok(CreateSessionResult {
             session: updated_session,
             root_event,
@@ -175,6 +180,7 @@ impl EventStore {
     ///
     /// Atomic: sequence generation, event insertion, head update, and counter
     /// increments all happen in a single transaction.
+    #[instrument(skip(self, opts), fields(session_id = opts.session_id, event_type = %opts.event_type))]
     pub fn append(&self, opts: &AppendOptions<'_>) -> Result<EventRow> {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
@@ -257,6 +263,7 @@ impl EventStore {
     /// Creates a new session whose root `session.fork` event has its `parent_id`
     /// pointing into the source session's event tree. Ancestor walks from the
     /// fork event traverse back through the shared history.
+    #[instrument(skip(self, opts), fields(from_event_id))]
     pub fn fork(
         &self,
         from_event_id: &str,
@@ -334,6 +341,12 @@ impl EventStore {
         let fork_event_row = EventRepo::get_by_id(&conn, &fork_event.id)?
             .ok_or(EventStoreError::EventNotFound(fork_event.id))?;
 
+        debug!(
+            new_session_id = %updated_session.id,
+            source_session_id = %source_session.id,
+            "session forked"
+        );
+
         Ok(ForkResult {
             session: updated_session,
             fork_event: fork_event_row,
@@ -345,6 +358,7 @@ impl EventStore {
     /// The target event must be a message event (`message.user`, `message.assistant`,
     /// or `tool.result`). The original event is never modified — deletion is recorded
     /// as a new event and applied during message reconstruction.
+    #[instrument(skip(self), fields(session_id, target_event_id))]
     pub fn delete_message(
         &self,
         session_id: &str,
@@ -593,6 +607,7 @@ impl EventStore {
     }
 
     /// Delete a session and all its events.
+    #[instrument(skip(self), fields(session_id))]
     pub fn delete_session(&self, session_id: &str) -> Result<bool> {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
@@ -735,6 +750,40 @@ impl EventStore {
     /// Get the raw connection pool (for advanced/custom queries).
     pub fn pool(&self) -> &ConnectionPool {
         &self.pool
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Device tokens
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Register or update a device token. Returns `{id, created}`.
+    pub fn register_device_token(
+        &self,
+        device_token: &str,
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+        environment: &str,
+    ) -> Result<RegisterTokenResult> {
+        let conn = self.conn()?;
+        DeviceTokenRepo::register(&conn, device_token, session_id, workspace_id, environment)
+    }
+
+    /// Unregister (deactivate) a device token.
+    pub fn unregister_device_token(&self, device_token: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        DeviceTokenRepo::unregister(&conn, device_token)
+    }
+
+    /// Get all active device tokens.
+    pub fn get_all_active_device_tokens(&self) -> Result<Vec<DeviceTokenRow>> {
+        let conn = self.conn()?;
+        DeviceTokenRepo::get_all_active(&conn)
+    }
+
+    /// Mark a device token as invalid (e.g., after APNS 410 response).
+    pub fn mark_device_token_invalid(&self, device_token: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        DeviceTokenRepo::mark_invalid(&conn, device_token)
     }
 }
 

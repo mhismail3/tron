@@ -284,6 +284,45 @@ impl ContextLoader {
 }
 
 // =============================================================================
+// Global rules
+// =============================================================================
+
+/// File names to search for global rules (in priority order).
+const GLOBAL_RULE_NAMES: &[&str] = &["CLAUDE.md", "claude.md", "AGENTS.md", "agents.md"];
+
+/// Load global rules from `~/.tron/` directory.
+///
+/// Searches for CLAUDE.md, claude.md, AGENTS.md, agents.md in priority order.
+/// Returns `None` if no file is found or all files are empty.
+pub fn load_global_rules(home_dir: &Path) -> Option<String> {
+    let tron_dir = home_dir.join(".tron");
+    for name in GLOBAL_RULE_NAMES {
+        let path = tron_dir.join(name);
+        if path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if !content.trim().is_empty() {
+                    return Some(content);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Merge global and project rules.
+///
+/// Global rules come first (higher precedence in context),
+/// separated by double newline. Returns `None` if both are `None`.
+pub fn merge_rules(global: Option<String>, project: Option<String>) -> Option<String> {
+    match (global, project) {
+        (Some(g), Some(p)) => Some(format!("{g}\n\n{p}")),
+        (Some(g), None) => Some(g),
+        (None, Some(p)) => Some(p),
+        (None, None) => None,
+    }
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 
@@ -633,5 +672,89 @@ mod tests {
     #[test]
     fn merge_empty() {
         assert!(merge_contexts(&[]).is_empty());
+    }
+
+    // -- load_global_rules --
+
+    #[test]
+    fn load_global_rules_from_tron_dir() {
+        let home = create_temp_project();
+        let tron_dir = home.join(".tron");
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("CLAUDE.md"), "# Global Rules").unwrap();
+
+        let result = load_global_rules(&home);
+        assert_eq!(result, Some("# Global Rules".into()));
+
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_none_if_missing() {
+        let home = create_temp_project();
+        assert!(load_global_rules(&home).is_none());
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_skips_empty_file() {
+        let home = create_temp_project();
+        let tron_dir = home.join(".tron");
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("CLAUDE.md"), "   \n  ").unwrap();
+
+        assert!(load_global_rules(&home).is_none());
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_priority_order() {
+        let home = create_temp_project();
+        let tron_dir = home.join(".tron");
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("CLAUDE.md"), "claude rules").unwrap();
+        fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
+
+        // CLAUDE.md has higher priority
+        let result = load_global_rules(&home).unwrap();
+        assert_eq!(result, "claude rules");
+        cleanup(&home);
+    }
+
+    #[test]
+    fn load_global_rules_falls_back_to_agents() {
+        let home = create_temp_project();
+        let tron_dir = home.join(".tron");
+        fs::create_dir_all(&tron_dir).unwrap();
+        fs::write(tron_dir.join("AGENTS.md"), "agents rules").unwrap();
+
+        let result = load_global_rules(&home).unwrap();
+        assert_eq!(result, "agents rules");
+        cleanup(&home);
+    }
+
+    // -- merge_rules --
+
+    #[test]
+    fn merge_rules_both_present() {
+        let result = merge_rules(Some("global".into()), Some("project".into()));
+        assert_eq!(result, Some("global\n\nproject".into()));
+    }
+
+    #[test]
+    fn merge_rules_global_only() {
+        let result = merge_rules(Some("global".into()), None);
+        assert_eq!(result, Some("global".into()));
+    }
+
+    #[test]
+    fn merge_rules_project_only() {
+        let result = merge_rules(None, Some("project".into()));
+        assert_eq!(result, Some("project".into()));
+    }
+
+    #[test]
+    fn merge_rules_both_none() {
+        assert!(merge_rules(None, None).is_none());
     }
 }

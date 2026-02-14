@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -13,9 +14,13 @@ pub struct StartStreamHandler;
 
 #[async_trait]
 impl MethodHandler for StartStreamHandler {
+    #[instrument(skip(self, _ctx), fields(method = "browser.startStream"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({ "streaming": true }))
+        Err(RpcError::NotAvailable {
+            message: "Browser streaming requires CDP infrastructure not available in Rust server"
+                .into(),
+        })
     }
 }
 
@@ -24,9 +29,11 @@ pub struct StopStreamHandler;
 
 #[async_trait]
 impl MethodHandler for StopStreamHandler {
+    #[instrument(skip(self, _ctx), fields(method = "browser.stopStream"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({ "stopped": true }))
+        // No-op stop is safe
+        Ok(serde_json::json!({ "success": true, "error": null }))
     }
 }
 
@@ -35,9 +42,14 @@ pub struct GetStatusHandler;
 
 #[async_trait]
 impl MethodHandler for GetStatusHandler {
+    #[instrument(skip(self, _ctx), fields(method = "browser.getStatus"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({ "active": false }))
+        Ok(serde_json::json!({
+            "hasBrowser": false,
+            "isStreaming": false,
+            "currentUrl": null,
+        }))
     }
 }
 
@@ -48,13 +60,13 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn start_stream_success() {
+    async fn start_stream_not_available() {
         let ctx = make_test_context();
-        let result = StartStreamHandler
+        let err = StartStreamHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
             .await
-            .unwrap();
-        assert_eq!(result["streaming"], true);
+            .unwrap_err();
+        assert_eq!(err.code(), "NOT_AVAILABLE");
     }
 
     #[tokio::test]
@@ -74,16 +86,17 @@ mod tests {
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
             .await
             .unwrap();
-        assert_eq!(result["stopped"], true);
+        assert_eq!(result["success"], true);
     }
 
     #[tokio::test]
-    async fn get_status_success() {
+    async fn get_status_no_browser() {
         let ctx = make_test_context();
         let result = GetStatusHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
             .await
             .unwrap();
-        assert_eq!(result["active"], false);
+        assert_eq!(result["hasBrowser"], false);
+        assert_eq!(result["isStreaming"], false);
     }
 }

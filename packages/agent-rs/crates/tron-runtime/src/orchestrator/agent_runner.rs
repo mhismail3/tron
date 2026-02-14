@@ -8,6 +8,8 @@ use std::sync::Arc;
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_hooks::engine::HookEngine;
 
+use tracing::{debug, info, instrument};
+
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::tron_agent::TronAgent;
 use crate::types::{RunContext, RunResult};
@@ -21,6 +23,7 @@ use crate::types::{RunContext, RunResult};
 /// 4. Post-run: emit `agent.complete`
 /// 5. Post-run: drain background hooks
 /// 6. Post-run: emit `agent.ready` (MUST be after `agent.complete`)
+#[instrument(skip_all, fields(session_id = agent.session_id()))]
 pub async fn run_agent(
     agent: &mut TronAgent,
     content: &str,
@@ -29,10 +32,12 @@ pub async fn run_agent(
     broadcast: &Arc<EventEmitter>,
 ) -> RunResult {
     let session_id = agent.session_id().to_owned();
+    debug!(session_id = agent.session_id(), "agent runner starting");
 
     // 1. Drain background hooks from previous run
     if let Some(hook_engine) = hooks {
         hook_engine.wait_for_background().await;
+        debug!("background hooks drained");
     }
 
     // 2. Forward agent events to broadcast channel
@@ -40,29 +45,31 @@ pub async fn run_agent(
     let broadcast_clone = broadcast.clone();
     let forward_handle = tokio::spawn(async move {
         while let Ok(event) = agent_rx.recv().await {
-            broadcast_clone.emit(event);
+            let _ = broadcast_clone.emit(event);
         }
     });
 
     // 3. Run the agent
     let result = agent.run(content, ctx).await;
 
-    // Stop event forwarding
+    // Yield to let the forward task drain remaining events from the agent
+    // (including AgentEnd which was the last event emitted by TronAgent::run).
+    // Multiple yields increase the chance all buffered events are forwarded
+    // before we abort the task.
+    for _ in 0..3 {
+        tokio::task::yield_now().await;
+    }
     forward_handle.abort();
-
-    // 4. Emit agent.complete (via the broadcast channel)
-    broadcast.emit(TronEvent::AgentEnd {
-        base: BaseEvent::now(&session_id),
-        error: result.error.clone(),
-    });
 
     // 5. Drain background hooks
     if let Some(hook_engine) = hooks {
         hook_engine.wait_for_background().await;
     }
 
+    info!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
+
     // 6. Emit agent.ready — MUST be AFTER agent.complete
-    broadcast.emit(TronEvent::AgentReady {
+    let _ = broadcast.emit(TronEvent::AgentReady {
         base: BaseEvent::now(&session_id),
     });
 
@@ -189,6 +196,34 @@ mod tests {
 
         let result = run_agent(&mut agent, "What tasks?", ctx, &None, &broadcast).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn run_agent_no_duplicate_agent_end() {
+        let mut agent = make_agent();
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let _ = run_agent(
+            &mut agent,
+            "Hello",
+            RunContext::default(),
+            &None,
+            &broadcast,
+        )
+        .await;
+
+        // Count agent_end events — there should be exactly one (from TronAgent, forwarded)
+        let mut agent_end_count = 0;
+        while let Ok(event) = rx.try_recv() {
+            if event.event_type() == "agent_end" {
+                agent_end_count += 1;
+            }
+        }
+        assert_eq!(
+            agent_end_count, 1,
+            "expected exactly 1 agent_end, got {agent_end_count}"
+        );
     }
 
     #[tokio::test]

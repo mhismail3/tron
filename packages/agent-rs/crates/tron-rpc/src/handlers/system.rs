@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -12,6 +13,7 @@ pub struct PingHandler;
 
 #[async_trait]
 impl MethodHandler for PingHandler {
+    #[instrument(skip(self, _ctx), fields(method = "system.info"))]
     async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         Ok(serde_json::json!({
             "pong": true,
@@ -25,9 +27,15 @@ pub struct GetInfoHandler;
 
 #[async_trait]
 impl MethodHandler for GetInfoHandler {
-    async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "system.getInfo"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let uptime = ctx.server_start_time.elapsed().as_secs();
+        let active_sessions = ctx.orchestrator.active_session_count();
+
         Ok(serde_json::json!({
             "version": env!("CARGO_PKG_VERSION"),
+            "uptime": uptime,
+            "activeSessions": active_sessions,
             "platform": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
             "runtime": "agent-rs",
@@ -40,6 +48,7 @@ pub struct ShutdownHandler;
 
 #[async_trait]
 impl MethodHandler for ShutdownHandler {
+    #[instrument(skip(self, ctx), fields(method = "system.shutdown"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         ctx.orchestrator
             .shutdown()
@@ -74,6 +83,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_info_returns_uptime() {
+        let ctx = make_test_context();
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        let uptime = result["uptime"].as_u64().unwrap();
+        assert!(uptime < 5);
+    }
+
+    #[tokio::test]
+    async fn get_info_returns_active_sessions() {
+        let ctx = make_test_context();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(result["activeSessions"], 1);
+    }
+
+    #[tokio::test]
+    async fn get_info_retains_extra_fields() {
+        let ctx = make_test_context();
+        let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
+        assert!(result["platform"].is_string());
+        assert!(result["arch"].is_string());
+        assert_eq!(result["runtime"], "agent-rs");
+    }
+
+    #[tokio::test]
     async fn shutdown_acknowledged() {
         let ctx = make_test_context();
         let result = ShutdownHandler.handle(None, &ctx).await.unwrap();
@@ -98,7 +135,6 @@ mod tests {
         let ctx = make_test_context();
         let result = PingHandler.handle(None, &ctx).await.unwrap();
         let ts = result["timestamp"].as_str().unwrap();
-        // Should end with Z and contain T
         assert!(ts.contains('T'));
         assert!(ts.ends_with('Z'));
     }

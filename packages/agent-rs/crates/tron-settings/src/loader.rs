@@ -13,6 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use tracing::debug;
 
 use crate::errors::Result;
 use crate::types::TronSettings;
@@ -36,10 +37,12 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     let defaults = serde_json::to_value(TronSettings::default())?;
 
     let merged = if path.exists() {
+        debug!(?path, "loading settings from file");
         let content = std::fs::read_to_string(path)?;
         let user: Value = serde_json::from_str(&content)?;
         deep_merge(defaults, user)
     } else {
+        debug!(?path, "settings file not found, using defaults");
         defaults
     };
 

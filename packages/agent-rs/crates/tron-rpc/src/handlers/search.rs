@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -13,6 +14,7 @@ pub struct ContentSearchHandler;
 
 #[async_trait]
 impl MethodHandler for ContentSearchHandler {
+    #[instrument(skip(self, ctx), fields(method = "search.content"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let query = require_string_param(params.as_ref(), "query")?;
 
@@ -69,6 +71,7 @@ pub struct EventSearchHandler;
 
 #[async_trait]
 impl MethodHandler for EventSearchHandler {
+    #[instrument(skip(self, ctx), fields(method = "search.events"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let query = require_string_param(params.as_ref(), "query")?;
 

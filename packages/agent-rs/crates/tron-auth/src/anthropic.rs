@@ -6,13 +6,13 @@
 use crate::errors::AuthError;
 use crate::types::{OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at, now_ms};
 
-/// Default Anthropic OAuth settings.
+/// Default Anthropic OAuth settings (matching TypeScript defaults).
 pub fn default_config() -> OAuthConfig {
     OAuthConfig {
         auth_url: "https://console.anthropic.com/oauth/authorize".to_string(),
         token_url: "https://console.anthropic.com/v1/oauth/token".to_string(),
         redirect_uri: "https://console.anthropic.com/oauth/code/callback".to_string(),
-        client_id: String::new(),
+        client_id: "9d1c250a-e61b-44d9-88ed-5944d1962f5e".to_string(),
         client_secret: None,
         scopes: vec![
             "org:create_api_key".to_string(),
@@ -36,6 +36,7 @@ pub fn get_authorization_url(config: &OAuthConfig, challenge: &str) -> String {
 }
 
 /// Exchange an authorization code for tokens.
+#[tracing::instrument(skip_all)]
 pub async fn exchange_code_for_tokens(
     config: &OAuthConfig,
     code: &str,
@@ -81,6 +82,7 @@ pub async fn exchange_code_for_tokens(
 }
 
 /// Refresh an expired OAuth token.
+#[tracing::instrument(skip_all)]
 pub async fn refresh_token(
     config: &OAuthConfig,
     refresh_token: &str,
@@ -132,6 +134,7 @@ pub fn is_oauth_token(token: &str) -> bool {
 /// 4. API key
 ///
 /// OAuth tokens are auto-refreshed if expired.
+#[tracing::instrument(skip_all, fields(provider = "anthropic"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
     config: &OAuthConfig,
@@ -163,7 +166,14 @@ pub async fn load_server_auth(
             .or_else(|| accounts.first());
 
             if let Some(acct) = account {
-                let tokens = maybe_refresh_tokens(&acct.oauth, config).await?;
+                let (tokens, refreshed) =
+                    maybe_refresh_tokens(&acct.oauth, config).await?;
+                if refreshed {
+                    tracing::info!(account = %acct.label, "persisting refreshed account tokens");
+                    let _ = crate::storage::save_account_oauth_tokens(
+                        auth_path, "anthropic", &acct.label, &tokens,
+                    );
+                }
                 return Ok(Some(ServerAuth::from_oauth(
                     &tokens,
                     Some(acct.label.clone()),
@@ -175,7 +185,15 @@ pub async fn load_server_auth(
     // 3. Legacy single OAuth
     if let Some(oauth) = &pa.oauth {
         match maybe_refresh_tokens(oauth, config).await {
-            Ok(tokens) => return Ok(Some(ServerAuth::from_oauth(&tokens, None))),
+            Ok((tokens, refreshed)) => {
+                if refreshed {
+                    tracing::info!("persisting refreshed provider tokens");
+                    let _ = crate::storage::save_provider_oauth_tokens(
+                        auth_path, "anthropic", &tokens,
+                    );
+                }
+                return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
+            }
             Err(e) => {
                 tracing::warn!("Anthropic OAuth refresh failed: {e}");
                 // Fall through to API key
@@ -191,18 +209,19 @@ pub async fn load_server_auth(
     Ok(None)
 }
 
-/// Refresh tokens if expired, returning the (possibly new) tokens.
+/// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
 async fn maybe_refresh_tokens(
     tokens: &OAuthTokens,
     config: &OAuthConfig,
-) -> Result<OAuthTokens, AuthError> {
+) -> Result<(OAuthTokens, bool), AuthError> {
     let buffer_ms = config.token_expiry_buffer_seconds * 1000;
     if now_ms() + buffer_ms < tokens.expires_at {
-        return Ok(tokens.clone());
+        return Ok((tokens.clone(), false));
     }
 
     tracing::info!("Anthropic OAuth token expired, refreshing...");
-    refresh_token(config, &tokens.refresh_token).await
+    let new_tokens = refresh_token(config, &tokens.refresh_token).await?;
+    Ok((new_tokens, true))
 }
 
 /// Token endpoint response.

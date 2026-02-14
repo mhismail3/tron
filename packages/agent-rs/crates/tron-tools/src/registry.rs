@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tron_core::tools::Tool;
+use tracing::debug;
 
 use crate::traits::TronTool;
 
@@ -26,6 +27,7 @@ impl ToolRegistry {
 
     /// Register a tool. Overwrites any existing tool with the same name.
     pub fn register(&mut self, tool: Arc<dyn TronTool>) {
+        debug!(tool_name = tool.name(), "tool registered");
         let _ = self.tools.insert(tool.name().to_owned(), tool);
     }
 

@@ -4,6 +4,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::{self, RpcError};
@@ -49,6 +50,7 @@ pub struct CreateTaskHandler;
 
 #[async_trait]
 impl MethodHandler for CreateTaskHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let title = require_string_param(params.as_ref(), "title")?;
         let conn = get_task_conn(ctx)?;
@@ -86,6 +88,7 @@ pub struct GetTaskHandler;
 
 #[async_trait]
 impl MethodHandler for GetTaskHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
         let conn = get_task_conn(ctx)?;
@@ -102,6 +105,7 @@ pub struct UpdateTaskHandler;
 
 #[async_trait]
 impl MethodHandler for UpdateTaskHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
         let conn = get_task_conn(ctx)?;
@@ -138,6 +142,7 @@ pub struct ListTasksHandler;
 
 #[async_trait]
 impl MethodHandler for ListTasksHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let conn = get_task_conn(ctx)?;
 
@@ -169,7 +174,7 @@ impl MethodHandler for ListTasksHandler {
                 message: e.to_string(),
             })?;
 
-        Ok(serde_json::json!({ "tasks": result.tasks }))
+        Ok(serde_json::json!({ "tasks": result.tasks, "total": result.total }))
     }
 }
 
@@ -178,6 +183,7 @@ pub struct DeleteTaskHandler;
 
 #[async_trait]
 impl MethodHandler for DeleteTaskHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
         let conn = get_task_conn(ctx)?;
@@ -194,6 +200,7 @@ pub struct SearchTasksHandler;
 
 #[async_trait]
 impl MethodHandler for SearchTasksHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.search"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let query = require_string_param(params.as_ref(), "query")?;
         let conn = get_task_conn(ctx)?;
@@ -214,6 +221,7 @@ pub struct GetTaskActivityHandler;
 
 #[async_trait]
 impl MethodHandler for GetTaskActivityHandler {
+    #[instrument(skip(self, ctx), fields(method = "task.getActivity"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let task_id = require_string_param(params.as_ref(), "taskId")?;
         let conn = get_task_conn(ctx)?;
@@ -234,6 +242,7 @@ pub struct CreateProjectHandler;
 
 #[async_trait]
 impl MethodHandler for CreateProjectHandler {
+    #[instrument(skip(self, ctx), fields(method = "project.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let title = require_string_param(params.as_ref(), "title")?;
         let conn = get_task_conn(ctx)?;
@@ -271,6 +280,7 @@ pub struct ListProjectsHandler;
 
 #[async_trait]
 impl MethodHandler for ListProjectsHandler {
+    #[instrument(skip(self, ctx), fields(method = "project.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let conn = get_task_conn(ctx)?;
 
@@ -293,6 +303,7 @@ pub struct GetProjectHandler;
 
 #[async_trait]
 impl MethodHandler for GetProjectHandler {
+    #[instrument(skip(self, ctx), fields(method = "project.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let conn = get_task_conn(ctx)?;
@@ -319,6 +330,7 @@ pub struct UpdateProjectHandler;
 
 #[async_trait]
 impl MethodHandler for UpdateProjectHandler {
+    #[instrument(skip(self, ctx), fields(method = "project.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let conn = get_task_conn(ctx)?;
@@ -351,6 +363,7 @@ pub struct DeleteProjectHandler;
 
 #[async_trait]
 impl MethodHandler for DeleteProjectHandler {
+    #[instrument(skip(self, ctx), fields(method = "project.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let conn = get_task_conn(ctx)?;
@@ -369,6 +382,7 @@ pub struct GetProjectDetailsHandler;
 
 #[async_trait]
 impl MethodHandler for GetProjectDetailsHandler {
+    #[instrument(skip(self, ctx), fields(method = "project.getDetails"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let conn = get_task_conn(ctx)?;
@@ -397,7 +411,7 @@ impl MethodHandler for GetProjectDetailsHandler {
 
         let mut project_json = serde_json::to_value(&project).unwrap_or_default();
         if let Some(obj) = project_json.as_object_mut() {
-            obj.insert("tasks".into(), serde_json::json!(task_result.tasks));
+            let _ = obj.insert("tasks".into(), serde_json::json!(task_result.tasks));
         }
 
         Ok(project_json)
@@ -409,6 +423,7 @@ pub struct CreateAreaHandler;
 
 #[async_trait]
 impl MethodHandler for CreateAreaHandler {
+    #[instrument(skip(self, ctx), fields(method = "area.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let title = require_string_param(params.as_ref(), "title")?;
         let conn = get_task_conn(ctx)?;
@@ -440,6 +455,7 @@ pub struct ListAreasHandler;
 
 #[async_trait]
 impl MethodHandler for ListAreasHandler {
+    #[instrument(skip(self, ctx), fields(method = "area.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let conn = get_task_conn(ctx)?;
 
@@ -462,6 +478,7 @@ pub struct GetAreaHandler;
 
 #[async_trait]
 impl MethodHandler for GetAreaHandler {
+    #[instrument(skip(self, ctx), fields(method = "area.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
         let conn = get_task_conn(ctx)?;
@@ -487,6 +504,7 @@ pub struct UpdateAreaHandler;
 
 #[async_trait]
 impl MethodHandler for UpdateAreaHandler {
+    #[instrument(skip(self, ctx), fields(method = "area.update"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
         let conn = get_task_conn(ctx)?;
@@ -523,6 +541,7 @@ pub struct DeleteAreaHandler;
 
 #[async_trait]
 impl MethodHandler for DeleteAreaHandler {
+    #[instrument(skip(self, ctx), fields(method = "area.delete"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
         let conn = get_task_conn(ctx)?;
@@ -642,6 +661,7 @@ mod tests {
         let ctx = make_test_context_with_tasks();
         let result = ListTasksHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["tasks"].as_array().unwrap().len(), 0);
+        assert_eq!(result["total"], 0);
     }
 
     #[tokio::test]
@@ -659,6 +679,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["tasks"].as_array().unwrap().len(), 3);
+        // total reflects all tasks, not just the page
+        assert_eq!(result["total"], 5);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_ios_field_names() {
+        let ctx = make_test_context_with_tasks();
+        let result = ListTasksHandler.handle(None, &ctx).await.unwrap();
+        // iOS TaskListResult expects {tasks: [RpcTask], total: Int}
+        assert!(result.get("tasks").is_some());
+        assert!(result.get("total").is_some());
+        assert!(result["total"].is_number());
     }
 
     // Project tests

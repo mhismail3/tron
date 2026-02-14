@@ -2,12 +2,29 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use parking_lot::RwLock;
 use tron_events::{ConnectionPool, EventStore};
+use tron_guardrails::GuardrailEngine;
+use tron_hooks::engine::HookEngine;
+use tron_llm::provider::Provider;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_skills::registry::SkillRegistry;
+use tron_tools::registry::ToolRegistry;
+
+/// Dependencies needed to create and run agents.
+pub struct AgentDeps {
+    /// LLM provider.
+    pub provider: Arc<dyn Provider>,
+    /// Factory that creates a fresh tool registry per agent.
+    pub tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
+    /// Guardrail engine (optional).
+    pub guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    /// Hook engine (optional).
+    pub hooks: Option<Arc<HookEngine>>,
+}
 
 /// Shared context passed to every RPC handler.
 pub struct RpcContext {
@@ -19,15 +36,34 @@ pub struct RpcContext {
     pub event_store: Arc<EventStore>,
     /// Skill registry (read/write).
     pub skill_registry: Arc<RwLock<SkillRegistry>>,
-    /// Connection pool for task database (separate from events DB).
+    /// Connection pool for task tables (same DB as events).
     pub task_pool: Option<ConnectionPool>,
     /// Path to settings JSON file.
     pub settings_path: PathBuf,
+    /// Agent execution dependencies (None = prompt handler returns error).
+    pub agent_deps: Option<AgentDeps>,
+    /// When the server started (for uptime calculation).
+    pub server_start_time: Instant,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::test_helpers::{make_test_context, make_test_context_with_tasks};
+    use super::*;
+    use crate::handlers::test_helpers::{make_test_context, make_test_context_with_tasks, make_test_agent_deps};
+
+    #[test]
+    fn context_has_server_start_time() {
+        let ctx = make_test_context();
+        let elapsed = ctx.server_start_time.elapsed();
+        assert!(elapsed.as_secs() < 5);
+    }
+
+    #[test]
+    fn server_start_time_allows_uptime_calc() {
+        let ctx = make_test_context();
+        let uptime = std::time::Instant::now() - ctx.server_start_time;
+        assert!(uptime.as_secs() < 5);
+    }
 
     #[test]
     fn context_has_orchestrator() {
@@ -129,5 +165,40 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    // ── AgentDeps tests ──
+
+    #[test]
+    fn context_without_agent_deps_backward_compat() {
+        let ctx = make_test_context();
+        assert!(ctx.agent_deps.is_none());
+    }
+
+    #[test]
+    fn context_with_agent_deps() {
+        let mut ctx = make_test_context();
+        ctx.agent_deps = Some(make_test_agent_deps());
+        assert!(ctx.agent_deps.is_some());
+    }
+
+    #[test]
+    fn agent_deps_provider_accessible() {
+        let deps = make_test_agent_deps();
+        assert_eq!(deps.provider.model(), "mock");
+    }
+
+    #[test]
+    fn agent_deps_tool_factory_creates_registry() {
+        let deps = make_test_agent_deps();
+        let registry = (deps.tool_factory)();
+        // Empty registry from factory
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn agent_deps_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AgentDeps>();
     }
 }

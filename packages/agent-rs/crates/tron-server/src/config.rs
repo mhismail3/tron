@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Configuration for the Tron server.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
-    /// Host to bind (default `"127.0.0.1"`).
+    /// Host to bind (default `"0.0.0.0"`).
     pub host: String,
     /// Port to bind (default `0` for auto-assign).
     pub port: u16,
@@ -22,7 +22,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            host: "127.0.0.1".into(),
+            host: "0.0.0.0".into(),
             port: 0,
             max_connections: 50,
             heartbeat_interval_secs: 30,
@@ -39,7 +39,7 @@ mod tests {
     #[test]
     fn default_host() {
         let cfg = ServerConfig::default();
-        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.host, "0.0.0.0");
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub mod git;
 pub mod logs;
 pub mod memory;
 pub mod message;
+pub mod sandbox;
 pub mod model;
 pub mod plan;
 pub mod search;
@@ -50,6 +51,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("session.fork", session::ForkSessionHandler);
     registry.register("session.getHead", session::GetHeadHandler);
     registry.register("session.getState", session::GetStateHandler);
+    registry.register("session.getHistory", session::GetHistoryHandler);
     registry.register("session.archive", session::ArchiveSessionHandler);
     registry.register("session.unarchive", session::UnarchiveSessionHandler);
 
@@ -76,6 +78,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("events.getHistory", events::GetHistoryHandler);
     registry.register("events.getSince", events::GetSinceHandler);
     registry.register("events.subscribe", events::SubscribeHandler);
+    registry.register("events.unsubscribe", events::UnsubscribeHandler);
     registry.register("events.append", events::AppendHandler);
 
     // Settings
@@ -91,6 +94,8 @@ fn register_core(registry: &mut MethodRegistry) {
     // Memory
     registry.register("memory.getLedger", memory::GetLedgerHandler);
     registry.register("memory.updateLedger", memory::UpdateLedgerHandler);
+    registry.register("memory.search", memory::SearchMemoryHandler);
+    registry.register("memory.getHandoffs", memory::GetHandoffsHandler);
 
     // Logs
     registry.register("logs.export", logs::ExportLogsHandler);
@@ -186,6 +191,12 @@ fn register_platform(registry: &mut MethodRegistry) {
 
     // Git
     registry.register("git.clone", git::CloneHandler);
+
+    // Sandbox
+    registry.register("sandbox.listContainers", sandbox::ListContainersHandler);
+    registry.register("sandbox.startContainer", sandbox::StartContainerHandler);
+    registry.register("sandbox.stopContainer", sandbox::StopContainerHandler);
+    registry.register("sandbox.killContainer", sandbox::KillContainerHandler);
 }
 
 /// Extract a required parameter from the params object.
@@ -217,14 +228,50 @@ pub(crate) fn require_string_param(
 pub(crate) mod test_helpers {
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Instant;
 
+    use async_trait::async_trait;
     use parking_lot::RwLock;
     use tron_events::EventStore;
+    use tron_llm::models::types::ProviderType;
+    use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_runtime::orchestrator::orchestrator::Orchestrator;
     use tron_runtime::orchestrator::session_manager::SessionManager;
     use tron_skills::registry::SkillRegistry;
+    use tron_tools::registry::ToolRegistry;
 
-    use crate::context::RpcContext;
+    use crate::context::{AgentDeps, RpcContext};
+
+    /// A no-op mock provider for tests.
+    pub struct MockProvider;
+    #[async_trait]
+    impl Provider for MockProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Other {
+                message: "mock provider".into(),
+            })
+        }
+    }
+
+    /// Build `AgentDeps` for testing with a mock provider.
+    pub fn make_test_agent_deps() -> AgentDeps {
+        AgentDeps {
+            provider: Arc::new(MockProvider),
+            tool_factory: Arc::new(ToolRegistry::new),
+            guardrails: None,
+            hooks: None,
+        }
+    }
 
     /// Build an `RpcContext` backed by an in-memory event store.
     pub fn make_test_context() -> RpcContext {
@@ -244,28 +291,31 @@ pub(crate) mod test_helpers {
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
             task_pool: None,
             settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: Instant::now(),
         }
     }
 
-    /// Build an `RpcContext` with a task database pool.
+    /// Build an `RpcContext` with agent deps (mock provider).
+    pub fn make_test_context_with_agent_deps() -> RpcContext {
+        let mut ctx = make_test_context();
+        ctx.agent_deps = Some(make_test_agent_deps());
+        ctx
+    }
+
+    /// Build an `RpcContext` with task tables (same DB as events).
     pub fn make_test_context_with_tasks() -> RpcContext {
         let pool =
             tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             tron_events::run_migrations(&conn).unwrap();
+            tron_tasks::migrations::run_migrations(&conn).unwrap();
         }
+        let task_pool = pool.clone();
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store.clone()));
         let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
-
-        // Create a separate in-memory pool for tasks
-        let task_pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
-        {
-            let conn = task_pool.get().unwrap();
-            tron_tasks::migrations::run_migrations(&conn).unwrap();
-        }
 
         RpcContext {
             orchestrator: orch,
@@ -274,6 +324,8 @@ pub(crate) mod test_helpers {
             skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
             task_pool: Some(task_pool),
             settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: Instant::now(),
         }
     }
 }
@@ -297,9 +349,10 @@ mod tests {
     fn register_all_method_count() {
         let mut reg = MethodRegistry::new();
         register_all(&mut reg);
-        assert!(
-            reg.methods().len() >= 60,
-            "expected at least 60 methods, got {}",
+        assert_eq!(
+            reg.methods().len(),
+            100,
+            "expected 100 methods, got {}",
             reg.methods().len()
         );
     }

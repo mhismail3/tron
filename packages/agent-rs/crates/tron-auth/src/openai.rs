@@ -20,6 +20,7 @@ pub const PROVIDER_KEY: &str = "openai-codex";
 const TOKEN_EXPIRY_BUFFER_SECONDS: i64 = 300;
 
 /// Refresh an `OpenAI` OAuth token.
+#[tracing::instrument(skip_all)]
 pub async fn refresh_token(refresh_token: &str) -> Result<OAuthTokens, AuthError> {
     let body = serde_json::json!({
         "grant_type": "refresh_token",
@@ -60,6 +61,7 @@ pub async fn refresh_token(refresh_token: &str) -> Result<OAuthTokens, AuthError
 /// 2. OAuth tokens from `auth.json` (provider key: `openai-codex`)
 /// 3. `env_api_key` (e.g. `OPENAI_API_KEY`)
 /// 4. API key from `auth.json`
+#[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
     env_token: Option<&str>,
@@ -81,7 +83,15 @@ pub async fn load_server_auth(
     if let Some(ref pa) = pa {
         if let Some(oauth) = &pa.oauth {
             match maybe_refresh_tokens(oauth).await {
-                Ok(tokens) => return Ok(Some(ServerAuth::from_oauth(&tokens, None))),
+                Ok((tokens, refreshed)) => {
+                    if refreshed {
+                        tracing::info!("persisting refreshed OpenAI tokens");
+                        let _ = crate::storage::save_provider_oauth_tokens(
+                            auth_path, PROVIDER_KEY, &tokens,
+                        );
+                    }
+                    return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
+                }
                 Err(e) => {
                     tracing::warn!("`OpenAI` OAuth refresh failed: {e}");
                 }
@@ -104,15 +114,16 @@ pub async fn load_server_auth(
     Ok(None)
 }
 
-/// Refresh tokens if expired.
-async fn maybe_refresh_tokens(tokens: &OAuthTokens) -> Result<OAuthTokens, AuthError> {
+/// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
+async fn maybe_refresh_tokens(tokens: &OAuthTokens) -> Result<(OAuthTokens, bool), AuthError> {
     let buffer_ms = TOKEN_EXPIRY_BUFFER_SECONDS * 1000;
     if now_ms() + buffer_ms < tokens.expires_at {
-        return Ok(tokens.clone());
+        return Ok((tokens.clone(), false));
     }
 
     tracing::info!("`OpenAI` OAuth token expired, refreshing...");
-    refresh_token(&tokens.refresh_token).await
+    let new_tokens = refresh_token(&tokens.refresh_token).await?;
+    Ok((new_tokens, true))
 }
 
 /// `OpenAI` token endpoint response.

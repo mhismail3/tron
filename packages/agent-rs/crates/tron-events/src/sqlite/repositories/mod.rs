@@ -7,6 +7,7 @@
 pub mod workspace;
 pub mod branch;
 pub mod blob;
+pub mod device_token;
 pub mod event;
 pub mod session;
 pub mod search;

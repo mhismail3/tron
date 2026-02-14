@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
+use tracing::debug;
 use tron_rpc::types::RpcEvent;
 
 use super::connection::ClientConnection;
@@ -25,13 +26,13 @@ impl BroadcastManager {
     /// Add a connection.
     pub async fn add(&self, connection: Arc<ClientConnection>) {
         let mut conns = self.connections.write().await;
-        conns.insert(connection.id.clone(), connection);
+        let _ = conns.insert(connection.id.clone(), connection);
     }
 
     /// Remove a connection by ID.
     pub async fn remove(&self, connection_id: &str) {
         let mut conns = self.connections.write().await;
-        conns.remove(connection_id);
+        let _ = conns.remove(connection_id);
     }
 
     /// Broadcast an event to all connections bound to the given session.
@@ -40,9 +41,19 @@ impl BroadcastManager {
             return;
         };
         let conns = self.connections.read().await;
+        let recipients = conns
+            .values()
+            .filter(|c| c.session_id().as_deref() == Some(session_id))
+            .count();
+        debug!(
+            event_type = event.event_type,
+            session_id,
+            recipients,
+            "broadcast event to session"
+        );
         for conn in conns.values() {
             if conn.session_id().as_deref() == Some(session_id) {
-                conn.send(json.clone());
+                let _ = conn.send(json.clone());
             }
         }
     }
@@ -53,8 +64,13 @@ impl BroadcastManager {
             return;
         };
         let conns = self.connections.read().await;
+        let recipients = conns.len();
+        debug!(
+            event_type = event.event_type,
+            recipients, "broadcast event to all"
+        );
         for conn in conns.values() {
-            conn.send(json.clone());
+            let _ = conn.send(json.clone());
         }
     }
 

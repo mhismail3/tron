@@ -1,6 +1,7 @@
 //! WebSocket message dispatch — parses incoming text as `RpcRequest` and
 //! routes through the `MethodRegistry`.
 
+use tracing::{debug, instrument, warn};
 use tron_rpc::context::RpcContext;
 use tron_rpc::registry::MethodRegistry;
 use tron_rpc::types::{RpcRequest, RpcResponse};
@@ -9,6 +10,7 @@ use tron_rpc::types::{RpcRequest, RpcResponse};
 ///
 /// Parses the message as an `RpcRequest`, dispatches to the registry, and
 /// returns the serialized `RpcResponse` as a JSON string.
+#[instrument(skip_all, fields(method))]
 pub async fn handle_message(
     message: &str,
     registry: &MethodRegistry,
@@ -17,14 +19,30 @@ pub async fn handle_message(
     let request: RpcRequest = match serde_json::from_str(message) {
         Ok(r) => r,
         Err(e) => {
+            warn!("invalid JSON received");
             let resp =
                 RpcResponse::error("unknown", "INVALID_PARAMS", format!("Invalid JSON: {e}"));
-            return serde_json::to_string(&resp).unwrap_or_default();
+            return serde_json::to_string(&resp).unwrap_or_else(|e| {
+                tracing::error!(error = %e, "Failed to serialize error response");
+                String::new()
+            });
         }
     };
 
+    let method = &request.method;
+    let id = &request.id;
+    let _ = tracing::Span::current().record("method", method.as_str());
+    debug!(method, id, "dispatching RPC");
+
+    if !registry.has_method(method) {
+        warn!(method, "unknown RPC method");
+    }
+
     let response = registry.dispatch(request, ctx).await;
-    serde_json::to_string(&response).unwrap_or_default()
+    serde_json::to_string(&response).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "Failed to serialize response");
+        String::new()
+    })
 }
 
 #[cfg(test)]
@@ -59,6 +77,8 @@ mod tests {
             )),
             task_pool: None,
             settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: std::time::Instant::now(),
         }
     }
 

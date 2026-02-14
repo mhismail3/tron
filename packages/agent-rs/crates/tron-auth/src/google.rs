@@ -90,6 +90,7 @@ pub fn get_authorization_url(config: &GoogleOAuthConfig, challenge: &str) -> Str
 }
 
 /// Exchange authorization code for tokens.
+#[tracing::instrument(skip_all)]
 pub async fn exchange_code_for_tokens(
     config: &GoogleOAuthConfig,
     code: &str,
@@ -141,6 +142,7 @@ pub async fn exchange_code_for_tokens(
 }
 
 /// Refresh an expired OAuth token.
+#[tracing::instrument(skip_all)]
 pub async fn refresh_token(
     config: &GoogleOAuthConfig,
     refresh_token: &str,
@@ -241,6 +243,7 @@ pub fn get_api_headers(auth: &GoogleAuth) -> Vec<(String, String)> {
 /// 2. OAuth tokens from `auth.json` (auto-refresh if expired)
 /// 3. `env_api_key` (env var API key)
 /// 4. API key from `auth.json`
+#[tracing::instrument(skip_all, fields(provider = "google"))]
 pub async fn load_server_auth(
     auth_path: &std::path::Path,
     env_token: Option<&str>,
@@ -280,7 +283,16 @@ pub async fn load_server_auth(
             };
 
             match maybe_refresh_tokens(oauth, &cfg_with_creds).await {
-                Ok(tokens) => {
+                Ok((tokens, refreshed)) => {
+                    if refreshed {
+                        tracing::info!("persisting refreshed Google tokens");
+                        // Update the stored OAuth tokens in the google provider auth
+                        let mut updated_gpa = gpa.clone();
+                        updated_gpa.base.oauth = Some(tokens.clone());
+                        let _ = crate::storage::save_google_provider_auth(
+                            auth_path, &updated_gpa,
+                        );
+                    }
                     return Ok(Some(GoogleAuth {
                         auth: ServerAuth::from_oauth(&tokens, None),
                         endpoint: Some(endpoint),
@@ -323,18 +335,19 @@ pub async fn load_server_auth(
     Ok(None)
 }
 
-/// Refresh tokens if expired.
+/// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
 async fn maybe_refresh_tokens(
     tokens: &OAuthTokens,
     config: &GoogleOAuthConfig,
-) -> Result<OAuthTokens, AuthError> {
+) -> Result<(OAuthTokens, bool), AuthError> {
     let buffer_ms = config.oauth.token_expiry_buffer_seconds * 1000;
     if now_ms() + buffer_ms < tokens.expires_at {
-        return Ok(tokens.clone());
+        return Ok((tokens.clone(), false));
     }
 
     tracing::info!("Google OAuth token expired, refreshing...");
-    refresh_token(config, &tokens.refresh_token).await
+    let new_tokens = refresh_token(config, &tokens.refresh_token).await?;
+    Ok((new_tokens, true))
 }
 
 /// Google token endpoint response.

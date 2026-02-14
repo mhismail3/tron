@@ -1,7 +1,11 @@
-//! Memory handlers: getLedger, updateLedger.
+//! Memory handlers: getLedger, updateLedger, search, getHandoffs.
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
+
+use tron_context::summarizer::KeywordSummarizer;
+use tron_context::summarizer::Summarizer;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -13,6 +17,7 @@ pub struct GetLedgerHandler;
 
 #[async_trait]
 impl MethodHandler for GetLedgerHandler {
+    #[instrument(skip(self, ctx), fields(method = "memory.getLedger"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let working_dir = require_string_param(params.as_ref(), "workingDirectory")?;
 
@@ -56,28 +61,299 @@ impl MethodHandler for GetLedgerHandler {
             }
         }
 
+        let total_count = entries.len();
+        let has_more = entries.len() > limit;
         entries.truncate(limit);
 
         Ok(serde_json::json!({
             "entries": entries,
+            "hasMore": has_more,
+            "totalCount": total_count,
         }))
     }
 }
 
-/// Trigger a memory ledger update.
+/// Trigger a memory ledger update for a session.
 pub struct UpdateLedgerHandler;
 
 #[async_trait]
 impl MethodHandler for UpdateLedgerHandler {
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _working_dir = require_string_param(params.as_ref(), "workingDirectory")?;
+    #[instrument(skip(self, ctx), fields(method = "memory.updateLedger"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        // Accept either sessionId directly or workingDirectory (find most recent session)
+        let session_id_owned: String;
+        if let Some(sid) = params.as_ref().and_then(|p| p.get("sessionId")).and_then(Value::as_str)
+        {
+            session_id_owned = sid.to_owned();
+        } else if let Some(wd) = params
+            .as_ref()
+            .and_then(|p| p.get("workingDirectory"))
+            .and_then(Value::as_str)
+        {
+            // Find most recent session for this workspace
+            let filter = tron_runtime::SessionFilter {
+                workspace_path: Some(wd.to_owned()),
+                limit: Some(1),
+                ..Default::default()
+            };
+            let sessions = ctx.session_manager.list_sessions(&filter).unwrap_or_default();
+            if let Some(s) = sessions.first() {
+                session_id_owned = s.id.clone();
+            } else {
+                return Ok(serde_json::json!({
+                    "written": false,
+                    "title": null,
+                    "entryType": null,
+                    "reason": "no sessions found for workspace",
+                }));
+            }
+        } else {
+            return Err(RpcError::InvalidParams {
+                message: "Missing required parameter: sessionId or workingDirectory".into(),
+            });
+        }
+        let session_id = &session_id_owned;
 
-        // In the TypeScript server, this triggers a one-shot memory ledger update
-        // via the memory manager. For now we acknowledge the request.
-        // The actual ledger update will be implemented when the memory manager
-        // is integrated into the agent run loop.
+        // Resume session to get messages
+        let Ok(active) = ctx.session_manager.resume_session(session_id) else {
+            return Ok(serde_json::json!({
+                "written": false,
+                "title": null,
+                "entryType": null,
+                "reason": "session not found or empty",
+            }));
+        };
+
+        // Need messages to summarize
+        if active.state.messages.is_empty() {
+            return Ok(serde_json::json!({
+                "written": false,
+                "title": null,
+                "entryType": null,
+                "reason": "no messages in session",
+            }));
+        }
+
+        // Derive title from first user message
+        let title = active
+            .state
+            .messages
+            .iter()
+            .find_map(|m| match m {
+                tron_core::messages::Message::User { content, .. } => {
+                    let text = match content {
+                        tron_core::messages::UserMessageContent::Text(t) => t.clone(),
+                        tron_core::messages::UserMessageContent::Blocks(blocks) => blocks
+                            .iter()
+                            .filter_map(|b| b.as_text())
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    };
+                    if text.is_empty() {
+                        None
+                    } else {
+                        Some(if text.len() > 80 {
+                            format!("{}...", &text[..77])
+                        } else {
+                            text
+                        })
+                    }
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "Untitled session".to_owned());
+
+        // Summarize messages using keyword summarizer
+        let summarizer = KeywordSummarizer::new();
+        let summary_result = summarizer
+            .summarize(&active.state.messages)
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: format!("Summarization failed: {e}"),
+            })?;
+
+        // Determine entry type from tool usage
+        let entry_type = if summary_result
+            .extracted_data
+            .files_modified
+            .is_empty()
+        {
+            "conversation"
+        } else {
+            "feature"
+        };
+
+        // Persist as memory.ledger event
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: serde_json::json!({
+                "title": title,
+                "summary": summary_result.narrative,
+                "entryType": entry_type,
+                "filesModified": summary_result.extracted_data.files_modified,
+                "topicsDiscussed": summary_result.extracted_data.topics_discussed,
+            }),
+            parent_id: None,
+        });
+
+        // Broadcast memory updated event
+        let _ = ctx.orchestrator.broadcast().emit(
+            tron_core::events::TronEvent::MemoryUpdated {
+                base: tron_core::events::BaseEvent::now(session_id),
+                title: Some(title.clone()),
+                entry_type: Some(entry_type.to_owned()),
+            },
+        );
+
         Ok(serde_json::json!({
-            "acknowledged": true,
+            "written": true,
+            "title": title,
+            "entryType": entry_type,
+        }))
+    }
+}
+
+/// Search memory entries across sessions.
+pub struct SearchMemoryHandler;
+
+#[async_trait]
+impl MethodHandler for SearchMemoryHandler {
+    #[instrument(skip(self, ctx), fields(method = "memory.search"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let search_text = params
+            .as_ref()
+            .and_then(|p| p.get("searchText"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+
+        let type_filter = params
+            .as_ref()
+            .and_then(|p| p.get("type"))
+            .and_then(Value::as_str);
+
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(Value::as_u64)
+            .unwrap_or(20);
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+
+        // Query all sessions for memory.ledger events
+        let sessions = ctx
+            .session_manager
+            .list_sessions(&tron_runtime::SessionFilter {
+                include_archived: true,
+                ..Default::default()
+            })
+            .unwrap_or_default();
+
+        let mut entries = Vec::new();
+        let search_lower = search_text.to_lowercase();
+
+        for session in sessions {
+            let events = ctx
+                .event_store
+                .get_events_by_type(&session.id, &["memory.ledger"], Some(100))
+                .unwrap_or_default();
+
+            for event in events {
+                if let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
+                    // Text filter (case-insensitive)
+                    if !search_lower.is_empty() {
+                        let payload_text = parsed.to_string().to_lowercase();
+                        if !payload_text.contains(&search_lower) {
+                            continue;
+                        }
+                    }
+
+                    // Type filter
+                    if let Some(tf) = type_filter {
+                        let entry_type = parsed
+                            .get("entryType")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        if entry_type != tf {
+                            continue;
+                        }
+                    }
+
+                    let mut entry = parsed;
+                    if let Some(obj) = entry.as_object_mut() {
+                        let _ = obj.insert("sessionId".into(), serde_json::json!(session.id));
+                        let _ = obj.insert("timestamp".into(), serde_json::json!(event.timestamp));
+                    }
+                    entries.push(entry);
+
+                    if entries.len() >= limit {
+                        break;
+                    }
+                }
+            }
+            if entries.len() >= limit {
+                break;
+            }
+        }
+
+        let total_count = entries.len();
+
+        Ok(serde_json::json!({
+            "entries": entries,
+            "totalCount": total_count,
+        }))
+    }
+}
+
+/// Get handoff entries for recent sessions.
+pub struct GetHandoffsHandler;
+
+#[async_trait]
+impl MethodHandler for GetHandoffsHandler {
+    #[instrument(skip(self, ctx), fields(method = "memory.getHandoffs"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(Value::as_u64)
+            .unwrap_or(10);
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+
+        let sessions = ctx
+            .session_manager
+            .list_sessions(&tron_runtime::SessionFilter {
+                include_archived: true,
+                limit: Some(limit * 2), // overfetch to ensure enough with ledger entries
+                ..Default::default()
+            })
+            .unwrap_or_default();
+
+        let mut handoffs = Vec::new();
+
+        for session in sessions {
+            let events = ctx
+                .event_store
+                .get_events_by_type(&session.id, &["memory.ledger"], Some(1))
+                .unwrap_or_default();
+
+            if let Some(event) = events.first() {
+                if let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
+                    handoffs.push(serde_json::json!({
+                        "sessionId": session.id,
+                        "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
+                        "timestamp": event.timestamp,
+                        "summary": parsed.get("summary").and_then(Value::as_str).unwrap_or(""),
+                        "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
+                    }));
+                }
+            }
+
+            if handoffs.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(serde_json::json!({
+            "handoffs": handoffs,
         }))
     }
 }
@@ -102,6 +378,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_ledger_returns_has_more() {
+        let ctx = make_test_context();
+        let result = GetLedgerHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["hasMore"], false);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_returns_total_count() {
+        let ctx = make_test_context();
+        let result = GetLedgerHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(result["totalCount"].is_number());
+    }
+
+    #[tokio::test]
     async fn get_ledger_missing_working_dir() {
         let ctx = make_test_context();
         let err = GetLedgerHandler
@@ -112,25 +414,140 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_ledger_returns_acknowledged() {
+    async fn update_ledger_with_session_and_messages() {
         let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        // Add messages
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Fix the login bug"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "I'll fix that for you."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
         let result = UpdateLedgerHandler
-            .handle(
-                Some(json!({"workingDirectory": "/tmp"})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        assert_eq!(result["acknowledged"], true);
+        assert_eq!(result["written"], true);
+        assert!(result["title"].is_string());
+        assert!(result["entryType"].is_string());
     }
 
     #[tokio::test]
-    async fn update_ledger_missing_working_dir() {
+    async fn update_ledger_empty_session() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], false);
+    }
+
+    #[tokio::test]
+    async fn update_ledger_nonexistent_session() {
+        let ctx = make_test_context();
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": "nonexistent"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], false);
+    }
+
+    #[tokio::test]
+    async fn update_ledger_missing_params() {
         let ctx = make_test_context();
         let err = UpdateLedgerHandler
             .handle(Some(json!({})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn search_memory_returns_empty() {
+        let ctx = make_test_context();
+        let result = SearchMemoryHandler
+            .handle(None, &ctx)
+            .await
+            .unwrap();
+        assert!(result["entries"].as_array().unwrap().is_empty());
+        assert_eq!(result["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn search_memory_with_params() {
+        let ctx = make_test_context();
+        let result = SearchMemoryHandler
+            .handle(
+                Some(json!({"searchText": "test", "type": "lesson", "limit": 10})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(result["entries"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn search_memory_missing_no_error() {
+        let ctx = make_test_context();
+        let result = SearchMemoryHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["entries"].is_array());
+    }
+
+    #[tokio::test]
+    async fn get_handoffs_returns_empty() {
+        let ctx = make_test_context();
+        let result = GetHandoffsHandler
+            .handle(None, &ctx)
+            .await
+            .unwrap();
+        assert!(result["handoffs"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_handoffs_with_workspace() {
+        let ctx = make_test_context();
+        let result = GetHandoffsHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(result["handoffs"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_handoffs_missing_no_error() {
+        let ctx = make_test_context();
+        let result = GetHandoffsHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["handoffs"].is_array());
     }
 }

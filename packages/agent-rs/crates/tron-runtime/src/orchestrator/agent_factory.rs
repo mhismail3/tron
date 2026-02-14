@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use tron_context::context_manager::ContextManager;
 use tron_context::types::ContextManagerConfig;
+use tron_core::messages::Message;
 use tron_guardrails::GuardrailEngine;
 use tron_hooks::engine::HookEngine;
 use tron_llm::provider::Provider;
@@ -26,6 +27,12 @@ pub struct CreateAgentOpts {
     pub is_subagent: bool,
     /// Tools to deny for subagents.
     pub denied_tools: Vec<String>,
+    /// Merged rules content (global + project).
+    pub rules_content: Option<String>,
+    /// Messages restored from session history.
+    pub initial_messages: Vec<Message>,
+    /// Workspace memory content (~/.tron/notes/MEMORY.md).
+    pub memory_content: Option<String>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -43,7 +50,7 @@ impl AgentFactory {
         // Remove denied tools for subagents
         if opts.is_subagent {
             for tool_name in &opts.denied_tools {
-                registry.remove(tool_name);
+                let _ = registry.remove(tool_name);
             }
             // Remove interactive tools from subagents
             let interactive_tools: Vec<String> = registry
@@ -53,20 +60,32 @@ impl AgentFactory {
                 .map(|t| t.name().to_owned())
                 .collect();
             for name in &interactive_tools {
-                registry.remove(name);
+                let _ = registry.remove(name);
             }
         }
+
+        let context_limit = tron_tokens::get_context_limit(&config.model);
+        let mut compaction = config.compaction.clone();
+        compaction.context_limit = context_limit;
 
         let ctx_config = ContextManagerConfig {
             model: config.model.clone(),
             system_prompt: config.system_prompt.clone(),
             working_directory: config.working_directory.clone(),
             tools: registry.definitions(),
-            rules_content: None,
-            compaction: config.compaction.clone(),
+            rules_content: opts.rules_content,
+            compaction,
         };
 
-        let context_manager = ContextManager::new(ctx_config);
+        let mut context_manager = ContextManager::new(ctx_config);
+
+        if !opts.initial_messages.is_empty() {
+            context_manager.set_messages(opts.initial_messages);
+        }
+
+        if opts.memory_content.is_some() {
+            context_manager.set_memory_content(opts.memory_content);
+        }
 
         TronAgent::new(
             config,
@@ -88,6 +107,20 @@ mod tests {
     use tron_llm::models::types::ProviderType;
     use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::traits::{ToolContext, TronTool};
+
+    fn default_opts(provider: Arc<dyn Provider>, tools: ToolRegistry) -> CreateAgentOpts {
+        CreateAgentOpts {
+            provider,
+            tools,
+            guardrails: None,
+            hooks: None,
+            is_subagent: false,
+            denied_tools: vec![],
+            rules_content: None,
+            initial_messages: vec![],
+            memory_content: None,
+        }
+    }
 
     struct MockProvider;
     #[async_trait]
@@ -136,14 +169,7 @@ mod tests {
         let agent = AgentFactory::create_agent(
             AgentConfig::default(),
             "s1".into(),
-            CreateAgentOpts {
-                provider: Arc::new(MockProvider),
-                tools: registry,
-                guardrails: None,
-                hooks: None,
-                is_subagent: false,
-                denied_tools: vec![],
-            },
+            default_opts(Arc::new(MockProvider), registry),
         );
 
         assert_eq!(agent.session_id(), "s1");
@@ -156,20 +182,11 @@ mod tests {
         registry.register(Arc::new(NormalTool));
         registry.register(Arc::new(InteractiveTool));
 
-        let agent = AgentFactory::create_agent(
-            AgentConfig::default(),
-            "s1".into(),
-            CreateAgentOpts {
-                provider: Arc::new(MockProvider),
-                tools: registry,
-                guardrails: None,
-                hooks: None,
-                is_subagent: true,
-                denied_tools: vec!["bash".into()],
-            },
-        );
+        let mut opts = default_opts(Arc::new(MockProvider), registry);
+        opts.is_subagent = true;
+        opts.denied_tools = vec!["bash".into()];
 
-        // bash should be removed (denied) and ask_user should be removed (interactive)
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         assert_eq!(agent.session_id(), "s1");
     }
 
@@ -179,20 +196,86 @@ mod tests {
         registry.register(Arc::new(NormalTool));
         registry.register(Arc::new(InteractiveTool));
 
-        let agent = AgentFactory::create_agent(
-            AgentConfig::default(),
-            "s1".into(),
-            CreateAgentOpts {
-                provider: Arc::new(MockProvider),
-                tools: registry,
-                guardrails: None,
-                hooks: None,
-                is_subagent: true,
-                denied_tools: vec![],
-            },
-        );
+        let mut opts = default_opts(Arc::new(MockProvider), registry);
+        opts.is_subagent = true;
 
-        // ask_user should be removed (interactive)
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         assert_eq!(agent.session_id(), "s1");
+    }
+
+    #[test]
+    fn factory_passes_rules_to_context_manager() {
+        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        opts.rules_content = Some("# My Rules".into());
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        assert_eq!(agent.context_manager().get_rules_content(), Some("# My Rules"));
+    }
+
+    #[test]
+    fn factory_restores_initial_messages() {
+        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        opts.initial_messages = vec![
+            Message::user("Hello"),
+            Message::assistant("Hi"),
+            Message::user("How are you?"),
+        ];
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        assert_eq!(agent.context_manager().message_count(), 3);
+    }
+
+    #[test]
+    fn factory_sets_memory_content() {
+        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        opts.memory_content = Some("# Memory\nImportant stuff".into());
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        assert_eq!(
+            agent.context_manager().get_full_memory_content(),
+            Some("# Memory\nImportant stuff".into())
+        );
+    }
+
+    #[test]
+    fn factory_no_rules_still_works() {
+        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        assert!(agent.context_manager().get_rules_content().is_none());
+    }
+
+    #[test]
+    fn factory_empty_messages_still_works() {
+        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        assert_eq!(agent.context_manager().message_count(), 0);
+    }
+
+    #[test]
+    fn factory_context_limit_matches_model() {
+        let config = AgentConfig {
+            model: "claude-opus-4-6".into(),
+            ..AgentConfig::default()
+        };
+        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        let agent = AgentFactory::create_agent(config, "s1".into(), opts);
+        assert_eq!(
+            agent.context_manager().get_context_limit(),
+            tron_tokens::get_context_limit("claude-opus-4-6")
+        );
+    }
+
+    #[test]
+    fn factory_context_limit_for_gemini() {
+        let config = AgentConfig {
+            model: "gemini-2.5-pro".into(),
+            ..AgentConfig::default()
+        };
+        let opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        let agent = AgentFactory::create_agent(config, "s1".into(), opts);
+        assert_eq!(
+            agent.context_manager().get_context_limit(),
+            tron_tokens::get_context_limit("gemini-2.5-pro")
+        );
     }
 }

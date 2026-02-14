@@ -38,4 +38,12 @@ async-trait.workspace = true
 tron-events.workspace = true
 tron-tasks.workspace = true
 tron-skills.workspace = true
+tron-llm = { path = "../tron-llm" }
+tron-tools = { path = "../tron-tools" }
+tron-guardrails = { path = "../tron-guardrails" }
+tron-hooks = { path = "../tron-hooks" }
+async-stream.workspace = true
 parking_lot.workspace = true
+futures.workspace = true
+tron-tokens.workspace = true
+tempfile.workspace = true

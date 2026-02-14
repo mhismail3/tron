@@ -224,6 +224,15 @@ impl ContextManager {
         &self.config.model
     }
 
+    #[must_use]
+    /// Get the working directory (for file operations and tool context).
+    pub fn get_working_directory(&self) -> &str {
+        self.config
+            .working_directory
+            .as_deref()
+            .unwrap_or("/tmp")
+    }
+
     // ── Token estimation ────────────────────────────────────────────────
 
     #[must_use]

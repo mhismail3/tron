@@ -20,7 +20,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 use crate::background::BackgroundTracker;
 use crate::handler::HookHandler;
@@ -54,6 +54,7 @@ impl HookEngine {
     /// Returns the aggregated result. If any blocking hook returns `Block`,
     /// execution stops and the block result is returned. Modifications from
     /// all `Modify` results are merged.
+    #[instrument(skip_all, fields(hook_type = %context.hook_type()))]
     pub async fn execute(&self, context: &HookContext) -> HookResult {
         let hook_type = context.hook_type();
         let handlers = self.registry.get_handlers(hook_type);

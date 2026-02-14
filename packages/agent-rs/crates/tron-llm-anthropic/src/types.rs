@@ -49,12 +49,24 @@ pub struct AnthropicConfig {
 }
 
 /// Shared Anthropic provider settings from global configuration.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct AnthropicProviderSettings {
     /// OAuth system prompt prefix.
     pub system_prompt_prefix: Option<String>,
     /// Token expiry buffer in seconds.
-    pub token_expiry_buffer_seconds: Option<i64>,
+    pub token_expiry_buffer_seconds: Option<u64>,
+    /// Beta headers sent with OAuth requests (comma-separated).
+    pub oauth_beta_headers: String,
+}
+
+impl Default for AnthropicProviderSettings {
+    fn default() -> Self {
+        Self {
+            system_prompt_prefix: None,
+            token_expiry_buffer_seconds: None,
+            oauth_beta_headers: "oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14".to_string(),
+        }
+    }
 }
 
 /// System prompt block with optional cache control.

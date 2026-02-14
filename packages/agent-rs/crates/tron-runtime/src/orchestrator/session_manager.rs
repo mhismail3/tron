@@ -5,6 +5,8 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use tron_events::EventStore;
 
+use tracing::{debug, instrument};
+
 use crate::errors::RuntimeError;
 use crate::orchestrator::session_context::SessionContext;
 use crate::orchestrator::session_reconstructor::{self, ReconstructedState};
@@ -32,6 +34,7 @@ pub struct SessionFilter {
 pub struct SessionManager {
     event_store: Arc<EventStore>,
     active_sessions: DashMap<String, Arc<ActiveSession>>,
+    plan_mode: DashMap<String, bool>,
 }
 
 impl SessionManager {
@@ -40,10 +43,12 @@ impl SessionManager {
         Self {
             event_store,
             active_sessions: DashMap::new(),
+            plan_mode: DashMap::new(),
         }
     }
 
     /// Create a new session.
+    #[instrument(skip(self), fields(model, working_dir = workspace_path))]
     pub fn create_session(
         &self,
         model: &str,
@@ -69,11 +74,13 @@ impl SessionManager {
             state,
         });
 
-        self.active_sessions.insert(session_id.clone(), active);
+        let _ = self.active_sessions.insert(session_id.clone(), active);
+        debug!(session_id, "session created");
         Ok(session_id)
     }
 
     /// Resume an existing session (reconstruct from events).
+    #[instrument(skip(self), fields(session_id))]
     pub fn resume_session(&self, session_id: &str) -> Result<Arc<ActiveSession>, RuntimeError> {
         // Check if already active
         if let Some(existing) = self.active_sessions.get(session_id) {
@@ -89,8 +96,9 @@ impl SessionManager {
             state,
         });
 
-        self.active_sessions
+        let _ = self.active_sessions
             .insert(session_id.to_owned(), active.clone());
+        debug!(session_id, "session resumed");
         Ok(active)
     }
 
@@ -135,7 +143,7 @@ impl SessionManager {
 
     /// Archive a session.
     pub fn archive_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.active_sessions.remove(session_id);
+        let _ = self.active_sessions.remove(session_id);
         let _ = self
             .event_store
             .end_session(session_id)
@@ -154,7 +162,7 @@ impl SessionManager {
 
     /// Delete a session.
     pub fn delete_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.active_sessions.remove(session_id);
+        let _ = self.active_sessions.remove(session_id);
         let _ = self
             .event_store
             .delete_session(session_id)
@@ -201,9 +209,28 @@ impl SessionManager {
         self.active_sessions.len()
     }
 
+    /// Invalidate cached session state, forcing re-reconstruction on next `resume_session`.
+    pub fn invalidate_session(&self, session_id: &str) {
+        let _ = self.active_sessions.remove(session_id);
+    }
+
     /// Get the event store.
     pub fn event_store(&self) -> &Arc<EventStore> {
         &self.event_store
+    }
+
+    // ── Plan mode ──────────────────────────────────────────────────────
+
+    /// Set plan mode for a session.
+    pub fn set_plan_mode(&self, session_id: &str, enabled: bool) {
+        let _ = self.plan_mode.insert(session_id.to_owned(), enabled);
+    }
+
+    /// Check if a session is in plan mode.
+    pub fn is_plan_mode(&self, session_id: &str) -> bool {
+        self.plan_mode
+            .get(session_id)
+            .is_some_and(|v| *v)
     }
 }
 

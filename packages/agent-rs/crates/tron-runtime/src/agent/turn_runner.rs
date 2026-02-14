@@ -13,6 +13,8 @@ use tron_hooks::engine::HookEngine;
 use tron_llm::provider::{Provider, ProviderStreamOptions};
 use tron_tools::registry::ToolRegistry;
 
+use tracing::{debug, error, instrument};
+
 use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::stream_processor;
@@ -22,6 +24,7 @@ use crate::types::{RunContext, TurnResult};
 
 /// Execute a single turn of the agent loop.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::cast_possible_truncation)]
+#[instrument(skip_all, fields(session_id, turn, model))]
 pub async fn execute_turn(
     turn: u32,
     context_manager: &mut ContextManager,
@@ -57,10 +60,11 @@ pub async fn execute_turn(
     }
 
     // 2. Emit TurnStart
-    emitter.emit(TronEvent::TurnStart {
+    let _ = emitter.emit(TronEvent::TurnStart {
         base: BaseEvent::now(session_id),
         turn,
     });
+    debug!(session_id, turn, "turn started");
 
     // 3. Build context
     let messages = context_manager.get_messages();
@@ -70,7 +74,7 @@ pub async fn execute_turn(
         tools: Some(registry.definitions()),
         working_directory: Some(
             context_manager
-                .get_model()
+                .get_working_directory()
                 .to_owned(),
         ),
         rules_content: context_manager.get_rules_content().map(String::from),
@@ -84,8 +88,9 @@ pub async fn execute_turn(
             .or_else(|| context_manager.get_dynamic_rules_content().map(String::from)),
     };
 
-    // 4. Build stream options
+    // 4. Build stream options (thinking always enabled — provider handles model-specific config)
     let stream_options = ProviderStreamOptions {
+        enable_thinking: Some(true),
         effort_level: run_context
             .reasoning_level
             .as_ref()
@@ -101,7 +106,7 @@ pub async fn execute_turn(
             let category = e.category().to_owned();
             let recoverable = e.is_retryable();
 
-            emitter.emit(TronEvent::TurnFailed {
+            let _ = emitter.emit(TronEvent::TurnFailed {
                 base: BaseEvent::now(session_id),
                 turn,
                 error: error_msg.clone(),
@@ -126,7 +131,8 @@ pub async fn execute_turn(
             Ok(r) => r,
             Err(e) => {
                 let error_msg = e.to_string();
-                emitter.emit(TronEvent::TurnFailed {
+                error!(session_id, turn, error = %error_msg, "stream failed");
+                let _ = emitter.emit(TronEvent::TurnFailed {
                     base: BaseEvent::now(session_id),
                     turn,
                     error: error_msg.clone(),
@@ -165,7 +171,7 @@ pub async fn execute_turn(
         cache_creation_1h_tokens: u.cache_creation_1h_tokens,
     });
 
-    emitter.emit(TronEvent::ResponseComplete {
+    let _ = emitter.emit(TronEvent::ResponseComplete {
         base: BaseEvent::now(session_id),
         turn,
         stop_reason: stream_result.stop_reason.clone(),
@@ -205,13 +211,13 @@ pub async fn execute_turn(
             })
             .collect();
 
-        emitter.emit(TronEvent::ToolUseBatch {
+        let _ = emitter.emit(TronEvent::ToolUseBatch {
             base: BaseEvent::now(session_id),
             tool_calls: summaries,
         });
 
         let working_dir = context_manager
-            .get_model()
+            .get_working_directory()
             .to_owned();
 
         // Execute tools sequentially
@@ -268,7 +274,7 @@ pub async fn execute_turn(
         cache_creation_tokens: u.cache_creation_tokens,
     });
 
-    emitter.emit(TronEvent::TurnEnd {
+    let _ = emitter.emit(TronEvent::TurnEnd {
         base: BaseEvent::now(session_id),
         turn,
         duration,
@@ -277,6 +283,7 @@ pub async fn execute_turn(
         cost: None,
         context_limit: Some(context_manager.get_context_limit()),
     });
+    debug!(session_id, turn, duration_ms = duration, "turn completed");
 
     // Determine stop reason for this turn
     let stop_reason = if stop_turn_requested {

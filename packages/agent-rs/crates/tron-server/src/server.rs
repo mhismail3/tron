@@ -13,6 +13,8 @@ use tokio::net::TcpListener;
 use tron_rpc::context::RpcContext;
 use tron_rpc::registry::MethodRegistry;
 
+use tracing::{info, instrument};
+
 use crate::config::ServerConfig;
 use crate::health::{self, HealthResponse};
 use crate::shutdown::ShutdownCoordinator;
@@ -75,6 +77,7 @@ impl TronServer {
 
     /// Bind to a TCP port and start serving. Returns the bound address and a
     /// join handle for the server task.
+    #[instrument(skip_all, fields(host = %self.config.host, port = self.config.port))]
     pub async fn listen(
         &self,
     ) -> Result<(SocketAddr, tokio::task::JoinHandle<()>), std::io::Error> {
@@ -82,16 +85,20 @@ impl TronServer {
         let listener = TcpListener::bind(&addr).await?;
         let bound_addr = listener.local_addr()?;
 
+        let methods = self.registry.methods().len();
+        info!(addr = %bound_addr, methods, "server started");
+
         let router = self.router();
         let shutdown_token = self.shutdown.token();
 
         let handle = tokio::spawn(async move {
-            axum::serve(listener, router)
+            let _ = axum::serve(listener, router)
                 .with_graceful_shutdown(async move {
                     shutdown_token.cancelled().await;
+                    info!("server shutdown initiated");
                 })
-                .await
-                .ok();
+                .await;
+            info!("server shutdown complete");
         });
 
         Ok((bound_addr, handle))
@@ -175,6 +182,8 @@ mod tests {
             )),
             task_pool: None,
             settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: std::time::Instant::now(),
         }
     }
 
@@ -186,7 +195,7 @@ mod tests {
     #[tokio::test]
     async fn server_with_default_config() {
         let server = make_server();
-        assert_eq!(server.config().host, "127.0.0.1");
+        assert_eq!(server.config().host, "0.0.0.0");
         assert_eq!(server.config().port, 0);
     }
 
@@ -319,7 +328,7 @@ mod tests {
         let (addr, handle) = server.listen().await.unwrap();
 
         assert_ne!(addr.port(), 0); // auto-assigned
-        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(addr.ip().to_string(), "0.0.0.0");
 
         // Shutdown
         server.shutdown().shutdown();

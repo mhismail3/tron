@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{json, Value};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use tron_core::events::StreamEvent;
 use tron_core::messages::Context;
@@ -71,6 +71,12 @@ impl AnthropicProvider {
     }
 
     /// Build HTTP headers for the request.
+    ///
+    /// OAuth requests require:
+    /// - `anthropic-beta: oauth-2025-04-20,...` (always includes the OAuth beta)
+    /// - `anthropic-dangerous-direct-browser-access: true`
+    ///
+    /// API key requests only add `anthropic-beta` for models needing thinking beta.
     fn build_headers(&self) -> ProviderResult<HeaderMap> {
         let mut headers = HeaderMap::new();
         let _ = headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -87,6 +93,15 @@ impl AnthropicProvider {
                         message: format!("Invalid API key header: {e}"),
                     })?,
                 );
+                // API key: only add thinking beta for models that need it
+                if let Some(model_info) = get_claude_model(&self.config.model) {
+                    if model_info.supports_thinking_beta_headers {
+                        let _ = headers.insert(
+                            "anthropic-beta",
+                            HeaderValue::from_static("interleaved-thinking-2025-05-14"),
+                        );
+                    }
+                }
             }
             AnthropicAuth::OAuth { tokens, .. } => {
                 let auth_value = format!("Bearer {}", tokens.access_token);
@@ -96,15 +111,26 @@ impl AnthropicProvider {
                         message: format!("Invalid OAuth header: {e}"),
                     })?,
                 );
-            }
-        }
-
-        // Add thinking beta header for models that require it
-        if let Some(model_info) = get_claude_model(&self.config.model) {
-            if model_info.supports_thinking_beta_headers {
+                // OAuth: always add browser access header
+                let _ = headers.insert(
+                    "anthropic-dangerous-direct-browser-access",
+                    HeaderValue::from_static("true"),
+                );
+                // OAuth: beta headers — full set for models needing thinking beta,
+                // just `oauth-2025-04-20` for models that don't (e.g., Opus 4.6)
+                let model_info = get_claude_model(&self.config.model);
+                let needs_thinking_beta =
+                    model_info.is_none_or(|m| m.supports_thinking_beta_headers);
+                let beta_value = if needs_thinking_beta {
+                    &self.config.provider_settings.oauth_beta_headers
+                } else {
+                    "oauth-2025-04-20"
+                };
                 let _ = headers.insert(
                     "anthropic-beta",
-                    HeaderValue::from_static("interleaved-thinking-2025-05-14"),
+                    HeaderValue::from_str(beta_value).map_err(|e| ProviderError::Auth {
+                        message: format!("Invalid beta header: {e}"),
+                    })?,
                 );
             }
         }
@@ -311,6 +337,7 @@ impl AnthropicProvider {
     }
 
     /// Perform the streaming HTTP request and return the event stream.
+    #[instrument(skip_all, fields(model = %self.config.model))]
     async fn stream_internal(
         &self,
         context: &Context,
@@ -375,6 +402,12 @@ impl AnthropicProvider {
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
             let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            error!(
+                status = status.as_u16(),
+                code = code.as_deref().unwrap_or("unknown"),
+                retryable,
+                "Anthropic API error"
+            );
             return Err(ProviderError::Api {
                 status: status.as_u16(),
                 message,
@@ -447,17 +480,21 @@ impl Provider for AnthropicProvider {
         &self.config.model
     }
 
+    #[instrument(skip_all, fields(provider = "anthropic", model = %self.config.model))]
     async fn stream(
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
-        // For now, skip retry wrapper — call stream_internal directly.
-        // Retry wrapping requires `StreamFactory` (a boxed closure), which
-        // needs ownership of context/options; that's handled at the runtime
-        // layer where retry is orchestrated per-turn.
+        debug!(message_count = context.messages.len(), "starting stream");
         let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = self.stream_internal(context, options).await?;
+        let inner_stream = match self.stream_internal(context, options).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "Anthropic stream failed");
+                return Err(e);
+            }
+        };
         Ok(Box::pin(start_event.chain(inner_stream)))
     }
 }
@@ -561,11 +598,103 @@ mod tests {
     }
 
     #[test]
+    fn headers_api_key_no_oauth_beta() {
+        // Opus 4.6 with API key: no beta headers at all
+        let provider = AnthropicProvider::new(api_key_config());
+        let headers = provider.build_headers().unwrap();
+        assert!(headers.get("anthropic-beta").is_none());
+        assert!(headers.get("anthropic-dangerous-direct-browser-access").is_none());
+    }
+
+    #[test]
+    fn headers_api_key_thinking_model() {
+        // Haiku 4.5 with API key: thinking beta only, no OAuth beta
+        let mut cfg = api_key_config();
+        cfg.model = "claude-haiku-4-5-20251001".into();
+        let provider = AnthropicProvider::new(cfg);
+        let headers = provider.build_headers().unwrap();
+        assert_eq!(
+            headers["anthropic-beta"],
+            "interleaved-thinking-2025-05-14"
+        );
+        assert!(headers.get("anthropic-dangerous-direct-browser-access").is_none());
+    }
+
+    #[test]
     fn headers_oauth() {
         let provider = AnthropicProvider::new(oauth_config());
         let headers = provider.build_headers().unwrap();
         assert_eq!(headers[AUTHORIZATION], "Bearer at-test");
         assert!(headers.get("x-api-key").is_none());
+    }
+
+    #[test]
+    fn headers_oauth_has_browser_access() {
+        let provider = AnthropicProvider::new(oauth_config());
+        let headers = provider.build_headers().unwrap();
+        assert_eq!(
+            headers["anthropic-dangerous-direct-browser-access"],
+            "true"
+        );
+    }
+
+    #[test]
+    fn headers_oauth_opus_46_has_oauth_beta_only() {
+        // Opus 4.6 doesn't need thinking beta → only `oauth-2025-04-20`
+        let provider = AnthropicProvider::new(oauth_config());
+        let headers = provider.build_headers().unwrap();
+        assert_eq!(headers["anthropic-beta"], "oauth-2025-04-20");
+    }
+
+    #[test]
+    fn headers_oauth_haiku_45_has_full_beta() {
+        // Haiku 4.5 needs thinking beta → full beta string with oauth prefix
+        let mut cfg = oauth_config();
+        cfg.model = "claude-haiku-4-5-20251001".into();
+        let provider = AnthropicProvider::new(cfg);
+        let headers = provider.build_headers().unwrap();
+        let beta = headers["anthropic-beta"].to_str().unwrap();
+        assert!(beta.contains("oauth-2025-04-20"), "must contain oauth beta");
+        assert!(
+            beta.contains("interleaved-thinking-2025-05-14"),
+            "must contain thinking beta"
+        );
+    }
+
+    #[test]
+    fn headers_oauth_sonnet_45_has_full_beta() {
+        let mut cfg = oauth_config();
+        cfg.model = "claude-sonnet-4-5-20250929".into();
+        let provider = AnthropicProvider::new(cfg);
+        let headers = provider.build_headers().unwrap();
+        let beta = headers["anthropic-beta"].to_str().unwrap();
+        assert!(beta.starts_with("oauth-2025-04-20"));
+    }
+
+    #[test]
+    fn headers_oauth_unknown_model_gets_full_beta() {
+        // Unknown model → treat as needing thinking beta (safe default)
+        let mut cfg = oauth_config();
+        cfg.model = "claude-future-model".into();
+        let provider = AnthropicProvider::new(cfg);
+        let headers = provider.build_headers().unwrap();
+        let beta = headers["anthropic-beta"].to_str().unwrap();
+        assert!(beta.contains("oauth-2025-04-20"));
+        assert!(beta.contains("interleaved-thinking"));
+    }
+
+    #[test]
+    fn headers_oauth_custom_beta_from_settings() {
+        let mut cfg = oauth_config();
+        cfg.model = "claude-haiku-4-5-20251001".into();
+        cfg.provider_settings.oauth_beta_headers =
+            "oauth-2025-04-20,custom-beta-2025-06-01".into();
+        let provider = AnthropicProvider::new(cfg);
+        let headers = provider.build_headers().unwrap();
+        assert_eq!(
+            headers["anthropic-beta"],
+            "oauth-2025-04-20,custom-beta-2025-06-01"
+        );
     }
 
     // ── System prompt ───────────────────────────────────────────────────

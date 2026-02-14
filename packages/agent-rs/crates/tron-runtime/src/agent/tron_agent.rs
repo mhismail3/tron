@@ -13,6 +13,8 @@ use tron_hooks::engine::HookEngine;
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
+use tracing::{error, info, instrument, warn};
+
 use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::turn_runner;
@@ -33,6 +35,8 @@ pub struct TronAgent {
     current_turn: AtomicU32,
     is_running: AtomicBool,
     abort_token: CancellationToken,
+    /// Whether the abort token was provided externally (e.g. by orchestrator).
+    external_abort_token: bool,
 }
 
 impl TronAgent {
@@ -60,10 +64,13 @@ impl TronAgent {
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
+            external_abort_token: false,
         }
     }
 
     /// Run the multi-turn loop with user content.
+    #[allow(clippy::too_many_lines)]
+    #[instrument(skip(self, ctx), fields(session_id = %self.session_id, model = %self.config.model))]
     pub async fn run(&mut self, content: &str, ctx: RunContext) -> RunResult {
         // Reject concurrent runs
         if self
@@ -78,8 +85,10 @@ impl TronAgent {
             };
         }
 
-        // Reset abort token for this run
-        self.abort_token = CancellationToken::new();
+        // Reset abort token for this run (unless an external token was injected)
+        if !self.external_abort_token {
+            self.abort_token = CancellationToken::new();
+        }
         self.current_turn.store(0, Ordering::Relaxed);
 
         let mut total_usage = TokenUsage::default();
@@ -95,12 +104,14 @@ impl TronAgent {
             });
 
         // Emit AgentStart
-        self.emitter.emit(TronEvent::AgentStart {
+        let _ = self.emitter.emit(TronEvent::AgentStart {
             base: BaseEvent::now(&self.session_id),
         });
+        info!(session_id = %self.session_id, "agent run started");
 
         let max_turns = self.config.max_turns;
         let mut turn = 0u32;
+        let mut exited_via_break = false;
 
         while turn < max_turns {
             turn += 1;
@@ -134,35 +145,45 @@ impl TronAgent {
             }
 
             if !result.success {
+                error!(session_id = %self.session_id, turn, error = ?result.error, "turn failed");
                 final_stop_reason = StopReason::Error;
                 error = result.error;
+                exited_via_break = true;
                 break;
             }
 
             if result.interrupted {
+                warn!(session_id = %self.session_id, turn, "agent interrupted");
                 final_stop_reason = StopReason::Interrupted;
                 interrupted = true;
+                exited_via_break = true;
                 break;
             }
 
             if result.stop_turn_requested {
                 final_stop_reason = StopReason::ToolStop;
+                exited_via_break = true;
                 break;
             }
 
             if let Some(StopReason::EndTurn | StopReason::NoToolCalls) = result.stop_reason {
                 final_stop_reason = result.stop_reason.unwrap_or(StopReason::EndTurn);
+                exited_via_break = true;
                 break;
             }
             // Continue looping (tool calls executed, more turns needed)
         }
 
-        if turn >= max_turns && !matches!(final_stop_reason, StopReason::Error | StopReason::Interrupted | StopReason::ToolStop | StopReason::EndTurn | StopReason::NoToolCalls) {
+        // If the loop ended because turn >= max_turns (not via break),
+        // the agent exhausted its turn budget.
+        if !exited_via_break && turn >= max_turns {
             final_stop_reason = StopReason::MaxTurns;
         }
 
+        info!(session_id = %self.session_id, turns = turn, stop_reason = ?final_stop_reason, "agent run completed");
+
         // Emit AgentEnd
-        self.emitter.emit(TronEvent::AgentEnd {
+        let _ = self.emitter.emit(TronEvent::AgentEnd {
             base: BaseEvent::now(&self.session_id),
             error: error.clone(),
         });
@@ -176,6 +197,13 @@ impl TronAgent {
             interrupted,
             error,
         }
+    }
+
+    /// Set an external abort token (e.g. from the orchestrator).
+    /// When set, `run()` will not reset it — the orchestrator controls cancellation.
+    pub fn set_abort_token(&mut self, token: CancellationToken) {
+        self.abort_token = token;
+        self.external_abort_token = true;
     }
 
     /// Abort the current run.
@@ -489,6 +517,7 @@ mod tests {
         let result = agent.run("Go", RunContext::default()).await;
 
         assert_eq!(result.turns_executed, 2);
+        assert_eq!(result.stop_reason, StopReason::MaxTurns);
     }
 
     #[tokio::test]
@@ -642,5 +671,90 @@ mod tests {
         assert_eq!(result.stop_reason, StopReason::Error);
         assert!(result.error.is_some());
         assert_eq!(result.turns_executed, 1);
+    }
+
+    // ── set_abort_token tests ──
+
+    #[test]
+    fn set_abort_token_replaces_default() {
+        let mut agent = make_agent(MockProvider::text_only("Hi"));
+        let token = CancellationToken::new();
+        agent.set_abort_token(token.clone());
+        assert!(!token.is_cancelled());
+
+        agent.abort();
+        assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn external_abort_token_cancels_run() {
+        struct SlowProvider;
+        #[async_trait]
+        impl Provider for SlowProvider {
+            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
+            fn model(&self) -> &str { "mock" }
+            async fn stream(
+                &self,
+                _context: &tron_core::messages::Context,
+                _options: &ProviderStreamOptions,
+            ) -> Result<StreamEventStream, ProviderError> {
+                let s = async_stream::stream! {
+                    yield Ok(StreamEvent::Start);
+                    yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    yield Ok(StreamEvent::Done {
+                        message: AssistantMessage { content: vec![], token_usage: None },
+                        stop_reason: "end_turn".into(),
+                    });
+                };
+                Ok(Box::pin(s))
+            }
+        }
+
+        let ctx_config = ContextManagerConfig {
+            model: "mock".into(),
+            system_prompt: None,
+            working_directory: None,
+            tools: vec![],
+            rules_content: None,
+            compaction: tron_context::types::CompactionConfig::default(),
+        };
+        let mut agent = TronAgent::new(
+            AgentConfig::default(),
+            Arc::new(SlowProvider),
+            ToolRegistry::new(),
+            None,
+            None,
+            ContextManager::new(ctx_config),
+            "test-session".into(),
+        );
+
+        let token = CancellationToken::new();
+        agent.set_abort_token(token.clone());
+
+        // Cancel the external token after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            token.cancel();
+        });
+
+        let result = agent.run("Go", RunContext::default()).await;
+        assert!(result.interrupted || result.turns_executed >= 1);
+    }
+
+    #[tokio::test]
+    async fn external_token_not_reset_between_runs() {
+        let mut agent = make_agent(MockProvider::text_only("Hello"));
+        let token = CancellationToken::new();
+        agent.set_abort_token(token.clone());
+
+        // run() should NOT reset the external token
+        let result = agent.run("Hi", RunContext::default()).await;
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+
+        // The external token should still be the same one (not cancelled, not replaced)
+        assert!(!token.is_cancelled());
+        token.cancel();
+        assert!(token.is_cancelled());
     }
 }

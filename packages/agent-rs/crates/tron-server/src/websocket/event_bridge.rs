@@ -22,10 +22,13 @@ impl EventBridge {
     }
 
     /// Run the bridge loop. Exits when the broadcast sender is dropped.
+    #[tracing::instrument(skip_all, name = "event_bridge")]
     pub async fn run(mut self) {
         loop {
             match self.rx.recv().await {
                 Ok(event) => {
+                    let event_type = event.event_type();
+                    tracing::debug!(event_type, "bridging event to client");
                     let rpc_event = tron_event_to_rpc(&event);
                     let session_id = event.session_id();
 
@@ -38,7 +41,7 @@ impl EventBridge {
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("Event bridge lagged, skipped {n} events");
+                    tracing::warn!(lagged = n, "event bridge lagged");
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     tracing::info!("Event bridge: sender closed, exiting");
@@ -124,7 +127,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             ..
         } => Some(serde_json::json!({
             "toolCallId": tool_call_id,
-            "update": update,
+            "output": update,
         })),
         TronEvent::ToolUseBatch { tool_calls, .. } => {
             Some(serde_json::json!({ "toolCalls": tool_calls }))
@@ -365,12 +368,90 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         TronEvent::ThinkingEnd { thinking, .. } => {
             Some(serde_json::json!({ "thinking": thinking }))
         }
+        TronEvent::SessionCreated {
+            model,
+            working_directory,
+            ..
+        } => Some(serde_json::json!({
+            "model": model,
+            "workingDirectory": working_directory,
+        })),
+        TronEvent::SessionForked {
+            new_session_id, ..
+        } => Some(serde_json::json!({
+            "newSessionId": new_session_id,
+        })),
+        TronEvent::SessionUpdated {
+            title,
+            model,
+            message_count,
+            input_tokens,
+            output_tokens,
+            last_turn_input_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            cost,
+            last_activity,
+            is_active,
+            last_user_prompt,
+            last_assistant_response,
+            parent_session_id,
+            ..
+        } => Some(serde_json::json!({
+            "title": title,
+            "model": model,
+            "messageCount": message_count,
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "lastTurnInputTokens": last_turn_input_tokens,
+            "cacheReadTokens": cache_read_tokens,
+            "cacheCreationTokens": cache_creation_tokens,
+            "cost": cost,
+            "lastActivity": last_activity,
+            "isActive": is_active,
+            "lastUserPrompt": last_user_prompt,
+            "lastAssistantResponse": last_assistant_response,
+            "parentSessionId": parent_session_id,
+        })),
+        TronEvent::MemoryUpdated {
+            title, entry_type, ..
+        } => Some(serde_json::json!({
+            "title": title,
+            "entryType": entry_type,
+        })),
+        TronEvent::ContextCleared {
+            tokens_before,
+            tokens_after,
+            ..
+        } => Some(serde_json::json!({
+            "tokensBefore": tokens_before,
+            "tokensAfter": tokens_after,
+        })),
+        TronEvent::MessageDeleted {
+            target_event_id,
+            target_type,
+            target_turn,
+            reason,
+            ..
+        } => Some(serde_json::json!({
+            "targetEventId": target_event_id,
+            "targetType": target_type,
+            "targetTurn": target_turn,
+            "reason": reason,
+        })),
+        TronEvent::SkillRemoved { skill_name, .. } => Some(serde_json::json!({
+            "skillName": skill_name,
+        })),
         // Events with no additional data
         TronEvent::AgentStart { .. }
         | TronEvent::AgentReady { .. }
         | TronEvent::ThinkingStart { .. }
+        | TronEvent::MemoryUpdating { .. }
         | TronEvent::SessionSaved { .. }
-        | TronEvent::SessionLoaded { .. } => None,
+        | TronEvent::SessionLoaded { .. }
+        | TronEvent::SessionArchived { .. }
+        | TronEvent::SessionUnarchived { .. }
+        | TronEvent::SessionDeleted { .. } => None,
     };
 
     // Map internal event types to wire format
@@ -386,10 +467,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         "response_complete" => "agent.response_complete",
         "tool_execution_start" => "agent.tool_start",
         "tool_execution_end" => "agent.tool_end",
-        "tool_execution_update" => "agent.tool_update",
+        "tool_execution_update" => "agent.tool_output",
         "tool_use_batch" => "agent.tool_use_batch",
         "toolcall_delta" => "agent.toolcall_delta",
-        "toolcall_generating" => "agent.toolcall_generating",
+        "toolcall_generating" => "agent.tool_generating",
         "hook_triggered" => "hook.triggered",
         "hook_completed" => "hook.completed",
         "hook.background_started" => "hook.background_started",
@@ -402,6 +483,17 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         "thinking_delta" => "agent.thinking_delta",
         "thinking_end" => "agent.thinking_end",
         "error" => "agent.error",
+        "session_created" => "session.created",
+        "session_archived" => "session.archived",
+        "session_unarchived" => "session.unarchived",
+        "session_forked" => "session.forked",
+        "session_deleted" => "session.deleted",
+        "session_updated" => "session.updated",
+        "memory_updating" => "agent.memory_updating",
+        "memory_updated" => "agent.memory_updated",
+        "context_cleared" => "agent.context_cleared",
+        "message_deleted" => "agent.message_deleted",
+        "skill_removed" => "agent.skill_removed",
         other => other,
     };
 
@@ -722,6 +814,40 @@ mod tests {
     }
 
     #[test]
+    fn event_bridge_maps_session_created() {
+        let event = TronEvent::SessionCreated {
+            base: BaseEvent::now("s1"),
+            model: "claude-opus-4-6".into(),
+            working_directory: "/tmp".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "session.created");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["model"], "claude-opus-4-6");
+    }
+
+    #[test]
+    fn event_bridge_maps_session_archived() {
+        let event = TronEvent::SessionArchived {
+            base: BaseEvent::now("s1"),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "session.archived");
+    }
+
+    #[test]
+    fn event_bridge_maps_session_forked() {
+        let event = TronEvent::SessionForked {
+            base: BaseEvent::now("s1"),
+            new_session_id: "s2".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "session.forked");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["newSessionId"], "s2");
+    }
+
+    #[test]
     fn all_event_types_have_wire_mapping() {
         // Ensure every TronEvent variant maps to a wire type with "." separator
         let base = BaseEvent::now("s1");
@@ -742,7 +868,34 @@ mod tests {
             TronEvent::CompactionComplete { base: base.clone(), success: true, tokens_before: 0, tokens_after: 0, compression_ratio: 0.0, reason: None, summary: None, estimated_context_tokens: None },
             TronEvent::ThinkingStart { base: base.clone() },
             TronEvent::ThinkingDelta { base: base.clone(), delta: "d".into() },
-            TronEvent::ThinkingEnd { base, thinking: "t".into() },
+            TronEvent::ThinkingEnd { base: base.clone(), thinking: "t".into() },
+            TronEvent::SessionCreated { base: base.clone(), model: "m".into(), working_directory: "/".into() },
+            TronEvent::SessionArchived { base: base.clone() },
+            TronEvent::SessionUnarchived { base: base.clone() },
+            TronEvent::SessionForked { base: base.clone(), new_session_id: "s2".into() },
+            TronEvent::SessionDeleted { base: base.clone() },
+            TronEvent::SessionUpdated {
+                base: base.clone(),
+                title: None,
+                model: "m".into(),
+                message_count: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                last_turn_input_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                cost: 0.0,
+                last_activity: "t".into(),
+                is_active: true,
+                last_user_prompt: None,
+                last_assistant_response: None,
+                parent_session_id: None,
+            },
+            TronEvent::MemoryUpdating { base: base.clone() },
+            TronEvent::MemoryUpdated { base: base.clone(), title: None, entry_type: None },
+            TronEvent::ContextCleared { base: base.clone(), tokens_before: 0, tokens_after: 0 },
+            TronEvent::MessageDeleted { base: base.clone(), target_event_id: "id".into(), target_type: "t".into(), target_turn: None, reason: None },
+            TronEvent::SkillRemoved { base, skill_name: "n".into() },
         ];
         for event in &events {
             let rpc = tron_event_to_rpc(event);
@@ -753,5 +906,134 @@ mod tests {
                 event.event_type()
             );
         }
+    }
+
+    #[test]
+    fn session_updated_wire_type_and_data() {
+        let event = TronEvent::SessionUpdated {
+            base: BaseEvent::now("s1"),
+            title: Some("Test Session".into()),
+            model: "claude-opus-4-6".into(),
+            message_count: 5,
+            input_tokens: 100,
+            output_tokens: 50,
+            last_turn_input_tokens: 20,
+            cache_read_tokens: 10,
+            cache_creation_tokens: 5,
+            cost: 0.01,
+            last_activity: "2024-01-01T00:00:00Z".into(),
+            is_active: true,
+            last_user_prompt: Some("hello".into()),
+            last_assistant_response: Some("world".into()),
+            parent_session_id: None,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "session.updated");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["title"], "Test Session");
+        assert_eq!(data["model"], "claude-opus-4-6");
+        assert_eq!(data["messageCount"], 5);
+        assert_eq!(data["inputTokens"], 100);
+        assert_eq!(data["outputTokens"], 50);
+        assert_eq!(data["lastTurnInputTokens"], 20);
+        assert_eq!(data["cacheReadTokens"], 10);
+        assert_eq!(data["cacheCreationTokens"], 5);
+        assert_eq!(data["cost"], 0.01);
+        assert_eq!(data["isActive"], true);
+        assert_eq!(data["lastUserPrompt"], "hello");
+        assert_eq!(data["lastAssistantResponse"], "world");
+    }
+
+    #[test]
+    fn memory_updating_wire_type() {
+        let event = TronEvent::MemoryUpdating { base: BaseEvent::now("s1") };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.memory_updating");
+        assert!(rpc.data.is_none());
+    }
+
+    #[test]
+    fn memory_updated_wire_type_and_data() {
+        let event = TronEvent::MemoryUpdated {
+            base: BaseEvent::now("s1"),
+            title: Some("My Entry".into()),
+            entry_type: Some("feature".into()),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.memory_updated");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["title"], "My Entry");
+        assert_eq!(data["entryType"], "feature");
+    }
+
+    #[test]
+    fn context_cleared_wire_type_and_data() {
+        let event = TronEvent::ContextCleared {
+            base: BaseEvent::now("s1"),
+            tokens_before: 5000,
+            tokens_after: 0,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.context_cleared");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["tokensBefore"], 5000);
+        assert_eq!(data["tokensAfter"], 0);
+    }
+
+    #[test]
+    fn message_deleted_wire_type_and_data() {
+        let event = TronEvent::MessageDeleted {
+            base: BaseEvent::now("s1"),
+            target_event_id: "evt-123".into(),
+            target_type: "message.user".into(),
+            target_turn: Some(3),
+            reason: Some("user request".into()),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.message_deleted");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["targetEventId"], "evt-123");
+        assert_eq!(data["targetType"], "message.user");
+        assert_eq!(data["targetTurn"], 3);
+        assert_eq!(data["reason"], "user request");
+    }
+
+    #[test]
+    fn skill_removed_wire_type_and_data() {
+        let event = TronEvent::SkillRemoved {
+            base: BaseEvent::now("s1"),
+            skill_name: "web-search".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.skill_removed");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["skillName"], "web-search");
+    }
+
+    #[test]
+    fn tool_generating_wire_type() {
+        let event = TronEvent::ToolCallGenerating {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "bash".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.tool_generating");
+    }
+
+    #[test]
+    fn tool_output_wire_type_and_data() {
+        let event = TronEvent::ToolExecutionUpdate {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            update: "running...".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.tool_output");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["toolCallId"], "tc_1");
+        assert_eq!(data["output"], "running...");
+        // Verify no legacy "update" field
+        assert!(data.get("update").is_none());
     }
 }

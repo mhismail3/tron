@@ -2,42 +2,171 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
 
-/// Save a voice note.
+fn notes_dir() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    format!("{home}/.tron/notes")
+}
+
+/// Save a voice note (accepts base64 audio, writes markdown with frontmatter).
 pub struct SaveHandler;
 
 #[async_trait]
 impl MethodHandler for SaveHandler {
+    #[instrument(skip(self, _ctx), fields(method = "voiceNotes.save"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({ "saved": true, "noteId": uuid::Uuid::now_v7().to_string() }))
+        let audio_base64 = require_string_param(params.as_ref(), "audioBase64")?;
+
+        let dir = notes_dir();
+        let _ = std::fs::create_dir_all(&dir);
+
+        let now = chrono::Utc::now();
+        let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S"));
+        let filepath = format!("{dir}/{filename}");
+
+        // Decode audio length estimate (base64 → bytes → rough duration)
+        let audio_bytes = audio_base64.len() * 3 / 4;
+        // Rough estimate: ~16KB/s for compressed audio
+        #[allow(clippy::cast_precision_loss)]
+        let duration_seconds = (audio_bytes as f64) / 16_000.0;
+
+        // Write markdown with frontmatter
+        let content = format!(
+            "---\ntype: voice-note\ncreated: {}\nduration: {:.1}\nlanguage: en\nmodel: stub\n---\n\n(transcription pending)\n",
+            now.to_rfc3339(),
+            duration_seconds,
+        );
+        std::fs::write(&filepath, &content).map_err(|e| RpcError::Internal {
+            message: format!("Failed to write voice note: {e}"),
+        })?;
+
+        Ok(serde_json::json!({
+            "success": true,
+            "filename": filename,
+            "filepath": filepath,
+            "transcription": {
+                "text": "(transcription pending)",
+                "language": "en",
+                "durationSeconds": duration_seconds,
+            },
+        }))
     }
 }
 
-/// List voice notes.
+/// List voice notes (reads from ~/.tron/notes/).
 pub struct ListHandler;
 
 #[async_trait]
 impl MethodHandler for ListHandler {
+    #[instrument(skip(self, _ctx), fields(method = "voiceNotes.list"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({ "notes": [] }))
+        let limit = params
+            .as_ref()
+            .and_then(|p| p.get("limit"))
+            .and_then(Value::as_u64)
+            .unwrap_or(50);
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+
+        let offset = params
+            .as_ref()
+            .and_then(|p| p.get("offset"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let offset = usize::try_from(offset).unwrap_or(0);
+
+        let dir = notes_dir();
+        let mut notes = Vec::new();
+
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.ends_with("-voice-note.md") {
+                    continue;
+                }
+                let path = entry.path();
+                let content = std::fs::read_to_string(&path).unwrap_or_default();
+
+                // Parse frontmatter
+                let mut created_at = String::new();
+                let mut duration_seconds: Option<f64> = None;
+                let mut language: Option<String> = None;
+                let mut transcript = String::new();
+
+                if let Some(stripped) = content.strip_prefix("---\n") {
+                    if let Some(end) = stripped.find("---\n") {
+                        let fm = &stripped[..end];
+                        for line in fm.lines() {
+                            if let Some(val) = line.strip_prefix("created: ") {
+                                created_at = val.trim().to_string();
+                            } else if let Some(val) = line.strip_prefix("duration: ") {
+                                duration_seconds = val.trim().parse().ok();
+                            } else if let Some(val) = line.strip_prefix("language: ") {
+                                language = Some(val.trim().to_string());
+                            }
+                        }
+                        transcript = content[4 + end + 4..].trim().to_string();
+                    }
+                }
+
+                let preview = if transcript.len() > 100 {
+                    transcript[..100].to_string()
+                } else {
+                    transcript.clone()
+                };
+
+                notes.push(serde_json::json!({
+                    "filename": name,
+                    "filepath": path.to_string_lossy(),
+                    "createdAt": created_at,
+                    "durationSeconds": duration_seconds,
+                    "language": language,
+                    "preview": preview,
+                    "transcript": transcript,
+                }));
+            }
+        }
+
+        // Sort newest first
+        notes.sort_by(|a, b| {
+            let a_ts = a["createdAt"].as_str().unwrap_or("");
+            let b_ts = b["createdAt"].as_str().unwrap_or("");
+            b_ts.cmp(a_ts)
+        });
+
+        let total_count = notes.len();
+        let has_more = offset + limit < total_count;
+        let notes: Vec<Value> = notes.into_iter().skip(offset).take(limit).collect();
+
+        Ok(serde_json::json!({
+            "notes": notes,
+            "totalCount": total_count,
+            "hasMore": has_more,
+        }))
     }
 }
 
-/// Delete a voice note.
+/// Delete a voice note by filename.
 pub struct DeleteHandler;
 
 #[async_trait]
 impl MethodHandler for DeleteHandler {
+    #[instrument(skip(self, _ctx), fields(method = "voiceNotes.delete"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _note_id = require_string_param(params.as_ref(), "noteId")?;
-        Ok(serde_json::json!({ "deleted": true }))
+        let filename = require_string_param(params.as_ref(), "filename")?;
+        let filepath = format!("{}/{filename}", notes_dir());
+
+        let _ = std::fs::remove_file(&filepath);
+
+        Ok(serde_json::json!({
+            "success": true,
+            "filename": filename,
+        }))
     }
 }
 
@@ -46,20 +175,31 @@ mod tests {
     use super::*;
     use crate::handlers::test_helpers::make_test_context;
     use serde_json::json;
+    use std::io::Write;
 
     #[tokio::test]
     async fn save_voice_note_success() {
         let ctx = make_test_context();
         let result = SaveHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
+            .handle(
+                Some(json!({"audioBase64": "SGVsbG8gV29ybGQ="})),
+                &ctx,
+            )
             .await
             .unwrap();
-        assert_eq!(result["saved"], true);
-        assert!(result["noteId"].is_string());
+        assert_eq!(result["success"], true);
+        assert!(result["filename"].is_string());
+        assert!(result["filepath"].is_string());
+        assert!(result["transcription"]["text"].is_string());
+        assert!(result["transcription"]["durationSeconds"].is_number());
+        // Cleanup
+        if let Some(fp) = result["filepath"].as_str() {
+            let _ = std::fs::remove_file(fp);
+        }
     }
 
     #[tokio::test]
-    async fn save_voice_note_missing_session() {
+    async fn save_voice_note_missing_audio() {
         let ctx = make_test_context();
         let err = SaveHandler
             .handle(Some(json!({})), &ctx)
@@ -69,17 +209,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_voice_notes() {
+    async fn list_voice_notes_empty() {
+        let ctx = make_test_context();
+        let result = ListHandler.handle(None, &ctx).await.unwrap();
+        assert!(result["notes"].is_array());
+        assert!(result["totalCount"].is_number());
+        assert!(result.get("hasMore").is_some());
+    }
+
+    #[tokio::test]
+    async fn list_voice_notes_with_pagination() {
         let ctx = make_test_context();
         let result = ListHandler
-            .handle(Some(json!({"sessionId": "s1"})), &ctx)
+            .handle(Some(json!({"limit": 10, "offset": 0})), &ctx)
             .await
             .unwrap();
         assert!(result["notes"].is_array());
     }
 
     #[tokio::test]
-    async fn delete_voice_note_missing_id() {
+    async fn delete_voice_note_by_filename() {
+        let ctx = make_test_context();
+        // Create a temp note
+        let dir = notes_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let filename = "test-delete-voice-note.md";
+        let path = format!("{dir}/{filename}");
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(b"test").unwrap();
+        }
+
+        let result = DeleteHandler
+            .handle(Some(json!({"filename": filename})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(result["filename"], filename);
+        assert!(!std::path::Path::new(&path).exists());
+    }
+
+    #[tokio::test]
+    async fn delete_voice_note_missing_filename() {
         let ctx = make_test_context();
         let err = DeleteHandler
             .handle(Some(json!({})), &ctx)

@@ -145,6 +145,29 @@ pub struct BranchRow {
     pub last_activity_at: String,
 }
 
+/// Raw device token row from the `device_tokens` table.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeviceTokenRow {
+    /// Device token registration ID.
+    pub id: String,
+    /// APNS device token (64-char hex).
+    pub device_token: String,
+    /// Associated session ID.
+    pub session_id: Option<String>,
+    /// Associated workspace ID.
+    pub workspace_id: Option<String>,
+    /// Platform (always "ios" for now).
+    pub platform: String,
+    /// APNS environment ("sandbox" or "production").
+    pub environment: String,
+    /// Creation timestamp.
+    pub created_at: String,
+    /// Last used timestamp.
+    pub last_used_at: String,
+    /// Whether the token is active.
+    pub is_active: bool,
+}
+
 /// Raw blob row from the `blobs` table.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlobRow {

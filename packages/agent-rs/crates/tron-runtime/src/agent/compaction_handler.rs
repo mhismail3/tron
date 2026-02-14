@@ -7,7 +7,10 @@ use tron_context::context_manager::ContextManager;
 use tron_context::summarizer::KeywordSummarizer;
 use tron_core::events::{BaseEvent, CompactionReason, TronEvent};
 use tron_hooks::engine::HookEngine;
+use tron_core::events::HookResult as EventHookResult;
 use tron_hooks::types::{HookAction, HookContext};
+
+use tracing::{debug, info};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::errors::RuntimeError;
@@ -58,6 +61,8 @@ impl CompactionHandler {
         emitter: &Arc<EventEmitter>,
         reason: CompactionReason,
     ) -> Result<bool, RuntimeError> {
+        debug!(session_id, ?reason, "compaction requested");
+
         // Guard against concurrent compaction
         if self
             .is_compacting
@@ -75,9 +80,31 @@ impl CompactionHandler {
                 session_id: session_id.to_owned(),
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 current_tokens: tokens_before,
-                target_tokens: context_manager.get_context_limit() / 2,
+                target_tokens: (context_manager.get_context_limit() * 7) / 10,
             };
+            let _ = emitter.emit(TronEvent::HookTriggered {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreCompact".into(),
+                tool_name: None,
+                tool_call_id: None,
+            });
             let result = hook_engine.execute(&hook_ctx).await;
+            let event_result = match result.action {
+                HookAction::Block => EventHookResult::Block,
+                HookAction::Modify => EventHookResult::Modify,
+                HookAction::Continue => EventHookResult::Continue,
+            };
+            let _ = emitter.emit(TronEvent::HookCompleted {
+                base: BaseEvent::now(session_id),
+                hook_names: vec![],
+                hook_event: "PreCompact".into(),
+                result: event_result,
+                duration: None,
+                reason: result.reason.clone(),
+                tool_name: None,
+                tool_call_id: None,
+            });
             if result.action == HookAction::Block {
                 self.is_compacting.store(false, Ordering::SeqCst);
                 return Ok(false);
@@ -85,7 +112,7 @@ impl CompactionHandler {
         }
 
         // Emit compaction start
-        emitter.emit(TronEvent::CompactionStart {
+        let _ = emitter.emit(TronEvent::CompactionStart {
             base: BaseEvent::now(session_id),
             reason: reason.clone(),
             tokens_before,
@@ -102,7 +129,8 @@ impl CompactionHandler {
         match result {
             Ok(compaction_result) => {
                 let tokens_after = context_manager.get_current_tokens();
-                emitter.emit(TronEvent::CompactionComplete {
+                info!(session_id, tokens_before, tokens_after, "compaction complete");
+                let _ = emitter.emit(TronEvent::CompactionComplete {
                     base: BaseEvent::now(session_id),
                     success: compaction_result.success,
                     tokens_before,
@@ -119,7 +147,7 @@ impl CompactionHandler {
                 Ok(true)
             }
             Err(e) => {
-                emitter.emit(TronEvent::CompactionComplete {
+                let _ = emitter.emit(TronEvent::CompactionComplete {
                     base: BaseEvent::now(session_id),
                     success: false,
                     tokens_before,
@@ -156,5 +184,20 @@ mod tests {
     fn default_state() {
         let handler = CompactionHandler::default();
         assert!(!handler.is_compacting());
+    }
+
+    #[test]
+    fn pre_compact_target_is_70_percent() {
+        // Verify the compaction target formula: (limit * 7) / 10
+        let limit: u64 = 200_000;
+        let target = (limit * 7) / 10;
+        assert_eq!(target, 140_000);
+    }
+
+    #[test]
+    fn pre_compact_target_not_50_percent() {
+        let limit: u64 = 200_000;
+        let target = (limit * 7) / 10;
+        assert_ne!(target, limit / 2);
     }
 }

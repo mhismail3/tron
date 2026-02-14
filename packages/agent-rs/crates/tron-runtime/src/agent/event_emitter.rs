@@ -37,7 +37,7 @@ impl EventEmitter {
     /// Returns the number of receivers that received the event.
     /// Returns 0 if there are no active subscribers.
     pub fn emit(&self, event: TronEvent) -> usize {
-        self.emit_count.fetch_add(1, Ordering::Relaxed);
+        let _ = self.emit_count.fetch_add(1, Ordering::Relaxed);
         self.tx.send(event).unwrap_or(0)
     }
 

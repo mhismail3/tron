@@ -748,6 +748,171 @@ pub enum TronEvent {
         /// Full thinking text.
         thinking: String,
     },
+
+    // -- Session lifecycle --
+
+    /// Session created.
+    #[serde(rename = "session_created")]
+    SessionCreated {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Model used for the session.
+        model: String,
+        /// Working directory for the session.
+        #[serde(rename = "workingDirectory")]
+        working_directory: String,
+    },
+
+    /// Session archived.
+    #[serde(rename = "session_archived")]
+    SessionArchived {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+    },
+
+    /// Session unarchived.
+    #[serde(rename = "session_unarchived")]
+    SessionUnarchived {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+    },
+
+    /// Session forked.
+    #[serde(rename = "session_forked")]
+    SessionForked {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// The new session ID.
+        #[serde(rename = "newSessionId")]
+        new_session_id: String,
+    },
+
+    /// Session deleted.
+    #[serde(rename = "session_deleted")]
+    SessionDeleted {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+    },
+
+    /// Session metadata updated (live sync to iOS).
+    #[serde(rename = "session_updated")]
+    SessionUpdated {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Session title.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// Current model.
+        model: String,
+        /// Message count.
+        #[serde(rename = "messageCount")]
+        message_count: i64,
+        /// Total input tokens.
+        #[serde(rename = "inputTokens")]
+        input_tokens: i64,
+        /// Total output tokens.
+        #[serde(rename = "outputTokens")]
+        output_tokens: i64,
+        /// Input tokens for last turn.
+        #[serde(rename = "lastTurnInputTokens")]
+        last_turn_input_tokens: i64,
+        /// Cache read tokens.
+        #[serde(rename = "cacheReadTokens")]
+        cache_read_tokens: i64,
+        /// Cache creation tokens.
+        #[serde(rename = "cacheCreationTokens")]
+        cache_creation_tokens: i64,
+        /// Cost in USD.
+        cost: f64,
+        /// Last activity timestamp.
+        #[serde(rename = "lastActivity")]
+        last_activity: String,
+        /// Whether the session is active.
+        #[serde(rename = "isActive")]
+        is_active: bool,
+        /// Last user prompt preview.
+        #[serde(rename = "lastUserPrompt", skip_serializing_if = "Option::is_none")]
+        last_user_prompt: Option<String>,
+        /// Last assistant response preview.
+        #[serde(rename = "lastAssistantResponse", skip_serializing_if = "Option::is_none")]
+        last_assistant_response: Option<String>,
+        /// Parent session ID (for forked sessions).
+        #[serde(rename = "parentSessionId", skip_serializing_if = "Option::is_none")]
+        parent_session_id: Option<String>,
+    },
+
+    /// Memory updating (shows spinner in iOS).
+    #[serde(rename = "memory_updating")]
+    MemoryUpdating {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+    },
+
+    /// Memory updated.
+    #[serde(rename = "memory_updated")]
+    MemoryUpdated {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Memory entry title.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        /// Memory entry type.
+        #[serde(rename = "entryType", skip_serializing_if = "Option::is_none")]
+        entry_type: Option<String>,
+    },
+
+    /// Context cleared.
+    #[serde(rename = "context_cleared")]
+    ContextCleared {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Token count before clearing.
+        #[serde(rename = "tokensBefore")]
+        tokens_before: i64,
+        /// Token count after clearing.
+        #[serde(rename = "tokensAfter")]
+        tokens_after: i64,
+    },
+
+    /// Message deleted.
+    #[serde(rename = "message_deleted")]
+    MessageDeleted {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// The event ID that was deleted.
+        #[serde(rename = "targetEventId")]
+        target_event_id: String,
+        /// The type of the deleted event.
+        #[serde(rename = "targetType")]
+        target_type: String,
+        /// Turn number of the deleted message.
+        #[serde(rename = "targetTurn", skip_serializing_if = "Option::is_none")]
+        target_turn: Option<i64>,
+        /// Reason for deletion.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
+    /// Skill removed.
+    #[serde(rename = "skill_removed")]
+    SkillRemoved {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Name of the removed skill.
+        #[serde(rename = "skillName")]
+        skill_name: String,
+    },
 }
 
 impl TronEvent {
@@ -783,7 +948,18 @@ impl TronEvent {
             | Self::ApiRetry { base, .. }
             | Self::ThinkingStart { base, .. }
             | Self::ThinkingDelta { base, .. }
-            | Self::ThinkingEnd { base, .. } => base,
+            | Self::ThinkingEnd { base, .. }
+            | Self::SessionCreated { base, .. }
+            | Self::SessionArchived { base, .. }
+            | Self::SessionUnarchived { base, .. }
+            | Self::SessionForked { base, .. }
+            | Self::SessionDeleted { base, .. }
+            | Self::SessionUpdated { base, .. }
+            | Self::MemoryUpdating { base, .. }
+            | Self::MemoryUpdated { base, .. }
+            | Self::ContextCleared { base, .. }
+            | Self::MessageDeleted { base, .. }
+            | Self::SkillRemoved { base, .. } => base,
         }
     }
 
@@ -832,6 +1008,17 @@ impl TronEvent {
             Self::ThinkingStart { .. } => "thinking_start",
             Self::ThinkingDelta { .. } => "thinking_delta",
             Self::ThinkingEnd { .. } => "thinking_end",
+            Self::SessionCreated { .. } => "session_created",
+            Self::SessionArchived { .. } => "session_archived",
+            Self::SessionUnarchived { .. } => "session_unarchived",
+            Self::SessionForked { .. } => "session_forked",
+            Self::SessionDeleted { .. } => "session_deleted",
+            Self::SessionUpdated { .. } => "session_updated",
+            Self::MemoryUpdating { .. } => "memory_updating",
+            Self::MemoryUpdated { .. } => "memory_updated",
+            Self::ContextCleared { .. } => "context_cleared",
+            Self::MessageDeleted { .. } => "message_deleted",
+            Self::SkillRemoved { .. } => "skill_removed",
         }
     }
 
@@ -1448,19 +1635,137 @@ mod tests {
                 delta: "d".into(),
             },
             TronEvent::ThinkingEnd {
-                base,
+                base: base.clone(),
                 thinking: "t".into(),
+            },
+            TronEvent::SessionUpdated {
+                base: base.clone(),
+                title: None,
+                model: "m".into(),
+                message_count: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                last_turn_input_tokens: 0,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                cost: 0.0,
+                last_activity: "t".into(),
+                is_active: true,
+                last_user_prompt: None,
+                last_assistant_response: None,
+                parent_session_id: None,
+            },
+            TronEvent::MemoryUpdating {
+                base: base.clone(),
+            },
+            TronEvent::MemoryUpdated {
+                base: base.clone(),
+                title: None,
+                entry_type: None,
+            },
+            TronEvent::ContextCleared {
+                base: base.clone(),
+                tokens_before: 0,
+                tokens_after: 0,
+            },
+            TronEvent::MessageDeleted {
+                base: base.clone(),
+                target_event_id: "id".into(),
+                target_type: "t".into(),
+                target_turn: None,
+                reason: None,
+            },
+            TronEvent::SkillRemoved {
+                base,
+                skill_name: "n".into(),
             },
         ];
 
-        // All 29 variants
-        assert_eq!(events.len(), 29);
+        // All 35 variants
+        assert_eq!(events.len(), 35);
 
-        // All have unique event types (except thinking_start/delta/end which
-        // share names with stream events, but that's by design)
         let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
         types.sort();
         types.dedup();
-        assert_eq!(types.len(), 29);
+        assert_eq!(types.len(), 35);
+    }
+
+    #[test]
+    fn session_updated_event_type() {
+        let e = TronEvent::SessionUpdated {
+            base: BaseEvent::now("s1"),
+            title: Some("title".into()),
+            model: "claude-opus-4-6".into(),
+            message_count: 5,
+            input_tokens: 100,
+            output_tokens: 50,
+            last_turn_input_tokens: 20,
+            cache_read_tokens: 10,
+            cache_creation_tokens: 5,
+            cost: 0.01,
+            last_activity: "2024-01-01T00:00:00Z".into(),
+            is_active: true,
+            last_user_prompt: Some("hello".into()),
+            last_assistant_response: Some("world".into()),
+            parent_session_id: None,
+        };
+        assert_eq!(e.event_type(), "session_updated");
+        assert_eq!(e.session_id(), "s1");
+    }
+
+    #[test]
+    fn memory_updating_event_type() {
+        let e = TronEvent::MemoryUpdating { base: BaseEvent::now("s1") };
+        assert_eq!(e.event_type(), "memory_updating");
+    }
+
+    #[test]
+    fn memory_updated_event_type() {
+        let e = TronEvent::MemoryUpdated {
+            base: BaseEvent::now("s1"),
+            title: Some("entry".into()),
+            entry_type: Some("feature".into()),
+        };
+        assert_eq!(e.event_type(), "memory_updated");
+    }
+
+    #[test]
+    fn context_cleared_event_type() {
+        let e = TronEvent::ContextCleared {
+            base: BaseEvent::now("s1"),
+            tokens_before: 5000,
+            tokens_after: 0,
+        };
+        assert_eq!(e.event_type(), "context_cleared");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["tokensBefore"], 5000);
+        assert_eq!(json["tokensAfter"], 0);
+    }
+
+    #[test]
+    fn message_deleted_event_type() {
+        let e = TronEvent::MessageDeleted {
+            base: BaseEvent::now("s1"),
+            target_event_id: "evt-123".into(),
+            target_type: "message.user".into(),
+            target_turn: Some(3),
+            reason: Some("user request".into()),
+        };
+        assert_eq!(e.event_type(), "message_deleted");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["targetEventId"], "evt-123");
+        assert_eq!(json["targetType"], "message.user");
+        assert_eq!(json["targetTurn"], 3);
+    }
+
+    #[test]
+    fn skill_removed_event_type() {
+        let e = TronEvent::SkillRemoved {
+            base: BaseEvent::now("s1"),
+            skill_name: "web-search".into(),
+        };
+        assert_eq!(e.event_type(), "skill_removed");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["skillName"], "web-search");
     }
 }

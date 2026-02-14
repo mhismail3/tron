@@ -115,6 +115,16 @@ impl SkillRegistry {
         self.skills.len()
     }
 
+    /// Remove a skill by name. Returns `true` if the skill existed and was removed.
+    pub fn remove(&mut self, name: &str) -> bool {
+        self.skills.remove(name).is_some()
+    }
+
+    /// Check if the registry has no skills.
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+
     /// Clear and reload all skills.
     pub fn refresh(&mut self, working_dir: &str) {
         self.skills.clear();

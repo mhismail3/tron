@@ -19,7 +19,7 @@
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use tron_auth::{calculate_expires_at, should_refresh, OAuthTokens};
 use tron_core::events::StreamEvent;
@@ -72,6 +72,7 @@ struct TokenResponse {
 }
 
 /// Refresh Google OAuth tokens.
+#[instrument(skip_all)]
 async fn refresh_tokens(
     tokens: &OAuthTokens,
     settings: &GoogleApiSettings,
@@ -184,6 +185,7 @@ impl GoogleProvider {
     }
 
     /// Ensure OAuth tokens are valid, refreshing if necessary.
+    #[instrument(skip_all)]
     async fn ensure_valid_tokens(&self) -> ProviderResult<()> {
         let Some(ref token_mutex) = self.tokens else {
             return Ok(()); // API key auth, no tokens to refresh
@@ -462,6 +464,7 @@ impl GoogleProvider {
     }
 
     /// Internal streaming implementation.
+    #[instrument(skip_all, fields(model = %self.config.model))]
     async fn stream_internal(
         &self,
         context: &Context,
@@ -505,6 +508,12 @@ impl GoogleProvider {
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
             let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            error!(
+                status = status.as_u16(),
+                code = code.as_deref().unwrap_or("unknown"),
+                retryable,
+                "Google API error"
+            );
             return Err(ProviderError::Api {
                 status: status.as_u16(),
                 message,
@@ -565,15 +574,23 @@ impl Provider for GoogleProvider {
         &self.config.model
     }
 
+    #[instrument(skip_all, fields(provider = "google", model = %self.config.model))]
     async fn stream(
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
+        debug!(message_count = context.messages.len(), "starting stream");
         self.ensure_valid_tokens().await?;
 
         let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = self.stream_internal(context, options).await?;
+        let inner_stream = match self.stream_internal(context, options).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "Google stream failed");
+                return Err(e);
+            }
+        };
         Ok(Box::pin(start_event.chain(inner_stream)))
     }
 }

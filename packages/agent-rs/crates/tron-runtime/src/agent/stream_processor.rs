@@ -96,7 +96,7 @@ pub async fn process_stream(
                 match stream_event {
                     StreamEvent::TextDelta { delta } => {
                         text_acc.push_str(&delta);
-                        emitter.emit(TronEvent::MessageUpdate {
+                        let _ = emitter.emit(TronEvent::MessageUpdate {
                             base: BaseEvent::now(session_id),
                             content: delta,
                         });
@@ -105,14 +105,14 @@ pub async fn process_stream(
                     StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
 
                     StreamEvent::ThinkingStart => {
-                        emitter.emit(TronEvent::ThinkingStart {
+                        let _ = emitter.emit(TronEvent::ThinkingStart {
                             base: BaseEvent::now(session_id),
                         });
                     }
 
                     StreamEvent::ThinkingDelta { delta } => {
                         thinking_acc.push_str(&delta);
-                        emitter.emit(TronEvent::ThinkingDelta {
+                        let _ = emitter.emit(TronEvent::ThinkingDelta {
                             base: BaseEvent::now(session_id),
                             delta,
                         });
@@ -121,7 +121,7 @@ pub async fn process_stream(
                     StreamEvent::ThinkingEnd { thinking, signature } => {
                         thinking_acc.clone_from(&thinking);
                         thinking_signature = signature;
-                        emitter.emit(TronEvent::ThinkingEnd {
+                        let _ = emitter.emit(TronEvent::ThinkingEnd {
                             base: BaseEvent::now(session_id),
                             thinking,
                         });
@@ -143,7 +143,7 @@ pub async fn process_stream(
                         current_tool_name = Some(name.clone());
                         current_tool_args.clear();
 
-                        emitter.emit(TronEvent::ToolCallGenerating {
+                        let _ = emitter.emit(TronEvent::ToolCallGenerating {
                             base: BaseEvent::now(session_id),
                             tool_call_id,
                             tool_name: name,
@@ -155,7 +155,7 @@ pub async fn process_stream(
                         arguments_delta,
                     } => {
                         current_tool_args.push_str(&arguments_delta);
-                        emitter.emit(TronEvent::ToolCallArgumentDelta {
+                        let _ = emitter.emit(TronEvent::ToolCallArgumentDelta {
                             base: BaseEvent::now(session_id),
                             tool_call_id,
                             tool_name: current_tool_name.clone(),
@@ -191,7 +191,7 @@ pub async fn process_stream(
                         delay_ms,
                         error,
                     } => {
-                        emitter.emit(TronEvent::ApiRetry {
+                        let _ = emitter.emit(TronEvent::ApiRetry {
                             base: BaseEvent::now(session_id),
                             attempt,
                             max_retries,

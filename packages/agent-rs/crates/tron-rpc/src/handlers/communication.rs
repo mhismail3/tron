@@ -1,7 +1,11 @@
 //! Communication handlers: send, receive, subscribe, unsubscribe.
+//!
+//! These are placeholder handlers — the TypeScript server also has stubs for
+//! communication features. iOS doesn't use these endpoints.
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::{debug, instrument};
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -13,8 +17,10 @@ pub struct SendHandler;
 
 #[async_trait]
 impl MethodHandler for SendHandler {
+    #[instrument(skip(self, _ctx), fields(method = "communication.send"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _channel = require_string_param(params.as_ref(), "channel")?;
+        let channel = require_string_param(params.as_ref(), "channel")?;
+        debug!(channel, "communication.send (stub)");
         Ok(serde_json::json!({ "sent": true }))
     }
 }
@@ -24,8 +30,10 @@ pub struct ReceiveHandler;
 
 #[async_trait]
 impl MethodHandler for ReceiveHandler {
+    #[instrument(skip(self, _ctx), fields(method = "communication.receive"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _channel = require_string_param(params.as_ref(), "channel")?;
+        let channel = require_string_param(params.as_ref(), "channel")?;
+        debug!(channel, "communication.receive (stub)");
         Ok(serde_json::json!({ "messages": [] }))
     }
 }
@@ -35,8 +43,10 @@ pub struct SubscribeHandler;
 
 #[async_trait]
 impl MethodHandler for SubscribeHandler {
+    #[instrument(skip(self, _ctx), fields(method = "communication.subscribe"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _channel = require_string_param(params.as_ref(), "channel")?;
+        let channel = require_string_param(params.as_ref(), "channel")?;
+        debug!(channel, "communication.subscribe (stub)");
         Ok(serde_json::json!({ "subscribed": true }))
     }
 }
@@ -46,8 +56,10 @@ pub struct UnsubscribeHandler;
 
 #[async_trait]
 impl MethodHandler for UnsubscribeHandler {
+    #[instrument(skip(self, _ctx), fields(method = "communication.unsubscribe"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _channel = require_string_param(params.as_ref(), "channel")?;
+        let channel = require_string_param(params.as_ref(), "channel")?;
+        debug!(channel, "communication.unsubscribe (stub)");
         Ok(serde_json::json!({ "unsubscribed": true }))
     }
 }

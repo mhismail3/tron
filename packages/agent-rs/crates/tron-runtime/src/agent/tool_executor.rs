@@ -5,13 +5,15 @@ use std::time::Instant;
 
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-use tron_core::events::{BaseEvent, TronEvent};
+use tron_core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use tron_core::messages::ToolCall;
 use tron_guardrails::{EvaluationContext, GuardrailEngine};
 use tron_hooks::engine::HookEngine;
 use tron_hooks::types::{HookAction, HookContext};
 use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::ToolContext;
+
+use tracing::{debug, error, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::types::ToolExecutionResult;
@@ -20,6 +22,7 @@ use crate::types::ToolExecutionResult;
 ///
 /// Pipeline: guardrails → pre-hooks → execute → post-hooks → result
 #[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::cast_possible_truncation)]
+#[instrument(skip_all, fields(tool_name = tool_call.name, session_id))]
 pub async fn execute_tool(
     tool_call: &ToolCall,
     registry: &ToolRegistry,
@@ -36,6 +39,7 @@ pub async fn execute_tool(
 
     // 1. Look up tool
     let Some(tool) = registry.get(&tool_name) else {
+        error!(tool_name, "tool not found");
         return ToolExecutionResult {
             tool_call_id,
             result: tron_core::tools::error_result(format!(
@@ -63,6 +67,7 @@ pub async fn execute_tool(
         if let Ok(mut engine) = guardrail_engine.lock() {
             let eval = engine.evaluate(&eval_ctx);
             if eval.blocked {
+                warn!(tool_name, "blocked by guardrail");
                 let reason = eval
                     .block_reason
                     .unwrap_or_else(|| "Blocked by guardrail".into());
@@ -89,9 +94,32 @@ pub async fn execute_tool(
             tool_arguments: effective_args.clone(),
             tool_call_id: tool_call_id.clone(),
         };
+        let _ = emitter.emit(TronEvent::HookTriggered {
+            base: BaseEvent::now(session_id),
+            hook_names: vec![],
+            hook_event: "PreToolUse".into(),
+            tool_name: Some(tool_name.clone()),
+            tool_call_id: Some(tool_call_id.clone()),
+        });
         let result = hook_engine.execute(&hook_ctx).await;
+        let event_result = match result.action {
+            HookAction::Block => EventHookResult::Block,
+            HookAction::Modify => EventHookResult::Modify,
+            HookAction::Continue => EventHookResult::Continue,
+        };
+        let _ = emitter.emit(TronEvent::HookCompleted {
+            base: BaseEvent::now(session_id),
+            hook_names: vec![],
+            hook_event: "PreToolUse".into(),
+            result: event_result,
+            duration: None,
+            reason: result.reason.clone(),
+            tool_name: Some(tool_name.clone()),
+            tool_call_id: Some(tool_call_id.clone()),
+        });
         match result.action {
             HookAction::Block => {
+                warn!(tool_name, "blocked by PreToolUse hook");
                 let reason = result
                     .reason
                     .unwrap_or_else(|| "Blocked by PreToolUse hook".into());
@@ -115,12 +143,13 @@ pub async fn execute_tool(
     }
 
     // 4. Emit ToolExecutionStart
-    emitter.emit(TronEvent::ToolExecutionStart {
+    let _ = emitter.emit(TronEvent::ToolExecutionStart {
         base: BaseEvent::now(session_id),
         tool_call_id: tool_call_id.clone(),
         tool_name: tool_name.clone(),
         arguments: effective_args.as_object().cloned(),
     });
+    debug!(tool_name, tool_call_id, session_id, "tool execution started");
 
     // 5. Execute tool
     let ctx = ToolContext {
@@ -142,7 +171,7 @@ pub async fn execute_tool(
     let duration_ms = start.elapsed().as_millis() as u64;
 
     // 6. Emit ToolExecutionEnd
-    emitter.emit(TronEvent::ToolExecutionEnd {
+    let _ = emitter.emit(TronEvent::ToolExecutionEnd {
         base: BaseEvent::now(session_id),
         tool_call_id: tool_call_id.clone(),
         tool_name: tool_name.clone(),
@@ -150,6 +179,7 @@ pub async fn execute_tool(
         is_error: tool_result.is_error,
         result: Some(tool_result.clone()),
     });
+    debug!(tool_name, tool_call_id, duration_ms, "tool executed");
 
     // 7. Execute PostToolUse hooks (background, fire-and-forget)
     if let Some(hook_engine) = hooks {
@@ -161,10 +191,36 @@ pub async fn execute_tool(
             result: serde_json::to_value(&tool_result).unwrap_or_default(),
             duration_ms,
         };
+        let _ = emitter.emit(TronEvent::HookTriggered {
+            base: BaseEvent::now(session_id),
+            hook_names: vec![],
+            hook_event: "PostToolUse".into(),
+            tool_name: Some(tool_name.clone()),
+            tool_call_id: Some(tool_call_id.clone()),
+        });
         // Fire and forget
         let engine = hook_engine.clone();
-        tokio::spawn(async move {
-            let _ = engine.execute(&hook_ctx).await;
+        let emitter_bg = emitter.clone();
+        let sid = session_id.to_owned();
+        let tn = tool_name.clone();
+        let tcid = tool_call_id.clone();
+        let _handle = tokio::spawn(async move {
+            let bg_result = engine.execute(&hook_ctx).await;
+            let event_result = match bg_result.action {
+                HookAction::Block => EventHookResult::Block,
+                HookAction::Modify => EventHookResult::Modify,
+                HookAction::Continue => EventHookResult::Continue,
+            };
+            let _ = emitter_bg.emit(TronEvent::HookCompleted {
+                base: BaseEvent::now(&sid),
+                hook_names: vec![],
+                hook_event: "PostToolUse".into(),
+                result: event_result,
+                duration: None,
+                reason: bg_result.reason.clone(),
+                tool_name: Some(tn),
+                tool_call_id: Some(tcid),
+            });
         });
     }
 
@@ -424,6 +480,116 @@ mod tests {
         }
         assert!(saw_start);
         assert!(saw_end);
+    }
+
+    #[tokio::test]
+    async fn pre_tool_use_hook_emits_triggered_and_completed() {
+        use tron_hooks::registry::HookRegistry;
+        use tron_hooks::handler::HookHandler;
+        use tron_hooks::types::{HookType, HookResult as HookExecResult};
+        use tron_hooks::errors::HookError;
+
+        struct ContinueHandler;
+
+        #[async_trait]
+        impl HookHandler for ContinueHandler {
+            fn name(&self) -> &str { "test-continue" }
+            fn hook_type(&self) -> HookType { HookType::PreToolUse }
+            async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
+                Ok(HookExecResult::continue_())
+            }
+        }
+
+        let mut hook_registry = HookRegistry::new();
+        hook_registry.register(Arc::new(ContinueHandler));
+        let hook_engine = Arc::new(HookEngine::new(hook_registry));
+
+        let registry = make_registry(vec![Arc::new(EchoTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let mut rx = emitter.subscribe();
+        let cancel = CancellationToken::new();
+
+        let mut args = Map::new();
+        let _ = args.insert("text".into(), json!("test"));
+        let tc = make_tool_call("echo", args);
+
+        let _ = execute_tool(
+            &tc, &registry, &None, &Some(hook_engine), "s1", "/tmp", &emitter, &cancel,
+        )
+        .await;
+
+        let mut saw_triggered = false;
+        let mut saw_completed = false;
+        while let Ok(event) = rx.try_recv() {
+            match &event {
+                TronEvent::HookTriggered { hook_event, .. } if hook_event == "PreToolUse" => {
+                    saw_triggered = true;
+                }
+                TronEvent::HookCompleted { hook_event, .. } if hook_event == "PreToolUse" => {
+                    saw_completed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_triggered, "should emit HookTriggered for PreToolUse");
+        assert!(saw_completed, "should emit HookCompleted for PreToolUse");
+    }
+
+    #[tokio::test]
+    async fn post_tool_use_hook_emits_triggered() {
+        use tron_hooks::registry::HookRegistry;
+        use tron_hooks::handler::HookHandler;
+        use tron_hooks::types::{HookType, HookExecutionMode, HookResult as HookExecResult};
+        use tron_hooks::errors::HookError;
+
+        struct BgHandler;
+
+        #[async_trait]
+        impl HookHandler for BgHandler {
+            fn name(&self) -> &str { "test-bg" }
+            fn hook_type(&self) -> HookType { HookType::PostToolUse }
+            fn execution_mode(&self) -> HookExecutionMode { HookExecutionMode::Background }
+            async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
+                Ok(HookExecResult::continue_())
+            }
+        }
+
+        let mut hook_registry = HookRegistry::new();
+        hook_registry.register(Arc::new(BgHandler));
+        let hook_engine = Arc::new(HookEngine::new(hook_registry));
+
+        let registry = make_registry(vec![Arc::new(EchoTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let mut rx = emitter.subscribe();
+        let cancel = CancellationToken::new();
+
+        let mut args = Map::new();
+        let _ = args.insert("text".into(), json!("test"));
+        let tc = make_tool_call("echo", args);
+
+        let _ = execute_tool(
+            &tc, &registry, &None, &Some(hook_engine), "s1", "/tmp", &emitter, &cancel,
+        )
+        .await;
+
+        // Give background task a moment to complete
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let mut saw_triggered = false;
+        let mut saw_completed = false;
+        while let Ok(event) = rx.try_recv() {
+            match &event {
+                TronEvent::HookTriggered { hook_event, .. } if hook_event == "PostToolUse" => {
+                    saw_triggered = true;
+                }
+                TronEvent::HookCompleted { hook_event, .. } if hook_event == "PostToolUse" => {
+                    saw_completed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_triggered, "should emit HookTriggered for PostToolUse");
+        assert!(saw_completed, "should emit HookCompleted for PostToolUse");
     }
 
     #[tokio::test]

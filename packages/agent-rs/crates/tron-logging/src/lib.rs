@@ -22,10 +22,12 @@
 #![deny(unsafe_code)]
 
 pub mod store;
+pub mod test_utils;
 pub mod transport;
 pub mod types;
 
 pub use store::LogStore;
+pub use test_utils::{capture_logs, CapturedLogs};
 pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
 pub use types::{LogEntry, LogLevel, LogQueryOptions};
 

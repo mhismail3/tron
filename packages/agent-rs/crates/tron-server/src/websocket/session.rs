@@ -9,6 +9,8 @@ use tokio::sync::mpsc;
 use tron_rpc::context::RpcContext;
 use tron_rpc::registry::MethodRegistry;
 
+use tracing::{debug, info, instrument};
+
 use super::broadcast::BroadcastManager;
 use super::connection::ClientConnection;
 use super::handler::handle_message;
@@ -19,6 +21,7 @@ use super::handler::handle_message;
 /// 2. Dispatches incoming text frames as RPC requests
 /// 3. Forwards outbound events/responses via the send channel
 /// 4. Cleans up on disconnect
+#[instrument(skip_all, fields(client_id = %client_id))]
 pub async fn run_ws_session(
     ws: WebSocket,
     client_id: String,
@@ -32,12 +35,14 @@ pub async fn run_ws_session(
     let (send_tx, mut send_rx) = mpsc::channel::<String>(256);
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
+    info!(client_id, "client connected");
+
     // Register with broadcast manager
     broadcast.add(connection.clone()).await;
 
-    // Send system.connected event (data wrapper matches TypeScript format)
+    // Send connection.established event (iOS expects this type string)
     let connected_msg = serde_json::json!({
-        "type": "system.connected",
+        "type": "connection.established",
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "data": {
             "clientId": client_id,
@@ -58,48 +63,56 @@ pub async fn run_ws_session(
 
     // Process incoming messages
     while let Some(Ok(msg)) = ws_rx.next().await {
-        match msg {
-            Message::Text(text) => {
-                let response =
-                    handle_message(&text, &registry, &ctx).await;
+        // Extract text from either Text or Binary frames (iOS sends binary)
+        let text = match msg {
+            Message::Text(ref t) => Some(t.to_string()),
+            Message::Binary(ref data) => {
+                if let Ok(s) = std::str::from_utf8(data) {
+                    Some(s.to_string())
+                } else {
+                    info!(client_id, len = data.len(), "received non-UTF8 binary frame");
+                    None
+                }
+            }
+            Message::Close(_) => {
+                info!(client_id, "client sent close frame");
+                break;
+            }
+            Message::Ping(_) | Message::Pong(_) => {
+                connection.mark_alive();
+                None
+            }
+        };
 
-                // Check if this is a session.create or session.resume response
-                // and bind the session if successful (only for these two methods)
-                if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-                    let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
-                    if method == "session.create" || method == "session.resume" {
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response) {
-                            if parsed["success"] == true {
-                                if let Some(sid) = parsed["result"]
-                                    .get("sessionId")
-                                    .and_then(|v| v.as_str())
-                                {
-                                    connection.bind_session(sid.to_string());
-                                }
-                            }
+        let Some(text) = text else { continue };
+
+        let response = handle_message(&text, &registry, &ctx).await;
+
+        // Bind session on create/resume
+        if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
+            let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+            if method == "session.create" || method == "session.resume" {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response) {
+                    if parsed["success"] == true {
+                        if let Some(sid) = parsed["result"]
+                            .get("sessionId")
+                            .and_then(|v| v.as_str())
+                        {
+                            connection.bind_session(sid.to_string());
+                            debug!(client_id, session_id = sid, "session bound to client");
                         }
                     }
                 }
+            }
+        }
 
-                connection.send(response);
-            }
-            Message::Close(_) => break,
-            Message::Ping(data) => {
-                connection.mark_alive();
-                // Pong is automatically sent by axum for Ping frames,
-                // but we also mark the connection alive
-                let _ = data; // consumed
-            }
-            Message::Pong(_) => {
-                connection.mark_alive();
-            }
-            Message::Binary(_) => {
-                // Binary frames not supported
-            }
+        if !connection.send(response) {
+            info!(client_id, "failed to enqueue response (channel full or closed)");
         }
     }
 
     // Clean up
+    info!(client_id, "client disconnected");
     outbound.abort();
     broadcast.remove(&client_id).await;
 }
@@ -116,12 +129,23 @@ mod tests {
     fn connected_message_has_required_fields() {
         let client_id = "test_client_123";
         let msg = serde_json::json!({
-            "type": "system.connected",
-            "clientId": client_id,
+            "type": "connection.established",
+            "data": { "clientId": client_id },
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        assert_eq!(msg["type"], "system.connected");
-        assert_eq!(msg["clientId"], client_id);
+        assert_eq!(msg["type"], "connection.established");
+        assert_eq!(msg["data"]["clientId"], client_id);
         assert!(msg["timestamp"].is_string());
+    }
+
+    #[test]
+    fn connected_message_type_is_connection_established() {
+        let msg = serde_json::json!({
+            "type": "connection.established",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "data": { "clientId": "c1" },
+        });
+        assert_eq!(msg["type"], "connection.established");
+        assert_ne!(msg["type"], "system.connected");
     }
 }

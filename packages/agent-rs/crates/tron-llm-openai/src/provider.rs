@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use futures::stream::{self, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use tron_core::events::StreamEvent;
 use tron_core::messages::{Context, Message};
@@ -148,6 +148,7 @@ struct TokenResponse {
 ///
 /// Returns new tokens on success. The caller is responsible for persisting
 /// the new tokens (e.g., via `tron_auth::save_provider_oauth_tokens`).
+#[instrument(skip_all)]
 async fn refresh_tokens(
     refresh_token: &str,
     settings: &OpenAIApiSettings,
@@ -253,6 +254,7 @@ impl OpenAIProvider {
     }
 
     /// Ensure OAuth tokens are valid, refreshing if necessary.
+    #[instrument(skip_all)]
     async fn ensure_valid_tokens(&self) -> ProviderResult<()> {
         let mut tokens = self.tokens.lock().await;
         if should_refresh_tokens(tokens.expires_at) {
@@ -389,6 +391,7 @@ impl OpenAIProvider {
     }
 
     /// Internal streaming implementation.
+    #[instrument(skip_all, fields(model = %self.config.model))]
     async fn stream_internal(
         &self,
         context: &Context,
@@ -421,6 +424,12 @@ impl OpenAIProvider {
         if !status.is_success() {
             let body_text = response.text().await.unwrap_or_default();
             let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            error!(
+                status = status.as_u16(),
+                code = code.as_deref().unwrap_or("unknown"),
+                retryable,
+                "OpenAI API error"
+            );
             return Err(ProviderError::Api {
                 status: status.as_u16(),
                 message,
@@ -481,16 +490,23 @@ impl Provider for OpenAIProvider {
         &self.config.model
     }
 
+    #[instrument(skip_all, fields(provider = "openai", model = %self.config.model))]
     async fn stream(
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
-        // Ensure tokens are valid before starting
+        debug!(message_count = context.messages.len(), "starting stream");
         self.ensure_valid_tokens().await?;
 
         let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = self.stream_internal(context, options).await?;
+        let inner_stream = match self.stream_internal(context, options).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, "OpenAI stream failed");
+                return Err(e);
+            }
+        };
         Ok(Box::pin(start_event.chain(inner_stream)))
     }
 }

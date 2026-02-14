@@ -32,7 +32,7 @@ impl EventPersister {
     pub fn new(event_store: Arc<EventStore>, session_id: String) -> Self {
         let (tx, rx) = mpsc::channel(256);
 
-        tokio::spawn(persist_worker(rx, event_store, session_id));
+        let _handle = tokio::spawn(persist_worker(rx, event_store, session_id));
 
         Self { tx }
     }

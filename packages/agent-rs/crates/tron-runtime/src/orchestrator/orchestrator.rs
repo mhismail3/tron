@@ -8,6 +8,8 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::TronEvent;
 
+use tracing::{debug, info, instrument, warn};
+
 use crate::agent::event_emitter::EventEmitter;
 use crate::errors::RuntimeError;
 use crate::orchestrator::session_manager::{SessionFilter, SessionManager};
@@ -59,6 +61,7 @@ impl Orchestrator {
 
     /// Start tracking a run for a session. Returns the `CancellationToken`.
     /// Errors if the session already has an active run.
+    #[instrument(skip(self), fields(session_id, run_id))]
     pub fn start_run(
         &self,
         session_id: &str,
@@ -69,19 +72,22 @@ impl Orchestrator {
             return Err(RuntimeError::SessionBusy(session_id.to_string()));
         }
         let cancel = CancellationToken::new();
-        runs.insert(
+        let _ = runs.insert(
             session_id.to_string(),
             ActiveRun {
                 run_id: run_id.to_string(),
                 cancel: cancel.clone(),
             },
         );
+        info!(session_id, run_id, "run started");
         Ok(cancel)
     }
 
     /// Complete a run for a session (removes from active tracking).
+    #[instrument(skip(self), fields(session_id))]
     pub fn complete_run(&self, session_id: &str) {
-        self.active_runs.lock().remove(session_id);
+        debug!(session_id, "run completed");
+        let _ = self.active_runs.lock().remove(session_id);
     }
 
     /// Get the run ID for an active session (if any).
@@ -104,9 +110,11 @@ impl Orchestrator {
 
     /// Abort a running session by cancelling its `CancellationToken`.
     /// Returns true if the session had an active run that was cancelled.
+    #[instrument(skip(self), fields(session_id))]
     pub fn abort(&self, session_id: &str) -> Result<bool, RuntimeError> {
         let runs = self.active_runs.lock();
         if let Some(run) = runs.get(session_id) {
+            warn!(session_id, "abort requested");
             run.cancel.cancel();
             Ok(true)
         } else {
@@ -153,7 +161,9 @@ impl Orchestrator {
     }
 
     /// Graceful shutdown — end all active sessions.
+    #[instrument(skip(self))]
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
+        info!("orchestrator shutdown initiated");
         // Cancel all active runs
         {
             let runs = self.active_runs.lock();

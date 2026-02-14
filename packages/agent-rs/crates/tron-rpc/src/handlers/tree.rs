@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::{self, RpcError};
@@ -13,6 +14,7 @@ pub struct GetVisualizationHandler;
 
 #[async_trait]
 impl MethodHandler for GetVisualizationHandler {
+    #[instrument(skip(self, ctx), fields(method = "tree.get"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
@@ -66,6 +68,7 @@ pub struct GetBranchesHandler;
 
 #[async_trait]
 impl MethodHandler for GetBranchesHandler {
+    #[instrument(skip(self, ctx), fields(method = "tree.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
@@ -103,6 +106,7 @@ pub struct GetSubtreeHandler;
 
 #[async_trait]
 impl MethodHandler for GetSubtreeHandler {
+    #[instrument(skip(self, ctx), fields(method = "tree.getSubtree"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let event_id = require_string_param(params.as_ref(), "eventId")?;
 
@@ -137,6 +141,7 @@ pub struct GetAncestorsHandler;
 
 #[async_trait]
 impl MethodHandler for GetAncestorsHandler {
+    #[instrument(skip(self, ctx), fields(method = "tree.getAncestors"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let event_id = require_string_param(params.as_ref(), "eventId")?;
 
@@ -168,6 +173,7 @@ pub struct CompareBranchesHandler;
 
 #[async_trait]
 impl MethodHandler for CompareBranchesHandler {
+    #[instrument(skip(self, _ctx), fields(method = "tree.compareBranches"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let _branch_a = require_string_param(params.as_ref(), "branchA")?;
         let _branch_b = require_string_param(params.as_ref(), "branchB")?;

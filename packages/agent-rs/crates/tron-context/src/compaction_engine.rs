@@ -23,7 +23,7 @@
 
 use tron_core::content::AssistantContent;
 use tron_core::messages::{Message, UserMessageContent};
-use tracing::{info, trace};
+use tracing::{info, instrument, trace};
 
 use crate::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};
 use crate::summarizer::Summarizer;
@@ -100,6 +100,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     }
 
     /// Generate a compaction preview without modifying state.
+    #[instrument(skip_all)]
     pub async fn preview(
         &self,
         summarizer: &dyn Summarizer,
@@ -134,6 +135,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     }
 
     /// Execute compaction and update messages.
+    #[instrument(skip_all, fields(edited = edited_summary.is_some()))]
     pub async fn execute(
         &self,
         summarizer: &dyn Summarizer,

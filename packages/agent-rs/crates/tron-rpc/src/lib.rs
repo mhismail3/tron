@@ -13,7 +13,6 @@
 //! - Plus: browser, canvas, device, task, transcription, worktree, tree adapters
 
 #![deny(unsafe_code)]
-#![allow(unused_results)]
 
 pub mod context;
 pub mod errors;

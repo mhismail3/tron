@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::{self, RpcError};
@@ -13,6 +14,7 @@ pub struct ToolResultHandler;
 
 #[async_trait]
 impl MethodHandler for ToolResultHandler {
+    #[instrument(skip(self, ctx), fields(method = "tool.result", tool_call_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let _session_id = require_string_param(params.as_ref(), "sessionId")?;
         let tool_use_id = require_string_param(params.as_ref(), "toolUseId")?;
