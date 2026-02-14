@@ -41,7 +41,9 @@ impl MethodHandler for GetSkillHandler {
             message: format!("Skill '{name}' not found"),
         })?;
 
-        Ok(serde_json::to_value(skill).unwrap_or_default())
+        serde_json::to_value(skill).map_err(|e| RpcError::Internal {
+            message: format!("Failed to serialize skill '{name}': {e}"),
+        })
     }
 }
 

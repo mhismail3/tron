@@ -19,7 +19,27 @@ use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::turn_runner;
 use crate::errors::StopReason;
+use crate::orchestrator::event_persister::EventPersister;
 use crate::types::{AgentConfig, RunContext, RunResult};
+
+/// RAII guard that resets `is_running` to `false` on drop (even on panic).
+struct RunGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> RunGuard<'a> {
+    fn new(flag: &'a AtomicBool) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for RunGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Multi-turn agent that owns all submodules.
 pub struct TronAgent {
@@ -37,6 +57,8 @@ pub struct TronAgent {
     abort_token: CancellationToken,
     /// Whether the abort token was provided externally (e.g. by orchestrator).
     external_abort_token: bool,
+    /// Optional inline event persister (injected by orchestrator).
+    persister: Option<Arc<EventPersister>>,
 }
 
 impl TronAgent {
@@ -65,6 +87,7 @@ impl TronAgent {
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
             external_abort_token: false,
+            persister: None,
         }
     }
 
@@ -72,18 +95,14 @@ impl TronAgent {
     #[allow(clippy::too_many_lines)]
     #[instrument(skip(self, ctx), fields(session_id = %self.session_id, model = %self.config.model))]
     pub async fn run(&mut self, content: &str, ctx: RunContext) -> RunResult {
-        // Reject concurrent runs
-        if self
-            .is_running
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
+        // Reject concurrent runs — guard resets is_running on drop (even on panic)
+        let Some(_guard) = RunGuard::new(&self.is_running) else {
             return RunResult {
                 stop_reason: StopReason::Error,
                 error: Some("Agent is already running".into()),
                 ..Default::default()
             };
-        }
+        };
 
         // Reset abort token for this run (unless an external token was injected)
         if !self.external_abort_token {
@@ -129,6 +148,7 @@ impl TronAgent {
                 &self.emitter,
                 &self.abort_token,
                 &ctx,
+                self.persister.as_deref(),
             )
             .await;
 
@@ -188,7 +208,7 @@ impl TronAgent {
             error: error.clone(),
         });
 
-        self.is_running.store(false, Ordering::SeqCst);
+        // _guard drops here, resetting is_running (even on panic)
 
         RunResult {
             turns_executed: turn,
@@ -204,6 +224,11 @@ impl TronAgent {
     pub fn set_abort_token(&mut self, token: CancellationToken) {
         self.abort_token = token;
         self.external_abort_token = true;
+    }
+
+    /// Set the inline event persister (e.g. from the orchestrator).
+    pub fn set_persister(&mut self, persister: Option<Arc<EventPersister>>) {
+        self.persister = persister;
     }
 
     /// Abort the current run.
@@ -594,6 +619,47 @@ mod tests {
         assert!(result.error.unwrap().contains("already running"));
     }
 
+    #[tokio::test]
+    async fn is_running_reset_after_error() {
+        struct ErrorProvider;
+        #[async_trait]
+        impl Provider for ErrorProvider {
+            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
+            fn model(&self) -> &str { "mock" }
+            async fn stream(
+                &self,
+                _context: &tron_core::messages::Context,
+                _options: &ProviderStreamOptions,
+            ) -> Result<StreamEventStream, ProviderError> {
+                Err(ProviderError::Auth { message: "expired".into() })
+            }
+        }
+
+        let ctx_config = ContextManagerConfig {
+            model: "mock".into(),
+            system_prompt: None,
+            working_directory: None,
+            tools: vec![],
+            rules_content: None,
+            compaction: tron_context::types::CompactionConfig::default(),
+        };
+        let mut agent = TronAgent::new(
+            AgentConfig::default(),
+            Arc::new(ErrorProvider),
+            ToolRegistry::new(),
+            None,
+            None,
+            ContextManager::new(ctx_config),
+            "test-session".into(),
+        );
+
+        let result = agent.run("Hi", RunContext::default()).await;
+        assert_eq!(result.stop_reason, StopReason::Error);
+
+        // is_running must be false after error (RunGuard resets it)
+        assert!(!agent.is_running(), "is_running must be false after error");
+    }
+
     #[test]
     fn agent_state_tracking() {
         let agent = make_agent(MockProvider::text_only("Hi"));
@@ -756,5 +822,300 @@ mod tests {
         assert!(!token.is_cancelled());
         token.cancel();
         assert!(token.is_cancelled());
+    }
+
+    // ── Persister integration tests ──
+
+    fn make_event_store() -> Arc<tron_events::EventStore> {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default())
+            .expect("Failed to create in-memory pool");
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        Arc::new(tron_events::EventStore::new(pool))
+    }
+
+    #[tokio::test]
+    async fn agent_run_without_persister_still_works() {
+        let mut agent = make_agent(MockProvider::text_only("Hello"));
+        // persister is None by default — backward compat
+        let result = agent.run("Hi", RunContext::default()).await;
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+        assert_eq!(result.turns_executed, 1);
+    }
+
+    /// Create an agent with matching event store session (IDs aligned).
+    fn make_agent_with_store(
+        provider: MockProvider,
+        store: &Arc<tron_events::EventStore>,
+    ) -> (TronAgent, String) {
+        let session = store
+            .create_session("mock-model", "/tmp", Some("test"))
+            .unwrap();
+        let sid = session.session.id.clone();
+        let config = AgentConfig::default();
+        let ctx_config = ContextManagerConfig {
+            model: "mock-model".into(),
+            system_prompt: None,
+            working_directory: None,
+            tools: vec![],
+            rules_content: None,
+            compaction: tron_context::types::CompactionConfig::default(),
+        };
+        let agent = TronAgent::new(
+            config,
+            Arc::new(provider),
+            ToolRegistry::new(),
+            None,
+            None,
+            ContextManager::new(ctx_config),
+            sid.clone(),
+        );
+        (agent, sid)
+    }
+
+    #[tokio::test]
+    async fn agent_set_persister() {
+        let store = make_event_store();
+        let (mut agent, sid) =
+            make_agent_with_store(MockProvider::text_only("Hello"), &store);
+
+        let persister = Arc::new(
+            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
+        );
+        agent.set_persister(Some(persister.clone()));
+
+        let result = agent.run("Hi", RunContext::default()).await;
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+
+        // Flush to ensure fire-and-forget events are written
+        persister.flush().await.unwrap();
+
+        // Check that message.assistant was persisted
+        let events = store
+            .get_events_by_session(
+                &sid,
+                &tron_events::sqlite::repositories::event::ListEventsOptions::default(),
+            )
+            .unwrap();
+        let assistant_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "message.assistant")
+            .collect();
+        assert!(
+            !assistant_events.is_empty(),
+            "message.assistant event must be persisted"
+        );
+
+        // Verify the payload has the new metadata fields
+        let payload: serde_json::Value =
+            serde_json::from_str(&assistant_events[0].payload).unwrap();
+        assert!(payload.get("model").is_some(), "payload must have model");
+        assert!(
+            payload.get("latencyMs").is_some(),
+            "payload must have latencyMs"
+        );
+        assert!(
+            payload.get("stopReason").is_some(),
+            "payload must have stopReason"
+        );
+        assert!(
+            payload.get("hasThinking").is_some(),
+            "payload must have hasThinking"
+        );
+        assert!(
+            payload.get("providerType").is_some(),
+            "payload must have providerType"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_multi_turn_persists_all_turns() {
+        let store = make_event_store();
+
+        // Turn 1: tool call, Turn 2: end
+        let turn1_events = vec![
+            StreamEvent::Start,
+            StreamEvent::ToolCallStart {
+                tool_call_id: "tc-1".into(),
+                name: "read".into(),
+            },
+            StreamEvent::ToolCallEnd {
+                tool_call: tron_core::messages::ToolCall {
+                    content_type: "tool_use".into(),
+                    id: "tc-1".into(),
+                    name: "read".into(),
+                    arguments: Map::new(),
+                    thought_signature: None,
+                },
+            },
+            StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::ToolUse {
+                        id: "tc-1".into(),
+                        name: "read".into(),
+                        arguments: Map::new(),
+                        thought_signature: None,
+                    }],
+                    token_usage: Some(TokenUsage {
+                        input_tokens: 20,
+                        output_tokens: 10,
+                        ..Default::default()
+                    }),
+                },
+                stop_reason: "tool_use".into(),
+            },
+        ];
+        let turn2_events = vec![
+            StreamEvent::Start,
+            StreamEvent::TextDelta {
+                delta: "Done.".into(),
+            },
+            StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text("Done.")],
+                    token_usage: Some(TokenUsage {
+                        input_tokens: 30,
+                        output_tokens: 5,
+                        ..Default::default()
+                    }),
+                },
+                stop_reason: "end_turn".into(),
+            },
+        ];
+
+        let provider = MockProvider::multi_turn(vec![turn1_events, turn2_events]);
+        let (mut agent, sid) = make_agent_with_store(provider, &store);
+
+        let persister = Arc::new(
+            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
+        );
+        agent.set_persister(Some(persister.clone()));
+
+        // Register read tool
+        use tron_core::tools::{text_result, Tool, ToolParameterSchema};
+        struct ReadTool;
+        #[async_trait]
+        impl tron_tools::traits::TronTool for ReadTool {
+            fn name(&self) -> &str {
+                "read"
+            }
+            fn category(&self) -> tron_core::tools::ToolCategory {
+                tron_core::tools::ToolCategory::Filesystem
+            }
+            fn definition(&self) -> Tool {
+                Tool {
+                    name: "read".into(),
+                    description: "Read file".into(),
+                    parameters: ToolParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::new(),
+                    },
+                }
+            }
+            async fn execute(
+                &self,
+                _p: serde_json::Value,
+                _c: &tron_tools::traits::ToolContext,
+            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+                Ok(text_result("file contents", false))
+            }
+        }
+        agent.registry.register(Arc::new(ReadTool));
+
+        let result = agent.run("Read the file", RunContext::default()).await;
+        assert_eq!(result.turns_executed, 2);
+
+        persister.flush().await.unwrap();
+
+        let events = store
+            .get_events_by_session(
+                &sid,
+                &tron_events::sqlite::repositories::event::ListEventsOptions::default(),
+            )
+            .unwrap();
+        let assistant_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "message.assistant")
+            .collect();
+        assert_eq!(
+            assistant_events.len(),
+            2,
+            "both turns must have message.assistant events"
+        );
+
+        // Verify turn numbers in payloads
+        let p1: serde_json::Value =
+            serde_json::from_str(&assistant_events[0].payload).unwrap();
+        let p2: serde_json::Value =
+            serde_json::from_str(&assistant_events[1].payload).unwrap();
+        assert_eq!(p1["turn"], 1);
+        assert_eq!(p2["turn"], 2);
+
+        // Verify tool.call and tool.result events exist
+        let tool_calls: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "tool.call")
+            .collect();
+        let tool_results: Vec<_> = events
+            .iter()
+            .filter(|e| e.event_type == "tool.result")
+            .collect();
+        assert_eq!(tool_calls.len(), 1, "must have 1 tool.call event");
+        assert_eq!(tool_results.len(), 1, "must have 1 tool.result event");
+    }
+
+    #[tokio::test]
+    async fn agent_persisted_event_has_indexed_columns() {
+        let store = make_event_store();
+        let (mut agent, sid) =
+            make_agent_with_store(MockProvider::text_only("Hello"), &store);
+
+        let persister = Arc::new(
+            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
+        );
+        agent.set_persister(Some(persister.clone()));
+
+        let _ = agent.run("Hi", RunContext::default()).await;
+        persister.flush().await.unwrap();
+
+        // Query the raw EventRow to check indexed columns
+        let events = store
+            .get_events_by_session(
+                &sid,
+                &tron_events::sqlite::repositories::event::ListEventsOptions::default(),
+            )
+            .unwrap();
+        let assistant = events
+            .iter()
+            .find(|e| e.event_type == "message.assistant")
+            .expect("must have message.assistant event");
+
+        assert_eq!(
+            assistant.model.as_deref(),
+            Some("mock-model"),
+            "model column must be extracted"
+        );
+        assert!(
+            assistant.stop_reason.is_some(),
+            "stop_reason column must be extracted"
+        );
+        assert!(
+            assistant.provider_type.is_some(),
+            "provider_type column must be extracted"
+        );
+        assert!(
+            assistant.latency_ms.is_some(),
+            "latency_ms column must be extracted"
+        );
+        assert_eq!(
+            assistant.has_thinking,
+            Some(0),
+            "has_thinking must be 0 (false)"
+        );
     }
 }

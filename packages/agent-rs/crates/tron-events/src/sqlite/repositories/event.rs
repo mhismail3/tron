@@ -49,13 +49,23 @@ impl EventRepo {
         // Extract token usage from payload.tokenUsage or payload directly
         let (input_tokens, output_tokens, cache_read, cache_create) = extract_tokens(&event.payload);
 
+        // Extract v002 per-turn metadata
+        let model = extract_str(&event.payload, "model");
+        let latency_ms = extract_i64(&event.payload, "latencyMs");
+        let stop_reason = extract_str(&event.payload, "stopReason");
+        let has_thinking = extract_bool_as_int(&event.payload, "hasThinking");
+        let provider_type = extract_str(&event.payload, "providerType");
+        let cost = event.payload.get("cost").and_then(Value::as_f64);
+
         let payload_str = serde_json::to_string(&event.payload)?;
 
         let _ = conn.execute(
             "INSERT INTO events (id, session_id, parent_id, sequence, depth, type, timestamp, payload,
              content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+             model, latency_ms, stop_reason, has_thinking, provider_type, cost)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                     ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             params![
                 event.id,
                 event.session_id,
@@ -76,6 +86,12 @@ impl EventRepo {
                 cache_read,
                 cache_create,
                 event.checksum,
+                model,
+                latency_ms,
+                stop_reason,
+                has_thinking,
+                provider_type,
+                cost,
             ],
         )?;
         Ok(())
@@ -87,7 +103,8 @@ impl EventRepo {
             .query_row(
                 "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                         content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
                  FROM events WHERE id = ?1",
                 params![event_id],
                 Self::map_row,
@@ -105,7 +122,8 @@ impl EventRepo {
         let mut sql = String::from(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM events WHERE session_id = ?1 ORDER BY sequence ASC",
         );
         if let Some(limit) = opts.limit {
@@ -142,21 +160,25 @@ impl EventRepo {
         let mut stmt = conn.prepare(
             "WITH RECURSIVE ancestors(id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, lvl) AS (
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, lvl) AS (
                SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                       content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, 0
+                      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, 0
                FROM events WHERE id = ?1
                UNION ALL
                SELECT e.id, e.session_id, e.parent_id, e.sequence, e.depth, e.type, e.timestamp, e.payload,
                       e.content_blob_id, e.workspace_id, e.role, e.tool_name, e.tool_call_id, e.turn,
-                      e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens, e.checksum, a.lvl + 1
+                      e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens, e.checksum,
+                      e.model, e.latency_ms, e.stop_reason, e.has_thinking, e.provider_type, e.cost, a.lvl + 1
                FROM events e JOIN ancestors a ON e.id = a.parent_id
                WHERE a.lvl < 10000
              )
              SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM ancestors ORDER BY lvl DESC",
         )?;
         let rows = stmt
@@ -170,7 +192,8 @@ impl EventRepo {
         let mut stmt = conn.prepare(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM events WHERE parent_id = ?1 ORDER BY sequence ASC",
         )?;
         let rows = stmt
@@ -184,21 +207,25 @@ impl EventRepo {
         let mut stmt = conn.prepare(
             "WITH RECURSIVE desc(id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, lvl) AS (
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, lvl) AS (
                SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                       content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, 0
+                      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, 0
                FROM events WHERE parent_id = ?1
                UNION ALL
                SELECT e.id, e.session_id, e.parent_id, e.sequence, e.depth, e.type, e.timestamp, e.payload,
                       e.content_blob_id, e.workspace_id, e.role, e.tool_name, e.tool_call_id, e.turn,
-                      e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens, e.checksum, d.lvl + 1
+                      e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_creation_tokens, e.checksum,
+                      e.model, e.latency_ms, e.stop_reason, e.has_thinking, e.provider_type, e.cost, d.lvl + 1
                FROM events e JOIN desc d ON e.parent_id = d.id
                WHERE d.lvl < 10000
              )
              SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM desc ORDER BY sequence ASC",
         )?;
         let rows = stmt
@@ -216,7 +243,8 @@ impl EventRepo {
         let mut stmt = conn.prepare(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM events WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC",
         )?;
         let rows = stmt
@@ -231,7 +259,8 @@ impl EventRepo {
             .query_row(
                 "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                         content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
                  FROM events WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 1",
                 params![session_id],
                 Self::map_row,
@@ -331,7 +360,8 @@ impl EventRepo {
         let sql = format!(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM events WHERE id IN ({})",
             placeholders.join(", ")
         );
@@ -368,7 +398,8 @@ impl EventRepo {
         let mut sql = format!(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM events WHERE session_id = ?1 AND type IN ({}) ORDER BY sequence ASC",
             placeholders.join(", ")
         );
@@ -409,7 +440,8 @@ impl EventRepo {
         let mut sql = format!(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
+                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
              FROM events WHERE workspace_id = ?1 AND type IN ({}) ORDER BY timestamp DESC",
             placeholders.join(", ")
         );
@@ -506,6 +538,12 @@ impl EventRepo {
             cache_read_tokens: row.get(16)?,
             cache_creation_tokens: row.get(17)?,
             checksum: row.get(18)?,
+            model: row.get(19)?,
+            latency_ms: row.get(20)?,
+            stop_reason: row.get(21)?,
+            has_thinking: row.get(22)?,
+            provider_type: row.get(23)?,
+            cost: row.get(24)?,
         })
     }
 }
@@ -539,6 +577,17 @@ fn extract_str(val: &Value, key: &str) -> Option<String> {
 
 fn extract_i64(val: &Value, key: &str) -> Option<i64> {
     val.get(key)?.as_i64()
+}
+
+/// Extract a boolean or integer value as SQLite integer (0/1).
+/// Handles both `"hasThinking": true` and `"hasThinking": 1`.
+fn extract_bool_as_int(val: &Value, key: &str) -> Option<i64> {
+    let v = val.get(key)?;
+    if let Some(b) = v.as_bool() {
+        Some(i64::from(b))
+    } else {
+        v.as_i64()
+    }
 }
 
 fn extract_tokens(payload: &Value) -> (Option<i64>, Option<i64>, Option<i64>, Option<i64>) {
@@ -1028,5 +1077,207 @@ mod tests {
         let conn = setup();
         let count = EventRepo::count_by_workspace_and_types(&conn, "ws_1", &[]).unwrap();
         assert_eq!(count, 0);
+    }
+
+    // ── v002 per-turn metadata extraction ───────────────────────────
+
+    #[test]
+    fn extract_model_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "model": "claude-opus-4-6"
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.model.as_deref(), Some("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn extract_latency_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "latencyMs": 1234
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.latency_ms, Some(1234));
+    }
+
+    #[test]
+    fn extract_stop_reason_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "stopReason": "end_turn"
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.stop_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[test]
+    fn extract_has_thinking_bool_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "hasThinking": true
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.has_thinking, Some(1));
+    }
+
+    #[test]
+    fn extract_has_thinking_false_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "hasThinking": false
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.has_thinking, Some(0));
+    }
+
+    #[test]
+    fn extract_provider_type_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "providerType": "google"
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.provider_type.as_deref(), Some("google"));
+    }
+
+    #[test]
+    fn extract_cost_from_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "hello",
+            "cost": 0.0042
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        let cost = row.cost.unwrap();
+        assert!((cost - 0.0042).abs() < f64::EPSILON, "cost should be ~0.0042, got {cost}");
+    }
+
+    #[test]
+    fn new_columns_null_when_not_in_payload() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageUser, None, json!({"content": "hi"}));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert!(row.model.is_none(), "model should be None for user messages");
+        assert!(row.latency_ms.is_none(), "latency_ms should be None");
+        assert!(row.stop_reason.is_none(), "stop_reason should be None");
+        assert!(row.has_thinking.is_none(), "has_thinking should be None");
+        assert!(row.provider_type.is_none(), "provider_type should be None");
+        assert!(row.cost.is_none(), "cost should be None");
+    }
+
+    #[test]
+    fn extract_all_v002_fields_together() {
+        let conn = setup();
+        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "content": "thinking response",
+            "model": "claude-opus-4-6",
+            "latencyMs": 2500,
+            "stopReason": "end_turn",
+            "hasThinking": true,
+            "providerType": "anthropic",
+            "cost": 0.015,
+            "tokenUsage": {
+                "inputTokens": 500,
+                "outputTokens": 200,
+                "cacheReadInputTokens": 100
+            }
+        }));
+        EventRepo::insert(&conn, &event).unwrap();
+
+        let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
+        assert_eq!(row.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(row.latency_ms, Some(2500));
+        assert_eq!(row.stop_reason.as_deref(), Some("end_turn"));
+        assert_eq!(row.has_thinking, Some(1));
+        assert_eq!(row.provider_type.as_deref(), Some("anthropic"));
+        assert!((row.cost.unwrap() - 0.015).abs() < f64::EPSILON);
+        assert_eq!(row.input_tokens, Some(500));
+        assert_eq!(row.output_tokens, Some(200));
+    }
+
+    #[test]
+    fn query_events_by_model() {
+        let conn = setup();
+        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
+            "model": "claude-opus-4-6"
+        }))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({
+            "model": "claude-opus-4-6"
+        }))).unwrap();
+        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::MessageAssistant, None, json!({
+            "model": "gpt-4"
+        }))).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM events WHERE session_id = 'sess_1' AND model = 'claude-opus-4-6'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 2, "should find exactly 2 events with claude-opus-4-6 model");
+    }
+
+    #[test]
+    fn v002_columns_survive_ancestor_cte() {
+        let conn = setup();
+        let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
+        let e2 = make_event("evt_2", 2, EventType::MessageAssistant, Some("evt_1"), json!({
+            "model": "claude-opus-4-6",
+            "latencyMs": 1000,
+            "stopReason": "end_turn",
+            "hasThinking": false,
+            "providerType": "anthropic",
+            "cost": 0.01
+        }));
+        EventRepo::insert(&conn, &e1).unwrap();
+        EventRepo::insert(&conn, &e2).unwrap();
+
+        let ancestors = EventRepo::get_ancestors(&conn, "evt_2").unwrap();
+        assert_eq!(ancestors.len(), 2);
+        // The assistant message (last in chain) should have v002 fields
+        let assistant = &ancestors[1];
+        assert_eq!(assistant.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(assistant.latency_ms, Some(1000));
+        assert_eq!(assistant.stop_reason.as_deref(), Some("end_turn"));
+        assert_eq!(assistant.provider_type.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn v002_columns_survive_descendant_cte() {
+        let conn = setup();
+        let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
+        let e2 = make_event("evt_2", 2, EventType::MessageAssistant, Some("evt_1"), json!({
+            "model": "gpt-4",
+            "providerType": "openai"
+        }));
+        EventRepo::insert(&conn, &e1).unwrap();
+        EventRepo::insert(&conn, &e2).unwrap();
+
+        let desc = EventRepo::get_descendants(&conn, "evt_1").unwrap();
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0].model.as_deref(), Some("gpt-4"));
+        assert_eq!(desc[0].provider_type.as_deref(), Some("openai"));
     }
 }

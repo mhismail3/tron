@@ -145,6 +145,16 @@ pub struct TurnResult {
     pub partial_content: Option<String>,
     /// Whether a tool requested turn stop.
     pub stop_turn_requested: bool,
+    /// LLM model ID used for this turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Turn duration in milliseconds.
+    pub latency_ms: u64,
+    /// Whether the response contained thinking blocks.
+    pub has_thinking: bool,
+    /// Raw LLM stop reason string (e.g. "end_turn", "tool_use").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_stop_reason: Option<String>,
 }
 
 impl Default for TurnResult {
@@ -158,6 +168,10 @@ impl Default for TurnResult {
             interrupted: false,
             partial_content: None,
             stop_turn_requested: false,
+            model: None,
+            latency_ms: 0,
+            has_thinking: false,
+            llm_stop_reason: None,
         }
     }
 }
@@ -304,6 +318,39 @@ mod tests {
         assert_eq!(tr.tool_calls_executed, 0);
         assert!(!tr.interrupted);
         assert!(!tr.stop_turn_requested);
+        assert!(tr.model.is_none());
+        assert_eq!(tr.latency_ms, 0);
+        assert!(!tr.has_thinking);
+        assert!(tr.llm_stop_reason.is_none());
+    }
+
+    #[test]
+    fn turn_result_backward_compat() {
+        let tr = TurnResult {
+            success: true,
+            tool_calls_executed: 3,
+            ..Default::default()
+        };
+        assert!(tr.success);
+        assert_eq!(tr.tool_calls_executed, 3);
+        assert!(tr.model.is_none());
+        assert_eq!(tr.latency_ms, 0);
+    }
+
+    #[test]
+    fn turn_result_with_metadata() {
+        let tr = TurnResult {
+            success: true,
+            model: Some("claude-opus-4-6".into()),
+            latency_ms: 1500,
+            has_thinking: true,
+            llm_stop_reason: Some("end_turn".into()),
+            ..Default::default()
+        };
+        assert_eq!(tr.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(tr.latency_ms, 1500);
+        assert!(tr.has_thinking);
+        assert_eq!(tr.llm_stop_reason.as_deref(), Some("end_turn"));
     }
 
     #[test]
@@ -318,15 +365,21 @@ mod tests {
                 ..Default::default()
             }),
             stop_reason: Some(StopReason::Error),
-            interrupted: false,
-            partial_content: None,
-            stop_turn_requested: false,
+            model: Some("claude-opus-4-6".into()),
+            latency_ms: 2000,
+            has_thinking: true,
+            llm_stop_reason: Some("end_turn".into()),
+            ..Default::default()
         };
         let json = serde_json::to_string(&tr).unwrap();
         let back: TurnResult = serde_json::from_str(&json).unwrap();
         assert!(!back.success);
         assert_eq!(back.tool_calls_executed, 3);
         assert_eq!(back.stop_reason, Some(StopReason::Error));
+        assert_eq!(back.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(back.latency_ms, 2000);
+        assert!(back.has_thinking);
+        assert_eq!(back.llm_stop_reason.as_deref(), Some("end_turn"));
     }
 
     #[test]

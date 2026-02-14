@@ -26,6 +26,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Complete schema — core tables, FTS, indexes, triggers",
         sql: include_str!("v001_schema.sql"),
     },
+    Migration {
+        version: 2,
+        description: "Per-turn metadata columns on events table",
+        sql: include_str!("v002_turn_metadata.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -161,7 +166,7 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 1);
+        assert_eq!(applied, 2);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -219,7 +224,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first, 1);
+        assert_eq!(first, 2);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second, 0);
@@ -236,12 +241,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 1);
+        assert_eq!(current_version(&conn).unwrap(), 2);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 1);
+        assert_eq!(latest_version(), 2);
     }
 
     #[test]
@@ -287,6 +292,9 @@ mod tests {
             "idx_areas_workspace",
             "idx_blobs_hash",
             "idx_branches_session",
+            // v002 indexes
+            "idx_events_model",
+            "idx_events_latency",
         ];
         for idx in &expected {
             assert!(
@@ -362,6 +370,13 @@ mod tests {
             "cache_read_tokens",
             "cache_creation_tokens",
             "checksum",
+            // v002 columns
+            "model",
+            "latency_ms",
+            "stop_reason",
+            "has_thinking",
+            "provider_type",
+            "cost",
         ];
         for col in &expected {
             assert!(
@@ -507,6 +522,115 @@ mod tests {
             [],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn v002_schema_version_recorded() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let (version, desc): (u32, String) = conn
+            .query_row(
+                "SELECT version, description FROM schema_version WHERE version = 2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(version, 2);
+        assert!(desc.contains("Per-turn metadata"));
+    }
+
+    #[test]
+    fn v002_new_columns_are_nullable() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // Insert a workspace and session for FK constraints
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
+             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Insert event WITHOUT new columns — they should default to NULL
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('evt_1', 'sess_1', 1, 'message.user', '2025-01-01T00:00:00Z', '{}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+
+        // Verify all new columns are NULL
+        let (model, latency, stop, thinking, provider, cost): (
+            Option<String>, Option<i64>, Option<String>, Option<i64>, Option<String>, Option<f64>,
+        ) = conn
+            .query_row(
+                "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost FROM events WHERE id = 'evt_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+            )
+            .unwrap();
+
+        assert!(model.is_none());
+        assert!(latency.is_none());
+        assert!(stop.is_none());
+        assert!(thinking.is_none());
+        assert!(provider.is_none());
+        assert!(cost.is_none());
+    }
+
+    #[test]
+    fn v002_new_columns_can_be_populated() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
+             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Insert event WITH all new columns populated
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id,
+                                 model, latency_ms, stop_reason, has_thinking, provider_type, cost)
+             VALUES ('evt_1', 'sess_1', 1, 'message.assistant', '2025-01-01T00:00:00Z', '{}', 'ws_1',
+                     'claude-opus-4-6', 1500, 'end_turn', 1, 'anthropic', 0.015)",
+            [],
+        )
+        .unwrap();
+
+        let (model, latency, stop, thinking, provider, cost): (
+            String, i64, String, i64, String, f64,
+        ) = conn
+            .query_row(
+                "SELECT model, latency_ms, stop_reason, has_thinking, provider_type, cost FROM events WHERE id = 'evt_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+            )
+            .unwrap();
+
+        assert_eq!(model, "claude-opus-4-6");
+        assert_eq!(latency, 1500);
+        assert_eq!(stop, "end_turn");
+        assert_eq!(thinking, 1);
+        assert_eq!(provider, "anthropic");
+        assert!((cost - 0.015).abs() < f64::EPSILON);
     }
 
     #[test]

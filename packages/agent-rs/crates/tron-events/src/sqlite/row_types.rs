@@ -103,6 +103,51 @@ pub struct EventRow {
     pub cache_creation_tokens: Option<i64>,
     /// Checksum.
     pub checksum: Option<String>,
+    /// LLM model ID (e.g. "claude-opus-4-6").
+    pub model: Option<String>,
+    /// Turn duration in milliseconds.
+    pub latency_ms: Option<i64>,
+    /// LLM stop reason (e.g. "end_turn", "tool_use").
+    pub stop_reason: Option<String>,
+    /// Whether the response contained thinking blocks (0 or 1).
+    pub has_thinking: Option<i64>,
+    /// Provider type (e.g. "anthropic", "openai", "google").
+    pub provider_type: Option<String>,
+    /// Estimated cost in USD.
+    pub cost: Option<f64>,
+}
+
+impl EventRow {
+    /// Create a sentinel row used only for flush synchronization.
+    pub fn flush_sentinel() -> Self {
+        Self {
+            id: String::new(),
+            session_id: String::new(),
+            parent_id: None,
+            sequence: 0,
+            depth: 0,
+            event_type: String::new(),
+            timestamp: String::new(),
+            payload: String::new(),
+            content_blob_id: None,
+            workspace_id: String::new(),
+            role: None,
+            tool_name: None,
+            tool_call_id: None,
+            turn: None,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+            checksum: None,
+            model: None,
+            latency_ms: None,
+            stop_reason: None,
+            has_thinking: None,
+            provider_type: None,
+            cost: None,
+        }
+    }
 }
 
 /// Raw workspace row from the `workspaces` table.

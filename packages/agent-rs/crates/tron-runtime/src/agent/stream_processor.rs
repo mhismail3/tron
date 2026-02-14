@@ -36,24 +36,9 @@ pub async fn process_stream(
     let mut thinking_signature: Option<String> = None;
 
     loop {
-        if cancel.is_cancelled() {
-            let partial = if text_acc.is_empty() {
-                None
-            } else {
-                Some(text_acc.clone())
-            };
-            return Ok(StreamResult {
-                message: build_message(&text_acc, &thinking_acc, thinking_signature.as_deref(), &tool_calls),
-                tool_calls,
-                stop_reason: "interrupted".into(),
-                token_usage,
-                interrupted: true,
-                partial_content: partial,
-            });
-        }
-
+        // biased: prefer cancellation when both a stream event and cancel are ready
         let event = tokio::select! {
-            event = stream.next() => event,
+            biased;
             () = cancel.cancelled() => {
                 let partial = if text_acc.is_empty() { None } else { Some(text_acc.clone()) };
                 return Ok(StreamResult {
@@ -65,6 +50,7 @@ pub async fn process_stream(
                     partial_content: partial,
                 });
             }
+            event = stream.next() => event,
         };
 
         match event {

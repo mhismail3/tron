@@ -14,6 +14,7 @@
 pub mod agent;
 pub mod errors;
 pub mod orchestrator;
+pub mod pipeline;
 pub mod types;
 
 // Re-export main public API

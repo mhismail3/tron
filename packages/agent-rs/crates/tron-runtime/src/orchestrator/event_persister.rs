@@ -23,6 +23,7 @@ struct PersistRequest {
 /// to a single consumer task, guaranteeing linear `parent_id` threading.
 pub struct EventPersister {
     tx: mpsc::Sender<PersistRequest>,
+    worker_handle: tokio::task::JoinHandle<()>,
 }
 
 impl EventPersister {
@@ -32,9 +33,9 @@ impl EventPersister {
     pub fn new(event_store: Arc<EventStore>, session_id: String) -> Self {
         let (tx, rx) = mpsc::channel(256);
 
-        let _handle = tokio::spawn(persist_worker(rx, event_store, session_id));
+        let worker_handle = tokio::spawn(persist_worker(rx, event_store, session_id));
 
-        Self { tx }
+        Self { tx, worker_handle }
     }
 
     /// Append an event and wait for persistence.
@@ -54,7 +55,13 @@ impl EventPersister {
                 reply: Some(reply_tx),
             })
             .await
-            .map_err(|_| RuntimeError::Persistence("Persist channel closed".into()))?;
+            .map_err(|_| {
+                if self.worker_handle.is_finished() {
+                    RuntimeError::Persistence("Persist worker panicked or exited".into())
+                } else {
+                    RuntimeError::Persistence("Persist channel closed".into())
+                }
+            })?;
 
         reply_rx
             .await
@@ -88,7 +95,13 @@ impl EventPersister {
                 reply: Some(reply_tx),
             })
             .await
-            .map_err(|_| RuntimeError::Persistence("Persist channel closed".into()))?;
+            .map_err(|_| {
+                if self.worker_handle.is_finished() {
+                    RuntimeError::Persistence("Persist worker panicked or exited".into())
+                } else {
+                    RuntimeError::Persistence("Persist channel closed".into())
+                }
+            })?;
 
         // Wait for the sentinel to be processed
         let _ = reply_rx.await;
@@ -106,8 +119,7 @@ async fn persist_worker(
         // Skip flush sentinels (null payload)
         if req.payload.is_null() && req.session_id.is_empty() {
             if let Some(reply) = req.reply {
-                // Return a dummy event row for flush sentinel
-                let _ = reply.send(Err(RuntimeError::Internal("flush sentinel".into())));
+                let _ = reply.send(Ok(EventRow::flush_sentinel()));
             }
             continue;
         }
@@ -209,6 +221,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn flush_returns_ok() {
+        let store = make_event_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"))
+            .expect("Failed to create session");
+
+        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+
+        // flush() should return Ok even with no pending events
+        let result = persister.flush().await;
+        assert!(result.is_ok(), "flush must return Ok, got: {result:?}");
+    }
+
+    #[tokio::test]
     async fn flush_waits_for_pending() {
         let store = make_event_store();
         let session = store
@@ -229,5 +255,34 @@ mod tests {
         // Flush should wait for all to complete
         let result = persister.flush().await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn worker_exit_gives_descriptive_error() {
+        let store = make_event_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"))
+            .expect("Failed to create session");
+
+        let persister = EventPersister::new(store.clone(), session.session.id.clone());
+
+        // Abort the worker to simulate it exiting
+        persister.worker_handle.abort();
+        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+
+        let result = persister
+            .append(
+                &session.session.id,
+                EventType::MessageUser,
+                serde_json::json!({"content": "hello"}),
+            )
+            .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("panicked or exited"),
+            "expected descriptive error, got: {err}"
+        );
     }
 }

@@ -3,7 +3,9 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use serde_json::json;
 use tron_context::context_manager::ContextManager;
+use tron_core::content::AssistantContent;
 use tron_core::events::{
     BaseEvent, CompactionReason, ResponseTokenUsage, ToolCallSummary, TronEvent, TurnTokenUsage,
 };
@@ -13,18 +15,22 @@ use tron_hooks::engine::HookEngine;
 use tron_llm::provider::{Provider, ProviderStreamOptions};
 use tron_tools::registry::ToolRegistry;
 
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::stream_processor;
 use crate::agent::tool_executor;
+use tron_events::EventType;
+
 use crate::errors::StopReason;
+use crate::orchestrator::event_persister::EventPersister;
+use crate::pipeline::persistence;
 use crate::types::{RunContext, TurnResult};
 
 /// Execute a single turn of the agent loop.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::cast_possible_truncation)]
-#[instrument(skip_all, fields(session_id, turn, model))]
+#[instrument(skip_all, fields(session_id, turn, model = provider.model()))]
 pub async fn execute_turn(
     turn: u32,
     context_manager: &mut ContextManager,
@@ -37,6 +43,7 @@ pub async fn execute_turn(
     emitter: &Arc<EventEmitter>,
     cancel: &tokio_util::sync::CancellationToken,
     run_context: &RunContext,
+    persister: Option<&EventPersister>,
 ) -> TurnResult {
     let turn_start = Instant::now();
 
@@ -180,19 +187,65 @@ pub async fn execute_turn(
         tool_call_count: stream_result.tool_calls.len() as u32,
     });
 
-    // 8. Add assistant message to context
+    // 8. Add assistant message to context — preserve metadata (fix: was None/None)
+    let has_thinking = stream_result
+        .message
+        .content
+        .iter()
+        .any(|c| matches!(c, AssistantContent::Thinking { .. }));
+    let thinking_text = stream_result
+        .message
+        .content
+        .iter()
+        .find_map(|c| {
+            if let AssistantContent::Thinking { thinking, .. } = c {
+                Some(thinking.clone())
+            } else {
+                None
+            }
+        });
+    let stop_reason_for_context: Option<tron_core::messages::StopReason> =
+        serde_json::from_value(serde_json::Value::String(
+            stream_result.stop_reason.clone(),
+        ))
+        .ok();
+
     let assistant_content = stream_result.message.content.clone();
     context_manager.add_message(Message::Assistant {
         content: assistant_content,
         usage: stream_result.token_usage.clone(),
         cost: None,
-        stop_reason: None,
-        thinking: None,
+        stop_reason: stop_reason_for_context,
+        thinking: thinking_text,
     });
 
     // Update API token count if available
     if let Some(ref usage) = stream_result.token_usage {
         context_manager.set_api_context_tokens(usage.input_tokens + usage.output_tokens);
+    }
+
+    // 8b. Persist message.assistant inline
+    if let Some(p) = persister {
+        let content_json = persistence::build_content_json(&stream_result.message.content);
+        let mut payload = json!({
+            "content": content_json,
+            "turn": turn,
+            "model": provider.model(),
+            "latencyMs": turn_start.elapsed().as_millis() as u64,
+            "stopReason": &stream_result.stop_reason,
+            "hasThinking": has_thinking,
+            "providerType": provider.provider_type().as_str(),
+        });
+        if let Some(ref usage) = stream_result.token_usage {
+            payload["tokenUsage"] = persistence::build_token_usage_json(usage);
+            payload["tokenRecord"] = persistence::build_token_record(
+                usage,
+                provider.provider_type(),
+                session_id,
+                turn,
+            );
+        }
+        p.append_fire_and_forget(session_id, EventType::MessageAssistant, payload);
     }
 
     // 9. Execute tool calls if present
@@ -226,6 +279,16 @@ pub async fn execute_turn(
                 break;
             }
 
+            // Persist tool.call BEFORE execution
+            if let Some(p) = persister {
+                p.append_fire_and_forget(session_id, EventType::ToolCall, json!({
+                    "toolCallId": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                    "turn": turn,
+                }));
+            }
+
             let exec_result = tool_executor::execute_tool(
                 tc,
                 registry,
@@ -248,14 +311,21 @@ pub async fn execute_turn(
                 }
             };
 
+            let is_error = exec_result.result.is_error.unwrap_or(false);
+
+            // Persist tool.result AFTER execution
+            if let Some(p) = persister {
+                p.append_fire_and_forget(session_id, EventType::ToolResult, json!({
+                    "toolCallId": tc.id,
+                    "content": result_text,
+                    "isError": is_error,
+                }));
+            }
+
             context_manager.add_message(Message::ToolResult {
                 tool_call_id: tc.id.clone(),
                 content: ToolResultMessageContent::Text(result_text),
-                is_error: if exec_result.result.is_error.unwrap_or(false) {
-                    Some(true)
-                } else {
-                    None
-                },
+                is_error: if is_error { Some(true) } else { None },
             });
 
             if exec_result.stops_turn {
@@ -274,16 +344,30 @@ pub async fn execute_turn(
         cache_creation_tokens: u.cache_creation_tokens,
     });
 
+    // Build token_record (fix: was None)
+    let token_record = stream_result.token_usage.as_ref().map(|usage| {
+        persistence::build_token_record(usage, provider.provider_type(), session_id, turn)
+    });
+
     let _ = emitter.emit(TronEvent::TurnEnd {
         base: BaseEvent::now(session_id),
         turn,
         duration,
         token_usage: turn_token_usage,
-        token_record: None,
+        token_record,
         cost: None,
         context_limit: Some(context_manager.get_context_limit()),
     });
-    debug!(session_id, turn, duration_ms = duration, "turn completed");
+    info!(
+        session_id,
+        turn,
+        duration_ms = duration,
+        model = provider.model(),
+        stop_reason = %stream_result.stop_reason,
+        tools = tool_calls_executed,
+        has_thinking,
+        "turn completed"
+    );
 
     // Determine stop reason for this turn
     let stop_reason = if stop_turn_requested {
@@ -302,13 +386,15 @@ pub async fn execute_turn(
 
     TurnResult {
         success: true,
-        error: None,
         tool_calls_executed,
         token_usage: stream_result.token_usage,
         stop_reason,
-        interrupted: false,
-        partial_content: None,
         stop_turn_requested,
+        model: Some(provider.model().to_owned()),
+        latency_ms: duration,
+        has_thinking,
+        llm_stop_reason: Some(stream_result.stop_reason.clone()),
+        ..Default::default()
     }
 }
 

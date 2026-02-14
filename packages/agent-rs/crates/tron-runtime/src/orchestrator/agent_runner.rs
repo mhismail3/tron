@@ -5,10 +5,12 @@
 
 use std::sync::Arc;
 
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_hooks::engine::HookEngine;
 
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::agent::tron_agent::TronAgent;
@@ -43,23 +45,44 @@ pub async fn run_agent(
     // 2. Forward agent events to broadcast channel
     let mut agent_rx = agent.subscribe();
     let broadcast_clone = broadcast.clone();
+    let forward_cancel = CancellationToken::new();
+    let forward_cancel_clone = forward_cancel.clone();
     let forward_handle = tokio::spawn(async move {
-        while let Ok(event) = agent_rx.recv().await {
-            let _ = broadcast_clone.emit(event);
+        loop {
+            tokio::select! {
+                event = agent_rx.recv() => {
+                    match event {
+                        Ok(e) => { let _ = broadcast_clone.emit(e); }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    }
+                }
+                () = forward_cancel_clone.cancelled() => {
+                    // Drain any remaining buffered events
+                    while let Ok(event) = agent_rx.try_recv() {
+                        let _ = broadcast_clone.emit(event);
+                    }
+                    break;
+                }
+            }
         }
     });
 
     // 3. Run the agent
     let result = agent.run(content, ctx).await;
 
-    // Yield to let the forward task drain remaining events from the agent
-    // (including AgentEnd which was the last event emitted by TronAgent::run).
-    // Multiple yields increase the chance all buffered events are forwarded
-    // before we abort the task.
-    for _ in 0..3 {
-        tokio::task::yield_now().await;
+    // Signal the forward task to drain remaining buffered events and exit
+    forward_cancel.cancel();
+    // Wait for it to finish draining (bounded timeout as safety net)
+    if tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        forward_handle,
+    )
+    .await
+    .is_err()
+    {
+        warn!(session_id, "forward task did not drain within 100ms");
     }
-    forward_handle.abort();
 
     // 5. Drain background hooks
     if let Some(hook_engine) = hooks {
@@ -270,5 +293,79 @@ mod tests {
             }
         }
         assert!(saw_ready, "agent_ready must be emitted even after error");
+    }
+
+    #[tokio::test]
+    async fn forward_task_drains_all_events() {
+        // Use a multi-turn provider to generate many events
+        struct MultiEventProvider;
+        #[async_trait]
+        impl tron_llm::provider::Provider for MultiEventProvider {
+            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
+            fn model(&self) -> &str { "mock" }
+            async fn stream(&self, _c: &tron_core::messages::Context, _o: &ProviderStreamOptions)
+                -> Result<StreamEventStream, ProviderError> {
+                let s = stream::iter(vec![
+                    Ok(StreamEvent::Start),
+                    Ok(StreamEvent::TextDelta { delta: "a".into() }),
+                    Ok(StreamEvent::TextDelta { delta: "b".into() }),
+                    Ok(StreamEvent::TextDelta { delta: "c".into() }),
+                    Ok(StreamEvent::TextDelta { delta: "d".into() }),
+                    Ok(StreamEvent::TextDelta { delta: "e".into() }),
+                    Ok(StreamEvent::Done {
+                        message: AssistantMessage {
+                            content: vec![AssistantContent::text("abcde")],
+                            token_usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5, ..Default::default() }),
+                        },
+                        stop_reason: "end_turn".into(),
+                    }),
+                ]);
+                Ok(Box::pin(s))
+            }
+        }
+
+        let mut agent = TronAgent::new(
+            AgentConfig::default(),
+            Arc::new(MultiEventProvider),
+            ToolRegistry::new(),
+            None,
+            None,
+            ContextManager::new(ContextManagerConfig {
+                model: "mock".into(),
+                system_prompt: None,
+                working_directory: None,
+                tools: vec![],
+                rules_content: None,
+                compaction: tron_context::types::CompactionConfig::default(),
+            }),
+            "test-session".into(),
+        );
+
+        let broadcast = Arc::new(EventEmitter::new());
+        let mut rx = broadcast.subscribe();
+
+        let result = run_agent(&mut agent, "Hi", RunContext::default(), &None, &broadcast).await;
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+
+        // Collect all forwarded events
+        let mut event_types = vec![];
+        while let Ok(event) = rx.try_recv() {
+            event_types.push(event.event_type().to_owned());
+        }
+
+        // agent_end must be present (it's the last event from TronAgent)
+        assert!(
+            event_types.contains(&"agent_end".to_owned()),
+            "agent_end must be forwarded; got: {event_types:?}"
+        );
+        // agent_ready must be last
+        assert_eq!(
+            event_types.last().map(String::as_str),
+            Some("agent_ready"),
+            "agent_ready must be the last event"
+        );
+        // All message_update deltas should be forwarded
+        let update_count = event_types.iter().filter(|t| *t == "message_update").count();
+        assert_eq!(update_count, 5, "all 5 text deltas must be forwarded");
     }
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, warn};
 use tron_rpc::types::RpcEvent;
 
 use super::connection::ClientConnection;
@@ -37,8 +37,12 @@ impl BroadcastManager {
 
     /// Broadcast an event to all connections bound to the given session.
     pub async fn broadcast_to_session(&self, session_id: &str, event: &RpcEvent) {
-        let Ok(json) = serde_json::to_string(event) else {
-            return;
+        let json = match serde_json::to_string(event) {
+            Ok(j) => j,
+            Err(e) => {
+                warn!(event_type = event.event_type, error = %e, "failed to serialize event");
+                return;
+            }
         };
         let conns = self.connections.read().await;
         let recipients = conns
@@ -53,15 +57,21 @@ impl BroadcastManager {
         );
         for conn in conns.values() {
             if conn.session_id().as_deref() == Some(session_id) {
-                let _ = conn.send(json.clone());
+                if !conn.send(json.clone()) {
+                    warn!(conn_id = %conn.id, session_id, "failed to send event to client");
+                }
             }
         }
     }
 
     /// Broadcast an event to all connections.
     pub async fn broadcast_all(&self, event: &RpcEvent) {
-        let Ok(json) = serde_json::to_string(event) else {
-            return;
+        let json = match serde_json::to_string(event) {
+            Ok(j) => j,
+            Err(e) => {
+                warn!(event_type = event.event_type, error = %e, "failed to serialize event");
+                return;
+            }
         };
         let conns = self.connections.read().await;
         let recipients = conns.len();
@@ -70,7 +80,9 @@ impl BroadcastManager {
             recipients, "broadcast event to all"
         );
         for conn in conns.values() {
-            let _ = conn.send(json.clone());
+            if !conn.send(json.clone()) {
+                warn!(conn_id = %conn.id, "failed to send event to client");
+            }
         }
     }
 

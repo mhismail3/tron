@@ -45,6 +45,24 @@ fn event_row_to_wire(row: &EventRow) -> Value {
     if let Some(output_tokens) = row.output_tokens {
         let _ = m.insert("outputTokens".into(), Value::Number(output_tokens.into()));
     }
+    if let Some(ref model) = row.model {
+        let _ = m.insert("model".into(), Value::String(model.clone()));
+    }
+    if let Some(latency_ms) = row.latency_ms {
+        let _ = m.insert("latencyMs".into(), Value::Number(latency_ms.into()));
+    }
+    if let Some(ref stop_reason) = row.stop_reason {
+        let _ = m.insert("stopReason".into(), Value::String(stop_reason.clone()));
+    }
+    if let Some(has_thinking) = row.has_thinking {
+        let _ = m.insert("hasThinking".into(), Value::Bool(has_thinking != 0));
+    }
+    if let Some(ref provider_type) = row.provider_type {
+        let _ = m.insert("providerType".into(), Value::String(provider_type.clone()));
+    }
+    if let Some(cost) = row.cost {
+        let _ = m.insert("cost".into(), serde_json::json!(cost));
+    }
 
     // Parse payload JSON string into a Value
     if let Ok(payload) = serde_json::from_str::<Value>(&row.payload) {
@@ -597,6 +615,12 @@ mod tests {
             cache_read_tokens: None,
             cache_creation_tokens: None,
             checksum: None,
+            model: None,
+            latency_ms: None,
+            stop_reason: None,
+            has_thinking: None,
+            provider_type: None,
+            cost: None,
         };
 
         let wire = event_row_to_wire(&row);
@@ -632,6 +656,12 @@ mod tests {
             cache_read_tokens: None,
             cache_creation_tokens: None,
             checksum: None,
+            model: None,
+            latency_ms: None,
+            stop_reason: None,
+            has_thinking: None,
+            provider_type: None,
+            cost: None,
         };
 
         let wire = event_row_to_wire(&row);

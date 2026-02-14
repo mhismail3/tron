@@ -1,151 +1,13 @@
 //! Agent handlers: prompt, abort, getState.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tracing::{info, instrument, warn};
 
 use crate::context::RpcContext;
 use crate::errors::{self, RpcError};
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
-
-/// Persist new messages from the agent's context manager to the event store.
-///
-/// After an agent run, the context manager contains all messages (initial + new).
-/// We skip `initial_count` (from reconstruction) + 1 (user message already persisted)
-/// and persist each remaining message as the appropriate event type.
-#[allow(clippy::too_many_lines)]
-fn persist_agent_messages(
-    context_manager: &tron_context::context_manager::ContextManager,
-    event_store: &Arc<tron_events::EventStore>,
-    session_id: &str,
-    initial_count: usize,
-) {
-    use tron_core::content::AssistantContent;
-    use tron_core::messages::Message;
-
-    let all_messages = context_manager.get_messages();
-    // Skip initial messages (from reconstruction) + 1 (user message we already persisted)
-    let new_start = initial_count + 1;
-    let mut turn_number = 0u32;
-
-    for msg in all_messages.iter().skip(new_start) {
-        match msg {
-            Message::Assistant {
-                content,
-                usage,
-                ..
-            } => {
-                turn_number += 1;
-
-                // Build content array with "input" field for tool_use (matching Anthropic format)
-                let content_json: Vec<Value> = content
-                    .iter()
-                    .map(|c| {
-                        let mut v = serde_json::to_value(c).unwrap_or(json!(null));
-                        // Rename "arguments" → "input" for tool_use blocks (Anthropic API format)
-                        if v.get("type").and_then(Value::as_str) == Some("tool_use") {
-                            if let Some(args) =
-                                v.as_object_mut().and_then(|o| o.remove("arguments"))
-                            {
-                                v["input"] = args;
-                            }
-                        }
-                        v
-                    })
-                    .collect();
-
-                // Persist tool.call events for each tool_use block (for argument restoration)
-                for c in content {
-                    if let AssistantContent::ToolUse {
-                        id,
-                        name,
-                        arguments,
-                        ..
-                    } = c
-                    {
-                        let _ = event_store.append(&tron_events::AppendOptions {
-                            session_id,
-                            event_type: tron_events::EventType::ToolCall,
-                            payload: json!({
-                                "toolCallId": id,
-                                "name": name,
-                                "arguments": arguments,
-                            }),
-                            parent_id: None,
-                        });
-                    }
-                }
-
-                let mut payload = json!({
-                    "content": content_json,
-                    "turn": turn_number,
-                });
-
-                if let Some(usage) = usage {
-                    let mut tu = json!({
-                        "inputTokens": usage.input_tokens,
-                        "outputTokens": usage.output_tokens,
-                    });
-                    if let Some(cache_read) = usage.cache_read_tokens {
-                        tu["cacheReadTokens"] = json!(cache_read);
-                    }
-                    if let Some(cache_create) = usage.cache_creation_tokens {
-                        tu["cacheCreationTokens"] = json!(cache_create);
-                    }
-                    payload["tokenUsage"] = tu;
-
-                    // ADAPTER(ios-compat): iOS reads tokenRecord from persisted events for session resume analytics.
-                    // REMOVE: delete this block; iOS should read tokenUsage directly from persisted events.
-                    payload["tokenRecord"] = crate::adapters::build_token_record(
-                        usage.input_tokens,
-                        usage.output_tokens,
-                        usage.cache_read_tokens,
-                        usage.cache_creation_tokens,
-                        "anthropic",
-                        session_id,
-                        turn_number,
-                    );
-                }
-
-                let _ = event_store.append(&tron_events::AppendOptions {
-                    session_id,
-                    event_type: tron_events::EventType::MessageAssistant,
-                    payload,
-                    parent_id: None,
-                });
-            }
-            Message::ToolResult {
-                tool_call_id,
-                content,
-                is_error,
-            } => {
-                let content_text = match content {
-                    tron_core::messages::ToolResultMessageContent::Text(t) => t.clone(),
-                    tron_core::messages::ToolResultMessageContent::Blocks(b) => {
-                        serde_json::to_string(b).unwrap_or_default()
-                    }
-                };
-                let _ = event_store.append(&tron_events::AppendOptions {
-                    session_id,
-                    event_type: tron_events::EventType::ToolResult,
-                    payload: json!({
-                        "toolCallId": tool_call_id,
-                        "content": content_text,
-                        "isError": is_error.unwrap_or(false),
-                    }),
-                    parent_id: None,
-                });
-            }
-            Message::User { .. } => {
-                // User messages beyond the initial prompt shouldn't appear,
-                // but skip them if they do.
-            }
-        }
-    }
-}
 
 /// Submit a prompt to the agent for a session.
 pub struct PromptHandler;
@@ -270,7 +132,6 @@ impl MethodHandler for PromptHandler {
                     .filter(|s| !s.trim().is_empty());
 
                 // 6. Get messages from reconstructed state
-                let initial_message_count = state.messages.len();
                 let messages = state.messages.clone();
 
                 let config = AgentConfig {
@@ -299,7 +160,16 @@ impl MethodHandler for PromptHandler {
 
                 agent.set_abort_token(cancel_token);
 
-                // 7. Persist message.user event BEFORE agent runs (matches TS server)
+                // 7a. Create inline persister — events are written during turn execution
+                let persister = std::sync::Arc::new(
+                    tron_runtime::orchestrator::event_persister::EventPersister::new(
+                        event_store.clone(),
+                        session_id_clone.clone(),
+                    ),
+                );
+                agent.set_persister(Some(persister.clone()));
+
+                // 7b. Persist message.user event BEFORE agent runs (matches TS server)
                 let _ = event_store.append(&tron_events::AppendOptions {
                     session_id: &session_id_clone,
                     event_type: tron_events::EventType::MessageUser,
@@ -316,13 +186,8 @@ impl MethodHandler for PromptHandler {
                 )
                 .await;
 
-                // 8. Persist new messages from agent's context manager
-                persist_agent_messages(
-                    agent.context_manager(),
-                    &event_store,
-                    &session_id_clone,
-                    initial_message_count,
-                );
+                // 8. Flush persister to ensure all inline-persisted events are written
+                let _ = persister.flush().await;
 
                 // 9. Invalidate cached session so next resume reconstructs from events
                 session_manager.invalidate_session(&session_id_clone);

@@ -2101,6 +2101,12 @@ mod tests {
             cache_read_tokens: None,
             cache_creation_tokens: None,
             checksum: None,
+            model: None,
+            latency_ms: None,
+            stop_reason: None,
+            has_thinking: None,
+            provider_type: None,
+            cost: None,
         };
 
         let events = super::rows_to_session_events(&[row]);
@@ -2132,6 +2138,12 @@ mod tests {
             cache_read_tokens: None,
             cache_creation_tokens: None,
             checksum: None,
+            model: None,
+            latency_ms: None,
+            stop_reason: None,
+            has_thinking: None,
+            provider_type: None,
+            cost: None,
         };
 
         let events = super::rows_to_session_events(&[row]);
