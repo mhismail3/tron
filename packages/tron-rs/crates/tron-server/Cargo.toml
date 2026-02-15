@@ -1,0 +1,27 @@
+[package]
+name = "tron-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tron-core.workspace = true
+tron-telemetry.workspace = true
+tron-engine.workspace = true
+tron-store.workspace = true
+tron-llm.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+dashmap.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+reqwest.workspace = true

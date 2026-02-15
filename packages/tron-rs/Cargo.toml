@@ -1,0 +1,97 @@
+[workspace]
+members = [
+    "crates/tron-core",
+    "crates/tron-telemetry",
+    "crates/tron-llm",
+    "crates/tron-store",
+    "crates/tron-engine",
+    "crates/tron-server",
+    ".",
+]
+resolver = "2"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+async-trait = "0.1"
+pin-project-lite = "0.2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# IDs & time
+uuid = { version = "1", features = ["v7"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# HTTP & networking
+reqwest = { version = "0.12", features = ["stream", "json"] }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["timeout", "cors", "trace"] }
+
+# Storage
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Concurrency
+dashmap = "6"
+parking_lot = "0.12"
+
+# Security
+secrecy = { version = "0.10", features = ["serde"] }
+chacha20poly1305 = "0.10"
+sha2 = "0.10"
+rand = "0.8"
+
+# Bytes
+bytes = "1"
+
+# Search
+glob = "0.3"
+regex = "1"
+
+# Encoding
+base64 = "0.22"
+
+# Internal crates
+tron-core = { path = "crates/tron-core" }
+tron-telemetry = { path = "crates/tron-telemetry" }
+tron-llm = { path = "crates/tron-llm" }
+tron-store = { path = "crates/tron-store" }
+tron-engine = { path = "crates/tron-engine" }
+tron-server = { path = "crates/tron-server" }
+
+[package]
+name = "tron"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tron"
+path = "src/main.rs"
+
+[dependencies]
+tron-core.workspace = true
+tron-telemetry.workspace = true
+tron-store.workspace = true
+tron-server.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
