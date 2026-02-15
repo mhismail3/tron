@@ -289,6 +289,29 @@ async fn process_rpc_messages(
         let response =
             crate::handlers::dispatch(&state, &request.method, &params, request.id).await;
 
+        // Auto-subscribe client to session for event routing.
+        // Check params first (most methods), then response (session.create, session.fork).
+        if response.success {
+            let session_id_str = params
+                .get("session_id")
+                .or_else(|| params.get("sessionId"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    response.result.as_ref().and_then(|r| {
+                        r.get("sessionId")
+                            .or_else(|| r.get("newSessionId"))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    })
+                });
+
+            if let Some(sid) = session_id_str {
+                let session_id = tron_core::ids::SessionId::from_raw(sid);
+                registry.set_session(&client_id, session_id).await;
+            }
+        }
+
         if let Ok(json) = serde_json::to_string(&response) {
             registry.send_to(&client_id, json);
         }
@@ -417,7 +440,7 @@ mod tests {
         // One should be a rate limit error
         let has_rate_limit = messages
             .iter()
-            .any(|m| m.contains("Rate limit exceeded") && m.contains("-32000"));
+            .any(|m| m.contains("Rate limit exceeded") && m.contains("RATE_LIMITED"));
         assert!(has_rate_limit, "Expected rate limit error in {messages:?}");
     }
 

@@ -73,8 +73,10 @@ mod tests {
             turn: 1,
         };
         let json = serialize_event(&event).unwrap();
-        assert!(json.contains("\"type\":\"turn_start\""));
+        assert!(json.contains("\"type\":\"agent.turn_start\""));
         assert!(json.contains("\"turn\":1"));
+        assert!(json.contains("\"sessionId\""));
+        assert!(json.contains("\"timestamp\""));
     }
 
     #[test]
@@ -85,8 +87,9 @@ mod tests {
             delta: "Hello".into(),
         };
         let json = serialize_event(&event).unwrap();
-        assert!(json.contains("\"type\":\"text_delta\""));
+        assert!(json.contains("\"type\":\"agent.text_delta\""));
         assert!(json.contains("Hello"));
+        assert!(json.contains("\"sessionId\""));
     }
 
     #[tokio::test]
@@ -112,7 +115,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let msg = client_rx.try_recv().unwrap();
-        assert!(msg.contains("turn_start"));
+        assert!(msg.contains("agent.turn_start"));
 
         handle.abort();
     }

@@ -35,10 +35,10 @@ pub fn classify_message(json: &str) -> MessagePriority {
     if json.contains("\"result\"") || json.contains("\"error\"") {
         return MessagePriority::Critical;
     }
-    // Agent lifecycle events
-    if json.contains("\"agent_ready\"")
-        || json.contains("\"agent_complete\"")
-        || json.contains("\"agent_error\"")
+    // Agent lifecycle events (dot-prefixed wire format)
+    if json.contains("\"agent.ready\"")
+        || json.contains("\"agent.complete\"")
+        || json.contains("\"agent.error\"")
     {
         return MessagePriority::Critical;
     }
@@ -667,13 +667,13 @@ mod tests {
 
     #[test]
     fn classify_agent_ready_critical() {
-        let event = r#"{"type":"agent_ready","session_id":"sess_123"}"#;
+        let event = r#"{"type":"agent.ready","sessionId":"sess_123","timestamp":"t","data":{}}"#;
         assert_eq!(classify_message(event), MessagePriority::Critical);
     }
 
     #[test]
     fn classify_agent_complete_critical() {
-        let event = r#"{"type":"agent_complete","session_id":"sess_123"}"#;
+        let event = r#"{"type":"agent.complete","sessionId":"sess_123","timestamp":"t","data":{}}"#;
         assert_eq!(classify_message(event), MessagePriority::Critical);
     }
 
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn classify_text_delta_normal() {
-        let event = r#"{"type":"text_delta","delta":"hello"}"#;
+        let event = r#"{"type":"agent.text_delta","sessionId":"s","timestamp":"t","data":{"delta":"hello"}}"#;
         assert_eq!(classify_message(event), MessagePriority::Normal);
     }
 

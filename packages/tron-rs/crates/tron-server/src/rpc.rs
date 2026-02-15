@@ -8,36 +8,53 @@ pub struct RpcRequest {
     pub id: Option<serde_json::Value>,
 }
 
-/// JSON-RPC 2.0 response.
+/// JSON-RPC 2.0 response — iOS-compatible wire format.
+///
+/// iOS expects: `{ id, success, result?, error?: { code: String, message } }`
 #[derive(Debug, Serialize)]
 pub struct RpcResponse {
     pub id: Option<serde_json::Value>,
+    pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<RpcError>,
 }
 
-/// JSON-RPC 2.0 error object.
+/// JSON-RPC 2.0 error object — iOS-compatible (code is String).
 #[derive(Debug, Serialize)]
 pub struct RpcError {
-    pub code: i32,
+    pub code: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
 
-// Standard JSON-RPC error codes
+// Standard JSON-RPC error codes (used internally for routing)
 pub const PARSE_ERROR: i32 = -32700;
 pub const INVALID_REQUEST: i32 = -32600;
 pub const METHOD_NOT_FOUND: i32 = -32601;
 pub const INVALID_PARAMS: i32 = -32602;
 pub const INTERNAL_ERROR: i32 = -32603;
 
+/// Map numeric JSON-RPC error codes to iOS-expected string codes.
+pub fn error_code_to_string(code: i32) -> &'static str {
+    match code {
+        PARSE_ERROR => "PARSE_ERROR",
+        INVALID_REQUEST => "INVALID_REQUEST",
+        METHOD_NOT_FOUND => "METHOD_NOT_FOUND",
+        INVALID_PARAMS => "INVALID_PARAMS",
+        INTERNAL_ERROR => "INTERNAL_ERROR",
+        -32000 => "RATE_LIMITED",
+        _ => "UNKNOWN_ERROR",
+    }
+}
+
 impl RpcResponse {
     pub fn success(id: Option<serde_json::Value>, result: serde_json::Value) -> Self {
         Self {
             id,
+            success: true,
             result: Some(result),
             error: None,
         }
@@ -46,9 +63,10 @@ impl RpcResponse {
     pub fn error(id: Option<serde_json::Value>, code: i32, message: impl Into<String>) -> Self {
         Self {
             id,
+            success: false,
             result: None,
             error: Some(RpcError {
-                code,
+                code: error_code_to_string(code).to_string(),
                 message: message.into(),
                 data: None,
             }),
@@ -104,11 +122,30 @@ mod tests {
     }
 
     #[test]
+    fn success_response_has_success_true() {
+        let resp = RpcResponse::success(Some(serde_json::json!(1)), serde_json::json!({"ok": true}));
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["success"], true);
+        assert!(json["result"].is_object());
+        assert!(json.get("error").is_none() || json["error"].is_null());
+    }
+
+    #[test]
     fn success_response_serializes() {
         let resp = RpcResponse::success(Some(serde_json::json!(1)), serde_json::json!({"ok": true}));
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"result\""));
         assert!(!json.contains("\"error\""));
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn error_response_has_success_false() {
+        let resp = RpcResponse::error(Some(serde_json::json!(1)), INVALID_PARAMS, "bad param");
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["success"], false);
+        assert_eq!(json["error"]["code"], "INVALID_PARAMS");
+        assert_eq!(json["error"]["message"], "bad param");
     }
 
     #[test]
@@ -116,9 +153,21 @@ mod tests {
         let resp = RpcResponse::method_not_found(Some(serde_json::json!(1)), "foo.bar");
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"error\""));
-        assert!(json.contains("-32601"));
+        assert!(json.contains("METHOD_NOT_FOUND"));
         assert!(json.contains("foo.bar"));
         assert!(!json.contains("\"result\""));
+        assert!(json.contains("\"success\":false"));
+    }
+
+    #[test]
+    fn error_code_maps_to_string() {
+        assert_eq!(error_code_to_string(PARSE_ERROR), "PARSE_ERROR");
+        assert_eq!(error_code_to_string(METHOD_NOT_FOUND), "METHOD_NOT_FOUND");
+        assert_eq!(error_code_to_string(INVALID_PARAMS), "INVALID_PARAMS");
+        assert_eq!(error_code_to_string(INTERNAL_ERROR), "INTERNAL_ERROR");
+        assert_eq!(error_code_to_string(INVALID_REQUEST), "INVALID_REQUEST");
+        assert_eq!(error_code_to_string(-32000), "RATE_LIMITED");
+        assert_eq!(error_code_to_string(-99999), "UNKNOWN_ERROR");
     }
 
     #[test]
@@ -142,6 +191,7 @@ mod tests {
     fn parse_error_has_no_id() {
         let resp = RpcResponse::parse_error();
         assert!(resp.id.is_none());
-        assert_eq!(resp.error.as_ref().unwrap().code, PARSE_ERROR);
+        assert_eq!(resp.error.as_ref().unwrap().code, "PARSE_ERROR");
+        assert!(!resp.success);
     }
 }

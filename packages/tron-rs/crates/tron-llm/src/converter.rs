@@ -13,6 +13,7 @@ pub fn build_request_body(
     options: &StreamOptions,
     model: &str,
     is_oauth: bool,
+    model_max_output: usize,
 ) -> Value {
     let mut body = json!({
         "model": model,
@@ -23,7 +24,7 @@ pub fn build_request_body(
     if let Some(max) = options.max_tokens {
         body["max_tokens"] = json!(max);
     } else {
-        body["max_tokens"] = json!(128_000);
+        body["max_tokens"] = json!(model_max_output);
     }
 
     // Temperature
@@ -436,6 +437,7 @@ mod tests {
             &StreamOptions::default(),
             "claude-sonnet-4-5-20250929",
             false,
+            64_000,
         );
 
         assert_eq!(body["model"], "claude-sonnet-4-5-20250929");

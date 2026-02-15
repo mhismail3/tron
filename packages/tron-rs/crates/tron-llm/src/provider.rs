@@ -60,9 +60,11 @@ impl AnthropicProvider {
         let auth = self.auth.read().await;
         let is_oauth = self.is_oauth(&auth);
 
-        let body = converter::build_request_body(context, options, self.model_info.name, is_oauth);
+        let body = converter::build_request_body(context, options, self.model_info.name, is_oauth, self.model_info.max_output);
 
         let mut req = self.client.post(API_URL);
+
+        req = req.header("anthropic-version", "2023-06-01");
 
         match &*auth {
             AuthMethod::OAuth(tokens) => {
@@ -78,7 +80,6 @@ impl AnthropicProvider {
             }
             AuthMethod::ApiKey(key) => {
                 req = req.header("x-api-key", key.0.expose_secret());
-                req = req.header("anthropic-version", "2023-06-01");
             }
         }
 
