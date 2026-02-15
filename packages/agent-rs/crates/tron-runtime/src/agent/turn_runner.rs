@@ -45,6 +45,8 @@ pub async fn execute_turn(
     run_context: &RunContext,
     persister: Option<&EventPersister>,
     previous_context_baseline: u64,
+    subagent_depth: u32,
+    subagent_max_depth: u32,
 ) -> TurnResult {
     let turn_start = Instant::now();
 
@@ -321,6 +323,8 @@ pub async fn execute_turn(
                 &working_dir,
                 emitter,
                 cancel,
+                subagent_depth,
+                subagent_max_depth,
             )
             .await;
 

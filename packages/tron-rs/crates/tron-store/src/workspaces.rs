@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use tron_core::ids::WorkspaceId;
 
@@ -26,6 +27,7 @@ impl WorkspaceRepo {
     /// Get or create a workspace for the given path.
     /// If a workspace already exists for this path, returns it.
     /// Otherwise, creates a new one.
+    #[instrument(skip(self), fields(path, name))]
     pub fn get_or_create(&self, path: &str, name: &str) -> Result<WorkspaceRow, StoreError> {
         self.db.with_conn(|conn| {
             // Try to find existing
@@ -66,6 +68,7 @@ impl WorkspaceRepo {
     }
 
     /// Get a workspace by ID.
+    #[instrument(skip(self), fields(workspace_id = %id))]
     pub fn get(&self, id: &WorkspaceId) -> Result<WorkspaceRow, StoreError> {
         self.db.with_conn(|conn| {
             conn.query_row(
@@ -85,6 +88,7 @@ impl WorkspaceRepo {
     }
 
     /// List all workspaces.
+    #[instrument(skip(self))]
     pub fn list(&self) -> Result<Vec<WorkspaceRow>, StoreError> {
         self.db.with_conn(|conn| {
             let mut stmt = conn

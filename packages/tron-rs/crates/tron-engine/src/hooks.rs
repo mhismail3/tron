@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::Semaphore;
+use tracing::warn;
 use tron_core::hooks::{HookResult, HookType};
+
+const DEFAULT_HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Context passed to hook handlers.
 #[derive(Clone, Debug)]
@@ -58,10 +61,20 @@ impl CircuitBreaker {
         }
     }
 
-    fn record_failure(&self) {
+    fn record_failure(&self, handler_name: &str) {
         let prev = self.failures.fetch_add(1, Ordering::Relaxed);
         if prev + 1 >= self.threshold {
+            let was_open = self.last_trip.lock().is_some();
             *self.last_trip.lock() = Some(Instant::now());
+            if !was_open {
+                warn!(
+                    handler = handler_name,
+                    failures = prev + 1,
+                    threshold = self.threshold,
+                    cooldown_secs = self.cooldown.as_secs(),
+                    "hook circuit breaker tripped"
+                );
+            }
         }
     }
 
@@ -83,6 +96,7 @@ pub struct HookEngine {
     max_background: usize,
     circuit_threshold: u32,
     circuit_cooldown: Duration,
+    hook_timeout: Duration,
 }
 
 impl HookEngine {
@@ -93,7 +107,13 @@ impl HookEngine {
             max_background: 32,
             circuit_threshold: 3,
             circuit_cooldown: Duration::from_secs(60),
+            hook_timeout: DEFAULT_HOOK_TIMEOUT,
         }
+    }
+
+    pub fn with_hook_timeout(mut self, timeout: Duration) -> Self {
+        self.hook_timeout = timeout;
+        self
     }
 
     /// Register a handler for a hook type.
@@ -107,6 +127,7 @@ impl HookEngine {
 
     /// Execute a blocking hook (PreToolUse, UserPromptSubmit, PreCompact).
     /// Handlers run sequentially. First Block short-circuits.
+    /// Handlers that exceed the timeout are treated as failures (fail-open: returns Continue).
     pub async fn execute_blocking(&self, ctx: &HookContext) -> HookResult {
         let entries = match self.handlers.get(&ctx.hook_type) {
             Some(e) => e,
@@ -119,9 +140,12 @@ impl HookEngine {
             }
 
             let handler = Arc::clone(&entry.handler);
+            let handler_name = handler.name().to_string();
             let result = std::panic::AssertUnwindSafe(handler.execute(ctx));
-            match futures::FutureExt::catch_unwind(result).await {
-                Ok(hook_result) => match &hook_result {
+            match tokio::time::timeout(self.hook_timeout, futures::FutureExt::catch_unwind(result))
+                .await
+            {
+                Ok(Ok(hook_result)) => match &hook_result {
                     HookResult::Block { .. } | HookResult::Modify { .. } => {
                         entry.breaker.record_success();
                         return hook_result;
@@ -130,8 +154,16 @@ impl HookEngine {
                         entry.breaker.record_success();
                     }
                 },
-                Err(_panic) => {
-                    entry.breaker.record_failure();
+                Ok(Err(_panic)) => {
+                    entry.breaker.record_failure(&handler_name);
+                }
+                Err(_timeout) => {
+                    warn!(
+                        handler = %handler_name,
+                        timeout_secs = self.hook_timeout.as_secs(),
+                        "hook handler timed out, treating as failure (fail-open)"
+                    );
+                    entry.breaker.record_failure(&handler_name);
                 }
             }
         }
@@ -154,6 +186,7 @@ impl HookEngine {
             .unwrap_or_default();
 
         let permits = Arc::clone(&self.background_permits);
+        let timeout = self.hook_timeout;
 
         tokio::spawn(async move {
             let _permit = permits.acquire().await;
@@ -161,7 +194,17 @@ impl HookEngine {
                 if *is_tripped {
                     continue;
                 }
-                let _ = handler.execute(&ctx).await;
+                let handler_name = handler.name().to_string();
+                if tokio::time::timeout(timeout, handler.execute(&ctx))
+                    .await
+                    .is_err()
+                {
+                    warn!(
+                        handler = %handler_name,
+                        timeout_secs = timeout.as_secs(),
+                        "background hook handler timed out"
+                    );
+                }
             }
         })
     }
@@ -338,30 +381,129 @@ mod tests {
         let breaker = CircuitBreaker::new(3, Duration::from_secs(60));
         assert!(!breaker.is_open());
 
-        breaker.record_failure();
-        breaker.record_failure();
+        breaker.record_failure("test");
+        breaker.record_failure("test");
         assert!(!breaker.is_open()); // 2 < 3
 
-        breaker.record_failure();
+        breaker.record_failure("test");
         assert!(breaker.is_open()); // 3 >= 3
     }
 
     #[test]
     fn circuit_breaker_recovers_on_success() {
         let breaker = CircuitBreaker::new(3, Duration::from_secs(60));
-        breaker.record_failure();
-        breaker.record_failure();
+        breaker.record_failure("test");
+        breaker.record_failure("test");
         breaker.record_success(); // Reset
-        breaker.record_failure();
+        breaker.record_failure("test");
         assert!(!breaker.is_open()); // Only 1 failure since reset
     }
 
     #[test]
     fn circuit_breaker_reopens_after_cooldown() {
         let breaker = CircuitBreaker::new(1, Duration::from_millis(0)); // Instant cooldown
-        breaker.record_failure();
+        breaker.record_failure("test");
         // With 0ms cooldown, it should be closed again immediately
         std::thread::sleep(Duration::from_millis(1));
         assert!(!breaker.is_open());
+    }
+
+    #[tokio::test]
+    async fn hook_timeout_returns_continue() {
+        // A handler that sleeps forever
+        struct SlowHandler;
+        #[async_trait]
+        impl HookHandler for SlowHandler {
+            fn name(&self) -> &str {
+                "slow"
+            }
+            async fn execute(&self, _ctx: &HookContext) -> HookResult {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                HookResult::Block {
+                    reason: "should never reach".into(),
+                }
+            }
+        }
+
+        let mut engine = HookEngine::new().with_hook_timeout(Duration::from_millis(50));
+        engine.register(HookType::PreToolUse, Arc::new(SlowHandler));
+
+        let result = engine.execute_blocking(&test_ctx(HookType::PreToolUse)).await;
+        // Timed-out handler should fail-open (Continue), not block
+        assert!(
+            matches!(result, HookResult::Continue),
+            "expected Continue (fail-open), got: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn hook_timeout_counts_as_failure_for_circuit_breaker() {
+        struct SlowHandler;
+        #[async_trait]
+        impl HookHandler for SlowHandler {
+            fn name(&self) -> &str {
+                "slow"
+            }
+            async fn execute(&self, _ctx: &HookContext) -> HookResult {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                HookResult::Continue
+            }
+        }
+
+        let mut engine = HookEngine::new().with_hook_timeout(Duration::from_millis(20));
+        engine.register(HookType::PreToolUse, Arc::new(SlowHandler));
+
+        // Trip the circuit breaker with 3 timeouts (default threshold)
+        for _ in 0..3 {
+            engine
+                .execute_blocking(&test_ctx(HookType::PreToolUse))
+                .await;
+        }
+
+        // Now register a fast handler to verify the slow one is skipped
+        // The slow handler's breaker should be tripped, so it gets skipped
+        // This verifies timeouts count as failures
+        let tracker = TrackingHandler::new();
+        engine.register(HookType::PreToolUse, tracker.clone());
+
+        let result = engine.execute_blocking(&test_ctx(HookType::PreToolUse)).await;
+        assert!(matches!(result, HookResult::Continue));
+        // The tracking handler should still be called (only the slow handler is tripped)
+        assert!(tracker.called.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn background_hook_timeout() {
+        struct SlowHandler;
+        #[async_trait]
+        impl HookHandler for SlowHandler {
+            fn name(&self) -> &str {
+                "slow"
+            }
+            async fn execute(&self, _ctx: &HookContext) -> HookResult {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                HookResult::Continue
+            }
+        }
+
+        let mut engine = HookEngine::new().with_hook_timeout(Duration::from_millis(50));
+        engine.register(HookType::PostToolUse, Arc::new(SlowHandler));
+
+        let start = Instant::now();
+        let handle = engine.execute_background(test_ctx(HookType::PostToolUse));
+        handle.await.unwrap();
+        let elapsed = start.elapsed();
+
+        // Should complete quickly (within ~100ms), not wait 3600s
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "background hook should timeout quickly, took: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn hook_timeout_default() {
+        let engine = HookEngine::new();
+        assert_eq!(engine.hook_timeout, Duration::from_secs(30));
     }
 }

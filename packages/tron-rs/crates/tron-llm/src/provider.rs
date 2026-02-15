@@ -1,9 +1,9 @@
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Future, Stream};
 use reqwest::Client;
 use secrecy::ExposeSecret;
 use tokio::sync::RwLock;
@@ -21,6 +21,8 @@ use crate::models::{self, ClaudeModelInfo};
 use crate::sse::{self, SseParser};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
 pub struct AnthropicProvider {
     client: Client,
@@ -36,7 +38,10 @@ impl AnthropicProvider {
             .unwrap_or_else(models::default_model);
 
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .build()
+                .expect("failed to build HTTP client"),
             auth: Arc::new(RwLock::new(auth)),
             model_info,
             last_api_call: Arc::new(RwLock::new(None)),
@@ -174,11 +179,14 @@ impl LlmProvider for AnthropicProvider {
 }
 
 /// Wraps a byte stream from reqwest and yields StreamEvents.
+/// Includes an idle timeout — if no data arrives within `idle_duration`, emits an error.
 struct SseStream {
     inner: Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>>,
     parser: SseParser,
     buffer: String,
     pending: Vec<StreamEvent>,
+    idle_deadline: Pin<Box<tokio::time::Sleep>>,
+    idle_duration: Duration,
 }
 
 impl SseStream {
@@ -187,11 +195,22 @@ impl SseStream {
             + Send
             + 'static,
     ) -> Self {
+        Self::with_idle_timeout(byte_stream, SSE_IDLE_TIMEOUT)
+    }
+
+    fn with_idle_timeout(
+        byte_stream: impl Stream<Item = Result<bytes::Bytes, reqwest::Error>>
+            + Send
+            + 'static,
+        idle_timeout: Duration,
+    ) -> Self {
         Self {
             inner: Box::pin(byte_stream),
             parser: SseParser::new(),
             buffer: String::new(),
             pending: Vec::new(),
+            idle_deadline: Box::pin(tokio::time::sleep(idle_timeout)),
+            idle_duration: idle_timeout,
         }
     }
 }
@@ -211,6 +230,10 @@ impl Stream for SseStream {
         loop {
             match self.inner.as_mut().poll_next(cx) {
                 std::task::Poll::Ready(Some(Ok(bytes))) => {
+                    // Data received — reset idle timer
+                    let new_deadline = tokio::time::Instant::now() + self.idle_duration;
+                    self.idle_deadline.as_mut().reset(new_deadline);
+
                     let text = String::from_utf8_lossy(&bytes);
                     self.buffer.push_str(&text);
 
@@ -250,7 +273,18 @@ impl Stream for SseStream {
                     }
                     return std::task::Poll::Ready(None);
                 }
-                std::task::Poll::Pending => return std::task::Poll::Pending,
+                std::task::Poll::Pending => {
+                    // No data available — check idle timeout
+                    if self.idle_deadline.as_mut().poll(cx).is_ready() {
+                        return std::task::Poll::Ready(Some(StreamEvent::Error {
+                            error: GatewayError::StreamInterrupted(format!(
+                                "idle timeout after {}s",
+                                self.idle_duration.as_secs()
+                            )),
+                        }));
+                    }
+                    return std::task::Poll::Pending;
+                }
             }
         }
     }
@@ -259,6 +293,7 @@ impl Stream for SseStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use secrecy::SecretString;
     use tron_core::security::ApiKey;
 
@@ -285,5 +320,71 @@ mod tests {
         let auth = AuthMethod::ApiKey(ApiKey(SecretString::from("test-key")));
         let provider = AnthropicProvider::new(auth, None);
         assert!(provider.is_cache_cold().await);
+    }
+
+    #[tokio::test]
+    async fn sse_stream_idle_timeout_fires_when_no_data() {
+        tokio::time::pause();
+
+        let byte_stream = futures::stream::pending::<Result<bytes::Bytes, reqwest::Error>>();
+        let mut stream = Box::pin(SseStream::with_idle_timeout(
+            byte_stream,
+            Duration::from_secs(5),
+        ));
+
+        // Advance time past the idle timeout
+        tokio::time::advance(Duration::from_secs(6)).await;
+
+        let event = stream.next().await;
+        assert!(
+            matches!(&event, Some(StreamEvent::Error { error: GatewayError::StreamInterrupted(msg) }) if msg.contains("idle timeout")),
+            "expected idle timeout error, got: {event:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sse_stream_idle_timeout_resets_on_data() {
+        tokio::time::pause();
+
+        // Create a channel-based stream so we can control when data arrives
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, reqwest::Error>>(16);
+        let rx_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+        let mut stream = Box::pin(SseStream::with_idle_timeout(
+            rx_stream,
+            Duration::from_secs(5),
+        ));
+
+        // Send some data before the timeout
+        tx.send(Ok(bytes::Bytes::from("data: ping\n\n")))
+            .await
+            .unwrap();
+
+        // Consume the event (resets the idle timer)
+        let _event = stream.next().await;
+
+        // Advance 4s (less than the 5s timeout from the reset point)
+        tokio::time::advance(Duration::from_secs(4)).await;
+
+        // Send more data — timer resets again
+        tx.send(Ok(bytes::Bytes::from("data: pong\n\n")))
+            .await
+            .unwrap();
+        let _event = stream.next().await;
+
+        // Drop sender to end the stream cleanly
+        drop(tx);
+        let event = stream.next().await;
+        // Should be None (stream ended), NOT an idle timeout error
+        assert!(event.is_none(), "expected stream end, got: {event:?}");
+    }
+
+    #[test]
+    fn connect_timeout_constant() {
+        assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn idle_timeout_constant() {
+        assert_eq!(SSE_IDLE_TIMEOUT, Duration::from_secs(90));
     }
 }

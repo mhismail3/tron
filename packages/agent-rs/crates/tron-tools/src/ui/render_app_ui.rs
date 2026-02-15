@@ -153,6 +153,8 @@ mod tests {
             session_id: "sess-1".into(),
             working_directory: "/tmp".into(),
             cancellation: tokio_util::sync::CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
         }
     }
 

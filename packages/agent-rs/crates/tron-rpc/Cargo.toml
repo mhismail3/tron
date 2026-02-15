@@ -21,6 +21,7 @@ tron-llm = { path = "../tron-llm" }
 tron-tools = { path = "../tron-tools" }
 tron-guardrails = { path = "../tron-guardrails" }
 tron-hooks = { path = "../tron-hooks" }
+tron-memory = { path = "../tron-memory" }
 tron-tokens = { path = "../tron-tokens" }
 futures.workspace = true
 parking_lot.workspace = true

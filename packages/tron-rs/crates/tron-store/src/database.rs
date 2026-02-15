@@ -19,20 +19,16 @@ impl Database {
     /// Open or create a database at the given path.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| StoreError::Io(format!("create dir: {e}")))?;
+            std::fs::create_dir_all(parent)?;
         }
 
-        let conn = Connection::open(path)
-            .map_err(|e| StoreError::Database(e.to_string()))?;
+        let conn = Connection::open(path)?;
 
         // Apply pragmas
-        conn.execute_batch(schema::PRAGMAS)
-            .map_err(|e| StoreError::Database(format!("pragmas: {e}")))?;
+        conn.execute_batch(schema::PRAGMAS)?;
 
         // Create tables
-        conn.execute_batch(schema::CREATE_TABLES)
-            .map_err(|e| StoreError::Database(format!("schema: {e}")))?;
+        conn.execute_batch(schema::CREATE_TABLES)?;
 
         // Set schema version if not present
         let version: Option<u32> = conn
@@ -47,8 +43,7 @@ impl Database {
             conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [schema::SCHEMA_VERSION],
-            )
-            .map_err(|e| StoreError::Database(format!("schema version: {e}")))?;
+            )?;
         }
 
         info!(path = %path.display(), "database opened");
@@ -61,20 +56,16 @@ impl Database {
 
     /// Open an in-memory database (for testing).
     pub fn in_memory() -> Result<Self, StoreError> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| StoreError::Database(e.to_string()))?;
+        let conn = Connection::open_in_memory()?;
 
-        conn.execute_batch(schema::PRAGMAS)
-            .map_err(|e| StoreError::Database(format!("pragmas: {e}")))?;
+        conn.execute_batch(schema::PRAGMAS)?;
 
-        conn.execute_batch(schema::CREATE_TABLES)
-            .map_err(|e| StoreError::Database(format!("schema: {e}")))?;
+        conn.execute_batch(schema::CREATE_TABLES)?;
 
         conn.execute(
             "INSERT INTO schema_version (version) VALUES (?1)",
             [schema::SCHEMA_VERSION],
-        )
-        .map_err(|e| StoreError::Database(format!("schema version: {e}")))?;
+        )?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -125,8 +116,7 @@ mod tests {
         let db = Database::in_memory().unwrap();
         let version: u32 = db
             .with_conn(|conn| {
-                conn.query_row("SELECT version FROM schema_version", [], |row| row.get(0))
-                    .map_err(|e| StoreError::Database(e.to_string()))
+                Ok(conn.query_row("SELECT version FROM schema_version", [], |row| row.get(0))?)
             })
             .unwrap();
         assert_eq!(version, schema::SCHEMA_VERSION);
@@ -136,13 +126,11 @@ mod tests {
     fn tables_created() {
         let db = Database::in_memory().unwrap();
         db.with_conn(|conn| {
-            let tables: Vec<String> = conn
-                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-                .map_err(|e| StoreError::Database(e.to_string()))?
-                .query_map([], |row| row.get(0))
-                .map_err(|e| StoreError::Database(e.to_string()))?
-                .collect::<Result<_, _>>()
-                .map_err(|e| StoreError::Database(e.to_string()))?;
+            let mut stmt =
+                conn.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")?;
+            let tables: Vec<String> = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<_, _>>()?;
 
             assert!(tables.contains(&"workspaces".to_string()));
             assert!(tables.contains(&"sessions".to_string()));
@@ -173,9 +161,7 @@ mod tests {
     fn wal_mode_enabled() {
         let db = Database::in_memory().unwrap();
         db.with_conn(|conn| {
-            let mode: String = conn
-                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-                .map_err(|e| StoreError::Database(e.to_string()))?;
+            let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
             // In-memory databases use "memory" journal mode, not WAL
             // File databases would use "wal"
             assert!(mode == "memory" || mode == "wal", "got: {mode}");

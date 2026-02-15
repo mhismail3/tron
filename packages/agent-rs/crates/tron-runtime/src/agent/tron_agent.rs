@@ -73,6 +73,7 @@ impl TronAgent {
         context_manager: ContextManager,
         session_id: String,
     ) -> Self {
+        let compaction = CompactionHandler::with_provider(provider.clone());
         Self {
             config,
             provider,
@@ -81,7 +82,7 @@ impl TronAgent {
             hooks,
             context_manager,
             emitter: Arc::new(EventEmitter::new()),
-            compaction: CompactionHandler::new(),
+            compaction,
             session_id,
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
@@ -94,7 +95,7 @@ impl TronAgent {
     /// Run the multi-turn loop with user content.
     #[allow(clippy::too_many_lines)]
     #[instrument(skip(self, ctx), fields(session_id = %self.session_id, model = %self.config.model))]
-    pub async fn run(&mut self, content: &str, ctx: RunContext) -> RunResult {
+    pub async fn run(&mut self, content: &str, mut ctx: RunContext) -> RunResult {
         // Reject concurrent runs — guard resets is_running on drop (even on panic)
         let Some(_guard) = RunGuard::new(&self.is_running) else {
             return RunResult {
@@ -116,9 +117,14 @@ impl TronAgent {
         let mut error: Option<String> = None;
 
         // Add user message to context
+        let user_content = if let Some(override_content) = ctx.user_content_override.take() {
+            override_content
+        } else {
+            UserMessageContent::Text(content.to_owned())
+        };
         self.context_manager
             .add_message(Message::User {
-                content: UserMessageContent::Text(content.to_owned()),
+                content: user_content,
                 timestamp: None,
             });
 
@@ -151,6 +157,8 @@ impl TronAgent {
                 &ctx,
                 self.persister.as_deref(),
                 previous_context_baseline,
+                self.config.subagent_depth,
+                self.config.subagent_max_depth,
             )
             .await;
 
@@ -223,6 +231,11 @@ impl TronAgent {
             stop_reason: final_stop_reason,
             interrupted,
             error,
+            last_context_window_tokens: if previous_context_baseline > 0 {
+                Some(previous_context_baseline)
+            } else {
+                None
+            },
         }
     }
 
@@ -665,6 +678,64 @@ mod tests {
 
         // is_running must be false after error (RunGuard resets it)
         assert!(!agent.is_running(), "is_running must be false after error");
+    }
+
+    #[tokio::test]
+    async fn run_result_includes_context_window_tokens() {
+        // MockProvider.text_only returns input_tokens=10 — normalize computes
+        // contextWindowTokens = input + cacheRead + cacheCreation = 10
+        let mut agent = make_agent(MockProvider::text_only("Hello!"));
+        let result = agent.run("Hi", RunContext::default()).await;
+        assert_eq!(result.last_context_window_tokens, Some(10));
+    }
+
+    #[tokio::test]
+    async fn run_result_context_window_tokens_none_without_usage() {
+        // Provider that returns no token_usage → contextWindowTokens stays 0
+        struct NoUsageProvider;
+        #[async_trait]
+        impl Provider for NoUsageProvider {
+            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
+            fn model(&self) -> &str { "mock" }
+            async fn stream(
+                &self,
+                _context: &tron_core::messages::Context,
+                _options: &ProviderStreamOptions,
+            ) -> Result<StreamEventStream, ProviderError> {
+                let events = vec![
+                    StreamEvent::Start,
+                    StreamEvent::TextDelta { delta: "hi".into() },
+                    StreamEvent::Done {
+                        message: AssistantMessage {
+                            content: vec![AssistantContent::text("hi")],
+                            token_usage: None,
+                        },
+                        stop_reason: "end_turn".into(),
+                    },
+                ];
+                Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
+            }
+        }
+
+        let ctx_config = ContextManagerConfig {
+            model: "mock".into(),
+            system_prompt: None,
+            working_directory: None,
+            tools: vec![],
+            rules_content: None,
+            compaction: tron_context::types::CompactionConfig::default(),
+        };
+        let mut agent = TronAgent::new(
+            AgentConfig::default(),
+            Arc::new(NoUsageProvider),
+            ToolRegistry::new(),
+            None,
+            None,
+            ContextManager::new(ctx_config),
+            "test-session".into(),
+        );
+        let result = agent.run("Hi", RunContext::default()).await;
+        assert!(result.last_context_window_tokens.is_none());
     }
 
     #[test]

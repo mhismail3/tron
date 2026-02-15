@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use futures::Stream;
 use parking_lot::RwLock;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use tron_core::context::LlmContext;
 use tron_core::errors::GatewayError;
@@ -199,6 +199,7 @@ impl<P: LlmProvider> LlmProvider for ReliableProvider<P> {
         self.inner.supports_tools()
     }
 
+    #[instrument(skip(self, context, options), fields(provider = self.inner.name(), model = self.inner.model(), circuit = self.circuit_state_name()))]
     async fn stream(
         &self,
         context: &LlmContext,

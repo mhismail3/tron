@@ -83,11 +83,13 @@ path = "src/main.rs"
 [dependencies]
 tron-core.workspace = true
 tron-telemetry.workspace = true
+tron-llm.workspace = true
+tron-engine.workspace = true
 tron-store.workspace = true
 tron-server.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
+clap = { version = "4", features = ["derive"] }
 
 [profile.release]
 opt-level = "z"

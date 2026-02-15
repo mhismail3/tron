@@ -348,7 +348,7 @@ pub enum TronEvent {
         /// Cost for this turn in USD.
         #[serde(skip_serializing_if = "Option::is_none")]
         cost: Option<f64>,
-        /// LLM stop reason (e.g., "end_turn", "tool_use").
+        /// LLM stop reason (e.g., `end_turn`, `tool_use`).
         #[serde(rename = "stopReason", skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
         /// Context window limit (for iOS sync after model switch).
@@ -698,6 +698,30 @@ pub enum TronEvent {
         /// Error context.
         #[serde(skip_serializing_if = "Option::is_none")]
         context: Option<String>,
+        /// Error code (e.g. `overloaded_error`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+        /// Provider that produced the error.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        /// Error category (e.g. `rate_limit`, `auth`, `network`).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
+        /// Suggested user action.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        suggestion: Option<String>,
+        /// Whether the error is retryable.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        retryable: Option<bool>,
+        /// HTTP status code.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        status_code: Option<u16>,
+        /// Error type classification.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error_type: Option<String>,
+        /// Model in use when error occurred.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
 
     /// API retry event.
@@ -1712,6 +1736,14 @@ mod tests {
                 base: base.clone(),
                 error: "e".into(),
                 context: None,
+                code: None,
+                provider: None,
+                category: None,
+                suggestion: None,
+                retryable: None,
+                status_code: None,
+                error_type: None,
+                model: None,
             },
             TronEvent::ApiRetry {
                 base: base.clone(),

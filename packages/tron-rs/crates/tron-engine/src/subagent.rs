@@ -125,6 +125,7 @@ impl SubagentManager {
             Arc::clone(&self.hook_engine),
             self.db.clone(),
             self.event_tx.clone(),
+            working_directory.clone(),
         );
 
         let runner_config = RunnerConfig {

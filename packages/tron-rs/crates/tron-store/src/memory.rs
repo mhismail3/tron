@@ -1,10 +1,12 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use tron_core::ids::{SessionId, WorkspaceId};
 
 use crate::database::Database;
 use crate::error::StoreError;
+use crate::row_helpers;
 
 /// A memory ledger entry.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,6 +61,7 @@ impl MemoryRepo {
     }
 
     /// Add a memory entry.
+    #[instrument(skip(self, content), fields(workspace_id = %workspace_id, title))]
     pub fn add(
         &self,
         workspace_id: &WorkspaceId,
@@ -101,19 +104,23 @@ impl MemoryRepo {
     }
 
     /// Get a memory entry by ID.
+    #[instrument(skip(self), fields(memory_id = id))]
     pub fn get(&self, id: &str) -> Result<MemoryEntry, StoreError> {
         self.db.with_conn(|conn| {
-            conn.query_row(
+            let mut stmt = conn.prepare(
                 "SELECT id, workspace_id, session_id, title, content, tokens, created_at, source
                  FROM memory_entries WHERE id = ?1",
-                [id],
-                |row| Ok(row_to_entry(row)),
-            )
-            .map_err(|_| StoreError::NotFound(format!("memory entry {id}")))
+            )?;
+            let mut rows = stmt.query([id])?;
+            match rows.next()? {
+                Some(row) => row_to_entry(row),
+                None => Err(StoreError::NotFound(format!("memory entry {id}"))),
+            }
         })
     }
 
     /// List all memory entries for a workspace.
+    #[instrument(skip(self), fields(workspace_id = %workspace_id))]
     pub fn list_for_workspace(
         &self,
         workspace_id: &WorkspaceId,
@@ -127,17 +134,18 @@ impl MemoryRepo {
                  ORDER BY created_at DESC
                  LIMIT ?2 OFFSET ?3",
             )?;
-            let rows = stmt
-                .query_map(
-                    rusqlite::params![workspace_id.as_str(), limit, offset],
-                    |row| Ok(row_to_entry(row)),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            let mut rows =
+                stmt.query(rusqlite::params![workspace_id.as_str(), limit, offset])?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_entry(row)?);
+            }
+            Ok(results)
         })
     }
 
     /// List memory entries for a specific session.
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn list_for_session(
         &self,
         session_id: &SessionId,
@@ -148,14 +156,17 @@ impl MemoryRepo {
                  FROM memory_entries WHERE session_id = ?1
                  ORDER BY created_at ASC",
             )?;
-            let rows = stmt
-                .query_map([session_id.as_str()], |row| Ok(row_to_entry(row)))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            let mut rows = stmt.query([session_id.as_str()])?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_entry(row)?);
+            }
+            Ok(results)
         })
     }
 
     /// Keyword search across memory entries for a workspace.
+    #[instrument(skip(self), fields(workspace_id = %workspace_id, query))]
     pub fn search(
         &self,
         workspace_id: &WorkspaceId,
@@ -163,25 +174,26 @@ impl MemoryRepo {
         limit: u32,
     ) -> Result<Vec<MemoryEntry>, StoreError> {
         self.db.with_conn(|conn| {
-            let pattern = format!("%{query}%");
+            let pattern = format!("%{}%", row_helpers::escape_like(query));
             let mut stmt = conn.prepare(
                 "SELECT id, workspace_id, session_id, title, content, tokens, created_at, source
                  FROM memory_entries
-                 WHERE workspace_id = ?1 AND (title LIKE ?2 OR content LIKE ?2)
+                 WHERE workspace_id = ?1 AND (title LIKE ?2 ESCAPE '\\' OR content LIKE ?2 ESCAPE '\\')
                  ORDER BY created_at DESC
                  LIMIT ?3",
             )?;
-            let rows = stmt
-                .query_map(
-                    rusqlite::params![workspace_id.as_str(), pattern, limit],
-                    |row| Ok(row_to_entry(row)),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            let mut rows =
+                stmt.query(rusqlite::params![workspace_id.as_str(), pattern, limit])?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_entry(row)?);
+            }
+            Ok(results)
         })
     }
 
     /// Delete a memory entry.
+    #[instrument(skip(self), fields(memory_id = id))]
     pub fn delete(&self, id: &str) -> Result<(), StoreError> {
         self.db.with_conn(|conn| {
             let rows = conn.execute("DELETE FROM memory_entries WHERE id = ?1", [id])?;
@@ -193,19 +205,20 @@ impl MemoryRepo {
     }
 
     /// Count memory entries for a workspace.
+    #[instrument(skip(self), fields(workspace_id = %workspace_id))]
     pub fn count(&self, workspace_id: &WorkspaceId) -> Result<i64, StoreError> {
         self.db.with_conn(|conn| {
-            conn.query_row(
+            Ok(conn.query_row(
                 "SELECT COUNT(*) FROM memory_entries WHERE workspace_id = ?1",
                 [workspace_id.as_str()],
                 |row| row.get(0),
-            )
-            .map_err(|e| StoreError::Database(e.to_string()))
+            )?)
         })
     }
 
     /// Compose memory content for context injection.
     /// Combines all workspace memories + session-specific memories.
+    #[instrument(skip(self), fields(workspace_id = %workspace_id))]
     pub fn compose_for_context(
         &self,
         workspace_id: &WorkspaceId,
@@ -241,24 +254,22 @@ impl MemoryRepo {
     }
 }
 
-fn row_to_entry(row: &rusqlite::Row<'_>) -> MemoryEntry {
-    MemoryEntry {
-        id: row.get(0).unwrap(),
-        workspace_id: WorkspaceId::from_raw(row.get::<_, String>(1).unwrap()),
-        session_id: row
-            .get::<_, Option<String>>(2)
-            .unwrap()
+fn row_to_entry(row: &rusqlite::Row<'_>) -> Result<MemoryEntry, StoreError> {
+    let source_str: String = row_helpers::get(row, 7, "memory_entries", "source")?;
+
+    Ok(MemoryEntry {
+        id: row_helpers::get(row, 0, "memory_entries", "id")?,
+        workspace_id: WorkspaceId::from_raw(
+            row_helpers::get::<String>(row, 1, "memory_entries", "workspace_id")?,
+        ),
+        session_id: row_helpers::get_opt::<String>(row, 2, "memory_entries", "session_id")?
             .map(SessionId::from_raw),
-        title: row.get(3).unwrap(),
-        content: row.get(4).unwrap(),
-        tokens: row.get(5).unwrap(),
-        created_at: row.get(6).unwrap(),
-        source: row
-            .get::<_, String>(7)
-            .unwrap()
-            .parse()
-            .unwrap_or(MemorySource::Auto),
-    }
+        title: row_helpers::get(row, 3, "memory_entries", "title")?,
+        content: row_helpers::get(row, 4, "memory_entries", "content")?,
+        tokens: row_helpers::get(row, 5, "memory_entries", "tokens")?,
+        created_at: row_helpers::get(row, 6, "memory_entries", "created_at")?,
+        source: row_helpers::parse_enum(&source_str, "memory_entries", "source")?,
+    })
 }
 
 #[cfg(test)]
@@ -473,5 +484,46 @@ mod tests {
             let parsed: MemorySource = s.parse().unwrap();
             assert_eq!(source, parsed);
         }
+    }
+
+    #[test]
+    fn invalid_memory_source_returns_error() {
+        let (db, ws_id) = setup();
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO memory_entries (id, workspace_id, session_id, title, content, tokens, created_at, source)
+                 VALUES ('test-id', ?1, NULL, 'title', 'content', 10, datetime('now'), 'INVALID_SOURCE')",
+                [ws_id.as_str()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let repo = MemoryRepo::new(db);
+        let result = repo.get("test-id");
+        assert!(matches!(result, Err(StoreError::CorruptRow { .. })));
+    }
+
+    #[test]
+    fn search_with_like_special_chars() {
+        let (db, ws_id) = setup();
+        let repo = MemoryRepo::new(db);
+
+        repo.add(&ws_id, None, "100% done", "task completed", 5, MemorySource::Auto)
+            .unwrap();
+        repo.add(&ws_id, None, "foo_bar pattern", "underscore test", 5, MemorySource::Auto)
+            .unwrap();
+        repo.add(&ws_id, None, "unrelated", "nothing here", 5, MemorySource::Auto)
+            .unwrap();
+
+        // Search for literal "%" — should only match the entry with %
+        let results = repo.search(&ws_id, "100%", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "100% done");
+
+        // Search for literal "_" — should only match the entry with _
+        let results = repo.search(&ws_id, "foo_bar", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "foo_bar pattern");
     }
 }

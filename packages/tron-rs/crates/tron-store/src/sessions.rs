@@ -1,11 +1,13 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use tron_core::ids::{EventId, SessionId, WorkspaceId};
 use tron_core::tokens::AccumulatedTokens;
 
 use crate::database::Database;
 use crate::error::StoreError;
+use crate::row_helpers;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +65,7 @@ impl SessionRepo {
     }
 
     /// Create a new session.
+    #[instrument(skip(self), fields(workspace_id = %workspace_id, model, provider))]
     pub fn create(
         &self,
         workspace_id: &WorkspaceId,
@@ -106,23 +109,27 @@ impl SessionRepo {
     }
 
     /// Get a session by ID.
+    #[instrument(skip(self), fields(session_id = %id))]
     pub fn get(&self, id: &SessionId) -> Result<SessionRow, StoreError> {
         self.db.with_conn(|conn| {
-            conn.query_row(
+            let mut stmt = conn.prepare(
                 "SELECT id, workspace_id, head_event_id, root_event_id, status, model, provider,
                         working_directory, title,
                         total_input_tokens, total_output_tokens, total_cache_read_tokens,
                         total_cache_creation_tokens, last_turn_input_tokens, total_cost_cents,
                         turn_count, created_at, updated_at
                  FROM sessions WHERE id = ?1",
-                [id.as_str()],
-                |row| Ok(row_to_session(row)),
-            )
-            .map_err(|_| StoreError::NotFound(format!("session {id}")))
+            )?;
+            let mut rows = stmt.query([id.as_str()])?;
+            match rows.next()? {
+                Some(row) => row_to_session(row),
+                None => Err(StoreError::NotFound(format!("session {id}"))),
+            }
         })
     }
 
     /// List sessions for a workspace, ordered by creation time (newest first).
+    #[instrument(skip(self), fields(workspace_id = %workspace_id))]
     pub fn list(
         &self,
         workspace_id: &WorkspaceId,
@@ -166,14 +173,17 @@ impl SessionRepo {
             let mut stmt = conn.prepare(sql)?;
             let params_refs: Vec<&dyn rusqlite::types::ToSql> =
                 params.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
-            let rows = stmt
-                .query_map(params_refs.as_slice(), |row| Ok(row_to_session(row)))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            let mut rows = stmt.query(params_refs.as_slice())?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_session(row)?);
+            }
+            Ok(results)
         })
     }
 
     /// Update session head event (called atomically with event insert).
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn update_head(
         &self,
         session_id: &SessionId,
@@ -198,6 +208,7 @@ impl SessionRepo {
     }
 
     /// Update session token accumulators.
+    #[instrument(skip(self, tokens), fields(session_id = %session_id))]
     pub fn update_tokens(
         &self,
         session_id: &SessionId,
@@ -233,6 +244,7 @@ impl SessionRepo {
     }
 
     /// Update session status (archive, delete, reactivate).
+    #[instrument(skip(self), fields(session_id = %session_id, status = %status))]
     pub fn update_status(
         &self,
         session_id: &SessionId,
@@ -249,6 +261,7 @@ impl SessionRepo {
     }
 
     /// Update session title.
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn update_title(
         &self,
         session_id: &SessionId,
@@ -265,6 +278,7 @@ impl SessionRepo {
     }
 
     /// Delete a session (hard delete — also deletes events).
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn delete(&self, session_id: &SessionId) -> Result<(), StoreError> {
         self.db.with_conn(|conn| {
             conn.execute(
@@ -280,39 +294,33 @@ impl SessionRepo {
     }
 }
 
-fn row_to_session(row: &rusqlite::Row<'_>) -> SessionRow {
-    SessionRow {
-        id: SessionId::from_raw(row.get::<_, String>(0).unwrap()),
-        workspace_id: WorkspaceId::from_raw(row.get::<_, String>(1).unwrap()),
-        head_event_id: row
-            .get::<_, Option<String>>(2)
-            .unwrap()
+fn row_to_session(row: &rusqlite::Row<'_>) -> Result<SessionRow, StoreError> {
+    let status_str: String = row_helpers::get(row, 4, "sessions", "status")?;
+
+    Ok(SessionRow {
+        id: SessionId::from_raw(row_helpers::get::<String>(row, 0, "sessions", "id")?),
+        workspace_id: WorkspaceId::from_raw(row_helpers::get::<String>(row, 1, "sessions", "workspace_id")?),
+        head_event_id: row_helpers::get_opt::<String>(row, 2, "sessions", "head_event_id")?
             .map(EventId::from_raw),
-        root_event_id: row
-            .get::<_, Option<String>>(3)
-            .unwrap()
+        root_event_id: row_helpers::get_opt::<String>(row, 3, "sessions", "root_event_id")?
             .map(EventId::from_raw),
-        status: row
-            .get::<_, String>(4)
-            .unwrap()
-            .parse()
-            .unwrap_or(SessionStatus::Active),
-        model: row.get(5).unwrap(),
-        provider: row.get(6).unwrap(),
-        working_directory: row.get(7).unwrap(),
-        title: row.get(8).unwrap(),
+        status: row_helpers::parse_enum(&status_str, "sessions", "status")?,
+        model: row_helpers::get(row, 5, "sessions", "model")?,
+        provider: row_helpers::get(row, 6, "sessions", "provider")?,
+        working_directory: row_helpers::get(row, 7, "sessions", "working_directory")?,
+        title: row_helpers::get_opt(row, 8, "sessions", "title")?,
         tokens: AccumulatedTokens {
-            total_input_tokens: row.get::<_, i64>(9).unwrap() as u64,
-            total_output_tokens: row.get::<_, i64>(10).unwrap() as u64,
-            total_cache_read_tokens: row.get::<_, i64>(11).unwrap() as u64,
-            total_cache_creation_tokens: row.get::<_, i64>(12).unwrap() as u64,
-            last_turn_input_tokens: row.get::<_, i64>(13).unwrap() as u32,
-            total_cost_cents: row.get(14).unwrap(),
-            turn_count: row.get::<_, u32>(15).unwrap(),
+            total_input_tokens: row_helpers::get::<i64>(row, 9, "sessions", "total_input_tokens")? as u64,
+            total_output_tokens: row_helpers::get::<i64>(row, 10, "sessions", "total_output_tokens")? as u64,
+            total_cache_read_tokens: row_helpers::get::<i64>(row, 11, "sessions", "total_cache_read_tokens")? as u64,
+            total_cache_creation_tokens: row_helpers::get::<i64>(row, 12, "sessions", "total_cache_creation_tokens")? as u64,
+            last_turn_input_tokens: row_helpers::get::<i64>(row, 13, "sessions", "last_turn_input_tokens")? as u32,
+            total_cost_cents: row_helpers::get(row, 14, "sessions", "total_cost_cents")?,
+            turn_count: row_helpers::get::<u32>(row, 15, "sessions", "turn_count")?,
         },
-        created_at: row.get(16).unwrap(),
-        updated_at: row.get(17).unwrap(),
-    }
+        created_at: row_helpers::get(row, 16, "sessions", "created_at")?,
+        updated_at: row_helpers::get(row, 17, "sessions", "updated_at")?,
+    })
 }
 
 #[cfg(test)]
@@ -465,5 +473,25 @@ mod tests {
         let session = repo.create(&ws_id, "model", "anthropic", "/tmp").unwrap();
         repo.delete(&session.id).unwrap();
         assert!(repo.get(&session.id).is_err());
+    }
+
+    #[test]
+    fn invalid_session_status_returns_error() {
+        let (db, ws_id) = setup();
+        let session_id = SessionId::new();
+        let now = chrono::Utc::now().to_rfc3339();
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO sessions (id, workspace_id, status, model, provider, working_directory, created_at, updated_at)
+                 VALUES (?1, ?2, 'INVALID_STATUS', 'model', 'anthropic', '/tmp', ?3, ?3)",
+                rusqlite::params![session_id.as_str(), ws_id.as_str(), now],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let repo = SessionRepo::new(db);
+        let result = repo.get(&session_id);
+        assert!(matches!(result, Err(StoreError::CorruptRow { .. })));
     }
 }

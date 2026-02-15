@@ -114,9 +114,12 @@ impl TronTool for SpawnSubagentTool {
                     .collect()
             });
 
+        // Remaining depth budget from context
+        let remaining_depth = ctx.subagent_max_depth.saturating_sub(1);
+        // LLM-provided maxDepth caps the remaining budget (default = remaining)
         #[allow(clippy::cast_possible_truncation)]
-        let max_depth = get_optional_u64(&params, "maxDepth")
-            .map_or(0, |v| v as u32);
+        let user_max_depth = get_optional_u64(&params, "maxDepth")
+            .map_or(remaining_depth, |v| (v as u32).min(remaining_depth));
 
         let config = SubagentConfig {
             task: task.clone(),
@@ -129,8 +132,8 @@ impl TronTool for SpawnSubagentTool {
             timeout_ms,
             tool_denials,
             skills,
-            max_depth,
-            current_depth: 0,
+            max_depth: user_max_depth,
+            current_depth: ctx.subagent_depth + 1,
         };
 
         match self.spawner.spawn(config).await {
@@ -238,6 +241,8 @@ mod tests {
             session_id: "sess-1".into(),
             working_directory: "/tmp".into(),
             cancellation: tokio_util::sync::CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
         }
     }
 
@@ -386,5 +391,110 @@ mod tests {
             .unwrap();
         let d = r.details.unwrap();
         assert!(d["tokenUsage"].is_object());
+    }
+
+    // ── Depth propagation tests ──
+
+    struct CapturingSpawner {
+        captured: std::sync::Mutex<Option<SubagentConfig>>,
+    }
+
+    impl CapturingSpawner {
+        fn new() -> Self {
+            Self {
+                captured: std::sync::Mutex::new(None),
+            }
+        }
+        fn captured_config(&self) -> SubagentConfig {
+            self.captured.lock().unwrap().clone().unwrap()
+        }
+    }
+
+    #[async_trait]
+    impl SubagentSpawner for CapturingSpawner {
+        async fn spawn(&self, config: SubagentConfig) -> Result<SubagentHandle, ToolError> {
+            *self.captured.lock().unwrap() = Some(config.clone());
+            Ok(SubagentHandle {
+                session_id: "sub-cap".into(),
+                output: if config.blocking { Some("done".into()) } else { None },
+                token_usage: None,
+            })
+        }
+        async fn query_agent(&self, _: &str, _: &str, _: Option<u32>) -> Result<Value, ToolError> {
+            Ok(json!({}))
+        }
+        async fn wait_for_agents(&self, _: &[String], _: WaitMode, _: u64) -> Result<Vec<SubagentResult>, ToolError> {
+            Ok(vec![])
+        }
+    }
+
+    fn make_ctx_with_depth(depth: u32, max_depth: u32) -> ToolContext {
+        ToolContext {
+            tool_call_id: "call-1".into(),
+            session_id: "sess-1".into(),
+            working_directory: "/tmp".into(),
+            cancellation: tokio_util::sync::CancellationToken::new(),
+            subagent_depth: depth,
+            subagent_max_depth: max_depth,
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_root_agent_depth_zero() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let ctx = make_ctx_with_depth(0, 3);
+        let _ = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.current_depth, 1, "child depth = parent + 1");
+        assert_eq!(config.max_depth, 2, "child max_depth = parent_max - 1");
+    }
+
+    #[tokio::test]
+    async fn spawn_reads_depth_from_context() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let ctx = make_ctx_with_depth(1, 2);
+        let _ = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.current_depth, 2, "child depth = 1 + 1");
+        assert_eq!(config.max_depth, 1, "child max_depth = 2 - 1");
+    }
+
+    #[tokio::test]
+    async fn spawn_at_max_depth_gives_zero_remaining() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let ctx = make_ctx_with_depth(2, 1);
+        let _ = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.current_depth, 3);
+        assert_eq!(config.max_depth, 0, "no more nesting allowed");
+    }
+
+    #[tokio::test]
+    async fn spawn_user_max_depth_caps_remaining() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let ctx = make_ctx_with_depth(0, 5);
+        let _ = tool
+            .execute(json!({"task": "t", "maxDepth": 1}), &ctx)
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.max_depth, 1, "user cap of 1 < remaining 4");
+    }
+
+    #[tokio::test]
+    async fn spawn_user_max_depth_cannot_exceed_remaining() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let ctx = make_ctx_with_depth(0, 2);
+        let _ = tool
+            .execute(json!({"task": "t", "maxDepth": 10}), &ctx)
+            .await
+            .unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(config.max_depth, 1, "capped to remaining depth (2-1=1)");
     }
 }

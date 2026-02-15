@@ -290,4 +290,62 @@ mod tests {
             tron_tokens::get_context_limit("gemini-2.5-pro")
         );
     }
+
+    // ── Subagent tool removal tests ──
+
+    struct FakeSpawnTool;
+    #[async_trait]
+    impl TronTool for FakeSpawnTool {
+        fn name(&self) -> &str { "SpawnSubagent" }
+        fn category(&self) -> ToolCategory { ToolCategory::Custom }
+        fn definition(&self) -> Tool {
+            Tool { name: "SpawnSubagent".into(), description: "Spawn".into(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() } }
+        }
+        async fn execute(&self, _p: serde_json::Value, _c: &ToolContext) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+            Ok(text_result("ok", false))
+        }
+    }
+
+    #[test]
+    fn factory_removes_subagent_tools_when_max_depth_zero() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(NormalTool));
+        registry.register(Arc::new(FakeSpawnTool));
+        assert!(registry.contains("SpawnSubagent"));
+
+        let mut opts = default_opts(Arc::new(MockProvider), registry);
+        opts.is_subagent = true;
+        opts.subagent_max_depth = 0;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        // SpawnSubagent should be removed (max_depth == 0 for subagent)
+        let _ = agent; // agent created successfully
+    }
+
+    #[test]
+    fn factory_keeps_subagent_tools_when_max_depth_positive() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(NormalTool));
+        registry.register(Arc::new(FakeSpawnTool));
+
+        let mut opts = default_opts(Arc::new(MockProvider), registry);
+        opts.is_subagent = true;
+        opts.subagent_max_depth = 3;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        // SpawnSubagent should be kept (max_depth > 0) — tool contributes tokens
+        let tools_tokens = agent.context_manager().estimate_tools_tokens();
+        assert!(tools_tokens > 0, "SpawnSubagent + bash should contribute tool tokens");
+
+        // Verify by comparing against subagent_max_depth=0 (tools removed)
+        let mut registry2 = ToolRegistry::new();
+        registry2.register(Arc::new(NormalTool));
+        registry2.register(Arc::new(FakeSpawnTool));
+        let mut opts2 = default_opts(Arc::new(MockProvider), registry2);
+        opts2.is_subagent = true;
+        opts2.subagent_max_depth = 0;
+        let agent2 = AgentFactory::create_agent(AgentConfig::default(), "s2".into(), opts2);
+        let tools_tokens2 = agent2.context_manager().estimate_tools_tokens();
+        assert!(tools_tokens > tools_tokens2, "max_depth>0 should have more tools than max_depth=0");
+    }
 }

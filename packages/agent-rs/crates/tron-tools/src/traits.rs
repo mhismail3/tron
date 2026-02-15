@@ -31,6 +31,10 @@ pub struct ToolContext {
     pub working_directory: String,
     /// Cancellation token for cooperative cancellation.
     pub cancellation: CancellationToken,
+    /// Current subagent nesting depth (0 = root agent).
+    pub subagent_depth: u32,
+    /// Maximum nesting depth allowed for spawning children.
+    pub subagent_max_depth: u32,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -573,10 +577,40 @@ mod tests {
             session_id: "sess-1".into(),
             working_directory: "/tmp".into(),
             cancellation: CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
         assert_eq!(ctx.working_directory, "/tmp");
+    }
+
+    #[test]
+    fn tool_context_default_depth_zero() {
+        let ctx = ToolContext {
+            tool_call_id: String::new(),
+            session_id: String::new(),
+            working_directory: String::new(),
+            cancellation: CancellationToken::new(),
+            subagent_depth: 0,
+            subagent_max_depth: 0,
+        };
+        assert_eq!(ctx.subagent_depth, 0);
+        assert_eq!(ctx.subagent_max_depth, 0);
+    }
+
+    #[test]
+    fn tool_context_custom_depth() {
+        let ctx = ToolContext {
+            tool_call_id: String::new(),
+            session_id: String::new(),
+            working_directory: String::new(),
+            cancellation: CancellationToken::new(),
+            subagent_depth: 2,
+            subagent_max_depth: 5,
+        };
+        assert_eq!(ctx.subagent_depth, 2);
+        assert_eq!(ctx.subagent_max_depth, 5);
     }
 
     #[test]

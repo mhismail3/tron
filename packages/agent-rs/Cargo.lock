@@ -3972,6 +3972,7 @@ name = "tron-context"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
  "insta",
  "mockall",
  "serde",
@@ -4234,6 +4235,7 @@ dependencies = [
  "tron-guardrails",
  "tron-hooks",
  "tron-llm",
+ "tron-memory",
  "tron-runtime",
  "tron-settings",
  "tron-skills",

@@ -94,7 +94,7 @@ mod tests {
         let registry = Arc::new(ClientRegistry::new(32));
         let (tx, rx) = broadcast::channel(100);
 
-        let (client_id, mut client_rx) = registry.register();
+        let (client_id, client_rx) = registry.register();
         let session_id = SessionId::new();
         registry.set_session(&client_id, session_id.clone()).await;
 
@@ -122,7 +122,7 @@ mod tests {
         let registry = Arc::new(ClientRegistry::new(32));
         let (tx, rx) = broadcast::channel(100);
 
-        let (client_id, mut client_rx) = registry.register();
+        let (client_id, client_rx) = registry.register();
         let client_session = SessionId::new();
         registry.set_session(&client_id, client_session).await;
 
@@ -140,6 +140,6 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Client should not receive the event
-        assert!(client_rx.try_recv().is_err());
+        assert!(client_rx.try_recv().is_none());
     }
 }

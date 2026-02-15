@@ -4,8 +4,16 @@
 //! to return structured JSON describing what happened in a session.
 //! This module parses that response into a [`LedgerEntry`].
 
+use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
+use tracing::warn;
+
+use crate::summarizer::serialize_messages;
+use crate::system_prompts::MEMORY_LEDGER_PROMPT;
+use tron_core::events::StreamEvent;
+use tron_core::messages::{Context, Message};
+use tron_llm::provider::{Provider, ProviderStreamOptions};
 
 // =============================================================================
 // Types
@@ -125,6 +133,82 @@ fn strip_code_fences(s: &str) -> String {
             .to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+// =============================================================================
+// LLM ledger helper
+// =============================================================================
+
+/// Attempt to write a ledger entry using the LLM provider.
+///
+/// Returns `None` if the provider call fails or the response is unparseable,
+/// signalling the caller to fall back to `KeywordSummarizer`.
+pub async fn try_llm_ledger(
+    provider: &dyn Provider,
+    messages: &[Message],
+) -> Option<LedgerParseResult> {
+    let transcript = serialize_messages(messages);
+    if transcript.is_empty() {
+        return None;
+    }
+
+    let context = Context {
+        system_prompt: Some(MEMORY_LEDGER_PROMPT.to_owned()),
+        messages: vec![Message::user(&transcript)],
+        ..Default::default()
+    };
+
+    let options = ProviderStreamOptions {
+        max_tokens: Some(4096),
+        enable_thinking: Some(false),
+        ..Default::default()
+    };
+
+    let mut stream = match provider.stream(&context, &options).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "LLM call failed for ledger writer");
+            return None;
+        }
+    };
+
+    let mut text = String::new();
+    while let Some(event) = stream.next().await {
+        match event {
+            Ok(StreamEvent::Done { message, .. }) => {
+                let complete: String = message
+                    .content
+                    .iter()
+                    .filter_map(|c| c.as_text())
+                    .collect::<Vec<_>>()
+                    .join("");
+                if !complete.is_empty() {
+                    text = complete;
+                }
+            }
+            Ok(StreamEvent::TextDelta { delta }) => {
+                text.push_str(&delta);
+            }
+            Err(e) => {
+                warn!(error = %e, "Stream error during ledger LLM call");
+                return None;
+            }
+            _ => {}
+        }
+    }
+
+    if text.is_empty() {
+        warn!("LLM returned empty response for ledger writer");
+        return None;
+    }
+
+    match parse_ledger_response(&text) {
+        Ok(result) => Some(result),
+        Err(e) => {
+            warn!(error = %e, "Failed to parse ledger LLM response");
+            None
+        }
     }
 }
 

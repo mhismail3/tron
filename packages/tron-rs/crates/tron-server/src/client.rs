@@ -1,6 +1,7 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 use dashmap::DashMap;
@@ -11,6 +12,238 @@ use uuid::Uuid;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(90);
+
+// ---------------------------------------------------------------------------
+// MessagePriority
+// ---------------------------------------------------------------------------
+
+/// Message priority for queue management.
+/// When the queue is full, the lowest-priority oldest message is evicted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MessagePriority {
+    /// Progress updates, diagnostics.
+    Low = 0,
+    /// Text deltas, tool events, turn events.
+    Normal = 1,
+    /// RPC responses, agent.ready, agent.complete, connection.established.
+    Critical = 2,
+}
+
+/// Classify a serialized JSON message's priority based on its content.
+pub fn classify_message(json: &str) -> MessagePriority {
+    // RPC responses contain "id" + ("result" or "error")
+    if json.contains("\"result\"") || json.contains("\"error\"") {
+        return MessagePriority::Critical;
+    }
+    // Agent lifecycle events
+    if json.contains("\"agent_ready\"")
+        || json.contains("\"agent_complete\"")
+        || json.contains("\"agent_error\"")
+    {
+        return MessagePriority::Critical;
+    }
+    // Connection established
+    if json.contains("\"connection.established\"") {
+        return MessagePriority::Critical;
+    }
+    MessagePriority::Normal
+}
+
+// ---------------------------------------------------------------------------
+// PriorityQueue
+// ---------------------------------------------------------------------------
+
+/// Priority-aware bounded message queue.
+///
+/// When the queue is full and a new message arrives, the lowest-priority
+/// oldest message is evicted to make room — unless the new message is
+/// strictly lower priority than everything in the queue, in which case
+/// the new message itself is dropped.
+pub struct PriorityQueue {
+    inner: std::sync::Mutex<PriorityQueueInner>,
+    notify: tokio::sync::Notify,
+}
+
+struct PriorityQueueInner {
+    buffer: VecDeque<(MessagePriority, String)>,
+    capacity: usize,
+    dropped: u64,
+    closed: bool,
+}
+
+impl PriorityQueue {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(PriorityQueueInner {
+                buffer: VecDeque::with_capacity(capacity),
+                capacity,
+                dropped: 0,
+                closed: false,
+            }),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    /// Enqueue a message with the given priority.
+    /// Returns `true` if the message was enqueued, `false` if it was dropped.
+    pub fn send(&self, priority: MessagePriority, message: String) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.closed {
+            return false;
+        }
+
+        if inner.buffer.len() < inner.capacity {
+            inner.buffer.push_back((priority, message));
+            drop(inner);
+            self.notify.notify_one();
+            return true;
+        }
+
+        // Buffer full — find the lowest-priority oldest message to evict.
+        let lowest_idx = inner
+            .buffer
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (p, _))| *p)
+            .map(|(i, (p, _))| (i, *p));
+
+        if let Some((idx, lowest_prio)) = lowest_idx {
+            if priority >= lowest_prio {
+                let evicted_prio = inner.buffer[idx].0;
+                inner.buffer.remove(idx);
+                inner.buffer.push_back((priority, message));
+                inner.dropped += 1;
+                tracing::debug!(
+                    evicted_priority = ?evicted_prio,
+                    new_priority = ?priority,
+                    "Priority queue evicted message"
+                );
+                drop(inner);
+                self.notify.notify_one();
+                return true;
+            }
+        }
+
+        // New message is strictly lower priority than everything in the buffer.
+        inner.dropped += 1;
+        false
+    }
+
+    /// Wait for and receive the next message.
+    /// Returns `None` when the queue is closed and drained.
+    pub async fn recv(&self) -> Option<String> {
+        loop {
+            {
+                let mut inner = self.inner.lock().unwrap();
+                if let Some((_, msg)) = inner.buffer.pop_front() {
+                    return Some(msg);
+                }
+                if inner.closed {
+                    return None;
+                }
+            }
+            self.notify.notified().await;
+        }
+    }
+
+    /// Close the queue. Subsequent `send()` calls return false.
+    /// `recv()` drains remaining messages, then returns `None`.
+    pub fn close(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.closed = true;
+        drop(inner);
+        self.notify.notify_waiters();
+    }
+
+    /// Try to receive a message without blocking.
+    /// Returns `None` if the queue is empty.
+    pub fn try_recv(&self) -> Option<String> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.buffer.pop_front().map(|(_, msg)| msg)
+    }
+
+    /// Number of messages currently in the queue.
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap().buffer.len()
+    }
+
+    /// Whether the queue is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().unwrap().buffer.is_empty()
+    }
+
+    /// Number of messages dropped due to capacity since creation.
+    pub fn dropped(&self) -> u64 {
+        self.inner.lock().unwrap().dropped
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RateLimiter
+// ---------------------------------------------------------------------------
+
+/// Token-bucket rate limiter keyed by ClientId.
+pub struct RateLimiter {
+    buckets: DashMap<ClientId, std::sync::Mutex<TokenBucket>>,
+    max_tokens: u32,
+    refill_rate: f64,
+}
+
+struct TokenBucket {
+    tokens: f64,
+    last_refill: Instant,
+}
+
+impl RateLimiter {
+    /// Create a new rate limiter.
+    ///
+    /// * `max_tokens` — burst capacity per client.
+    /// * `refill_rate` — tokens restored per second.
+    pub fn new(max_tokens: u32, refill_rate: f64) -> Self {
+        Self {
+            buckets: DashMap::new(),
+            max_tokens,
+            refill_rate,
+        }
+    }
+
+    /// Try to consume one token for `client_id`. Returns `true` if allowed.
+    pub fn check(&self, client_id: &ClientId) -> bool {
+        let max = self.max_tokens;
+        let rate = self.refill_rate;
+        let entry = self
+            .buckets
+            .entry(client_id.clone())
+            .or_insert_with(|| {
+                std::sync::Mutex::new(TokenBucket {
+                    tokens: max as f64,
+                    last_refill: Instant::now(),
+                })
+            });
+
+        let mut bucket = entry.value().lock().unwrap();
+        let now = Instant::now();
+        let elapsed = now.duration_since(bucket.last_refill).as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * rate).min(max as f64);
+        bucket.last_refill = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a client's bucket (called on disconnect).
+    pub fn remove(&self, client_id: &ClientId) {
+        self.buckets.remove(client_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClientId
+// ---------------------------------------------------------------------------
 
 /// Unique client identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -34,22 +267,24 @@ impl std::fmt::Display for ClientId {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
 /// A connected WebSocket client.
 pub struct Client {
     pub id: ClientId,
     pub session_id: Option<SessionId>,
-    pub tx: mpsc::Sender<String>,
     pub connected: AtomicBool,
     pub last_pong: std::sync::atomic::AtomicU64,
 }
 
 impl Client {
-    fn new(id: ClientId, tx: mpsc::Sender<String>) -> Self {
+    fn new(id: ClientId) -> Self {
         let now = now_secs();
         Self {
             id,
             session_id: None,
-            tx,
             connected: AtomicBool::new(true),
             last_pong: std::sync::atomic::AtomicU64::new(now),
         }
@@ -80,9 +315,14 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+// ---------------------------------------------------------------------------
+// ClientRegistry
+// ---------------------------------------------------------------------------
+
 /// Registry of all connected WebSocket clients.
 pub struct ClientRegistry {
     clients: DashMap<ClientId, Arc<Mutex<Client>>>,
+    queues: DashMap<ClientId, Arc<PriorityQueue>>,
     max_send_queue: usize,
 }
 
@@ -90,21 +330,26 @@ impl ClientRegistry {
     pub fn new(max_send_queue: usize) -> Self {
         Self {
             clients: DashMap::new(),
+            queues: DashMap::new(),
             max_send_queue,
         }
     }
 
-    /// Register a new client and return its ID + sender.
-    pub fn register(&self) -> (ClientId, mpsc::Receiver<String>) {
+    /// Register a new client. Returns the client ID and its message queue.
+    pub fn register(&self) -> (ClientId, Arc<PriorityQueue>) {
         let id = ClientId::new();
-        let (tx, rx) = mpsc::channel(self.max_send_queue);
-        let client = Arc::new(Mutex::new(Client::new(id.clone(), tx)));
+        let queue = Arc::new(PriorityQueue::new(self.max_send_queue));
+        let client = Arc::new(Mutex::new(Client::new(id.clone())));
         self.clients.insert(id.clone(), client);
-        (id, rx)
+        self.queues.insert(id.clone(), Arc::clone(&queue));
+        (id, queue)
     }
 
-    /// Remove a client by ID.
+    /// Remove a client by ID, closing its message queue.
     pub fn unregister(&self, id: &ClientId) {
+        if let Some((_, queue)) = self.queues.remove(id) {
+            queue.close();
+        }
         if let Some((_, client)) = self.clients.remove(id) {
             if let Ok(c) = client.try_lock() {
                 c.connected.store(false, Ordering::Relaxed);
@@ -119,24 +364,12 @@ impl ClientRegistry {
         }
     }
 
-    /// Send a message to a specific client. Drops oldest message if queue is full.
-    pub async fn send_to(&self, client_id: &ClientId, message: String) -> bool {
-        if let Some(client) = self.clients.get(client_id) {
-            let tx = client.lock().await.tx.clone();
-            match tx.try_send(message) {
-                Ok(()) => true,
-                Err(mpsc::error::TrySendError::Full(msg)) => {
-                    // Backpressure: the channel is full.
-                    // We can't drop oldest from mpsc, so we drop this message and log.
-                    tracing::warn!(
-                        client_id = %client_id,
-                        msg_len = msg.len(),
-                        "Send queue full, dropping message"
-                    );
-                    false
-                }
-                Err(mpsc::error::TrySendError::Closed(_)) => false,
-            }
+    /// Send a message to a specific client. Priority is auto-classified.
+    /// Returns `true` if enqueued, `false` if dropped or client not found.
+    pub fn send_to(&self, client_id: &ClientId, message: String) -> bool {
+        if let Some(queue) = self.queues.get(client_id) {
+            let priority = classify_message(&message);
+            queue.send(priority, message)
         } else {
             false
         }
@@ -144,10 +377,13 @@ impl ClientRegistry {
 
     /// Broadcast a message to all clients watching a specific session.
     pub fn broadcast_to_session(&self, session_id: &SessionId, message: &str) {
+        let priority = classify_message(message);
         for entry in self.clients.iter() {
             if let Ok(client) = entry.value().try_lock() {
                 if client.session_id.as_ref() == Some(session_id) && client.is_connected() {
-                    let _ = client.tx.try_send(message.to_string());
+                    if let Some(queue) = self.queues.get(&client.id) {
+                        queue.send(priority, message.to_string());
+                    }
                 }
             }
         }
@@ -195,33 +431,38 @@ impl ClientRegistry {
     }
 }
 
-/// Handle a WebSocket connection: split into reader/writer, manage lifecycle with heartbeat.
+// ---------------------------------------------------------------------------
+// WebSocket connection handler
+// ---------------------------------------------------------------------------
+
+/// Handle a WebSocket connection: split into reader/writer, manage lifecycle.
 pub async fn handle_ws_connection(
     socket: WebSocket,
     client_id: ClientId,
-    mut rx: mpsc::Receiver<String>,
+    queue: Arc<PriorityQueue>,
     registry: Arc<ClientRegistry>,
     on_message: mpsc::Sender<(ClientId, String)>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
-    // Writer task: forward messages from channel to WebSocket + periodic ping
+    // Writer task: forward messages from priority queue to WebSocket + periodic ping
     let writer_cid = client_id.clone();
     let writer_registry = Arc::clone(&registry);
+    let writer_queue = queue;
     let writer = tokio::spawn(async move {
         let mut ping_interval = tokio::time::interval(HEARTBEAT_INTERVAL);
         ping_interval.tick().await; // consume first immediate tick
 
         loop {
             tokio::select! {
-                msg = rx.recv() => {
+                msg = writer_queue.recv() => {
                     match msg {
                         Some(text) => {
                             if ws_tx.send(WsMessage::Text(text.into())).await.is_err() {
                                 break;
                             }
                         }
-                        None => break,
+                        None => break, // Queue closed
                     }
                 }
                 _ = ping_interval.tick() => {
@@ -234,8 +475,8 @@ pub async fn handle_ws_connection(
         }
 
         // Mark as disconnected
-        if let Some(client) = writer_registry.clients.get(&writer_cid) {
-            if let Ok(c) = client.try_lock() {
+        if let Some(entry) = writer_registry.clients.get(&writer_cid) {
+            if let Ok(c) = entry.value().try_lock() {
                 c.connected.store(false, Ordering::Relaxed);
             }
         }
@@ -251,9 +492,8 @@ pub async fn handle_ws_connection(
                     let _ = on_message.send((reader_cid.clone(), text.to_string())).await;
                 }
                 WsMessage::Pong(_) => {
-                    // Record pong for liveness detection
-                    if let Some(client) = reader_registry.clients.get(&reader_cid) {
-                        if let Ok(c) = client.try_lock() {
+                    if let Some(entry) = reader_registry.clients.get(&reader_cid) {
+                        if let Ok(c) = entry.value().try_lock() {
                             c.record_pong();
                         }
                     }
@@ -291,9 +531,15 @@ pub fn start_cleanup_task(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- ClientId --
 
     #[test]
     fn client_id_unique() {
@@ -303,13 +549,225 @@ mod tests {
         assert!(a.0.starts_with("client_"));
     }
 
+    // -- PriorityQueue --
+
+    #[tokio::test]
+    async fn priority_queue_send_recv() {
+        let queue = PriorityQueue::new(8);
+        assert!(queue.send(MessagePriority::Normal, "hello".into()));
+        assert!(queue.send(MessagePriority::Critical, "world".into()));
+        assert_eq!(queue.len(), 2);
+
+        // FIFO order
+        assert_eq!(queue.recv().await.unwrap(), "hello");
+        assert_eq!(queue.recv().await.unwrap(), "world");
+        assert_eq!(queue.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn priority_queue_evicts_lowest_priority() {
+        let queue = PriorityQueue::new(3);
+        queue.send(MessagePriority::Normal, "a".into());
+        queue.send(MessagePriority::Critical, "b".into());
+        queue.send(MessagePriority::Normal, "c".into());
+        assert_eq!(queue.len(), 3);
+
+        // Full — sending Critical should evict oldest Normal ("a")
+        let enqueued = queue.send(MessagePriority::Critical, "d".into());
+        assert!(enqueued);
+        assert_eq!(queue.len(), 3);
+        assert_eq!(queue.dropped(), 1);
+
+        // Remaining: "b" (Critical), "c" (Normal), "d" (Critical)
+        assert_eq!(queue.recv().await.unwrap(), "b");
+        assert_eq!(queue.recv().await.unwrap(), "c");
+        assert_eq!(queue.recv().await.unwrap(), "d");
+    }
+
+    #[test]
+    fn priority_queue_drops_lowest_new() {
+        // Queue full of Critical messages
+        let queue = PriorityQueue::new(2);
+        queue.send(MessagePriority::Critical, "a".into());
+        queue.send(MessagePriority::Critical, "b".into());
+
+        // Sending Normal when all Critical — evicts oldest Critical (equal priority doesn't block)
+        // Actually: Normal < Critical, so Normal cannot evict Critical → dropped
+        let enqueued = queue.send(MessagePriority::Low, "c".into());
+        assert!(!enqueued);
+        assert_eq!(queue.dropped(), 1);
+        assert_eq!(queue.len(), 2);
+    }
+
+    #[test]
+    fn priority_queue_equal_priority_evicts() {
+        let queue = PriorityQueue::new(2);
+        queue.send(MessagePriority::Normal, "a".into());
+        queue.send(MessagePriority::Normal, "b".into());
+
+        // Same priority: evicts oldest ("a"), keeps "b" and adds "c"
+        let enqueued = queue.send(MessagePriority::Normal, "c".into());
+        assert!(enqueued);
+        assert_eq!(queue.dropped(), 1);
+    }
+
+    #[tokio::test]
+    async fn priority_queue_close_stops_recv() {
+        let queue = Arc::new(PriorityQueue::new(8));
+        queue.send(MessagePriority::Normal, "last".into());
+        queue.close();
+
+        // Drains remaining messages first
+        assert_eq!(queue.recv().await.unwrap(), "last");
+        // Then returns None
+        assert!(queue.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn priority_queue_close_rejects_send() {
+        let queue = PriorityQueue::new(8);
+        queue.close();
+        assert!(!queue.send(MessagePriority::Critical, "nope".into()));
+    }
+
+    #[tokio::test]
+    async fn priority_queue_recv_waits_for_send() {
+        let queue = Arc::new(PriorityQueue::new(8));
+        let queue_clone = Arc::clone(&queue);
+
+        let handle = tokio::spawn(async move {
+            queue_clone.recv().await
+        });
+
+        // Give the recv task a moment to start waiting
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        queue.send(MessagePriority::Normal, "delayed".into());
+
+        let msg = tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("timeout")
+            .expect("join")
+            .unwrap();
+        assert_eq!(msg, "delayed");
+    }
+
+    // -- classify_message --
+
+    #[test]
+    fn classify_rpc_response_critical() {
+        let rpc = r#"{"id":1,"result":{"ok":true}}"#;
+        assert_eq!(classify_message(rpc), MessagePriority::Critical);
+    }
+
+    #[test]
+    fn classify_rpc_error_critical() {
+        let rpc = r#"{"id":1,"error":{"code":-32600,"message":"bad"}}"#;
+        assert_eq!(classify_message(rpc), MessagePriority::Critical);
+    }
+
+    #[test]
+    fn classify_agent_ready_critical() {
+        let event = r#"{"type":"agent_ready","session_id":"sess_123"}"#;
+        assert_eq!(classify_message(event), MessagePriority::Critical);
+    }
+
+    #[test]
+    fn classify_agent_complete_critical() {
+        let event = r#"{"type":"agent_complete","session_id":"sess_123"}"#;
+        assert_eq!(classify_message(event), MessagePriority::Critical);
+    }
+
+    #[test]
+    fn classify_connection_established_critical() {
+        let event = r#"{"type":"connection.established","data":{}}"#;
+        assert_eq!(classify_message(event), MessagePriority::Critical);
+    }
+
+    #[test]
+    fn classify_text_delta_normal() {
+        let event = r#"{"type":"text_delta","delta":"hello"}"#;
+        assert_eq!(classify_message(event), MessagePriority::Normal);
+    }
+
+    // -- RateLimiter --
+
+    #[test]
+    fn rate_limiter_allows_within_limit() {
+        let limiter = RateLimiter::new(5, 5.0);
+        let client = ClientId::new();
+
+        for _ in 0..5 {
+            assert!(limiter.check(&client));
+        }
+    }
+
+    #[test]
+    fn rate_limiter_rejects_over_limit() {
+        let limiter = RateLimiter::new(3, 1.0);
+        let client = ClientId::new();
+
+        // Exhaust all tokens
+        assert!(limiter.check(&client));
+        assert!(limiter.check(&client));
+        assert!(limiter.check(&client));
+
+        // Next should be rejected
+        assert!(!limiter.check(&client));
+    }
+
+    #[test]
+    fn rate_limiter_refills_over_time() {
+        let limiter = RateLimiter::new(2, 1000.0); // fast refill for testing
+        let client = ClientId::new();
+
+        // Exhaust
+        assert!(limiter.check(&client));
+        assert!(limiter.check(&client));
+        assert!(!limiter.check(&client));
+
+        // Wait a tiny bit for refill (1000 tokens/sec = 1 token per ms)
+        std::thread::sleep(Duration::from_millis(5));
+
+        assert!(limiter.check(&client));
+    }
+
+    #[test]
+    fn rate_limiter_independent_clients() {
+        let limiter = RateLimiter::new(1, 0.0); // no refill
+        let a = ClientId::new();
+        let b = ClientId::new();
+
+        assert!(limiter.check(&a));
+        assert!(!limiter.check(&a));
+
+        // Client B has its own bucket
+        assert!(limiter.check(&b));
+        assert!(!limiter.check(&b));
+    }
+
+    #[test]
+    fn rate_limiter_remove_client() {
+        let limiter = RateLimiter::new(1, 0.0);
+        let client = ClientId::new();
+
+        assert!(limiter.check(&client));
+        assert!(!limiter.check(&client));
+
+        limiter.remove(&client);
+
+        // Fresh bucket after removal
+        assert!(limiter.check(&client));
+    }
+
+    // -- ClientRegistry --
+
     #[test]
     fn registry_register_and_unregister() {
         let registry = ClientRegistry::new(32);
         assert_eq!(registry.count(), 0);
 
-        let (id1, _rx1) = registry.register();
-        let (id2, _rx2) = registry.register();
+        let (id1, _q1) = registry.register();
+        let (id2, _q2) = registry.register();
         assert_eq!(registry.count(), 2);
 
         registry.unregister(&id1);
@@ -322,7 +780,7 @@ mod tests {
     #[tokio::test]
     async fn registry_set_session() {
         let registry = ClientRegistry::new(32);
-        let (id, _rx) = registry.register();
+        let (id, _q) = registry.register();
         let session_id = SessionId::new();
 
         registry.set_session(&id, session_id.clone()).await;
@@ -335,9 +793,9 @@ mod tests {
     #[test]
     fn registry_broadcast_to_session() {
         let registry = ClientRegistry::new(32);
-        let (id1, mut rx1) = registry.register();
-        let (id2, mut rx2) = registry.register();
-        let (_id3, mut rx3) = registry.register();
+        let (id1, q1) = registry.register();
+        let (id2, q2) = registry.register();
+        let (_id3, q3) = registry.register();
 
         let session = SessionId::new();
         {
@@ -349,53 +807,58 @@ mod tests {
             entry.try_lock().unwrap().set_session(session.clone());
         }
 
-        registry.broadcast_to_session(&session, "hello");
+        registry.broadcast_to_session(&session, r#"{"type":"text_delta","delta":"hi"}"#);
 
-        assert!(rx1.try_recv().is_ok());
-        assert!(rx2.try_recv().is_ok());
-        assert!(rx3.try_recv().is_err());
+        assert_eq!(q1.len(), 1);
+        assert_eq!(q2.len(), 1);
+        assert_eq!(q3.len(), 0);
     }
 
-    #[tokio::test]
-    async fn send_to_specific_client() {
+    #[test]
+    fn send_to_specific_client() {
         let registry = ClientRegistry::new(32);
-        let (id, mut rx) = registry.register();
+        let (id, queue) = registry.register();
 
-        let sent = registry.send_to(&id, "test message".into()).await;
+        let sent = registry.send_to(&id, "test message".into());
         assert!(sent);
-
-        let msg = rx.recv().await.unwrap();
-        assert_eq!(msg, "test message");
+        assert_eq!(queue.len(), 1);
     }
 
-    #[tokio::test]
-    async fn send_to_nonexistent_client() {
+    #[test]
+    fn send_to_nonexistent_client() {
         let registry = ClientRegistry::new(32);
         let fake = ClientId::new();
-        let sent = registry.send_to(&fake, "test".into()).await;
+        let sent = registry.send_to(&fake, "test".into());
         assert!(!sent);
     }
 
     #[tokio::test]
-    async fn send_to_full_queue_drops() {
+    async fn send_to_full_queue_evicts() {
         let registry = ClientRegistry::new(2); // tiny queue
-        let (id, _rx) = registry.register();
+        let (id, queue) = registry.register();
 
-        // Fill the queue
-        let sent1 = registry.send_to(&id, "msg1".into()).await;
-        let sent2 = registry.send_to(&id, "msg2".into()).await;
-        assert!(sent1);
-        assert!(sent2);
+        // Fill with Normal priority
+        registry.send_to(&id, r#"{"type":"text_delta","delta":"a"}"#.into());
+        registry.send_to(&id, r#"{"type":"text_delta","delta":"b"}"#.into());
+        assert_eq!(queue.len(), 2);
 
-        // Queue is full — this should be dropped
-        let sent3 = registry.send_to(&id, "msg3".into()).await;
-        assert!(!sent3);
+        // Send Critical — should evict oldest Normal
+        let sent = registry.send_to(&id, r#"{"id":1,"result":{"ok":true}}"#.into());
+        assert!(sent);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.dropped(), 1);
+
+        // Remaining: "b" (Normal), RPC response (Critical)
+        let msg1 = queue.recv().await.unwrap();
+        assert!(msg1.contains("delta"));
+        assert!(msg1.contains("\"b\""));
+        let msg2 = queue.recv().await.unwrap();
+        assert!(msg2.contains("result"));
     }
 
     #[test]
     fn client_pong_tracking() {
-        let (tx, _rx) = mpsc::channel(1);
-        let client = Client::new(ClientId::new(), tx);
+        let client = Client::new(ClientId::new());
         assert!(client.is_alive());
 
         client.record_pong();
@@ -405,7 +868,7 @@ mod tests {
     #[test]
     fn cleanup_dead_clients_removes_expired() {
         let registry = ClientRegistry::new(32);
-        let (id, _rx) = registry.register();
+        let (id, _q) = registry.register();
         assert_eq!(registry.count(), 1);
 
         // Manually set last_pong to far in the past
@@ -418,5 +881,19 @@ mod tests {
         let removed = registry.cleanup_dead_clients();
         assert_eq!(removed, 1);
         assert_eq!(registry.count(), 0);
+    }
+
+    #[tokio::test]
+    async fn unregister_closes_queue() {
+        let registry = ClientRegistry::new(32);
+        let (id, queue) = registry.register();
+
+        queue.send(MessagePriority::Normal, "before".into());
+        registry.unregister(&id);
+
+        // Drain remaining
+        assert_eq!(queue.recv().await.unwrap(), "before");
+        // Then None
+        assert!(queue.recv().await.is_none());
     }
 }

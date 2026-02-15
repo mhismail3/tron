@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tron_core::errors::GatewayError;
 use tron_core::tools::ToolError;
 use tron_store::StoreError;
@@ -27,6 +29,9 @@ pub enum EngineError {
 
     #[error("max turns exceeded: {0}")]
     MaxTurnsExceeded(u32),
+
+    #[error("run timeout after {0:?}")]
+    RunTimeout(Duration),
 
     #[error("{0}")]
     Internal(String),

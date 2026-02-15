@@ -256,11 +256,45 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             Some(data)
         }
         TronEvent::Error {
-            error, context, ..
+            error,
+            context,
+            code,
+            provider,
+            category,
+            suggestion,
+            retryable,
+            status_code,
+            error_type,
+            model,
+            ..
         } => {
             let mut data = serde_json::json!({ "message": error });
             if let Some(ctx) = context {
                 data["context"] = serde_json::json!(ctx);
+            }
+            if let Some(c) = code {
+                data["code"] = serde_json::json!(c);
+            }
+            if let Some(p) = provider {
+                data["provider"] = serde_json::json!(p);
+            }
+            if let Some(cat) = category {
+                data["category"] = serde_json::json!(cat);
+            }
+            if let Some(s) = suggestion {
+                data["suggestion"] = serde_json::json!(s);
+            }
+            if let Some(r) = retryable {
+                data["retryable"] = serde_json::json!(r);
+            }
+            if let Some(sc) = status_code {
+                data["statusCode"] = serde_json::json!(sc);
+            }
+            if let Some(et) = error_type {
+                data["errorType"] = serde_json::json!(et);
+            }
+            if let Some(m) = model {
+                data["model"] = serde_json::json!(m);
             }
             Some(data)
         }
@@ -407,12 +441,19 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             Some(serde_json::json!({ "thinking": thinking }))
         }
         TronEvent::SessionCreated {
+            base,
             model,
             working_directory,
             ..
         } => Some(serde_json::json!({
             "model": model,
             "workingDirectory": working_directory,
+            "messageCount": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cost": 0.0,
+            "lastActivity": base.timestamp,
+            "isActive": true,
         })),
         TronEvent::SessionForked {
             new_session_id, ..
@@ -1023,12 +1064,92 @@ mod tests {
             base: BaseEvent::now("s1"),
             error: "connection failed".into(),
             context: Some("during tool execution".into()),
+            code: None,
+            provider: None,
+            category: None,
+            suggestion: None,
+            retryable: None,
+            status_code: None,
+            error_type: None,
+            model: None,
         };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.error");
         let data = rpc.data.unwrap();
         assert_eq!(data["message"], "connection failed");
         assert_eq!(data["context"], "during tool execution");
+    }
+
+    #[test]
+    fn error_enrichment_fields_passed_through() {
+        let event = TronEvent::Error {
+            base: BaseEvent::now("s1"),
+            error: "rate limit".into(),
+            context: None,
+            code: Some("rate_limit_error".into()),
+            provider: Some("anthropic".into()),
+            category: Some("rate_limit".into()),
+            suggestion: Some("Wait and retry".into()),
+            retryable: Some(true),
+            status_code: Some(429),
+            error_type: Some("RateLimitError".into()),
+            model: Some("claude-opus-4-6".into()),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.error");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["message"], "rate limit");
+        assert_eq!(data["code"], "rate_limit_error");
+        assert_eq!(data["provider"], "anthropic");
+        assert_eq!(data["category"], "rate_limit");
+        assert_eq!(data["suggestion"], "Wait and retry");
+        assert_eq!(data["retryable"], true);
+        assert_eq!(data["statusCode"], 429);
+        assert_eq!(data["errorType"], "RateLimitError");
+        assert_eq!(data["model"], "claude-opus-4-6");
+    }
+
+    #[test]
+    fn error_omits_none_enrichment_fields() {
+        let event = TronEvent::Error {
+            base: BaseEvent::now("s1"),
+            error: "unknown".into(),
+            context: None,
+            code: None,
+            provider: None,
+            category: None,
+            suggestion: None,
+            retryable: None,
+            status_code: None,
+            error_type: None,
+            model: None,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        let data = rpc.data.unwrap();
+        assert_eq!(data["message"], "unknown");
+        assert!(data.get("code").is_none());
+        assert!(data.get("provider").is_none());
+        assert!(data.get("statusCode").is_none());
+    }
+
+    #[test]
+    fn session_created_has_full_ios_fields() {
+        let event = TronEvent::SessionCreated {
+            base: BaseEvent::now("s1"),
+            model: "claude-opus-4-6".into(),
+            working_directory: "/tmp/project".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "session.created");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["model"], "claude-opus-4-6");
+        assert_eq!(data["workingDirectory"], "/tmp/project");
+        assert_eq!(data["messageCount"], 0);
+        assert_eq!(data["inputTokens"], 0);
+        assert_eq!(data["outputTokens"], 0);
+        assert_eq!(data["cost"], 0.0);
+        assert_eq!(data["isActive"], true);
+        assert!(data.get("lastActivity").is_some());
     }
 
     #[test]
@@ -1145,7 +1266,7 @@ mod tests {
             TronEvent::MessageUpdate { base: base.clone(), content: "c".into() },
             TronEvent::ToolExecutionStart { base: base.clone(), tool_call_id: "id".into(), tool_name: "n".into(), arguments: None },
             TronEvent::ToolExecutionEnd { base: base.clone(), tool_call_id: "id".into(), tool_name: "n".into(), duration: 0, is_error: None, result: None },
-            TronEvent::Error { base: base.clone(), error: "e".into(), context: None },
+            TronEvent::Error { base: base.clone(), error: "e".into(), context: None, code: None, provider: None, category: None, suggestion: None, retryable: None, status_code: None, error_type: None, model: None },
             TronEvent::CompactionStart { base: base.clone(), reason: tron_core::events::CompactionReason::Manual, tokens_before: 0 },
             TronEvent::CompactionComplete { base: base.clone(), success: true, tokens_before: 0, tokens_after: 0, compression_ratio: 0.0, reason: None, summary: None, estimated_context_tokens: None },
             TronEvent::ThinkingStart { base: base.clone() },

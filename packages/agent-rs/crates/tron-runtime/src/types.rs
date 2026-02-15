@@ -72,6 +72,12 @@ pub struct AgentConfig {
     /// Working directory for file operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
+    /// Current subagent nesting depth (0 = root agent).
+    #[serde(default)]
+    pub subagent_depth: u32,
+    /// Maximum nesting depth allowed for spawning children.
+    #[serde(default)]
+    pub subagent_max_depth: u32,
 }
 
 const fn default_max_turns() -> u32 {
@@ -92,6 +98,8 @@ impl Default for AgentConfig {
             stop_sequences: Vec::new(),
             compaction: CompactionConfig::default(),
             working_directory: None,
+            subagent_depth: 0,
+            subagent_max_depth: 0,
         }
     }
 }
@@ -115,6 +123,10 @@ pub struct RunContext {
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
+    /// Override user message content (e.g., multimodal blocks with images).
+    /// When set, `run()` uses this instead of creating a text-only message.
+    #[serde(skip)]
+    pub user_content_override: Option<tron_core::messages::UserMessageContent>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +208,9 @@ pub struct RunResult {
     /// Error message if run failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Context window tokens from the last turn (for compaction ratio).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_context_window_tokens: Option<u64>,
 }
 
 impl Default for RunResult {
@@ -206,6 +221,7 @@ impl Default for RunResult {
             stop_reason: StopReason::EndTurn,
             interrupted: false,
             error: None,
+            last_context_window_tokens: None,
         }
     }
 }
@@ -394,6 +410,7 @@ mod tests {
         assert_eq!(rr.stop_reason, StopReason::EndTurn);
         assert!(!rr.interrupted);
         assert!(rr.error.is_none());
+        assert!(rr.last_context_window_tokens.is_none());
     }
 
     #[test]
@@ -408,12 +425,35 @@ mod tests {
             stop_reason: StopReason::MaxTurns,
             interrupted: false,
             error: None,
+            last_context_window_tokens: None,
         };
         let json = serde_json::to_string(&rr).unwrap();
         let back: RunResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back.turns_executed, 5);
         assert_eq!(back.stop_reason, StopReason::MaxTurns);
         assert_eq!(back.total_token_usage.input_tokens, 1000);
+    }
+
+    #[test]
+    fn run_result_has_last_context_window_tokens() {
+        let rr = RunResult {
+            last_context_window_tokens: Some(85_000),
+            ..Default::default()
+        };
+        assert_eq!(rr.last_context_window_tokens, Some(85_000));
+    }
+
+    #[test]
+    fn run_result_serde_with_context_window_tokens() {
+        let rr = RunResult {
+            turns_executed: 3,
+            last_context_window_tokens: Some(120_000),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&rr).unwrap();
+        let back: RunResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.last_context_window_tokens, Some(120_000));
+        assert_eq!(back.turns_executed, 3);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 use tron_core::events::PersistenceEventType;
 use tron_core::ids::{EventId, SessionId, WorkspaceId};
@@ -11,6 +12,7 @@ use tron_core::messages::Message;
 
 use crate::database::Database;
 use crate::error::StoreError;
+use crate::row_helpers;
 
 /// A stored event row.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -65,6 +67,7 @@ impl EventRepo {
     /// 2. Reads current head
     /// 3. Inserts event with parent_id = current head
     /// 4. Updates session head_event_id
+    #[instrument(skip(self, payload), fields(session_id = %session_id, event_type = %event_type))]
     pub fn append(
         &self,
         session_id: &SessionId,
@@ -76,6 +79,7 @@ impl EventRepo {
     }
 
     /// Append an event with a specific depth (for sub-agent events).
+    #[instrument(skip(self, payload), fields(session_id = %session_id, event_type = %event_type, depth))]
     pub fn append_with_depth(
         &self,
         session_id: &SessionId,
@@ -150,19 +154,23 @@ impl EventRepo {
     }
 
     /// Get a single event by ID.
+    #[instrument(skip(self), fields(event_id = %event_id))]
     pub fn get(&self, event_id: &EventId) -> Result<EventRow, StoreError> {
         self.db.with_conn(|conn| {
-            conn.query_row(
+            let mut stmt = conn.prepare(
                 "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload, workspace_id
                  FROM events WHERE id = ?1",
-                [event_id.as_str()],
-                |row| Ok(row_to_event(row)),
-            )
-            .map_err(|_| StoreError::NotFound(format!("event {event_id}")))
+            )?;
+            let mut rows = stmt.query([event_id.as_str()])?;
+            match rows.next()? {
+                Some(row) => row_to_event(row),
+                None => Err(StoreError::NotFound(format!("event {event_id}"))),
+            }
         })
     }
 
     /// List events for a session, ordered by sequence.
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn list(
         &self,
         session_id: &SessionId,
@@ -178,17 +186,18 @@ impl EventRepo {
                  ORDER BY sequence ASC
                  LIMIT ?2 OFFSET ?3",
             )?;
-            let rows = stmt
-                .query_map(
-                    rusqlite::params![session_id.as_str(), limit, offset],
-                    |row| Ok(row_to_event(row)),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            let mut rows =
+                stmt.query(rusqlite::params![session_id.as_str(), limit, offset])?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_event(row)?);
+            }
+            Ok(results)
         })
     }
 
     /// List events for sync (events after a given sequence number).
+    #[instrument(skip(self), fields(session_id = %session_id, after_sequence))]
     pub fn list_after_sequence(
         &self,
         session_id: &SessionId,
@@ -202,13 +211,13 @@ impl EventRepo {
                  ORDER BY sequence ASC
                  LIMIT ?3",
             )?;
-            let rows = stmt
-                .query_map(
-                    rusqlite::params![session_id.as_str(), after_sequence, limit],
-                    |row| Ok(row_to_event(row)),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
+            let mut rows =
+                stmt.query(rusqlite::params![session_id.as_str(), after_sequence, limit])?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_event(row)?);
+            }
+            Ok(results)
         })
     }
 
@@ -217,6 +226,7 @@ impl EventRepo {
     /// - Events before a compact_boundary are skipped
     /// - compact_summary provides the summary message
     /// - message_user, message_assistant, tool_result events become messages
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn reconstruct_messages(
         &self,
         session_id: &SessionId,
@@ -226,14 +236,14 @@ impl EventRepo {
     }
 
     /// Count events for a session.
+    #[instrument(skip(self), fields(session_id = %session_id))]
     pub fn count(&self, session_id: &SessionId) -> Result<i64, StoreError> {
         self.db.with_conn(|conn| {
-            conn.query_row(
+            Ok(conn.query_row(
                 "SELECT COUNT(*) FROM events WHERE session_id = ?1",
                 [session_id.as_str()],
                 |row| row.get(0),
-            )
-            .map_err(|e| StoreError::Database(e.to_string()))
+            )?)
         })
     }
 }
@@ -276,22 +286,22 @@ pub fn reconstruct_from_events(events: &[EventRow]) -> Result<Vec<Message>, Stor
     Ok(messages)
 }
 
-fn row_to_event(row: &rusqlite::Row<'_>) -> EventRow {
-    let payload_str: String = row.get(7).unwrap();
-    EventRow {
-        id: EventId::from_raw(row.get::<_, String>(0).unwrap()),
-        session_id: SessionId::from_raw(row.get::<_, String>(1).unwrap()),
-        parent_id: row
-            .get::<_, Option<String>>(2)
-            .unwrap()
+fn row_to_event(row: &rusqlite::Row<'_>) -> Result<EventRow, StoreError> {
+    let payload_str: String = row_helpers::get(row, 7, "events", "payload")?;
+    let payload = row_helpers::parse_json(&payload_str, "events", "payload")?;
+
+    Ok(EventRow {
+        id: EventId::from_raw(row_helpers::get::<String>(row, 0, "events", "id")?),
+        session_id: SessionId::from_raw(row_helpers::get::<String>(row, 1, "events", "session_id")?),
+        parent_id: row_helpers::get_opt::<String>(row, 2, "events", "parent_id")?
             .map(EventId::from_raw),
-        sequence: row.get(3).unwrap(),
-        depth: row.get(4).unwrap(),
-        event_type: row.get(5).unwrap(),
-        timestamp: row.get(6).unwrap(),
-        payload: serde_json::from_str(&payload_str).unwrap_or(serde_json::Value::Null),
-        workspace_id: WorkspaceId::from_raw(row.get::<_, String>(8).unwrap()),
-    }
+        sequence: row_helpers::get(row, 3, "events", "sequence")?,
+        depth: row_helpers::get(row, 4, "events", "depth")?,
+        event_type: row_helpers::get(row, 5, "events", "type")?,
+        timestamp: row_helpers::get(row, 6, "events", "timestamp")?,
+        payload,
+        workspace_id: WorkspaceId::from_raw(row_helpers::get::<String>(row, 8, "events", "workspace_id")?),
+    })
 }
 
 #[cfg(test)]
@@ -637,5 +647,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn malformed_payload_returns_error_not_null() {
+        let (db, session_id, ws_id) = setup();
+        db.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO events (id, session_id, parent_id, sequence, depth, type, timestamp, payload, workspace_id)
+                 VALUES (?1, ?2, NULL, 1, 0, 'test', datetime('now'), 'not valid json', ?3)",
+                rusqlite::params![EventId::new().as_str(), session_id.as_str(), ws_id.as_str()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let repo = EventRepo::new(db);
+        let result = repo.list(&session_id, None, None);
+        assert!(matches!(result, Err(StoreError::CorruptRow { .. })));
+    }
+
+    #[test]
+    fn row_to_event_returns_result() {
+        let (db, session_id, ws_id) = setup();
+        let repo = EventRepo::new(db);
+        repo.append(
+            &session_id,
+            &ws_id,
+            PersistenceEventType::MessageUser,
+            json!({"text": "hi"}),
+        )
+        .unwrap();
+        let events = repo.list(&session_id, None, None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "message_user");
     }
 }

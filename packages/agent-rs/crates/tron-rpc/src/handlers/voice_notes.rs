@@ -1,12 +1,14 @@
 //! Voice notes handlers: save, list, delete.
 
 use async_trait::async_trait;
+use base64::Engine;
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
 use crate::handlers::require_string_param;
+use crate::handlers::transcription::transcribe_audio_via_sidecar;
 use crate::registry::MethodHandler;
 
 fn notes_dir() -> String {
@@ -15,13 +17,26 @@ fn notes_dir() -> String {
 }
 
 /// Save a voice note (accepts base64 audio, writes markdown with frontmatter).
+///
+/// Attempts transcription via the sidecar service inline. Falls back to a stub
+/// if transcription is disabled or fails.
 pub struct SaveHandler;
 
 #[async_trait]
 impl MethodHandler for SaveHandler {
-    #[instrument(skip(self, _ctx), fields(method = "voiceNotes.save"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+    #[instrument(skip(self, ctx), fields(method = "voiceNotes.save"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let audio_base64 = require_string_param(params.as_ref(), "audioBase64")?;
+
+        let mime_type = params
+            .as_ref()
+            .and_then(|p| p.get("mimeType"))
+            .and_then(Value::as_str)
+            .unwrap_or("audio/wav");
+        let file_name = params
+            .as_ref()
+            .and_then(|p| p.get("fileName"))
+            .and_then(Value::as_str);
 
         let dir = notes_dir();
         let _ = std::fs::create_dir_all(&dir);
@@ -30,17 +45,54 @@ impl MethodHandler for SaveHandler {
         let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S"));
         let filepath = format!("{dir}/{filename}");
 
-        // Decode audio length estimate (base64 → bytes → rough duration)
-        let audio_bytes = audio_base64.len() * 3 / 4;
-        // Rough estimate: ~16KB/s for compressed audio
+        // Decode audio
+        let audio_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&audio_base64)
+            .map_err(|e| RpcError::InvalidParams {
+                message: format!("Invalid base64 audio data: {e}"),
+            })?;
+
+        // Rough duration estimate: ~16KB/s for compressed audio
         #[allow(clippy::cast_precision_loss)]
-        let duration_seconds = (audio_bytes as f64) / 16_000.0;
+        let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
+
+        // Try transcription via sidecar
+        let (transcript_text, language, duration_seconds) =
+            match transcribe_audio_via_sidecar(&ctx.settings_path, &audio_bytes, mime_type, file_name).await {
+                Ok(result) => {
+                    let text = result
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("(transcription failed)")
+                        .to_string();
+                    let lang = result
+                        .get("language")
+                        .and_then(Value::as_str)
+                        .unwrap_or("en")
+                        .to_string();
+                    let dur = result
+                        .get("durationSeconds")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(estimated_duration);
+                    (text, lang, dur)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Transcription failed, using stub");
+                    (
+                        "(transcription not available)".to_string(),
+                        "en".to_string(),
+                        estimated_duration,
+                    )
+                }
+            };
 
         // Write markdown with frontmatter
         let content = format!(
-            "---\ntype: voice-note\ncreated: {}\nduration: {:.1}\nlanguage: en\nmodel: stub\n---\n\n(transcription pending)\n",
+            "---\ntype: voice-note\ncreated: {}\nduration: {:.1}\nlanguage: {}\n---\n\n{}\n",
             now.to_rfc3339(),
             duration_seconds,
+            language,
+            transcript_text,
         );
         std::fs::write(&filepath, &content).map_err(|e| RpcError::Internal {
             message: format!("Failed to write voice note: {e}"),
@@ -51,8 +103,8 @@ impl MethodHandler for SaveHandler {
             "filename": filename,
             "filepath": filepath,
             "transcription": {
-                "text": "(transcription pending)",
-                "language": "en",
+                "text": transcript_text,
+                "language": language,
                 "durationSeconds": duration_seconds,
             },
         }))
@@ -192,10 +244,46 @@ mod tests {
         assert!(result["filepath"].is_string());
         assert!(result["transcription"]["text"].is_string());
         assert!(result["transcription"]["durationSeconds"].is_number());
+        // Without sidecar configured, falls back to stub
+        assert_eq!(
+            result["transcription"]["text"].as_str().unwrap(),
+            "(transcription not available)"
+        );
         // Cleanup
         if let Some(fp) = result["filepath"].as_str() {
             let _ = std::fs::remove_file(fp);
         }
+    }
+
+    #[tokio::test]
+    async fn save_voice_note_writes_transcript_to_file() {
+        let ctx = make_test_context();
+        let result = SaveHandler
+            .handle(
+                Some(json!({"audioBase64": "SGVsbG8gV29ybGQ="})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        let fp = result["filepath"].as_str().unwrap();
+        let content = std::fs::read_to_string(fp).unwrap();
+        assert!(content.contains("(transcription not available)"));
+        assert!(content.contains("type: voice-note"));
+        assert!(content.contains("language: en"));
+        let _ = std::fs::remove_file(fp);
+    }
+
+    #[tokio::test]
+    async fn save_voice_note_invalid_base64() {
+        let ctx = make_test_context();
+        let err = SaveHandler
+            .handle(
+                Some(json!({"audioBase64": "!!!not-valid!!!"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     #[tokio::test]

@@ -144,6 +144,43 @@ async fn resolve_response(
     }
 }
 
+/// Stub provider for when no LLM authentication is configured.
+/// All stream calls return `GatewayError::AuthenticationFailed`.
+pub struct NoAuthProvider;
+
+#[async_trait]
+impl LlmProvider for NoAuthProvider {
+    fn name(&self) -> &str {
+        "no-auth"
+    }
+
+    fn model(&self) -> &str {
+        "none"
+    }
+
+    fn context_window(&self) -> usize {
+        0
+    }
+
+    fn supports_thinking(&self) -> bool {
+        false
+    }
+
+    fn supports_tools(&self) -> bool {
+        false
+    }
+
+    async fn stream(
+        &self,
+        _context: &LlmContext,
+        _options: &StreamOptions,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamEvent> + Send>>, GatewayError> {
+        Err(GatewayError::AuthenticationFailed(
+            "No LLM authentication configured — run OAuth setup first".into(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +286,19 @@ mod tests {
             events.push(event);
         }
         assert_eq!(events.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn no_auth_provider_returns_auth_error() {
+        let provider = NoAuthProvider;
+        let context = LlmContext::empty();
+        let result = provider.stream(&context, &StreamOptions::default()).await;
+        assert!(matches!(
+            result,
+            Err(GatewayError::AuthenticationFailed(_))
+        ));
+        assert_eq!(provider.name(), "no-auth");
+        assert_eq!(provider.model(), "none");
     }
 
     #[tokio::test]

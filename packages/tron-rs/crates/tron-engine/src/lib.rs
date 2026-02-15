@@ -5,3 +5,4 @@ pub mod registry;
 pub mod runner;
 pub mod subagent;
 pub mod tools;
+pub mod truncate;

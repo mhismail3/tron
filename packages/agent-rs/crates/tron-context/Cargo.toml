@@ -14,6 +14,7 @@ tron-core.workspace = true
 tron-llm.workspace = true
 tron-settings.workspace = true
 async-trait.workspace = true
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

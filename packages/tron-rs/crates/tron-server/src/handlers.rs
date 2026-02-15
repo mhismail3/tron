@@ -5,13 +5,17 @@ use std::sync::Arc;
 use tron_core::ids::{SessionId, WorkspaceId};
 use tron_store::sessions::SessionStatus;
 use tron_store::Database;
+use tron_telemetry::TelemetryGuard;
 
+use crate::orchestrator::{AgentOrchestrator, PromptParams};
 use crate::rpc::{self, RpcResponse};
 
 /// Shared state available to all RPC handlers.
 pub struct HandlerState {
     pub db: Database,
     pub default_workspace_id: WorkspaceId,
+    pub telemetry: Option<Arc<TelemetryGuard>>,
+    pub orchestrator: Option<Arc<dyn AgentOrchestrator>>,
 }
 
 impl HandlerState {
@@ -19,7 +23,27 @@ impl HandlerState {
         Self {
             db,
             default_workspace_id,
+            telemetry: None,
+            orchestrator: None,
         }
+    }
+
+    pub fn with_telemetry(
+        db: Database,
+        default_workspace_id: WorkspaceId,
+        telemetry: Arc<TelemetryGuard>,
+    ) -> Self {
+        Self {
+            db,
+            default_workspace_id,
+            telemetry: Some(telemetry),
+            orchestrator: None,
+        }
+    }
+
+    pub fn with_orchestrator(mut self, orchestrator: Arc<dyn AgentOrchestrator>) -> Self {
+        self.orchestrator = Some(orchestrator);
+        self
     }
 }
 
@@ -32,9 +56,9 @@ pub async fn dispatch(
 ) -> RpcResponse {
     match method {
         // Agent (engine-dependent)
-        "agent.message" => agent_message(id),
-        "agent.abort" => agent_abort(id),
-        "agent.state" => agent_state(id),
+        "agent.message" => agent_message(state, params, id).await,
+        "agent.abort" => agent_abort(state, params, id),
+        "agent.state" => agent_state(state, params, id),
 
         // Session
         "session.create" => session_create(state, params, id),
@@ -87,6 +111,10 @@ pub async fn dispatch(
         // Device (deferred)
         "device.register" => device_register(params, id),
 
+        // Telemetry
+        "telemetry.logs" => telemetry_logs(state, params, id),
+        "telemetry.metrics" => telemetry_metrics(state, params, id),
+
         // Health (via RPC)
         "health" => health(state, id),
 
@@ -94,26 +122,100 @@ pub async fn dispatch(
     }
 }
 
-// ── Agent handlers (engine-dependent, queued) ──
+// ── Agent handlers (wired to orchestrator) ──
 
-fn agent_message(id: Option<serde_json::Value>) -> RpcResponse {
-    // Will be wired to the engine's message queue when agent lifecycle is connected.
-    // For now, acknowledge receipt.
-    RpcResponse::success(id, serde_json::json!({"queued": true}))
+async fn agent_message(
+    state: &Arc<HandlerState>,
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let Some(ref orchestrator) = state.orchestrator else {
+        return RpcResponse::internal_error(id, "Agent orchestrator not configured");
+    };
+
+    let session_id = match rpc::require_str(params, "session_id") {
+        Ok(s) => SessionId::from_raw(s),
+        Err(e) => return RpcResponse::invalid_params(id, e),
+    };
+
+    let prompt = match rpc::require_str(params, "prompt") {
+        Ok(p) => p.to_string(),
+        Err(e) => return RpcResponse::invalid_params(id, e),
+    };
+
+    match orchestrator
+        .prompt(PromptParams {
+            session_id,
+            prompt,
+            workspace_id: state.default_workspace_id.clone(),
+        })
+        .await
+    {
+        Ok(result) => RpcResponse::success(
+            id,
+            serde_json::json!({
+                "acknowledged": true,
+                "runId": result.run_id,
+            }),
+        ),
+        Err(e) => RpcResponse::internal_error(id, e.to_string()),
+    }
 }
 
-fn agent_abort(id: Option<serde_json::Value>) -> RpcResponse {
-    // Will cancel the active agent run via CancellationToken.
-    RpcResponse::success(id, serde_json::json!({"aborted": true}))
+fn agent_abort(
+    state: &Arc<HandlerState>,
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let Some(ref orchestrator) = state.orchestrator else {
+        return RpcResponse::internal_error(id, "Agent orchestrator not configured");
+    };
+
+    let session_id = match rpc::require_str(params, "session_id") {
+        Ok(s) => SessionId::from_raw(s),
+        Err(e) => return RpcResponse::invalid_params(id, e),
+    };
+
+    let aborted = orchestrator.abort(&session_id);
+    RpcResponse::success(id, serde_json::json!({"aborted": aborted}))
 }
 
-fn agent_state(id: Option<serde_json::Value>) -> RpcResponse {
-    // Returns current agent state (idle, running, etc.)
-    RpcResponse::success(id, serde_json::json!({
-        "status": "idle",
-        "active_session": null,
-        "current_turn": 0,
-    }))
+fn agent_state(
+    state: &Arc<HandlerState>,
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let Some(ref orchestrator) = state.orchestrator else {
+        return RpcResponse::success(
+            id,
+            serde_json::json!({
+                "status": "idle",
+                "isRunning": false,
+                "currentTurn": 0,
+            }),
+        );
+    };
+
+    let session_id = match rpc::require_str(params, "session_id") {
+        Ok(s) => SessionId::from_raw(s),
+        Err(e) => return RpcResponse::invalid_params(id, e),
+    };
+
+    let agent_state = orchestrator.state(&session_id);
+    let status = if agent_state.is_running {
+        "running"
+    } else {
+        "idle"
+    };
+
+    RpcResponse::success(
+        id,
+        serde_json::json!({
+            "status": status,
+            "isRunning": agent_state.is_running,
+            "currentTurn": agent_state.current_turn,
+        }),
+    )
 }
 
 // ── Session handlers ──
@@ -129,7 +231,10 @@ fn session_create(
 
     let repo = tron_store::sessions::SessionRepo::new(state.db.clone());
     match repo.create(&state.default_workspace_id, model, provider, working_dir) {
-        Ok(session) => RpcResponse::success(id, serde_json::to_value(session).unwrap()),
+        Ok(session) => match serde_json::to_value(session) {
+            Ok(v) => RpcResponse::success(id, v),
+            Err(e) => RpcResponse::internal_error(id, format!("serialization failed: {e}")),
+        },
         Err(e) => RpcResponse::internal_error(id, e.to_string()),
     }
 }
@@ -173,7 +278,10 @@ fn session_get(
 
     let repo = tron_store::sessions::SessionRepo::new(state.db.clone());
     match repo.get(&session_id) {
-        Ok(session) => RpcResponse::success(id, serde_json::to_value(session).unwrap()),
+        Ok(session) => match serde_json::to_value(session) {
+            Ok(v) => RpcResponse::success(id, v),
+            Err(e) => RpcResponse::internal_error(id, format!("serialization failed: {e}")),
+        },
         Err(e) => RpcResponse::internal_error(id, e.to_string()),
     }
 }
@@ -439,7 +547,10 @@ fn memory_add(
         tokens,
         tron_store::memory::MemorySource::Manual,
     ) {
-        Ok(entry) => RpcResponse::success(id, serde_json::to_value(entry).unwrap()),
+        Ok(entry) => match serde_json::to_value(entry) {
+            Ok(v) => RpcResponse::success(id, v),
+            Err(e) => RpcResponse::internal_error(id, format!("serialization failed: {e}")),
+        },
         Err(e) => RpcResponse::internal_error(id, e.to_string()),
     }
 }
@@ -493,9 +604,17 @@ fn settings_update(
     // Persist to disk
     let settings_path = settings_file_path();
     if let Some(parent) = settings_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return RpcResponse::internal_error(
+                id,
+                format!("Failed to create settings directory: {e}"),
+            );
+        }
     }
-    match std::fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap_or_default()) {
+    match std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).unwrap_or_default(),
+    ) {
         Ok(_) => RpcResponse::success(id, settings),
         Err(e) => RpcResponse::internal_error(id, format!("Failed to save settings: {e}")),
     }
@@ -508,16 +627,25 @@ fn settings_file_path() -> std::path::PathBuf {
 
 fn load_settings() -> serde_json::Value {
     let path = settings_file_path();
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| {
-            serde_json::json!({
-                "model": "claude-sonnet-4-5-20250929",
-                "provider": "anthropic",
-                "theme": "dark",
-            })
-        })
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => match serde_json::from_str(&contents) {
+            Ok(v) => return v,
+            Err(e) => tracing::info!(error = %e, "Settings file corrupted, using defaults"),
+        },
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!(error = %e, "Failed to read settings file, using defaults");
+        }
+        _ => {} // NotFound is expected on first run
+    }
+    default_settings()
+}
+
+fn default_settings() -> serde_json::Value {
+    serde_json::json!({
+        "model": "claude-sonnet-4-5-20250929",
+        "provider": "anthropic",
+        "theme": "dark",
+    })
 }
 
 // ── Model handlers ──
@@ -571,9 +699,22 @@ fn model_switch(
     }
     let settings_path = settings_file_path();
     if let Some(parent) = settings_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return RpcResponse::internal_error(
+                id,
+                format!("Failed to create settings directory: {e}"),
+            );
+        }
     }
-    let _ = std::fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap_or_default());
+    if let Err(e) = std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).unwrap_or_default(),
+    ) {
+        return RpcResponse::internal_error(
+            id,
+            format!("Failed to persist model switch: {e}"),
+        );
+    }
 
     RpcResponse::success(id, serde_json::json!({
         "model": model_name,
@@ -667,14 +808,136 @@ fn device_register(
     }))
 }
 
+// ── Telemetry handlers ──
+
+fn telemetry_logs(
+    state: &Arc<HandlerState>,
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let Some(ref telemetry) = state.telemetry else {
+        return RpcResponse::success(id, serde_json::json!({
+            "logs": [],
+            "totalCount": 0,
+            "enabled": false,
+        }));
+    };
+
+    let Some(log_sink) = telemetry.logs() else {
+        return RpcResponse::success(id, serde_json::json!({
+            "logs": [],
+            "totalCount": 0,
+            "enabled": false,
+        }));
+    };
+
+    let level = rpc::optional_str(params, "level");
+    let target = rpc::optional_str(params, "target").map(|s| s.to_string());
+    let session_id = rpc::optional_str(params, "session_id").map(|s| s.to_string());
+    let since = rpc::optional_str(params, "since").map(|s| s.to_string());
+    let limit = rpc::optional_i64(params, "limit").map(|v| v as u32);
+
+    let query = tron_telemetry::LogQuery {
+        level: level.and_then(|l| l.parse().ok()),
+        target,
+        session_id,
+        since,
+        limit,
+    };
+
+    match log_sink.query(&query) {
+        Ok(records) => {
+            let count = records.len();
+            let logs: Vec<serde_json::Value> = records
+                .into_iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.id,
+                        "timestamp": r.timestamp,
+                        "level": r.level,
+                        "target": r.target,
+                        "message": r.message,
+                        "fields": r.fields,
+                        "session_id": r.session_id,
+                        "agent_id": r.agent_id,
+                    })
+                })
+                .collect();
+            RpcResponse::success(id, serde_json::json!({
+                "logs": logs,
+                "totalCount": count,
+                "enabled": true,
+            }))
+        }
+        Err(e) => RpcResponse::internal_error(id, format!("Failed to query logs: {e}")),
+    }
+}
+
+fn telemetry_metrics(
+    state: &Arc<HandlerState>,
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let Some(ref telemetry) = state.telemetry else {
+        return RpcResponse::success(id, serde_json::json!({
+            "metrics": [],
+            "totalCount": 0,
+            "enabled": false,
+        }));
+    };
+
+    let Some(metrics) = telemetry.metrics() else {
+        return RpcResponse::success(id, serde_json::json!({
+            "metrics": [],
+            "totalCount": 0,
+            "enabled": false,
+        }));
+    };
+
+    let name = rpc::optional_str(params, "name").map(|s| s.to_string());
+    let since = rpc::optional_str(params, "since").map(|s| s.to_string());
+    let limit = rpc::optional_i64(params, "limit").map(|v| v as u32);
+
+    let query = tron_telemetry::MetricsQuery {
+        name,
+        since,
+        labels: None,
+        limit,
+    };
+
+    match metrics.query(&query) {
+        Ok(snapshots) => {
+            let count = snapshots.len();
+            let items: Vec<serde_json::Value> = snapshots
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "id": s.id,
+                        "timestamp": s.timestamp,
+                        "name": s.name,
+                        "value": s.value,
+                        "labels": s.labels,
+                        "metric_type": format!("{:?}", s.metric_type),
+                    })
+                })
+                .collect();
+            RpcResponse::success(id, serde_json::json!({
+                "metrics": items,
+                "totalCount": count,
+                "enabled": true,
+            }))
+        }
+        Err(e) => RpcResponse::internal_error(id, format!("Failed to query metrics: {e}")),
+    }
+}
+
 // ── Health handlers ──
 
 fn health(state: &Arc<HandlerState>, id: Option<serde_json::Value>) -> RpcResponse {
     let db_ok = state
         .db
         .with_conn(|conn| {
-            conn.execute_batch("SELECT 1")
-                .map_err(|e| tron_store::StoreError::Database(e.to_string()))?;
+            conn.execute_batch("SELECT 1")?;
             Ok(true)
         })
         .unwrap_or(false);
@@ -912,26 +1175,173 @@ mod tests {
         assert!(resp.result.unwrap()["model"].as_str().is_some());
     }
 
-    #[tokio::test]
-    async fn agent_message_queues() {
-        let state = setup();
-        let resp = dispatch(&state, "agent.message", &serde_json::json!({}), Some(serde_json::json!(1))).await;
-        assert!(resp.error.is_none());
-        assert_eq!(resp.result.unwrap()["queued"], true);
+    fn setup_with_orchestrator(
+        orch: crate::orchestrator::tests::MockOrchestrator,
+    ) -> Arc<HandlerState> {
+        let db = Database::in_memory().unwrap();
+        let ws_repo = WorkspaceRepo::new(db.clone());
+        let ws = ws_repo.get_or_create("/test", "test").unwrap();
+        Arc::new(
+            HandlerState::new(db, ws.id)
+                .with_orchestrator(Arc::new(orch)),
+        )
     }
 
     #[tokio::test]
-    async fn agent_abort_succeeds() {
-        let state = setup();
-        let resp = dispatch(&state, "agent.abort", &serde_json::json!({}), Some(serde_json::json!(1))).await;
+    async fn agent_message_validates_session_id_required() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::new(),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.message",
+            &serde_json::json!({"prompt": "hi"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert_eq!(resp.error.unwrap().code, rpc::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn agent_message_validates_prompt_required() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::new(),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.message",
+            &serde_json::json!({"session_id": "sess_123"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert_eq!(resp.error.unwrap().code, rpc::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn agent_message_returns_acknowledged_and_run_id() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::new(),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.message",
+            &serde_json::json!({"session_id": "sess_123", "prompt": "hello"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["acknowledged"], true);
+        assert!(result["runId"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn agent_message_returns_error_from_orchestrator() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::with_prompt_error("session not found"),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.message",
+            &serde_json::json!({"session_id": "sess_123", "prompt": "hello"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn agent_message_no_orchestrator_returns_error() {
+        let state = setup(); // No orchestrator configured
+        let resp = dispatch(
+            &state,
+            "agent.message",
+            &serde_json::json!({"session_id": "sess_123", "prompt": "hello"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn agent_abort_returns_result() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::new(),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.abort",
+            &serde_json::json!({"session_id": "sess_123"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
         assert!(resp.error.is_none());
         assert_eq!(resp.result.unwrap()["aborted"], true);
     }
 
     #[tokio::test]
-    async fn agent_state_returns_idle() {
-        let state = setup();
-        let resp = dispatch(&state, "agent.state", &serde_json::json!({}), Some(serde_json::json!(1))).await;
+    async fn agent_abort_requires_session_id() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::new(),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.abort",
+            &serde_json::json!({}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert_eq!(resp.error.unwrap().code, rpc::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn agent_state_returns_idle_when_no_run() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::new(),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.state",
+            &serde_json::json!({"session_id": "sess_123"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["status"], "idle");
+        assert_eq!(result["isRunning"], false);
+        assert_eq!(result["currentTurn"], 0);
+    }
+
+    #[tokio::test]
+    async fn agent_state_returns_running_during_active_run() {
+        let state = setup_with_orchestrator(
+            crate::orchestrator::tests::MockOrchestrator::with_running_state(3),
+        );
+        let resp = dispatch(
+            &state,
+            "agent.state",
+            &serde_json::json!({"session_id": "sess_123"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["status"], "running");
+        assert_eq!(result["isRunning"], true);
+        assert_eq!(result["currentTurn"], 3);
+    }
+
+    #[tokio::test]
+    async fn agent_state_no_orchestrator_returns_idle() {
+        let state = setup(); // No orchestrator
+        let resp = dispatch(
+            &state,
+            "agent.state",
+            &serde_json::json!({}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
         assert!(resp.error.is_none());
         assert_eq!(resp.result.unwrap()["status"], "idle");
     }
@@ -1023,5 +1433,76 @@ mod tests {
         let state = setup();
         let resp = dispatch(&state, "skill.list", &serde_json::json!({}), Some(serde_json::json!(1))).await;
         assert_eq!(resp.result.unwrap()["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_logs_disabled_returns_empty() {
+        let state = setup(); // No telemetry configured
+        let resp = dispatch(
+            &state,
+            "telemetry.logs",
+            &serde_json::json!({}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["enabled"], false);
+        assert_eq!(result["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_metrics_disabled_returns_empty() {
+        let state = setup(); // No telemetry configured
+        let resp = dispatch(
+            &state,
+            "telemetry.metrics",
+            &serde_json::json!({}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["enabled"], false);
+        assert_eq!(result["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_logs_with_filters() {
+        let state = setup();
+        let resp = dispatch(
+            &state,
+            "telemetry.logs",
+            &serde_json::json!({
+                "level": "warn",
+                "target": "tron_store",
+                "limit": 10,
+            }),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["enabled"], false); // No telemetry guard in test setup
+        assert_eq!(result["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_metrics_with_filters() {
+        let state = setup();
+        let resp = dispatch(
+            &state,
+            "telemetry.metrics",
+            &serde_json::json!({
+                "name": "llm.request",
+                "limit": 5,
+            }),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["enabled"], false);
+        assert_eq!(result["totalCount"], 0);
     }
 }

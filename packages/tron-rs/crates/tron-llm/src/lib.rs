@@ -9,5 +9,6 @@ pub mod sse;
 
 pub mod mock;
 
+pub use mock::NoAuthProvider;
 pub use provider::AnthropicProvider;
 pub use reliable::ReliableProvider;
