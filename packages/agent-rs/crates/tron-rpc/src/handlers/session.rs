@@ -192,7 +192,7 @@ impl MethodHandler for ForkSessionHandler {
             .and_then(|p| p.get("title"))
             .and_then(|v| v.as_str());
 
-        let fork_id = ctx
+        let fork_result = ctx
             .session_manager
             .fork_session(&session_id, None, title)
             .map_err(|e| RpcError::NotFound {
@@ -202,14 +202,14 @@ impl MethodHandler for ForkSessionHandler {
 
         let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionForked {
             base: BaseEvent::now(&session_id),
-            new_session_id: fork_id.clone(),
+            new_session_id: fork_result.new_session_id.clone(),
         });
 
         Ok(serde_json::json!({
-            "newSessionId": fork_id,
+            "newSessionId": fork_result.new_session_id,
             "forkedFromSessionId": session_id,
-            "forkedFromEventId": null,
-            "rootEventId": null,
+            "forkedFromEventId": fork_result.forked_from_event_id,
+            "rootEventId": fork_result.root_event_id,
         }))
     }
 }
@@ -281,10 +281,14 @@ impl MethodHandler for GetStateHandler {
             "turnCount": active.state.turn_count,
             "isEnded": active.state.is_ended,
             "workingDirectory": active.state.working_directory,
+            "workspaceId": session.working_directory,
             "eventCount": event_count,
+            "lastTurnInputTokens": session.last_turn_input_tokens,
             "tokenUsage": {
                 "inputTokens": active.state.token_usage.input_tokens,
                 "outputTokens": active.state.token_usage.output_tokens,
+                "cacheReadTokens": session.total_cache_read_tokens,
+                "cacheCreationTokens": session.total_cache_creation_tokens,
             },
         }))
     }
@@ -346,8 +350,10 @@ impl MethodHandler for GetHistoryHandler {
                 message: format!("Session '{session_id}' not found"),
             })?;
 
-        // Get message-type events
-        let message_types = ["message.user", "message.assistant", "message.tool_call", "message.tool_result"];
+        // Get message-type events.
+        // Tool calls are embedded as tool_use content blocks inside message.assistant events.
+        // Tool results are persisted as "tool.result" events (NOT "message.tool_result").
+        let message_types = ["message.user", "message.assistant", "tool.result"];
         let type_strs: Vec<&str> = message_types.to_vec();
         let events = ctx
             .event_store
@@ -384,8 +390,8 @@ impl MethodHandler for GetHistoryHandler {
             .map(|e| {
                 let role = match e.event_type.as_str() {
                     "message.user" => "user",
-                    "message.assistant" | "message.tool_call" => "assistant",
-                    "message.tool_result" => "tool",
+                    "message.assistant" => "assistant",
+                    "tool.result" => "tool",
                     _ => "unknown",
                 };
                 let content = serde_json::from_str::<Value>(&e.payload)
@@ -398,6 +404,16 @@ impl MethodHandler for GetHistoryHandler {
                 });
                 if let Some(ref tool_name) = e.tool_name {
                     msg["toolUse"] = serde_json::json!({ "name": tool_name });
+                }
+                // Hoist toolCallId and isError from content to message level
+                // for tool.result messages (iOS expects them at top level)
+                if e.event_type == "tool.result" {
+                    if let Some(tc_id) = content.get("toolCallId") {
+                        msg["toolCallId"] = tc_id.clone();
+                    }
+                    if let Some(is_err) = content.get("isError") {
+                        msg["isError"] = is_err.clone();
+                    }
                 }
                 msg
             })
@@ -641,7 +657,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fork_returns_no_worktree() {
+    async fn fork_returns_event_ids() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
@@ -652,7 +668,11 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        assert!(result.get("worktree").is_none());
+        // forkedFromEventId and rootEventId should be real strings, not null
+        assert!(result["forkedFromEventId"].is_string(), "forkedFromEventId should be a string, got: {}", result["forkedFromEventId"]);
+        assert!(result["rootEventId"].is_string(), "rootEventId should be a string, got: {}", result["rootEventId"]);
+        assert!(!result["forkedFromEventId"].as_str().unwrap().is_empty());
+        assert!(!result["rootEventId"].as_str().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -694,6 +714,70 @@ mod tests {
             .unwrap();
         assert_eq!(result["model"], "my-model");
         assert_eq!(result["turnCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn get_state_has_workspace_id() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp/workspace", Some("t"))
+            .unwrap();
+
+        let result = GetStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["workspaceId"], "/tmp/workspace");
+    }
+
+    #[tokio::test]
+    async fn get_state_has_cache_read_tokens() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = GetStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["tokenUsage"]["cacheReadTokens"].is_number());
+    }
+
+    #[tokio::test]
+    async fn get_state_has_cache_creation_tokens() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = GetStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["tokenUsage"]["cacheCreationTokens"].is_number());
+    }
+
+    #[tokio::test]
+    async fn get_state_token_usage_complete() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = GetStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let tu = &result["tokenUsage"];
+        assert!(tu["inputTokens"].is_number());
+        assert!(tu["outputTokens"].is_number());
+        assert!(tu["cacheReadTokens"].is_number());
+        assert!(tu["cacheCreationTokens"].is_number());
     }
 
     #[tokio::test]
@@ -961,5 +1045,145 @@ mod tests {
         assert_eq!(msg["role"], "user");
         assert!(msg["content"].is_object());
         assert!(msg["timestamp"].is_string());
+    }
+
+    #[tokio::test]
+    async fn get_history_tool_result_has_tool_call_id_at_top() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolResult,
+            payload: json!({"toolCallId": "tc1", "content": "result data", "isError": false}),
+            parent_id: None,
+        }).unwrap();
+
+        let result = GetHistoryHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let msg = &result["messages"][0];
+        assert_eq!(msg["toolCallId"], "tc1", "toolCallId should be hoisted to message level");
+    }
+
+    #[tokio::test]
+    async fn get_history_tool_result_content_preserved() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolResult,
+            payload: json!({"toolCallId": "tc1", "content": "file contents", "isError": false}),
+            parent_id: None,
+        }).unwrap();
+
+        let result = GetHistoryHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let msg = &result["messages"][0];
+        assert_eq!(msg["content"]["content"], "file contents");
+    }
+
+    #[tokio::test]
+    async fn get_history_tool_result_has_is_error() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolResult,
+            payload: json!({"toolCallId": "tc1", "content": "error msg", "isError": true}),
+            parent_id: None,
+        }).unwrap();
+
+        let result = GetHistoryHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let msg = &result["messages"][0];
+        assert_eq!(msg["isError"], true, "isError should be hoisted to message level");
+    }
+
+    #[tokio::test]
+    async fn get_history_assistant_latency_preserved() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "hello"}],
+                "latency": 1234
+            }),
+            parent_id: None,
+        }).unwrap();
+
+        let result = GetHistoryHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let msg = &result["messages"][0];
+        assert_eq!(msg["content"]["latency"], 1234, "latency should be preserved in content");
+    }
+
+    #[tokio::test]
+    async fn get_history_includes_tool_results() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // User message
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "read a file"}),
+            parent_id: None,
+        }).unwrap();
+
+        // Assistant message with tool_use block
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({"content": [{"type": "tool_use", "id": "tc1", "name": "Read", "input": {"path": "/tmp/test"}}]}),
+            parent_id: None,
+        }).unwrap();
+
+        // Tool result (persisted as tool.result)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::ToolResult,
+            payload: json!({"toolCallId": "tc1", "content": "file contents here", "isError": false}),
+            parent_id: None,
+        }).unwrap();
+
+        let result = GetHistoryHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let messages = result["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3, "should include user, assistant, and tool result");
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["content"]["toolCallId"], "tc1");
+        assert_eq!(messages[2]["content"]["content"], "file contents here");
     }
 }

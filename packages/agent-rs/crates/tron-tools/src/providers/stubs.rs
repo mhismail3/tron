@@ -235,6 +235,8 @@ mod tests {
             timeout_ms: 30_000,
             tool_denials: None,
             skills: None,
+            max_depth: 0,
+            current_depth: 0,
         };
         let err = spawner.spawn(config).await;
         assert!(err.is_err());

@@ -69,8 +69,21 @@ impl TronTool for AskUserQuestionTool {
                             "properties": {
                                 "id": {"type": "string"},
                                 "question": {"type": "string"},
-                                "options": {"type": "array", "items": {"type": "string"}},
-                                "mode": {"type": "string", "enum": ["single", "multi"]}
+                                "options": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "label": {"type": "string", "description": "Display text for this option"},
+                                            "value": {"type": "string", "description": "Optional value (defaults to label)"},
+                                            "description": {"type": "string", "description": "Optional explanation of this option"}
+                                        },
+                                        "required": ["label"]
+                                    }
+                                },
+                                "mode": {"type": "string", "enum": ["single", "multi"]},
+                                "allowOther": {"type": "boolean", "description": "Whether to allow a free-text 'Other' option"},
+                                "otherPlaceholder": {"type": "string", "description": "Placeholder text for the Other input"}
                             }
                         }
                     }));
@@ -101,24 +114,46 @@ impl TronTool for AskUserQuestionTool {
             return Ok(error_result(format!("Maximum {MAX_QUESTIONS} questions allowed")));
         }
 
-        // Validate each question has enough options
+        // Validate each question has enough options and all have labels
         for (i, q) in questions.iter().enumerate() {
             let options = q.get("options").and_then(Value::as_array);
             if let Some(opts) = options {
                 if opts.len() < MIN_OPTIONS {
                     return Ok(error_result(format!("Question {} must have at least {MIN_OPTIONS} options", i + 1)));
                 }
+                // Validate that object options have a "label" field
+                for (j, opt) in opts.iter().enumerate() {
+                    if opt.is_object() && opt.get("label").and_then(Value::as_str).is_none() {
+                        return Ok(error_result(format!(
+                            "Question {} option {} is missing required 'label' field",
+                            i + 1, j + 1
+                        )));
+                    }
+                }
             }
         }
 
         let context = get_optional_string(&params, "context");
 
-        // Format summary
+        // Format summary — extract labels from both string and object options
         let mut summary = String::new();
         for (i, q) in questions.iter().enumerate() {
             let text = q.get("question").and_then(Value::as_str).unwrap_or("(no question)");
             let mode = q.get("mode").and_then(Value::as_str).unwrap_or("single");
-            let _ = writeln!(summary, "Q{}: {text} [{mode}]", i + 1);
+            let options_text = q.get("options").and_then(Value::as_array).map(|opts| {
+                opts.iter().filter_map(|o| {
+                    if let Some(s) = o.as_str() {
+                        Some(s.to_string())
+                    } else {
+                        o.get("label").and_then(Value::as_str).map(String::from)
+                    }
+                }).collect::<Vec<_>>().join(", ")
+            }).unwrap_or_default();
+            let _ = write!(summary, "Q{}: {text} [{mode}]", i + 1);
+            if !options_text.is_empty() {
+                let _ = write!(summary, " ({options_text})");
+            }
+            summary.push('\n');
         }
 
         if let Some(ctx) = &context {
@@ -270,5 +305,79 @@ mod tests {
         }), &make_ctx()).await.unwrap();
         let text = extract_text(&r);
         assert!(text.contains("Choose a color"));
+    }
+
+    // ── Object options tests ──
+
+    #[tokio::test]
+    async fn object_options_accepted() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool.execute(json!({
+            "questions": [{"question": "Pick", "options": [{"label": "A"}, {"label": "B"}]}]
+        }), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn object_options_with_description() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool.execute(json!({
+            "questions": [{"question": "Pick", "options": [{"label": "A", "description": "desc"}, {"label": "B"}]}]
+        }), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+        let text = extract_text(&r);
+        assert!(text.contains("A"), "summary should contain option label A: {text}");
+    }
+
+    #[tokio::test]
+    async fn options_missing_label_error() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool.execute(json!({
+            "questions": [{"question": "Pick", "options": [{"value": "x"}, {"label": "B"}]}]
+        }), &make_ctx()).await.unwrap();
+        assert_eq!(r.is_error, Some(true));
+    }
+
+    #[test]
+    fn schema_has_object_options() {
+        let tool = AskUserQuestionTool::new();
+        let def = tool.definition();
+        let props = def.parameters.properties.unwrap();
+        let questions = &props["questions"];
+        let items = &questions["items"];
+        let options_items = &items["properties"]["options"]["items"];
+        assert_eq!(options_items["type"], "object");
+        assert!(options_items["properties"]["label"].is_object());
+    }
+
+    #[test]
+    fn schema_has_allow_other() {
+        let tool = AskUserQuestionTool::new();
+        let def = tool.definition();
+        let props = def.parameters.properties.unwrap();
+        let questions = &props["questions"];
+        let items = &questions["items"];
+        assert_eq!(items["properties"]["allowOther"]["type"], "boolean");
+    }
+
+    #[tokio::test]
+    async fn string_options_backward_compat() {
+        // String options should still work (backward compat)
+        let tool = AskUserQuestionTool::new();
+        let r = tool.execute(json!({
+            "questions": [{"question": "Pick", "options": ["A", "B"]}]
+        }), &make_ctx()).await.unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn summary_contains_option_labels() {
+        let tool = AskUserQuestionTool::new();
+        let r = tool.execute(json!({
+            "questions": [{"question": "Pick color", "options": [{"label": "Red"}, {"label": "Blue"}]}]
+        }), &make_ctx()).await.unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains("Red"), "summary should contain Red: {text}");
+        assert!(text.contains("Blue"), "summary should contain Blue: {text}");
     }
 }

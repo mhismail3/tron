@@ -27,10 +27,10 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
     });
     let m = obj.as_object_mut().unwrap();
     if let Some(cr) = usage.cache_read_tokens {
-        let _ = m.insert("cacheReadInputTokens".into(), json!(cr));
+        let _ = m.insert("cacheReadTokens".into(), json!(cr));
     }
     if let Some(cc) = usage.cache_creation_tokens {
-        let _ = m.insert("cacheCreationInputTokens".into(), json!(cc));
+        let _ = m.insert("cacheCreationTokens".into(), json!(cc));
     }
     obj
 }
@@ -224,8 +224,8 @@ mod tests {
         let json = build_token_usage_json(&usage);
         assert_eq!(json["inputTokens"], 100);
         assert_eq!(json["outputTokens"], 50);
-        assert_eq!(json["cacheReadInputTokens"], 30);
-        assert_eq!(json["cacheCreationInputTokens"], 10);
+        assert_eq!(json["cacheReadTokens"], 30);
+        assert_eq!(json["cacheCreationTokens"], 10);
     }
 
     #[test]
@@ -238,8 +238,8 @@ mod tests {
         let json = build_token_usage_json(&usage);
         assert_eq!(json["inputTokens"], 100);
         assert_eq!(json["outputTokens"], 50);
-        assert!(json.get("cacheReadInputTokens").is_none());
-        assert!(json.get("cacheCreationInputTokens").is_none());
+        assert!(json.get("cacheReadTokens").is_none());
+        assert!(json.get("cacheCreationTokens").is_none());
     }
 
     // ── build_token_record ──────────────────────────────────────────

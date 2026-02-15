@@ -80,6 +80,23 @@ pub fn adapt_skill_list(response: &mut Value) {
     }
 }
 
+/// ADAPTER(tool-compat): Normalize `AskUserQuestion` options from strings to objects.
+///
+/// The LLM may still send string options `["A", "B"]` even though the schema
+/// specifies object items. This normalizes them to `[{"label": "A"}, {"label": "B"}]`
+/// so iOS can always parse structured option objects.
+///
+/// REMOVE: When the schema has been live long enough that LLMs always produce objects.
+pub fn adapt_ask_user_options(options: &mut Value) {
+    if let Some(arr) = options.as_array_mut() {
+        for item in arr.iter_mut() {
+            if let Some(s) = item.as_str().map(String::from) {
+                *item = json!({"label": s});
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,4 +195,34 @@ mod tests {
         assert_eq!(response["totalCount"], 0);
     }
 
+    // --- adapt_ask_user_options ---
+
+    #[test]
+    fn adapt_ask_user_string_options() {
+        let mut options = json!(["A", "B"]);
+        adapt_ask_user_options(&mut options);
+        assert_eq!(options, json!([{"label": "A"}, {"label": "B"}]));
+    }
+
+    #[test]
+    fn adapt_ask_user_object_options_passthrough() {
+        let mut options = json!([{"label": "A"}, {"label": "B"}]);
+        let expected = options.clone();
+        adapt_ask_user_options(&mut options);
+        assert_eq!(options, expected);
+    }
+
+    #[test]
+    fn adapt_ask_user_mixed_options() {
+        let mut options = json!(["A", {"label": "B"}]);
+        adapt_ask_user_options(&mut options);
+        assert_eq!(options, json!([{"label": "A"}, {"label": "B"}]));
+    }
+
+    #[test]
+    fn adapt_ask_user_empty_array() {
+        let mut options = json!([]);
+        adapt_ask_user_options(&mut options);
+        assert_eq!(options, json!([]));
+    }
 }

@@ -105,9 +105,12 @@ fn build_context_manager_for_session(
         cm.set_memory_content(memory);
     }
 
-    // 9. Set API tokens if available (ground truth from last turn)
-    if state.token_usage.input_tokens > 0 {
-        cm.set_api_context_tokens(state.token_usage.input_tokens + state.token_usage.output_tokens);
+    // 9. Set API tokens if available (ground truth from last turn's context window)
+    // Use last_turn_input_tokens from session row (NOT accumulated totals)
+    let last_turn = session.last_turn_input_tokens;
+    if last_turn > 0 {
+        #[allow(clippy::cast_sign_loss)]
+        cm.set_api_context_tokens(last_turn as u64);
     }
 
     Ok(cm)

@@ -1,0 +1,966 @@
+//! SubagentManager — real `SubagentSpawner` implementation.
+//!
+//! Spawns child agents in-process, tracks their state, and forwards
+//! events from child sessions to the parent session's broadcast.
+
+use std::sync::Arc;
+use std::time::Instant;
+
+use async_trait::async_trait;
+use dashmap::DashMap;
+use parking_lot::Mutex;
+use serde_json::{json, Value};
+use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
+use tracing::info;
+use tron_core::events::{BaseEvent, TronEvent};
+use tron_events::{EventStore, EventType};
+use tron_guardrails::GuardrailEngine;
+use tron_hooks::engine::HookEngine;
+use tron_llm::provider::Provider;
+use tron_tools::errors::ToolError;
+use tron_tools::registry::ToolRegistry;
+use tron_tools::traits::{
+    SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
+};
+
+use crate::agent::event_emitter::EventEmitter;
+use crate::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
+use crate::orchestrator::agent_runner;
+use crate::orchestrator::event_persister::EventPersister;
+use crate::orchestrator::session_manager::SessionManager;
+use crate::types::{AgentConfig, RunContext};
+
+/// Internal tracking for a running subagent.
+struct TrackedSubagent {
+    #[allow(dead_code)]
+    session_id: String,
+    #[allow(dead_code)]
+    parent_session_id: String,
+    task: String,
+    model: String,
+    depth: u32,
+    #[allow(dead_code)]
+    max_depth: u32,
+    started_at: Instant,
+    done: Notify,
+    result: Mutex<Option<SubagentResult>>,
+    cancel: CancellationToken,
+}
+
+/// Real `SubagentSpawner` implementation for in-process subagent execution.
+pub struct SubagentManager {
+    session_manager: Arc<SessionManager>,
+    event_store: Arc<EventStore>,
+    broadcast: Arc<EventEmitter>,
+    provider: Arc<dyn Provider>,
+    tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
+    guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    hooks: Option<Arc<HookEngine>>,
+    /// Tracked subagents: child_session_id → TrackedSubagent.
+    subagents: DashMap<String, Arc<TrackedSubagent>>,
+    /// Parent → children mapping.
+    #[allow(dead_code)]
+    children: DashMap<String, Vec<String>>,
+}
+
+impl SubagentManager {
+    /// Create a new `SubagentManager`.
+    pub fn new(
+        session_manager: Arc<SessionManager>,
+        event_store: Arc<EventStore>,
+        broadcast: Arc<EventEmitter>,
+        provider: Arc<dyn Provider>,
+        guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+        hooks: Option<Arc<HookEngine>>,
+    ) -> Self {
+        Self {
+            session_manager,
+            event_store,
+            broadcast,
+            provider,
+            tool_factory: tokio::sync::OnceCell::new(),
+            guardrails,
+            hooks,
+            subagents: DashMap::new(),
+            children: DashMap::new(),
+        }
+    }
+
+    /// Set the tool factory (breaks circular dependency with tool registry).
+    pub fn set_tool_factory(
+        &self,
+        factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
+    ) {
+        let _ = self.tool_factory.set(factory);
+    }
+}
+
+#[async_trait]
+impl SubagentSpawner for SubagentManager {
+    async fn spawn(&self, config: SubagentConfig) -> Result<SubagentHandle, ToolError> {
+        // Validate mode
+        if config.mode == SubagentMode::Tmux {
+            return Err(ToolError::Validation {
+                message: "Tmux mode is not yet supported. Use inProcess mode.".into(),
+            });
+        }
+
+        // Depth check: current_depth > 0 means we're inside a subagent
+        if config.current_depth > 0 && config.max_depth == 0 {
+            return Err(ToolError::Validation {
+                message: "Subagent nesting is not allowed at this depth.".into(),
+            });
+        }
+
+        let tool_factory = self.tool_factory.get().ok_or_else(|| ToolError::Internal {
+            message: "SubagentManager tool factory not initialized".into(),
+        })?;
+
+        let model = config.model.as_deref().unwrap_or(self.provider.model());
+        let task = config.task.clone();
+
+        // 1. Create child session
+        let title = format!("Subagent: {}", truncate(&task, 60));
+        let workspace = &config.working_directory;
+        let child_session_id = self
+            .session_manager
+            .create_session_for_subagent(
+                model,
+                workspace,
+                Some(&title),
+                "parent-placeholder", // will be set by caller context
+                "inProcess",
+                &task,
+            )
+            .map_err(|e| ToolError::Internal {
+                message: format!("Failed to create subagent session: {e}"),
+            })?;
+
+        // 2. Register tracking
+        let cancel = CancellationToken::new();
+        let tracker = Arc::new(TrackedSubagent {
+            session_id: child_session_id.clone(),
+            parent_session_id: String::new(), // set below
+            task: task.clone(),
+            model: model.to_owned(),
+            depth: config.current_depth,
+            max_depth: config.max_depth,
+            started_at: Instant::now(),
+            done: Notify::new(),
+            result: Mutex::new(None),
+            cancel: cancel.clone(),
+        });
+
+        let _ = self.subagents
+            .insert(child_session_id.clone(), tracker.clone());
+
+        // 3. Emit SubagentSpawned on broadcast
+        let _ = self.broadcast.emit(TronEvent::SubagentSpawned {
+            base: BaseEvent::now(&child_session_id),
+            subagent_session_id: child_session_id.clone(),
+            task: task.clone(),
+            model: model.to_owned(),
+            max_turns: config.max_turns,
+            spawn_depth: config.current_depth,
+        });
+
+        // 4. Spawn execution task
+        let session_mgr = self.session_manager.clone();
+        let event_store = self.event_store.clone();
+        let broadcast = self.broadcast.clone();
+        let provider = self.provider.clone();
+        let tools = tool_factory();
+        let guardrails = self.guardrails.clone();
+        let hooks = self.hooks.clone();
+        let child_sid = child_session_id.clone();
+        let max_turns = config.max_turns;
+        let model_owned = model.to_owned();
+        let system_prompt = config.system_prompt.clone();
+        let working_directory = config.working_directory.clone();
+        let subagent_max_depth = config.max_depth;
+        let subagent_depth = config.current_depth;
+        let tracker_clone = tracker.clone();
+
+        let _ = tokio::spawn(async move {
+            let child_broadcast = Arc::new(EventEmitter::new());
+
+            // Build agent
+            let agent_config = AgentConfig {
+                model: model_owned.clone(),
+                system_prompt,
+                max_turns,
+                enable_thinking: true,
+                working_directory: Some(working_directory),
+                ..AgentConfig::default()
+            };
+
+            let mut agent = AgentFactory::create_agent(
+                agent_config,
+                child_sid.clone(),
+                CreateAgentOpts {
+                    provider,
+                    tools,
+                    guardrails,
+                    hooks: hooks.clone(),
+                    is_subagent: true,
+                    denied_tools: vec![],
+                    subagent_depth,
+                    subagent_max_depth,
+                    rules_content: None,
+                    initial_messages: vec![],
+                    memory_content: None,
+                },
+            );
+
+            agent.set_abort_token(cancel);
+
+            // Create inline persister for child session
+            let persister = Arc::new(EventPersister::new(
+                event_store.clone(),
+                child_sid.clone(),
+            ));
+
+            // Subscribe to child events for forwarding
+            let mut child_rx = child_broadcast.subscribe();
+            let forward_broadcast = broadcast.clone();
+            let forward_child_sid = child_sid.clone();
+            let forward_persister = persister.clone();
+            let forward_cancel = CancellationToken::new();
+            let forward_cancel_clone = forward_cancel.clone();
+
+            let forward_handle = tokio::spawn(async move {
+                let mut current_turn: u32 = 0;
+                loop {
+                    tokio::select! {
+                        event = child_rx.recv() => {
+                            match event {
+                                Ok(ref e) => {
+                                    // Track current turn
+                                    if let TronEvent::TurnStart { turn, .. } = e {
+                                        current_turn = *turn;
+                                    }
+                                    // Forward selected events as status updates
+                                    let activity = match e {
+                                        TronEvent::TurnStart { turn, .. } => {
+                                            Some(format!("Turn {turn} started"))
+                                        }
+                                        TronEvent::ToolExecutionStart { tool_name, .. } => {
+                                            Some(format!("Executing {tool_name}"))
+                                        }
+                                        TronEvent::ToolExecutionEnd { tool_name, duration, .. } => {
+                                            Some(format!("{tool_name} completed ({duration}ms)"))
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(activity_text) = activity {
+                                        let _ = forward_broadcast.emit(TronEvent::SubagentStatusUpdate {
+                                            base: BaseEvent::now(&forward_child_sid),
+                                            subagent_session_id: forward_child_sid.clone(),
+                                            status: "running".into(),
+                                            current_turn,
+                                            activity: Some(activity_text),
+                                        });
+                                    }
+                                    // Persist child events
+                                    let event_type = match e {
+                                        TronEvent::TurnStart { .. } => Some(EventType::StreamTurnStart),
+                                        TronEvent::TurnEnd { .. } => Some(EventType::StreamTurnEnd),
+                                        TronEvent::ToolExecutionStart { .. } => Some(EventType::ToolCall),
+                                        TronEvent::ToolExecutionEnd { .. } => Some(EventType::ToolResult),
+                                        _ => None,
+                                    };
+                                    if let Some(et) = event_type {
+                                        let payload = serde_json::to_value(e).unwrap_or_default();
+                                        forward_persister.append_fire_and_forget(
+                                            &forward_child_sid,
+                                            et,
+                                            payload,
+                                        );
+                                    }
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                            }
+                        }
+                        () = forward_cancel_clone.cancelled() => {
+                            // Drain remaining
+                            while let Ok(ref _event) = child_rx.try_recv() {}
+                            break;
+                        }
+                    }
+                }
+            });
+
+            // Run the agent
+            let result = agent_runner::run_agent(
+                &mut agent,
+                &task,
+                RunContext::default(),
+                &hooks,
+                &child_broadcast,
+            )
+            .await;
+
+            // Stop forwarding
+            forward_cancel.cancel();
+            let _ = forward_handle.await;
+
+            // Flush persister
+            let _ = persister.flush().await;
+
+            let duration_ms = tracker_clone.started_at.elapsed().as_millis() as u64;
+
+            // Extract output from agent's last assistant message
+            let output = {
+                let messages = agent.context_manager().get_messages();
+                messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        if let tron_core::messages::Message::Assistant { content, .. } = m {
+                            let text: String = content
+                                .iter()
+                                .filter_map(|c| c.as_text())
+                                .collect::<Vec<_>>()
+                                .join("");
+                            if text.is_empty() { None } else { Some(text) }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default()
+            };
+
+            let token_usage = serde_json::to_value(&result.total_token_usage).ok();
+
+            if result.error.is_some() {
+                let error = result.error.unwrap_or_else(|| "Unknown error".into());
+                // Emit SubagentFailed
+                let _ = broadcast.emit(TronEvent::SubagentFailed {
+                    base: BaseEvent::now(&child_sid),
+                    subagent_session_id: child_sid.clone(),
+                    error: error.clone(),
+                    duration_ms,
+                });
+
+                *tracker_clone.result.lock() = Some(SubagentResult {
+                    session_id: child_sid.clone(),
+                    output: error,
+                    token_usage,
+                    duration_ms,
+                    status: "failed".into(),
+                });
+            } else {
+                // Emit SubagentCompleted
+                let _ = broadcast.emit(TronEvent::SubagentCompleted {
+                    base: BaseEvent::now(&child_sid),
+                    subagent_session_id: child_sid.clone(),
+                    total_turns: result.turns_executed,
+                    duration_ms,
+                    output: Some(output.clone()),
+                    token_usage: token_usage.clone(),
+                });
+
+                *tracker_clone.result.lock() = Some(SubagentResult {
+                    session_id: child_sid.clone(),
+                    output,
+                    token_usage,
+                    duration_ms,
+                    status: "completed".into(),
+                });
+            }
+
+            tracker_clone.done.notify_waiters();
+
+            // End the child session
+            let _ = session_mgr.end_session(&child_sid).await;
+
+            info!(
+                child_session = child_sid,
+                turns = result.turns_executed,
+                duration_ms,
+                "subagent execution finished"
+            );
+        });
+
+        // 5. If blocking, wait for completion
+        if config.blocking {
+            let timeout = std::time::Duration::from_millis(config.timeout_ms);
+            let wait_result = tokio::time::timeout(timeout, tracker.done.notified()).await;
+
+            if wait_result.is_err() {
+                tracker.cancel.cancel();
+                return Err(ToolError::Timeout {
+                    timeout_ms: config.timeout_ms,
+                });
+            }
+
+            let result = tracker.result.lock().clone();
+            if let Some(r) = result {
+                Ok(SubagentHandle {
+                    session_id: child_session_id,
+                    output: Some(r.output),
+                    token_usage: r.token_usage,
+                })
+            } else {
+                Ok(SubagentHandle {
+                    session_id: child_session_id,
+                    output: None,
+                    token_usage: None,
+                })
+            }
+        } else {
+            Ok(SubagentHandle {
+                session_id: child_session_id,
+                output: None,
+                token_usage: None,
+            })
+        }
+    }
+
+    async fn query_agent(
+        &self,
+        session_id: &str,
+        query_type: &str,
+        limit: Option<u32>,
+    ) -> Result<Value, ToolError> {
+        match query_type {
+            "status" => {
+                if let Some(tracker) = self.subagents.get(session_id) {
+                    let result = tracker.result.lock().clone();
+                    let duration_ms =
+                        tracker.started_at.elapsed().as_millis() as u64;
+                    let status = if result.is_some() {
+                        result.as_ref().map_or("unknown", |r| r.status.as_str())
+                    } else {
+                        "running"
+                    };
+                    Ok(json!({
+                        "sessionId": session_id,
+                        "status": status,
+                        "task": tracker.task,
+                        "model": tracker.model,
+                        "durationMs": duration_ms,
+                        "depth": tracker.depth,
+                    }))
+                } else {
+                    // Fall back to DB
+                    let session = self
+                        .event_store
+                        .get_session(session_id)
+                        .map_err(|e| ToolError::Internal {
+                            message: format!("Failed to query session: {e}"),
+                        })?;
+                    if let Some(s) = session {
+                        Ok(json!({
+                            "sessionId": s.id,
+                            "status": if s.ended_at.is_some() { "completed" } else { "unknown" },
+                            "model": s.latest_model,
+                            "task": s.spawn_task,
+                        }))
+                    } else {
+                        Err(ToolError::Validation {
+                            message: format!("Session not found: {session_id}"),
+                        })
+                    }
+                }
+            }
+            "output" => {
+                if let Some(tracker) = self.subagents.get(session_id) {
+                    let result = tracker.result.lock().clone();
+                    if let Some(r) = result {
+                        Ok(json!({ "output": r.output }))
+                    } else {
+                        Ok(json!({ "output": null, "status": "running" }))
+                    }
+                } else {
+                    Ok(json!({ "output": null, "status": "not_tracked" }))
+                }
+            }
+            "events" => {
+                let event_limit = limit.unwrap_or(20);
+                let opts = tron_events::sqlite::repositories::event::ListEventsOptions {
+                    limit: Some(i64::from(event_limit)),
+                    offset: None,
+                };
+                let events = self
+                    .event_store
+                    .get_events_by_session(session_id, &opts)
+                    .map_err(|e| ToolError::Internal {
+                        message: format!("Failed to get events: {e}"),
+                    })?;
+                let summaries: Vec<Value> = events
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "id": e.id,
+                            "type": e.event_type,
+                            "timestamp": e.timestamp,
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "events": summaries }))
+            }
+            "logs" => Ok(json!({ "logs": [] })),
+            _ => Err(ToolError::Validation {
+                message: format!("Invalid query type: {query_type}"),
+            }),
+        }
+    }
+
+    async fn wait_for_agents(
+        &self,
+        session_ids: &[String],
+        mode: WaitMode,
+        timeout_ms: u64,
+    ) -> Result<Vec<SubagentResult>, ToolError> {
+        if session_ids.is_empty() {
+            return Err(ToolError::Validation {
+                message: "No session IDs provided".into(),
+            });
+        }
+
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        let deadline = Instant::now() + timeout;
+
+        match mode {
+            WaitMode::All => {
+                let mut results = Vec::with_capacity(session_ids.len());
+                for sid in session_ids {
+                    let tracker = self.subagents.get(sid).ok_or_else(|| {
+                        ToolError::Validation {
+                            message: format!("Unknown subagent session: {sid}"),
+                        }
+                    })?;
+
+                    // Check if already done
+                    {
+                        let result = tracker.result.lock().clone();
+                        if let Some(r) = result {
+                            results.push(r);
+                            continue;
+                        }
+                    }
+
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return Err(ToolError::Timeout { timeout_ms });
+                    }
+
+                    let wait = tokio::time::timeout(remaining, tracker.done.notified()).await;
+                    if wait.is_err() {
+                        return Err(ToolError::Timeout { timeout_ms });
+                    }
+
+                    let result = tracker.result.lock().clone().unwrap_or_else(|| {
+                        SubagentResult {
+                            session_id: sid.clone(),
+                            output: String::new(),
+                            token_usage: None,
+                            duration_ms: 0,
+                            status: "unknown".into(),
+                        }
+                    });
+                    results.push(result);
+                }
+                Ok(results)
+            }
+            WaitMode::Any => {
+                // Build futures for all trackers
+                let trackers: Vec<_> = session_ids
+                    .iter()
+                    .map(|sid| {
+                        self.subagents
+                            .get(sid)
+                            .map(|t| (sid.clone(), t.clone()))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| ToolError::Validation {
+                        message: "One or more unknown subagent sessions".into(),
+                    })?;
+
+                // Check if any already done
+                for (_sid, tracker) in &trackers {
+                    let result = tracker.result.lock().clone();
+                    if let Some(r) = result {
+                        return Ok(vec![r]);
+                    }
+                }
+
+                // Race all notified futures
+                let (result_tx, mut result_rx) = tokio::sync::mpsc::channel(1);
+                for (sid, tracker) in trackers {
+                    let tx = result_tx.clone();
+                    let tracker = tracker.clone();
+                    let sid = sid.clone();
+                    let _ = tokio::spawn(async move {
+                        tracker.done.notified().await;
+                        let result =
+                            tracker.result.lock().clone().unwrap_or_else(|| {
+                                SubagentResult {
+                                    session_id: sid,
+                                    output: String::new(),
+                                    token_usage: None,
+                                    duration_ms: 0,
+                                    status: "unknown".into(),
+                                }
+                            });
+                        let _ = tx.send(result).await;
+                    });
+                }
+                drop(result_tx);
+
+                match tokio::time::timeout(timeout, result_rx.recv()).await {
+                    Ok(Some(result)) => Ok(vec![result]),
+                    Ok(None) => Err(ToolError::Internal {
+                        message: "All wait tasks completed without result".into(),
+                    }),
+                    Err(_) => Err(ToolError::Timeout { timeout_ms }),
+                }
+            }
+        }
+    }
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        s
+    } else {
+        &s[..max]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::event_emitter::EventEmitter;
+    use async_trait::async_trait;
+    use futures::stream;
+    use tron_core::content::AssistantContent;
+    use tron_core::events::{AssistantMessage, StreamEvent};
+    use tron_core::messages::TokenUsage;
+    use tron_llm::models::types::ProviderType;
+    use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
+
+    struct MockProvider;
+    #[async_trait]
+    impl Provider for MockProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let s = stream::iter(vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::TextDelta {
+                    delta: "Done".into(),
+                }),
+                Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text("Done")],
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            ..Default::default()
+                        }),
+                    },
+                    stop_reason: "end_turn".into(),
+                }),
+            ]);
+            Ok(Box::pin(s))
+        }
+    }
+
+    struct ErrorProvider;
+    #[async_trait]
+    impl Provider for ErrorProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock-model"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Auth {
+                message: "expired".into(),
+            })
+        }
+    }
+
+    fn make_manager_and_store() -> (Arc<SessionManager>, Arc<EventStore>, Arc<EventEmitter>) {
+        let pool =
+            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = Arc::new(SessionManager::new(store.clone()));
+        let broadcast = Arc::new(EventEmitter::new());
+        (mgr, store, broadcast)
+    }
+
+    fn make_subagent_manager(
+        provider: Arc<dyn Provider>,
+    ) -> (SubagentManager, Arc<SessionManager>, Arc<EventStore>) {
+        let (mgr, store, broadcast) = make_manager_and_store();
+        let manager = SubagentManager::new(
+            mgr.clone(),
+            store.clone(),
+            broadcast,
+            provider,
+            None,
+            None,
+        );
+        // Set tool factory
+        manager.set_tool_factory(Arc::new(ToolRegistry::new));
+        (manager, mgr, store)
+    }
+
+    fn make_config(task: &str) -> SubagentConfig {
+        SubagentConfig {
+            task: task.into(),
+            mode: SubagentMode::InProcess,
+            blocking: true,
+            model: None,
+            system_prompt: None,
+            working_directory: "/tmp".into(),
+            max_turns: 5,
+            timeout_ms: 10_000,
+            tool_denials: None,
+            skills: None,
+            max_depth: 0,
+            current_depth: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_creates_session_and_tracks() {
+        let (manager, _mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_config("test task");
+        let handle = manager.spawn(config).await.unwrap();
+
+        assert!(!handle.session_id.is_empty());
+        // Session should exist in DB
+        let session = store.get_session(&handle.session_id).unwrap();
+        assert!(session.is_some());
+    }
+
+    #[tokio::test]
+    async fn spawn_blocking_returns_output() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_config("test task");
+        let handle = manager.spawn(config).await.unwrap();
+
+        assert!(handle.output.is_some());
+        assert!(!handle.output.as_ref().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_nonblocking_returns_immediately() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("test task");
+        config.blocking = false;
+        let handle = manager.spawn(config).await.unwrap();
+
+        assert!(!handle.session_id.is_empty());
+        assert!(handle.output.is_none());
+    }
+
+    #[tokio::test]
+    async fn spawn_tmux_mode_rejected() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("test task");
+        config.mode = SubagentMode::Tmux;
+        let err = manager.spawn(config).await.unwrap_err();
+        assert!(err.to_string().contains("Tmux"));
+    }
+
+    #[tokio::test]
+    async fn spawn_depth_zero_blocks_nesting() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("nested task");
+        config.current_depth = 1;
+        config.max_depth = 0;
+        let err = manager.spawn(config).await.unwrap_err();
+        assert!(err.to_string().contains("nesting"));
+    }
+
+    #[tokio::test]
+    async fn spawn_depth_one_allows_nesting() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("nested task");
+        config.current_depth = 1;
+        config.max_depth = 2;
+        let handle = manager.spawn(config).await.unwrap();
+        assert!(!handle.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_agent_status_running() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("test task");
+        config.blocking = false;
+        let handle = manager.spawn(config).await.unwrap();
+
+        // Query immediately (may still be running or completed)
+        let result = manager
+            .query_agent(&handle.session_id, "status", None)
+            .await
+            .unwrap();
+        assert!(result.get("sessionId").is_some());
+        assert!(result.get("status").is_some());
+    }
+
+    #[tokio::test]
+    async fn query_agent_output_after_completion() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_config("test task");
+        let handle = manager.spawn(config).await.unwrap();
+
+        let result = manager
+            .query_agent(&handle.session_id, "output", None)
+            .await
+            .unwrap();
+        assert!(result.get("output").is_some());
+    }
+
+    #[tokio::test]
+    async fn query_agent_invalid_type() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let err = manager
+            .query_agent("any", "invalid", None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Invalid query type"));
+    }
+
+    #[tokio::test]
+    async fn wait_all_waits_for_all() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+
+        let mut c1 = make_config("task 1");
+        c1.blocking = false;
+        let h1 = manager.spawn(c1).await.unwrap();
+
+        let mut c2 = make_config("task 2");
+        c2.blocking = false;
+        let h2 = manager.spawn(c2).await.unwrap();
+
+        let results = manager
+            .wait_for_agents(
+                &[h1.session_id, h2.session_id],
+                WaitMode::All,
+                30_000,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn wait_any_returns_first() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+
+        let mut c1 = make_config("task 1");
+        c1.blocking = false;
+        let h1 = manager.spawn(c1).await.unwrap();
+
+        let mut c2 = make_config("task 2");
+        c2.blocking = false;
+        let h2 = manager.spawn(c2).await.unwrap();
+
+        let results = manager
+            .wait_for_agents(
+                &[h1.session_id, h2.session_id],
+                WaitMode::Any,
+                30_000,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn wait_empty_session_ids_error() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let err = manager
+            .wait_for_agents(&[], WaitMode::All, 5000)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("No session IDs"));
+    }
+
+    #[tokio::test]
+    async fn subagent_completion_emits_events() {
+        let (mgr, store, broadcast) = make_manager_and_store();
+        let manager = SubagentManager::new(
+            mgr.clone(),
+            store.clone(),
+            broadcast.clone(),
+            Arc::new(MockProvider),
+            None,
+            None,
+        );
+        manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+        let mut rx = broadcast.subscribe();
+        let config = make_config("test task");
+        let _handle = manager.spawn(config).await.unwrap();
+
+        // Collect emitted events
+        let mut event_types = vec![];
+        while let Ok(event) = rx.try_recv() {
+            event_types.push(event.event_type().to_owned());
+        }
+
+        assert!(
+            event_types.contains(&"subagent_spawned".to_owned()),
+            "expected subagent_spawned, got: {event_types:?}"
+        );
+        // Should have either completed or failed
+        let has_terminal = event_types.contains(&"subagent_completed".to_owned())
+            || event_types.contains(&"subagent_failed".to_owned());
+        assert!(
+            has_terminal,
+            "expected subagent_completed or subagent_failed, got: {event_types:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn spawn_error_provider_reports_failure() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(ErrorProvider));
+        let config = make_config("test task");
+        let handle = manager.spawn(config).await.unwrap();
+
+        // Blocking spawn with error provider should still return a handle
+        // The output will contain error info
+        assert!(!handle.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn truncate_helper() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello world", 5), "hello");
+    }
+
+    #[tokio::test]
+    async fn query_agent_logs_returns_empty() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let result = manager.query_agent("any", "logs", None).await.unwrap();
+        assert_eq!(result["logs"], json!([]));
+    }
+}

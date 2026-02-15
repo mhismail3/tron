@@ -26,6 +26,7 @@ html2text.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+indexmap = "2"
 url = "2"
 urlencoding = "2"
 

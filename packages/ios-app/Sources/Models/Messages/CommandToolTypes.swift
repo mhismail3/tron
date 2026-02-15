@@ -127,13 +127,7 @@ extension CommandToolChipData {
         // Truncate result if too large to prevent performance issues
         let (truncatedResult, wasTruncated) = tool.result.map { ResultTruncation.truncate($0) } ?? (nil, false)
 
-        // Use past-tense display name for completed tools
-        let name: String
-        if mappedStatus == .success, let completed = descriptor.completedDisplayName {
-            name = completed
-        } else {
-            name = descriptor.displayName
-        }
+        let name = descriptor.displayName
 
         self.id = tool.toolCallId
         self.toolName = tool.toolName

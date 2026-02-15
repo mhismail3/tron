@@ -72,12 +72,14 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             token_usage,
             token_record,
             cost,
+            stop_reason,
             context_limit,
             ..
         } => {
             let mut data = serde_json::json!({
                 "turn": turn,
                 "duration": duration,
+                "durationMs": duration,
             });
             if let Some(usage) = token_usage {
                 data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
@@ -87,6 +89,9 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             }
             if let Some(c) = cost {
                 data["cost"] = serde_json::json!(c);
+            }
+            if let Some(sr) = stop_reason {
+                data["stopReason"] = serde_json::json!(sr);
             }
             if let Some(limit) = context_limit {
                 data["contextLimit"] = serde_json::json!(limit);
@@ -475,6 +480,68 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         TronEvent::SkillRemoved { skill_name, .. } => Some(serde_json::json!({
             "skillName": skill_name,
         })),
+        TronEvent::SubagentSpawned {
+            subagent_session_id,
+            task,
+            model,
+            max_turns,
+            spawn_depth,
+            ..
+        } => Some(serde_json::json!({
+            "subagentSessionId": subagent_session_id,
+            "task": task,
+            "model": model,
+            "maxTurns": max_turns,
+            "spawnDepth": spawn_depth,
+        })),
+        TronEvent::SubagentStatusUpdate {
+            subagent_session_id,
+            status,
+            current_turn,
+            activity,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "subagentSessionId": subagent_session_id,
+                "status": status,
+                "currentTurn": current_turn,
+            });
+            if let Some(act) = activity {
+                data["activity"] = serde_json::json!(act);
+            }
+            Some(data)
+        }
+        TronEvent::SubagentCompleted {
+            subagent_session_id,
+            total_turns,
+            duration_ms,
+            output,
+            token_usage,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "subagentSessionId": subagent_session_id,
+                "totalTurns": total_turns,
+                "durationMs": duration_ms,
+            });
+            if let Some(o) = output {
+                data["output"] = serde_json::json!(o);
+            }
+            if let Some(tu) = token_usage {
+                data["tokenUsage"] = tu.clone();
+            }
+            Some(data)
+        }
+        TronEvent::SubagentFailed {
+            subagent_session_id,
+            error,
+            duration_ms,
+            ..
+        } => Some(serde_json::json!({
+            "subagentSessionId": subagent_session_id,
+            "error": error,
+            "durationMs": duration_ms,
+        })),
         // Events with no additional data
         TronEvent::AgentStart { .. }
         | TronEvent::AgentReady { .. }
@@ -527,6 +594,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         "context_cleared" => "agent.context_cleared",
         "message_deleted" => "agent.message_deleted",
         "skill_removed" => "agent.skill_removed",
+        "subagent_spawned" => "agent.subagent_spawned",
+        "subagent_status_update" => "agent.subagent_status",
+        "subagent_completed" => "agent.subagent_completed",
+        "subagent_failed" => "agent.subagent_failed",
         other => other,
     };
 
@@ -595,6 +666,7 @@ mod tests {
             token_usage: None,
             token_record: None,
             cost: None,
+            stop_reason: None,
             context_limit: None,
         };
         assert_eq!(tron_event_to_rpc(&start).event_type, "agent.turn_start");
@@ -738,6 +810,7 @@ mod tests {
             }),
             token_record: Some(token_record.clone()),
             cost: None,
+            stop_reason: None,
             context_limit: None,
         };
         let rpc = tron_event_to_rpc(&event);
@@ -760,6 +833,7 @@ mod tests {
             }),
             token_record: None,
             cost: None,
+            stop_reason: None,
             context_limit: None,
         };
         let rpc = tron_event_to_rpc(&event);
@@ -781,6 +855,7 @@ mod tests {
             }),
             token_record: None,
             cost: Some(0.005),
+            stop_reason: Some("end_turn".into()),
             context_limit: Some(200_000),
         };
         let rpc = tron_event_to_rpc(&event);
@@ -788,9 +863,11 @@ mod tests {
         let data = rpc.data.unwrap();
         assert_eq!(data["turn"], 2);
         assert_eq!(data["duration"], 5000);
+        assert_eq!(data["durationMs"], 5000);
         assert_eq!(data["tokenUsage"]["inputTokens"], 100);
         assert_eq!(data["tokenUsage"]["outputTokens"], 50);
         assert_eq!(data["cost"], 0.005);
+        assert_eq!(data["stopReason"], "end_turn");
         assert_eq!(data["contextLimit"], 200_000);
     }
 
@@ -1062,7 +1139,7 @@ mod tests {
             TronEvent::AgentReady { base: base.clone() },
             TronEvent::AgentInterrupted { base: base.clone(), turn: 1, partial_content: None, active_tool: None },
             TronEvent::TurnStart { base: base.clone(), turn: 1 },
-            TronEvent::TurnEnd { base: base.clone(), turn: 1, duration: 0, token_usage: None, token_record: None, cost: None, context_limit: None },
+            TronEvent::TurnEnd { base: base.clone(), turn: 1, duration: 0, token_usage: None, token_record: None, cost: None, stop_reason: None, context_limit: None },
             TronEvent::TurnFailed { base: base.clone(), turn: 1, error: "e".into(), code: None, category: None, recoverable: false, partial_content: None },
             TronEvent::ResponseComplete { base: base.clone(), turn: 1, stop_reason: "end_turn".into(), token_usage: None, has_tool_calls: false, tool_call_count: 0 },
             TronEvent::MessageUpdate { base: base.clone(), content: "c".into() },
@@ -1100,7 +1177,11 @@ mod tests {
             TronEvent::MemoryUpdated { base: base.clone(), title: None, entry_type: None },
             TronEvent::ContextCleared { base: base.clone(), tokens_before: 0, tokens_after: 0 },
             TronEvent::MessageDeleted { base: base.clone(), target_event_id: "id".into(), target_type: "t".into(), target_turn: None, reason: None },
-            TronEvent::SkillRemoved { base, skill_name: "n".into() },
+            TronEvent::SkillRemoved { base: base.clone(), skill_name: "n".into() },
+            TronEvent::SubagentSpawned { base: base.clone(), subagent_session_id: "sub-1".into(), task: "t".into(), model: "m".into(), max_turns: 5, spawn_depth: 0 },
+            TronEvent::SubagentStatusUpdate { base: base.clone(), subagent_session_id: "sub-1".into(), status: "running".into(), current_turn: 1, activity: None },
+            TronEvent::SubagentCompleted { base: base.clone(), subagent_session_id: "sub-1".into(), total_turns: 3, duration_ms: 5000, output: None, token_usage: None },
+            TronEvent::SubagentFailed { base, subagent_session_id: "sub-1".into(), error: "e".into(), duration_ms: 1000 },
         ];
         for event in &events {
             let rpc = tron_event_to_rpc(event);

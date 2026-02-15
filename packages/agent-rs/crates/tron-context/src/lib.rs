@@ -15,6 +15,7 @@ pub mod compaction_engine;
 pub mod constants;
 pub mod context_manager;
 pub mod context_snapshot_builder;
+pub mod ledger_writer;
 pub mod llm_summarizer;
 pub mod loader;
 pub mod message_store;

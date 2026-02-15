@@ -19,6 +19,7 @@ use tron_rpc::context::{AgentDeps, RpcContext};
 use tron_rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
+use tron_runtime::orchestrator::subagent_manager::SubagentManager;
 use tron_server::config::ServerConfig;
 use tron_server::server::TronServer;
 use tron_server::websocket::event_bridge::EventBridge;
@@ -326,17 +327,16 @@ struct ToolRegistryConfig {
 /// - Tools with real backends use real providers
 /// - BrowseTheWeb/NotifyApp: conditionally registered (only with backend)
 /// - Communication tools: not registered (not in TS server)
-/// - Subagent tools: registered with stubs (complex infra, future work)
+/// - Subagent tools: NOT registered (stubs return "not available", confusing LLM)
 fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     use tron_tools::providers::{
-        NoOpOpenUrlDelegate, RealFileSystem, ReqwestHttpClient, StubSubagentSpawner,
-        TokioProcessRunner,
+        NoOpOpenUrlDelegate, RealFileSystem, ReqwestHttpClient, StubBrowserDelegate,
+        StubNotifyDelegate, TokioProcessRunner,
     };
 
     let fs: Arc<dyn tron_tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
     let runner: Arc<dyn tron_tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
     let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(ReqwestHttpClient::new());
-    let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = Arc::new(StubSubagentSpawner);
 
     // Real providers backed by SQLite
     let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> = Arc::new(
@@ -346,38 +346,74 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         providers::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
     );
 
-    // ADAPTER(tool-compat): fire-and-forget delegate for OpenURL.
-    // iOS opens Safari on receiving tool_execution_start — no real backend needed.
-    let open_url_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
-        Arc::new(NoOpOpenUrlDelegate);
-
     let mut registry = ToolRegistry::new();
 
-    // 1–4: Filesystem tools
+    // Registration order matches the TypeScript server exactly:
+    // 1–3: Filesystem tools
     registry.register(Arc::new(tron_tools::fs::read::ReadTool::new(fs.clone())));
     registry.register(Arc::new(tron_tools::fs::write::WriteTool::new(fs.clone())));
     registry.register(Arc::new(tron_tools::fs::edit::EditTool::new(fs.clone())));
-    registry.register(Arc::new(tron_tools::fs::find::FindTool::new()));
 
-    // 5–6: System tools
+    // 4: Bash
     registry.register(Arc::new(tron_tools::system::bash::BashTool::new(
         runner.clone(),
     )));
-    registry.register(Arc::new(tron_tools::system::remember::RememberTool::new(
-        store_query,
-    )));
 
-    // 7: Search tool
+    // 5: Search
     registry.register(Arc::new(
         tron_tools::search::search_tool::SearchTool::new(runner),
     ));
 
-    // 8: WebFetch (always available)
+    // 6: Find
+    registry.register(Arc::new(tron_tools::fs::find::FindTool::new()));
+
+    // 7: BrowseTheWeb (stub delegate — iOS shows browser via tool events)
+    let browser_delegate: Arc<dyn tron_tools::traits::BrowserDelegate> =
+        Arc::new(StubBrowserDelegate);
+    registry.register(Arc::new(
+        tron_tools::browser::browse_the_web::BrowseTheWebTool::new(browser_delegate),
+    ));
+
+    // 8: AskUserQuestion
+    registry.register(Arc::new(
+        tron_tools::ui::ask_user::AskUserQuestionTool::new(),
+    ));
+
+    // 9: OpenURL — fire-and-forget (iOS opens Safari via tool event)
+    let open_url_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
+        Arc::new(NoOpOpenUrlDelegate);
+    registry.register(Arc::new(tron_tools::browser::open_url::OpenURLTool::new(
+        open_url_delegate,
+    )));
+
+    // 10: RenderAppUI
+    registry.register(Arc::new(
+        tron_tools::ui::render_app_ui::RenderAppUITool::new(),
+    ));
+
+    // 11: TaskManager
+    registry.register(Arc::new(
+        tron_tools::ui::task_manager::TaskManagerTool::new(task_mgr),
+    ));
+
+    // 12: Remember
+    registry.register(Arc::new(tron_tools::system::remember::RememberTool::new(
+        store_query,
+    )));
+
+    // 13: NotifyApp (stub delegate — APNS not wired yet)
+    let notify_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
+        Arc::new(StubNotifyDelegate);
+    registry.register(Arc::new(tron_tools::ui::notify::NotifyAppTool::new(
+        notify_delegate,
+    )));
+
+    // 14: WebFetch (always available)
     registry.register(Arc::new(tron_tools::web::web_fetch::WebFetchTool::new(
         http.clone(),
     )));
 
-    // 9: WebSearch — conditional on Brave API key (matches TS server)
+    // 15: WebSearch — conditional on Brave API key (matches TS server)
     if let Some(ref api_key) = config.brave_api_key {
         registry.register(Arc::new(tron_tools::web::web_search::WebSearchTool::new(
             http,
@@ -385,36 +421,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         )));
     }
 
-    // 10: OpenURL — fire-and-forget (iOS opens Safari via tool event)
-    registry.register(Arc::new(tron_tools::browser::open_url::OpenURLTool::new(
-        open_url_delegate,
-    )));
-
-    // BrowseTheWeb: NOT registered (TS only registers with browser service)
-    // NotifyApp: NOT registered (TS only registers with APNS callback)
-    // Communication tools: NOT registered (not in TS server)
-
-    // 11–13: Subagent tools (stubs — complex infrastructure, future work)
-    registry.register(Arc::new(
-        tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
-    ));
-    registry.register(Arc::new(
-        tron_tools::subagent::query::QueryAgentTool::new(spawner.clone()),
-    ));
-    registry.register(Arc::new(
-        tron_tools::subagent::wait::WaitForAgentsTool::new(spawner),
-    ));
-
-    // 14–16: UI tools
-    registry.register(Arc::new(
-        tron_tools::ui::ask_user::AskUserQuestionTool::new(),
-    ));
-    registry.register(Arc::new(
-        tron_tools::ui::task_manager::TaskManagerTool::new(task_mgr),
-    ));
-    registry.register(Arc::new(
-        tron_tools::ui::render_app_ui::RenderAppUITool::new(),
-    ));
+    // Subagent tools: registered separately via SubagentManager (see main)
 
     tracing::debug!(tool_count = registry.len(), tools = ?registry.names(), "tool registry created");
     registry
@@ -478,10 +485,40 @@ async fn main() -> Result<()> {
             model = settings.server.default_model.as_str(),
             "agent execution enabled"
         );
+
+        // Create SubagentManager (tool_factory set below via OnceCell)
+        let subagent_manager = Arc::new(SubagentManager::new(
+            session_manager.clone(),
+            event_store.clone(),
+            orchestrator.broadcast().clone(),
+            provider.clone(),
+            None,
+            None,
+        ));
+
+        // Build tool factory that includes subagent tools
         let config = tool_config.clone();
+        let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = subagent_manager.clone();
+        let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
+            let mut registry = create_tool_registry(&config);
+            registry.register(Arc::new(
+                tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
+            ));
+            registry.register(Arc::new(
+                tron_tools::subagent::query::QueryAgentTool::new(spawner.clone()),
+            ));
+            registry.register(Arc::new(
+                tron_tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
+            ));
+            registry
+        });
+
+        // Break circular dep: SubagentManager needs tool_factory to spawn children
+        subagent_manager.set_tool_factory(tool_factory.clone());
+
         AgentDeps {
             provider,
-            tool_factory: Arc::new(move || create_tool_registry(&config)),
+            tool_factory,
             guardrails: None,
             hooks: None,
         }
@@ -884,6 +921,72 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    fn make_tool_config() -> ToolRegistryConfig {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tools-test.db");
+        let db_str = db_path.to_string_lossy();
+        let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+            tron_tasks::migrations::run_migrations(&conn).unwrap();
+        }
+        let event_store = Arc::new(EventStore::new(pool.clone()));
+        ToolRegistryConfig {
+            event_store,
+            task_pool: pool,
+            brave_api_key: None,
+        }
+    }
+
+    #[test]
+    fn tool_registry_order() {
+        let config = make_tool_config();
+        let registry = create_tool_registry(&config);
+        let names = registry.names();
+        // First 8 tools must match TS server order exactly
+        assert_eq!(names[0], "Read");
+        assert_eq!(names[1], "Write");
+        assert_eq!(names[2], "Edit");
+        assert_eq!(names[3], "Bash");
+        assert_eq!(names[4], "Search");
+        assert_eq!(names[5], "Find");
+        assert_eq!(names[6], "BrowseTheWeb");
+        assert_eq!(names[7], "AskUserQuestion");
+    }
+
+    #[test]
+    fn tool_registry_has_browse_the_web() {
+        let config = make_tool_config();
+        let registry = create_tool_registry(&config);
+        assert!(registry.names().contains(&"BrowseTheWeb".to_string()));
+    }
+
+    #[test]
+    fn tool_registry_has_notify_app() {
+        let config = make_tool_config();
+        let registry = create_tool_registry(&config);
+        assert!(registry.names().contains(&"NotifyApp".to_string()));
+    }
+
+    #[test]
+    fn tool_registry_count() {
+        let config = make_tool_config();
+        let registry = create_tool_registry(&config);
+        // 15 tools without Brave API key (no WebSearch), without subagent tools
+        assert_eq!(registry.len(), 14, "expected 14 tools (no WebSearch without Brave key), got: {:?}", registry.names());
+    }
+
+    #[test]
+    fn tool_registry_count_with_web_search() {
+        let config = ToolRegistryConfig {
+            brave_api_key: Some("test-key".into()),
+            ..make_tool_config()
+        };
+        let registry = create_tool_registry(&config);
+        assert_eq!(registry.len(), 15, "expected 15 tools with WebSearch, got: {:?}", registry.names());
     }
 
     #[test]

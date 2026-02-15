@@ -109,6 +109,12 @@ pub struct SubagentConfig {
     /// Skills to enable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
+    /// Maximum nesting depth (0 = no children, 1 = one level, etc.).
+    #[serde(default)]
+    pub max_depth: u32,
+    /// Current nesting depth (set by SubagentManager, not user).
+    #[serde(default)]
+    pub current_depth: u32,
 }
 
 /// Subagent execution mode.

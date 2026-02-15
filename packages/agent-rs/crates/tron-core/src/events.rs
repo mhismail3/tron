@@ -348,6 +348,9 @@ pub enum TronEvent {
         /// Cost for this turn in USD.
         #[serde(skip_serializing_if = "Option::is_none")]
         cost: Option<f64>,
+        /// LLM stop reason (e.g., "end_turn", "tool_use").
+        #[serde(rename = "stopReason", skip_serializing_if = "Option::is_none")]
+        stop_reason: Option<String>,
         /// Context window limit (for iOS sync after model switch).
         #[serde(rename = "contextLimit", skip_serializing_if = "Option::is_none")]
         context_limit: Option<u64>,
@@ -913,6 +916,87 @@ pub enum TronEvent {
         #[serde(rename = "skillName")]
         skill_name: String,
     },
+
+    // -- Subagents --
+
+    /// Subagent spawned.
+    #[serde(rename = "subagent_spawned")]
+    SubagentSpawned {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Child session ID.
+        #[serde(rename = "subagentSessionId")]
+        subagent_session_id: String,
+        /// Task description.
+        task: String,
+        /// Model used.
+        model: String,
+        /// Maximum turns.
+        #[serde(rename = "maxTurns")]
+        max_turns: u32,
+        /// Nesting depth.
+        #[serde(rename = "spawnDepth")]
+        spawn_depth: u32,
+    },
+
+    /// Subagent status update (forwarded child events).
+    #[serde(rename = "subagent_status_update")]
+    SubagentStatusUpdate {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Child session ID.
+        #[serde(rename = "subagentSessionId")]
+        subagent_session_id: String,
+        /// Current status.
+        status: String,
+        /// Current turn.
+        #[serde(rename = "currentTurn")]
+        current_turn: u32,
+        /// Activity description.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        activity: Option<String>,
+    },
+
+    /// Subagent completed.
+    #[serde(rename = "subagent_completed")]
+    SubagentCompleted {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Child session ID.
+        #[serde(rename = "subagentSessionId")]
+        subagent_session_id: String,
+        /// Total turns executed.
+        #[serde(rename = "totalTurns")]
+        total_turns: u32,
+        /// Duration in milliseconds.
+        #[serde(rename = "durationMs")]
+        duration_ms: u64,
+        /// Output text.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        /// Token usage.
+        #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
+        token_usage: Option<Value>,
+    },
+
+    /// Subagent failed.
+    #[serde(rename = "subagent_failed")]
+    SubagentFailed {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Child session ID.
+        #[serde(rename = "subagentSessionId")]
+        subagent_session_id: String,
+        /// Error message.
+        error: String,
+        /// Duration in milliseconds.
+        #[serde(rename = "durationMs")]
+        duration_ms: u64,
+    },
 }
 
 impl TronEvent {
@@ -959,7 +1043,11 @@ impl TronEvent {
             | Self::MemoryUpdated { base, .. }
             | Self::ContextCleared { base, .. }
             | Self::MessageDeleted { base, .. }
-            | Self::SkillRemoved { base, .. } => base,
+            | Self::SkillRemoved { base, .. }
+            | Self::SubagentSpawned { base, .. }
+            | Self::SubagentStatusUpdate { base, .. }
+            | Self::SubagentCompleted { base, .. }
+            | Self::SubagentFailed { base, .. } => base,
         }
     }
 
@@ -1019,6 +1107,10 @@ impl TronEvent {
             Self::ContextCleared { .. } => "context_cleared",
             Self::MessageDeleted { .. } => "message_deleted",
             Self::SkillRemoved { .. } => "skill_removed",
+            Self::SubagentSpawned { .. } => "subagent_spawned",
+            Self::SubagentStatusUpdate { .. } => "subagent_status_update",
+            Self::SubagentCompleted { .. } => "subagent_completed",
+            Self::SubagentFailed { .. } => "subagent_failed",
         }
     }
 
@@ -1353,6 +1445,7 @@ mod tests {
             }),
             token_record: None,
             cost: Some(0.005),
+            stop_reason: Some("end_turn".into()),
             context_limit: Some(200_000),
         };
         let json = serde_json::to_value(&e).unwrap();
@@ -1496,6 +1589,7 @@ mod tests {
                 token_usage: None,
                 token_record: None,
                 cost: None,
+                stop_reason: None,
                 context_limit: None,
             },
             TronEvent::TurnFailed {
@@ -1676,18 +1770,47 @@ mod tests {
                 reason: None,
             },
             TronEvent::SkillRemoved {
-                base,
+                base: base.clone(),
                 skill_name: "n".into(),
+            },
+            TronEvent::SubagentSpawned {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                task: "t".into(),
+                model: "m".into(),
+                max_turns: 50,
+                spawn_depth: 0,
+            },
+            TronEvent::SubagentStatusUpdate {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                status: "running".into(),
+                current_turn: 1,
+                activity: None,
+            },
+            TronEvent::SubagentCompleted {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                total_turns: 3,
+                duration_ms: 5000,
+                output: None,
+                token_usage: None,
+            },
+            TronEvent::SubagentFailed {
+                base,
+                subagent_session_id: "sub-1".into(),
+                error: "e".into(),
+                duration_ms: 1000,
             },
         ];
 
-        // All 35 variants
-        assert_eq!(events.len(), 35);
+        // All 39 variants
+        assert_eq!(events.len(), 39);
 
         let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
         types.sort();
         types.dedup();
-        assert_eq!(types.len(), 35);
+        assert_eq!(types.len(), 39);
     }
 
     #[test]

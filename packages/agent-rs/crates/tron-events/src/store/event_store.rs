@@ -4,6 +4,7 @@
 //! Every write method runs inside a single `SQLite` transaction — callers
 //! never observe partial state.
 
+use rusqlite::OptionalExtension;
 use serde_json::Value;
 use tracing::{debug, instrument};
 use uuid::Uuid;
@@ -127,9 +128,19 @@ impl EventStore {
         // 3. Create root session.start event
         let event_id = format!("evt_{}", Uuid::now_v7());
         let now = chrono::Utc::now().to_rfc3339();
+        let provider = if model.starts_with("claude-") {
+            "anthropic"
+        } else if model.starts_with("gpt-") || model.starts_with("o1-") || model.starts_with("o3-") {
+            "openai"
+        } else if model.starts_with("gemini-") {
+            "google"
+        } else {
+            "anthropic"
+        };
         let payload = serde_json::json!({
             "workingDirectory": workspace_path,
             "model": model,
+            "provider": provider,
         });
         let event = SessionEvent {
             id: event_id,
@@ -243,14 +254,20 @@ impl EventStore {
         if let Some(tu) = opts.payload.get("tokenUsage") {
             counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
             counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
-            counters.cache_read_tokens = tu.get("cacheReadInputTokens").and_then(Value::as_i64);
+            counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
             counters.cache_creation_tokens =
-                tu.get("cacheCreationInputTokens").and_then(Value::as_i64);
+                tu.get("cacheCreationTokens").and_then(Value::as_i64);
 
-            // Last turn input tokens: SET (not increment) to latest turn's context window size
+            // Last turn context window: prefer tokenRecord.computed.contextWindowTokens
+            // (includes cache reads for Anthropic), fall back to raw inputTokens
             if opts.event_type == EventType::MessageAssistant {
-                counters.last_turn_input_tokens =
-                    tu.get("inputTokens").and_then(Value::as_i64);
+                counters.last_turn_input_tokens = opts
+                    .payload
+                    .get("tokenRecord")
+                    .and_then(|r| r.get("computed"))
+                    .and_then(|c| c.get("contextWindowTokens"))
+                    .and_then(Value::as_i64)
+                    .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
             }
         }
 
@@ -509,6 +526,40 @@ impl EventStore {
     pub fn count_events(&self, session_id: &str) -> Result<i64> {
         let conn = self.conn()?;
         EventRepo::count_by_session(&conn, session_id)
+    }
+
+    /// Check if a session was interrupted (last turn didn't complete).
+    ///
+    /// A session is considered interrupted if the last `message.assistant` event
+    /// has a higher sequence than the last `stream.turn_end` event, meaning the
+    /// turn started but never finished.
+    pub fn was_session_interrupted(&self, session_id: &str) -> Result<bool> {
+        let conn = self.conn()?;
+        let last_assistant_seq: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(sequence) FROM events WHERE session_id = ?1 AND type = 'message.assistant'",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let last_turn_end_seq: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(sequence) FROM events WHERE session_id = ?1 AND type = 'stream.turn_end'",
+                rusqlite::params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+
+        match (last_assistant_seq, last_turn_end_seq) {
+            // No assistant messages → not interrupted
+            (None, _) => Ok(false),
+            // Assistant message but no turn_end → interrupted
+            (Some(_), None) => Ok(true),
+            // Both exist → interrupted if assistant is after turn_end
+            (Some(a), Some(t)) => Ok(a > t),
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1048,7 +1099,7 @@ mod tests {
                     "tokenUsage": {
                         "inputTokens": 100,
                         "outputTokens": 50,
-                        "cacheReadInputTokens": 10,
+                        "cacheReadTokens": 10,
                     }
                 }),
                 parent_id: None,
@@ -1061,6 +1112,97 @@ mod tests {
         assert_eq!(session.total_input_tokens, 100);
         assert_eq!(session.total_output_tokens, 50);
         assert_eq!(session.total_cache_read_tokens, 10);
+    }
+
+    #[test]
+    fn last_turn_input_tokens_prefers_context_window_tokens() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+
+        // Append assistant message with BOTH tokenUsage.inputTokens AND
+        // tokenRecord.computed.contextWindowTokens. The latter should win
+        // because it includes cache reads for Anthropic (accurate context fill).
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Hello",
+                    "tokenUsage": {
+                        "inputTokens": 1000,
+                        "outputTokens": 200,
+                    },
+                    "tokenRecord": {
+                        "computed": {
+                            "contextWindowTokens": 5000,
+                            "newInputTokens": 1000,
+                        }
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        // Should be 5000 (contextWindowTokens), NOT 1000 (inputTokens)
+        assert_eq!(session.last_turn_input_tokens, 5000);
+    }
+
+    #[test]
+    fn last_turn_input_tokens_falls_back_to_input_tokens() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+
+        // No tokenRecord — should fall back to tokenUsage.inputTokens
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Hello",
+                    "tokenUsage": {
+                        "inputTokens": 800,
+                        "outputTokens": 100,
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.last_turn_input_tokens, 800);
+    }
+
+    #[test]
+    fn last_turn_input_tokens_not_set_for_user_messages() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+
+        // User messages should NOT update last_turn_input_tokens even if
+        // they somehow have tokenUsage (guard: event_type == MessageAssistant)
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({
+                    "content": "Hello",
+                    "tokenUsage": {
+                        "inputTokens": 999,
+                        "outputTokens": 0,
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.last_turn_input_tokens, 0); // unchanged from default
     }
 
     #[test]

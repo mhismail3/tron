@@ -41,9 +41,24 @@ impl MethodHandler for GetSkillHandler {
             message: format!("Skill '{name}' not found"),
         })?;
 
-        serde_json::to_value(skill).map_err(|e| RpcError::Internal {
-            message: format!("Failed to serialize skill '{name}': {e}"),
-        })
+        // Transform to iOS-compatible format: extract tags from frontmatter,
+        // omit internal fields (frontmatter, skillMdPath, lastModified)
+        let skill_json = serde_json::json!({
+            "name": skill.name,
+            "displayName": skill.display_name,
+            "description": skill.description,
+            "source": skill.source,
+            "tags": skill.frontmatter.tags,
+            "content": skill.content,
+            "path": skill.path,
+            "additionalFiles": skill.additional_files,
+        });
+
+        // iOS expects { skill: SkillMetadata, found: bool } wrapper
+        Ok(serde_json::json!({
+            "skill": skill_json,
+            "found": true,
+        }))
     }
 }
 
@@ -242,6 +257,23 @@ mod tests {
 
         let event = rx.try_recv().unwrap();
         assert_eq!(event.event_type(), "skill_removed");
+    }
+
+    #[tokio::test]
+    async fn get_skill_returns_wrapped_response() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("my-skill"));
+
+        let result = GetSkillHandler
+            .handle(Some(json!({"name": "my-skill"})), &ctx)
+            .await
+            .unwrap();
+
+        // iOS expects { skill: {...}, found: true }
+        assert_eq!(result["found"], true);
+        assert!(result["skill"].is_object());
+        assert_eq!(result["skill"]["name"], "my-skill");
+        assert_eq!(result["skill"]["description"], "my-skill skill");
     }
 
     #[tokio::test]

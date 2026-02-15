@@ -124,6 +124,18 @@ impl MethodHandler for PromptHandler {
                 // 4. Merge rules (global first, then project)
                 let combined_rules = tron_context::loader::merge_rules(global_rules, project_rules);
 
+                // 4b. Persist rules.loaded event if any rules were found
+                if combined_rules.is_some() {
+                    let _ = event_store.append(&tron_events::AppendOptions {
+                        session_id: &session_id_clone,
+                        event_type: tron_events::EventType::RulesLoaded,
+                        payload: serde_json::json!({
+                            "sources": ["project", "global"],
+                        }),
+                        parent_id: None,
+                    });
+                }
+
                 // 5. Load memory from ~/.tron/notes/MEMORY.md
                 let memory = home_dir
                     .as_ref()
@@ -152,6 +164,8 @@ impl MethodHandler for PromptHandler {
                         hooks: hooks.clone(),
                         is_subagent: false,
                         denied_tools: vec![],
+                        subagent_depth: 0,
+                        subagent_max_depth: 0,
                         rules_content: combined_rules,
                         initial_messages: messages,
                         memory_content: memory,
@@ -274,16 +288,18 @@ impl MethodHandler for GetAgentStateHandler {
         let run_id = ctx.orchestrator.get_run_id(&session_id);
 
         // Try to get session metadata for model/turn/message info
-        let (model, current_turn, message_count, total_input, total_output) =
+        let (model, current_turn, message_count, total_input, total_output, cache_read, cache_creation) =
             if let Ok(Some(session)) = ctx.session_manager.get_session(&session_id) {
                 let model = session.latest_model.clone();
                 let input = session.total_input_tokens;
                 let output = session.total_output_tokens;
                 let turn = session.turn_count;
                 let msg = session.message_count;
-                (model, turn, msg, input, output)
+                let cr = session.total_cache_read_tokens;
+                let cc = session.total_cache_creation_tokens;
+                (model, turn, msg, input, output, cr, cc)
             } else {
-                (String::new(), 0, 0, 0, 0)
+                (String::new(), 0, 0, 0, 0, 0, 0)
             };
 
         // Get tool names from the tool factory (if configured)
@@ -292,6 +308,15 @@ impl MethodHandler for GetAgentStateHandler {
             .as_ref()
             .map(|deps| (deps.tool_factory)().names())
             .unwrap_or_default();
+
+        // Check if session was interrupted (last turn didn't complete)
+        let was_interrupted = if is_running {
+            false
+        } else {
+            ctx.event_store
+                .was_session_interrupted(&session_id)
+                .unwrap_or(false)
+        };
 
         Ok(serde_json::json!({
             "sessionId": session_id,
@@ -303,9 +328,16 @@ impl MethodHandler for GetAgentStateHandler {
             "tokenUsage": {
                 "input": total_input,
                 "output": total_output,
+                "cacheReadTokens": cache_read,
+                "cacheCreationTokens": cache_creation,
             },
             "tools": tool_names,
-            "wasInterrupted": false,
+            "wasInterrupted": was_interrupted,
+            // Resume-related fields — iOS uses these to show in-progress turn content
+            // when reconnecting to a running session. Null when not running.
+            "currentTurnText": null,
+            "currentTurnToolCalls": null,
+            "contentSequence": null,
         }))
     }
 }
@@ -654,6 +686,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_state_returns_cache_read_tokens() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        let result = GetAgentStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["tokenUsage"]["cacheReadTokens"].is_number());
+    }
+
+    #[tokio::test]
+    async fn get_state_returns_cache_creation_tokens() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        let result = GetAgentStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert!(result["tokenUsage"]["cacheCreationTokens"].is_number());
+    }
+
+    #[tokio::test]
+    async fn get_state_cache_tokens_default_zero() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        let result = GetAgentStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["tokenUsage"]["cacheReadTokens"], 0);
+        assert_eq!(result["tokenUsage"]["cacheCreationTokens"], 0);
+    }
+
+    #[tokio::test]
     async fn get_state_token_usage_field_names() {
         let ctx = make_test_context();
         let sid = ctx
@@ -681,6 +759,58 @@ mod tests {
             .unwrap();
         assert_eq!(result["isRunning"], false);
         assert!(result["runId"].is_null());
+    }
+
+    #[tokio::test]
+    async fn get_state_interrupted_when_no_turn_end() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        // Persist an assistant message without a following stream.turn_end
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({"content": [{"type": "text", "text": "hello"}], "turn": 1}),
+            parent_id: None,
+        });
+
+        let result = GetAgentStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["wasInterrupted"], true);
+    }
+
+    #[tokio::test]
+    async fn get_state_not_interrupted_when_turn_end_follows() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+
+        // Persist an assistant message followed by stream.turn_end
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({"content": [{"type": "text", "text": "hello"}], "turn": 1}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::StreamTurnEnd,
+            payload: json!({"turn": 1}),
+            parent_id: None,
+        });
+
+        let result = GetAgentStateHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["wasInterrupted"], false);
     }
 
     // ── Extra prompt params ──

@@ -22,6 +22,7 @@ tron-tools = { path = "../tron-tools" }
 tron-guardrails = { path = "../tron-guardrails" }
 tron-hooks = { path = "../tron-hooks" }
 tron-tokens = { path = "../tron-tokens" }
+futures.workspace = true
 parking_lot.workspace = true
 async-trait.workspace = true
 serde.workspace = true

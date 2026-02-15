@@ -920,8 +920,8 @@ mod tests {
             serde_json::from_str(&assistant_events[0].payload).unwrap();
         assert!(payload.get("model").is_some(), "payload must have model");
         assert!(
-            payload.get("latencyMs").is_some(),
-            "payload must have latencyMs"
+            payload.get("latency").is_some(),
+            "payload must have latency"
         );
         assert!(
             payload.get("stopReason").is_some(),

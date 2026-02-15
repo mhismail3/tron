@@ -4,24 +4,27 @@
 //! The runtime registers tools at startup and queries the registry to dispatch
 //! tool calls and to generate the LLM tool schema.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
+use indexmap::IndexMap;
 use tron_core::tools::Tool;
 use tracing::debug;
 
 use crate::traits::TronTool;
 
 /// Central registry mapping tool names to their implementations.
+///
+/// Uses `IndexMap` to preserve insertion order — tool ordering matters for the
+/// LLM API (tools are sent in registration order) and must match the TS server.
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn TronTool>>,
+    tools: IndexMap<String, Arc<dyn TronTool>>,
 }
 
 impl ToolRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: IndexMap::new(),
         }
     }
 
@@ -36,21 +39,19 @@ impl ToolRegistry {
         self.tools.get(name).cloned()
     }
 
-    /// Return all registered tools (arbitrary order).
+    /// Return all registered tools in registration order.
     pub fn list(&self) -> Vec<Arc<dyn TronTool>> {
         self.tools.values().cloned().collect()
     }
 
-    /// Return all tool schemas for the LLM.
+    /// Return all tool schemas for the LLM in registration order.
     pub fn definitions(&self) -> Vec<Tool> {
         self.tools.values().map(|t| t.definition()).collect()
     }
 
-    /// Return all tool names, sorted alphabetically.
+    /// Return all tool names in registration order.
     pub fn names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.tools.keys().cloned().collect();
-        names.sort();
-        names
+        self.tools.keys().cloned().collect()
     }
 
     /// Number of registered tools.
@@ -65,7 +66,7 @@ impl ToolRegistry {
 
     /// Remove a tool by name, returning it if it existed.
     pub fn remove(&mut self, name: &str) -> Option<Arc<dyn TronTool>> {
-        self.tools.remove(name)
+        self.tools.swap_remove(name)
     }
 
     /// Whether a tool with the given name is registered.
@@ -188,12 +189,12 @@ mod tests {
     }
 
     #[test]
-    fn names_returns_sorted() {
+    fn names_returns_insertion_order() {
         let mut reg = ToolRegistry::new();
         reg.register(Arc::new(StubTool::new("Write")));
         reg.register(Arc::new(StubTool::new("Bash")));
         reg.register(Arc::new(StubTool::new("Read")));
-        assert_eq!(reg.names(), vec!["Bash", "Read", "Write"]);
+        assert_eq!(reg.names(), vec!["Write", "Bash", "Read"]);
     }
 
     #[test]

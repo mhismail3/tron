@@ -59,6 +59,7 @@ impl TronTool for SpawnSubagentTool {
                     let _ = m.insert("maxTurns".into(), json!({"type": "number", "description": "Maximum turns before stopping"}));
                     let _ = m.insert("blocking".into(), json!({"type": "boolean", "description": "Whether to wait for completion"}));
                     let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in milliseconds when blocking"}));
+                    let _ = m.insert("maxDepth".into(), json!({"type": "number", "description": "Maximum nesting depth for child subagents (0 = no children)"}));
                     m
                 }),
                 required: Some(vec!["task".into()]),
@@ -113,6 +114,10 @@ impl TronTool for SpawnSubagentTool {
                     .collect()
             });
 
+        #[allow(clippy::cast_possible_truncation)]
+        let max_depth = get_optional_u64(&params, "maxDepth")
+            .map_or(0, |v| v as u32);
+
         let config = SubagentConfig {
             task: task.clone(),
             mode: mode.clone(),
@@ -124,6 +129,8 @@ impl TronTool for SpawnSubagentTool {
             timeout_ms,
             tool_denials,
             skills,
+            max_depth,
+            current_depth: 0,
         };
 
         match self.spawner.spawn(config).await {
@@ -151,6 +158,7 @@ impl TronTool for SpawnSubagentTool {
                         ]),
                         details: Some(json!({
                             "sessionId": handle.session_id,
+                            "success": true,
                             "blocking": false,
                         })),
                         is_error: None,
@@ -274,6 +282,7 @@ mod tests {
         assert!(text.contains("sub-1"));
         let d = r.details.unwrap();
         assert_eq!(d["blocking"], false);
+        assert_eq!(d["success"], true);
     }
 
     #[tokio::test]

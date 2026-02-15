@@ -4379,6 +4379,7 @@ dependencies = [
  "chrono",
  "globset",
  "html2text",
+ "indexmap",
  "insta",
  "mockall",
  "regex",

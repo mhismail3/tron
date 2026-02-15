@@ -49,7 +49,7 @@ fn event_row_to_wire(row: &EventRow) -> Value {
         let _ = m.insert("model".into(), Value::String(model.clone()));
     }
     if let Some(latency_ms) = row.latency_ms {
-        let _ = m.insert("latencyMs".into(), Value::Number(latency_ms.into()));
+        let _ = m.insert("latency".into(), Value::Number(latency_ms.into()));
     }
     if let Some(ref stop_reason) = row.stop_reason {
         let _ = m.insert("stopReason".into(), Value::String(stop_reason.clone()));
@@ -143,17 +143,21 @@ impl MethodHandler for GetHistoryHandler {
             i64::try_from(events.len()).unwrap_or(0) >= l
         });
 
+        // Include oldestEventId for iOS pagination
+        let oldest_event_id = events.first().map(|e| e.id.clone());
+
         let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
 
         Ok(serde_json::json!({
             "sessionId": session_id,
             "events": wire_events,
             "hasMore": has_more,
+            "oldestEventId": oldest_event_id,
         }))
     }
 }
 
-/// Get events since a given sequence number.
+/// Get events since a cursor (afterEventId or afterSequence).
 pub struct GetSinceHandler;
 
 #[async_trait]
@@ -162,12 +166,27 @@ impl MethodHandler for GetSinceHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        // Accept either "afterSequence" (number) or "timestamp" (string, for compat)
-        let after_sequence = params
+        // Resolve cursor: prefer afterEventId (iOS), fall back to afterSequence (internal)
+        // Default -1 so `sequence > -1` returns ALL events including session.start (seq 0)
+        let after_sequence = if let Some(event_id) = params
             .as_ref()
-            .and_then(|p| p.get("afterSequence"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
+            .and_then(|p| p.get("afterEventId"))
+            .and_then(Value::as_str)
+        {
+            // Look up the event to get its sequence number
+            ctx.event_store
+                .get_event(event_id)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?
+                .map_or(-1, |row| row.sequence)
+        } else {
+            params
+                .as_ref()
+                .and_then(|p| p.get("afterSequence"))
+                .and_then(Value::as_i64)
+                .unwrap_or(-1)
+        };
 
         let limit = params
             .as_ref()
@@ -191,9 +210,13 @@ impl MethodHandler for GetSinceHandler {
 
         let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
 
+        // Include nextCursor for iOS incremental sync
+        let next_cursor = events.last().map(|e| e.id.clone());
+
         Ok(serde_json::json!({
             "events": wire_events,
             "hasMore": has_more,
+            "nextCursor": next_cursor,
         }))
     }
 }
@@ -669,5 +692,137 @@ mod tests {
         assert!(wire.get("role").is_none());
         assert!(wire.get("toolName").is_none());
         assert!(wire.get("turn").is_none());
+    }
+
+    #[tokio::test]
+    async fn get_since_after_event_id() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Append 3 events
+        let mut event_ids = Vec::new();
+        for i in 0..3 {
+            let evt = ctx
+                .event_store
+                .append(&tron_events::AppendOptions {
+                    session_id: &sid,
+                    event_type: tron_events::EventType::MessageUser,
+                    payload: json!({"text": format!("msg {i}")}),
+                    parent_id: None,
+                })
+                .unwrap();
+            event_ids.push(evt.id.clone());
+        }
+
+        // Use afterEventId to get events after the first user message
+        let result = GetSinceHandler
+            .handle(
+                Some(json!({"sessionId": sid, "afterEventId": event_ids[0]})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2); // msg 1 and msg 2 (after msg 0)
+        assert!(result["nextCursor"].is_string());
+    }
+
+    #[tokio::test]
+    async fn get_since_no_cursor_returns_all_events() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: json!({"text": "hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // No afterEventId or afterSequence → returns ALL events including session.start
+        let result = GetSinceHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2); // session.start + message.user
+        assert_eq!(events[0]["type"], "session.start");
+    }
+
+    #[tokio::test]
+    async fn get_since_unknown_event_id_returns_all() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        // Unknown afterEventId → returns all events
+        let result = GetSinceHandler
+            .handle(
+                Some(json!({"sessionId": sid, "afterEventId": "nonexistent"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let events = result["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1); // session.start
+    }
+
+    #[tokio::test]
+    async fn get_history_has_oldest_event_id() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let result = GetHistoryHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        assert!(result["oldestEventId"].is_string());
+    }
+
+    #[tokio::test]
+    async fn get_since_has_next_cursor() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("t"))
+            .unwrap();
+
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: json!({"text": "hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = GetSinceHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        // nextCursor should be the ID of the last event returned
+        let events = result["events"].as_array().unwrap();
+        let last_id = events.last().unwrap()["id"].as_str().unwrap();
+        assert_eq!(result["nextCursor"].as_str().unwrap(), last_id);
     }
 }

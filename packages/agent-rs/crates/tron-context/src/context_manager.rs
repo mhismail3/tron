@@ -46,7 +46,14 @@ pub struct ContextManager {
 
 impl ContextManager {
     /// Create a new context manager with the given configuration.
-    pub fn new(config: ContextManagerConfig) -> Self {
+    pub fn new(mut config: ContextManagerConfig) -> Self {
+        // Default working_directory to $HOME/Workspace/ rather than /tmp
+        if config.working_directory.is_none() {
+            if let Ok(home) = std::env::var("HOME") {
+                config.working_directory = Some(format!("{home}/Workspace"));
+            }
+        }
+
         let system_prompt = config
             .system_prompt
             .clone()
@@ -593,6 +600,18 @@ mod tests {
         assert_eq!(cm.get_system_prompt(), "You are helpful.");
         assert_eq!(cm.message_count(), 0);
         assert_eq!(cm.get_context_limit(), 100_000);
+    }
+
+    #[test]
+    fn working_directory_defaults_to_home_workspace_when_none() {
+        let config = ContextManagerConfig {
+            working_directory: None,
+            ..test_config()
+        };
+        let cm = ContextManager::new(config);
+        let wd = cm.get_working_directory();
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(wd, format!("{home}/Workspace"));
     }
 
     #[test]

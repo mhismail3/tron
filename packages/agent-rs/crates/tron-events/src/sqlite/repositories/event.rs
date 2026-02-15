@@ -51,7 +51,7 @@ impl EventRepo {
 
         // Extract v002 per-turn metadata
         let model = extract_str(&event.payload, "model");
-        let latency_ms = extract_i64(&event.payload, "latencyMs");
+        let latency_ms = extract_i64(&event.payload, "latency");
         let stop_reason = extract_str(&event.payload, "stopReason");
         let has_thinking = extract_bool_as_int(&event.payload, "hasThinking");
         let provider_type = extract_str(&event.payload, "providerType");
@@ -596,16 +596,16 @@ fn extract_tokens(payload: &Value) -> (Option<i64>, Option<i64>, Option<i64>, Op
         return (
             tu.get("inputTokens").and_then(Value::as_i64),
             tu.get("outputTokens").and_then(Value::as_i64),
-            tu.get("cacheReadInputTokens").and_then(Value::as_i64),
-            tu.get("cacheCreationInputTokens").and_then(Value::as_i64),
+            tu.get("cacheReadTokens").and_then(Value::as_i64),
+            tu.get("cacheCreationTokens").and_then(Value::as_i64),
         );
     }
     // Try top-level (some event types put tokens directly)
     (
         extract_i64(payload, "inputTokens"),
         extract_i64(payload, "outputTokens"),
-        extract_i64(payload, "cacheReadInputTokens"),
-        extract_i64(payload, "cacheCreationInputTokens"),
+        extract_i64(payload, "cacheReadTokens"),
+        extract_i64(payload, "cacheCreationTokens"),
     )
 }
 
@@ -700,7 +700,7 @@ mod tests {
             "tokenUsage": {
                 "inputTokens": 100,
                 "outputTokens": 50,
-                "cacheReadInputTokens": 25
+                "cacheReadTokens": 25
             }
         }));
         EventRepo::insert(&conn, &event).unwrap();
@@ -929,7 +929,7 @@ mod tests {
     fn token_usage_summary() {
         let conn = setup();
         EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "tokenUsage": {"inputTokens": 100, "outputTokens": 50, "cacheReadInputTokens": 20}
+            "tokenUsage": {"inputTokens": 100, "outputTokens": 50, "cacheReadTokens": 20}
         }))).unwrap();
         EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({
             "tokenUsage": {"inputTokens": 200, "outputTokens": 100}
@@ -1099,7 +1099,7 @@ mod tests {
         let conn = setup();
         let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
             "content": "hello",
-            "latencyMs": 1234
+            "latency": 1234
         }));
         EventRepo::insert(&conn, &event).unwrap();
 
@@ -1194,7 +1194,7 @@ mod tests {
         let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
             "content": "thinking response",
             "model": "claude-opus-4-6",
-            "latencyMs": 2500,
+            "latency": 2500,
             "stopReason": "end_turn",
             "hasThinking": true,
             "providerType": "anthropic",
@@ -1202,7 +1202,7 @@ mod tests {
             "tokenUsage": {
                 "inputTokens": 500,
                 "outputTokens": 200,
-                "cacheReadInputTokens": 100
+                "cacheReadTokens": 100
             }
         }));
         EventRepo::insert(&conn, &event).unwrap();
@@ -1245,7 +1245,7 @@ mod tests {
         let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
         let e2 = make_event("evt_2", 2, EventType::MessageAssistant, Some("evt_1"), json!({
             "model": "claude-opus-4-6",
-            "latencyMs": 1000,
+            "latency": 1000,
             "stopReason": "end_turn",
             "hasThinking": false,
             "providerType": "anthropic",

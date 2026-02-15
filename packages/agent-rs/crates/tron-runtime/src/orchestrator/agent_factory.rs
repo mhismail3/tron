@@ -27,6 +27,10 @@ pub struct CreateAgentOpts {
     pub is_subagent: bool,
     /// Tools to deny for subagents.
     pub denied_tools: Vec<String>,
+    /// Current subagent nesting depth (0 = top-level agent).
+    pub subagent_depth: u32,
+    /// Maximum nesting depth allowed for spawning children.
+    pub subagent_max_depth: u32,
     /// Merged rules content (global + project).
     pub rules_content: Option<String>,
     /// Messages restored from session history.
@@ -61,6 +65,12 @@ impl AgentFactory {
                 .collect();
             for name in &interactive_tools {
                 let _ = registry.remove(name);
+            }
+            // Deny subagent spawning tools when at max nesting depth
+            if opts.subagent_max_depth == 0 {
+                for name in &["SpawnSubagent", "QueryAgent", "WaitForAgents"] {
+                    let _ = registry.remove(name);
+                }
             }
         }
 
@@ -116,6 +126,8 @@ mod tests {
             hooks: None,
             is_subagent: false,
             denied_tools: vec![],
+            subagent_depth: 0,
+            subagent_max_depth: 0,
             rules_content: None,
             initial_messages: vec![],
             memory_content: None,

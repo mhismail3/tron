@@ -24,6 +24,6 @@ pub use errors::{RuntimeError, StopReason};
 pub use orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 pub use orchestrator::agent_runner::run_agent;
 pub use orchestrator::orchestrator::Orchestrator;
-pub use orchestrator::session_manager::{SessionFilter, SessionManager};
+pub use orchestrator::session_manager::{ForkSessionResult, SessionFilter, SessionManager};
 pub use orchestrator::session_reconstructor::ReconstructedState;
 pub use types::{AgentConfig, ReasoningLevel, RunContext, RunResult, TurnResult};

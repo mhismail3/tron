@@ -3,13 +3,24 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use tron_events::EventStore;
+use serde_json::json;
+use tron_events::{AppendOptions, EventStore, EventType};
 
 use tracing::{debug, instrument};
 
 use crate::errors::RuntimeError;
 use crate::orchestrator::session_context::SessionContext;
 use crate::orchestrator::session_reconstructor::{self, ReconstructedState};
+
+/// Result of a session fork operation.
+pub struct ForkSessionResult {
+    /// The new forked session ID.
+    pub new_session_id: String,
+    /// The root event in the new session (the fork event).
+    pub root_event_id: String,
+    /// The event ID from which the fork was created.
+    pub forked_from_event_id: String,
+}
 
 /// Active session wrapper.
 pub struct ActiveSession {
@@ -102,11 +113,21 @@ impl SessionManager {
         Ok(active)
     }
 
-    /// End a session (flush events, remove from active map).
+    /// End a session (flush events, persist session.end, remove from active map).
     pub async fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
         if let Some((_, active)) = self.active_sessions.remove(session_id) {
             active.context.persister.flush().await?;
         }
+        // Persist session.end event before marking the session as ended
+        let _ = self
+            .event_store
+            .append(&AppendOptions {
+                session_id,
+                event_type: EventType::SessionEnd,
+                payload: json!({"reason": "completed"}),
+                parent_id: None,
+            })
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
         let _ = self
             .event_store
             .end_session(session_id)
@@ -114,13 +135,13 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Fork a session.
+    /// Result of forking a session.
     pub fn fork_session(
         &self,
         session_id: &str,
         model: Option<&str>,
         title: Option<&str>,
-    ) -> Result<String, RuntimeError> {
+    ) -> Result<ForkSessionResult, RuntimeError> {
         // Get the session's head event ID for forking
         let session = self
             .event_store
@@ -133,12 +154,18 @@ impl SessionManager {
             .as_deref()
             .ok_or_else(|| RuntimeError::Persistence("Session has no head event".into()))?;
 
+        let forked_from_event_id = head_event_id.to_owned();
+
         let result = self
             .event_store
             .fork(head_event_id, &tron_events::ForkOptions { model, title })
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
-        Ok(result.session.id)
+        Ok(ForkSessionResult {
+            new_session_id: result.session.id,
+            root_event_id: result.fork_event.id,
+            forked_from_event_id,
+        })
     }
 
     /// Archive a session.
@@ -197,6 +224,27 @@ impl SessionManager {
         self.event_store
             .list_sessions(&opts)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))
+    }
+
+    /// Create a session for a subagent (linked to parent via spawning_session_id).
+    #[instrument(skip(self), fields(model, working_dir = workspace_path, parent = spawning_session_id))]
+    pub fn create_session_for_subagent(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        spawning_session_id: &str,
+        spawn_type: &str,
+        spawn_task: &str,
+    ) -> Result<String, RuntimeError> {
+        let session_id = self.create_session(model, workspace_path, title)?;
+
+        let _ = self.event_store
+            .update_spawn_info(&session_id, spawning_session_id, spawn_type, spawn_task)
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        debug!(session_id, spawning_session_id, "subagent session created");
+        Ok(session_id)
     }
 
     /// Check if a session is active.
@@ -296,9 +344,11 @@ mod tests {
         let mgr = make_manager();
         let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
 
-        let fork_id = mgr.fork_session(&sid, None, Some("forked")).unwrap();
-        assert!(!fork_id.is_empty());
-        assert_ne!(fork_id, sid);
+        let result = mgr.fork_session(&sid, None, Some("forked")).unwrap();
+        assert!(!result.new_session_id.is_empty());
+        assert_ne!(result.new_session_id, sid);
+        assert!(!result.root_event_id.is_empty());
+        assert!(!result.forked_from_event_id.is_empty());
     }
 
     #[tokio::test]

@@ -25,7 +25,7 @@ use tron_events::EventType;
 
 use crate::errors::StopReason;
 use crate::orchestrator::event_persister::EventPersister;
-use crate::pipeline::persistence;
+use crate::pipeline::{persistence, pricing};
 use crate::types::{RunContext, TurnResult};
 
 /// Execute a single turn of the agent loop.
@@ -67,11 +67,16 @@ pub async fn execute_turn(
         };
     }
 
-    // 2. Emit TurnStart
+    // 2. Emit TurnStart and persist (TS persists stream.turn_start events)
     let _ = emitter.emit(TronEvent::TurnStart {
         base: BaseEvent::now(session_id),
         turn,
     });
+    if let Some(p) = persister {
+        p.append_fire_and_forget(session_id, EventType::StreamTurnStart, json!({
+            "turn": turn,
+        }));
+    }
     debug!(session_id, turn, "turn started");
 
     // 3. Build context
@@ -236,14 +241,20 @@ pub async fn execute_turn(
         )
     });
 
-    // 8c. Persist message.assistant inline
+    // 8c. Calculate cost for this turn
+    let cost = stream_result
+        .token_usage
+        .as_ref()
+        .map(|u| pricing::calculate_cost(provider.model(), u));
+
+    // 8d. Persist message.assistant inline
     if let Some(p) = persister {
         let content_json = persistence::build_content_json(&stream_result.message.content);
         let mut payload = json!({
             "content": content_json,
             "turn": turn,
             "model": provider.model(),
-            "latencyMs": turn_start.elapsed().as_millis() as u64,
+            "latency": turn_start.elapsed().as_millis() as u64,
             "stopReason": &stream_result.stop_reason,
             "hasThinking": has_thinking,
             "providerType": provider.provider_type().as_str(),
@@ -253,6 +264,9 @@ pub async fn execute_turn(
         }
         if let Some(ref record) = token_record_json {
             payload["tokenRecord"] = record.clone();
+        }
+        if let Some(c) = cost {
+            payload["cost"] = json!(c);
         }
         p.append_fire_and_forget(session_id, EventType::MessageAssistant, payload);
     }
@@ -312,11 +326,21 @@ pub async fn execute_turn(
 
             tool_calls_executed += 1;
 
-            // Add tool result message
+            // Add tool result message — extract plain text from blocks (not JSON)
             let result_text = match &exec_result.result.content {
                 tron_core::tools::ToolResultBody::Text(t) => t.clone(),
                 tron_core::tools::ToolResultBody::Blocks(blocks) => {
-                    serde_json::to_string(blocks).unwrap_or_default()
+                    blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let tron_core::content::ToolResultContent::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 }
             };
 
@@ -326,8 +350,10 @@ pub async fn execute_turn(
             if let Some(p) = persister {
                 p.append_fire_and_forget(session_id, EventType::ToolResult, json!({
                     "toolCallId": tc.id,
+                    "name": tc.name,
                     "content": result_text,
                     "isError": is_error,
+                    "duration": exec_result.duration_ms,
                 }));
             }
 
@@ -359,9 +385,40 @@ pub async fn execute_turn(
         duration,
         token_usage: turn_token_usage,
         token_record: token_record_json.clone(),
-        cost: None,
+        cost,
+        stop_reason: Some(stream_result.stop_reason.clone()),
         context_limit: Some(context_manager.get_context_limit()),
     });
+
+    // Persist stream.turn_end for iOS reconstruction (turn tracking + tokenRecord)
+    if let Some(p) = persister {
+        let mut tu_obj = json!({
+            "inputTokens": stream_result.token_usage.as_ref().map_or(0, |u| u.input_tokens),
+            "outputTokens": stream_result.token_usage.as_ref().map_or(0, |u| u.output_tokens),
+        });
+        if let Some(ref usage) = stream_result.token_usage {
+            if let Some(cr) = usage.cache_read_tokens {
+                tu_obj["cacheReadTokens"] = json!(cr);
+            }
+            if let Some(cc) = usage.cache_creation_tokens {
+                tu_obj["cacheCreationTokens"] = json!(cc);
+            }
+        }
+        let mut turn_end_payload = json!({
+            "turn": turn,
+            "tokenUsage": tu_obj,
+            "stopReason": &stream_result.stop_reason,
+            "contextLimit": context_manager.get_context_limit(),
+        });
+        if let Some(ref record) = token_record_json {
+            turn_end_payload["tokenRecord"] = record.clone();
+        }
+        if let Some(c) = cost {
+            turn_end_payload["cost"] = json!(c);
+        }
+        p.append_fire_and_forget(session_id, EventType::StreamTurnEnd, turn_end_payload);
+    }
+
     info!(
         session_id,
         turn,

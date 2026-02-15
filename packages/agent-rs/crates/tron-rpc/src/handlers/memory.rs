@@ -1,11 +1,16 @@
 //! Memory handlers: getLedger, updateLedger, search, getHandoffs.
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
-use tron_context::summarizer::KeywordSummarizer;
-use tron_context::summarizer::Summarizer;
+use tron_context::ledger_writer::{parse_ledger_response, LedgerParseResult};
+use tron_context::summarizer::{serialize_messages, KeywordSummarizer, Summarizer};
+use tron_context::system_prompts::MEMORY_LEDGER_PROMPT;
+use tron_core::events::StreamEvent;
+use tron_core::messages::{Context, Message};
+use tron_llm::provider::ProviderStreamOptions;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
@@ -134,13 +139,138 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         }
 
+        // Try LLM-based ledger writing (if provider available)
+        let llm_result = if let Some(ref agent_deps) = ctx.agent_deps {
+            try_llm_ledger(&*agent_deps.provider, &active.state.messages).await
+        } else {
+            None
+        };
+
+        match llm_result {
+            Some(LedgerParseResult::Skip) => {
+                return Ok(serde_json::json!({
+                    "written": false,
+                    "title": null,
+                    "entryType": null,
+                    "reason": "trivial interaction (skipped by summarizer)",
+                }));
+            }
+            Some(LedgerParseResult::Entry(ref entry)) => {
+                // Get session metadata for the full payload
+                let session_info = ctx.session_manager.get_session(session_id).ok().flatten();
+                let (total_input, total_output) = session_info
+                    .as_ref()
+                    .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
+                let model = session_info
+                    .as_ref()
+                    .map(|s| s.latest_model.clone())
+                    .unwrap_or_default();
+                let workspace = active
+                    .state
+                    .working_directory
+                    .clone()
+                    .unwrap_or_default();
+                let head_event_id = session_info
+                    .as_ref()
+                    .and_then(|s| s.head_event_id.clone())
+                    .unwrap_or_default();
+
+                // Get first event ID
+                let first_event_id = ctx
+                    .event_store
+                    .get_events_by_session(
+                        session_id,
+                        &tron_events::sqlite::repositories::event::ListEventsOptions {
+                            limit: Some(1),
+                            offset: None,
+                        },
+                    )
+                    .ok()
+                    .and_then(|events| events.first().map(|e| e.id.clone()))
+                    .unwrap_or_default();
+
+                // Count turns (user messages)
+                #[allow(clippy::cast_possible_wrap)]
+                let user_turns = active
+                    .state
+                    .messages
+                    .iter()
+                    .filter(|m| matches!(m, Message::User { .. }))
+                    .count() as i64;
+
+                // Build full MemoryLedgerPayload
+                let payload = serde_json::json!({
+                    "eventRange": {
+                        "firstEventId": first_event_id,
+                        "lastEventId": head_event_id,
+                    },
+                    "turnRange": {
+                        "firstTurn": 1,
+                        "lastTurn": user_turns,
+                    },
+                    "title": entry.title,
+                    "entryType": entry.entry_type,
+                    "status": entry.status,
+                    "tags": entry.tags,
+                    "input": entry.input,
+                    "actions": entry.actions,
+                    "files": entry.files.iter().map(|f| serde_json::json!({
+                        "path": f.path,
+                        "op": f.op,
+                        "why": f.why,
+                    })).collect::<Vec<_>>(),
+                    "decisions": entry.decisions.iter().map(|d| serde_json::json!({
+                        "choice": d.choice,
+                        "reason": d.reason,
+                    })).collect::<Vec<_>>(),
+                    "lessons": entry.lessons,
+                    "thinkingInsights": entry.thinking_insights,
+                    "tokenCost": {
+                        "input": total_input,
+                        "output": total_output,
+                    },
+                    "model": model,
+                    "workingDirectory": workspace,
+                });
+
+                // Persist as memory.ledger event
+                let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                    session_id,
+                    event_type: tron_events::EventType::MemoryLedger,
+                    payload,
+                    parent_id: None,
+                });
+
+                // Broadcast memory updated event
+                let _ = ctx.orchestrator.broadcast().emit(
+                    tron_core::events::TronEvent::MemoryUpdated {
+                        base: tron_core::events::BaseEvent::now(session_id),
+                        title: Some(entry.title.clone()),
+                        entry_type: Some(entry.entry_type.clone()),
+                    },
+                );
+
+                return Ok(serde_json::json!({
+                    "written": true,
+                    "title": entry.title,
+                    "entryType": entry.entry_type,
+                }));
+            }
+            None => {
+                // Fall through to keyword summarizer
+            }
+        }
+
+        // ── Fallback: keyword summarizer ────────────────────────────────────
+        // Used when no LLM provider is configured or the LLM call failed.
+
         // Derive title from first user message
         let title = active
             .state
             .messages
             .iter()
             .find_map(|m| match m {
-                tron_core::messages::Message::User { content, .. } => {
+                Message::User { content, .. } => {
                     let text = match content {
                         tron_core::messages::UserMessageContent::Text(t) => t.clone(),
                         tron_core::messages::UserMessageContent::Blocks(blocks) => blocks
@@ -163,7 +293,6 @@ impl MethodHandler for UpdateLedgerHandler {
             })
             .unwrap_or_else(|| "Untitled session".to_owned());
 
-        // Summarize messages using keyword summarizer
         let summarizer = KeywordSummarizer::new();
         let summary_result = summarizer
             .summarize(&active.state.messages)
@@ -172,7 +301,6 @@ impl MethodHandler for UpdateLedgerHandler {
                 message: format!("Summarization failed: {e}"),
             })?;
 
-        // Determine entry type from tool usage
         let entry_type = if summary_result
             .extracted_data
             .files_modified
@@ -183,7 +311,7 @@ impl MethodHandler for UpdateLedgerHandler {
             "feature"
         };
 
-        // Persist as memory.ledger event
+        // Persist as memory.ledger event (sparse payload)
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id,
             event_type: tron_events::EventType::MemoryLedger,
@@ -211,6 +339,82 @@ impl MethodHandler for UpdateLedgerHandler {
             "title": title,
             "entryType": entry_type,
         }))
+    }
+}
+
+// =============================================================================
+// LLM ledger helper
+// =============================================================================
+
+/// Attempt to write a ledger entry using the LLM provider.
+///
+/// Returns `None` if the provider call fails or the response is unparseable,
+/// signalling the caller to fall back to `KeywordSummarizer`.
+async fn try_llm_ledger(
+    provider: &dyn tron_llm::provider::Provider,
+    messages: &[Message],
+) -> Option<LedgerParseResult> {
+    let transcript = serialize_messages(messages);
+    if transcript.is_empty() {
+        return None;
+    }
+
+    let context = Context {
+        system_prompt: Some(MEMORY_LEDGER_PROMPT.to_owned()),
+        messages: vec![Message::user(&transcript)],
+        ..Default::default()
+    };
+
+    let options = ProviderStreamOptions {
+        max_tokens: Some(4096),
+        enable_thinking: Some(false),
+        ..Default::default()
+    };
+
+    let mut stream = match provider.stream(&context, &options).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "LLM call failed for ledger writer");
+            return None;
+        }
+    };
+
+    let mut text = String::new();
+    while let Some(event) = stream.next().await {
+        match event {
+            Ok(StreamEvent::Done { message, .. }) => {
+                let complete: String = message
+                    .content
+                    .iter()
+                    .filter_map(|c| c.as_text())
+                    .collect::<Vec<_>>()
+                    .join("");
+                if !complete.is_empty() {
+                    text = complete;
+                }
+            }
+            Ok(StreamEvent::TextDelta { delta }) => {
+                text.push_str(&delta);
+            }
+            Err(e) => {
+                warn!(error = %e, "Stream error during ledger LLM call");
+                return None;
+            }
+            _ => {}
+        }
+    }
+
+    if text.is_empty() {
+        warn!("LLM returned empty response for ledger writer");
+        return None;
+    }
+
+    match parse_ledger_response(&text) {
+        Ok(result) => Some(result),
+        Err(e) => {
+            warn!(error = %e, "Failed to parse ledger LLM response");
+            None
+        }
     }
 }
 

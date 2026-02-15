@@ -19,6 +19,20 @@ use crate::utils::validation::{
 };
 
 const DEFAULT_MAX_RESULTS: usize = 200;
+
+/// Format byte count as human-readable size (matching TS server output).
+#[allow(clippy::cast_precision_loss)]
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes}")
+    } else if bytes < 1_048_576 {
+        format!("{:.1}K", bytes as f64 / 1024.0)
+    } else if bytes < 1_073_741_824 {
+        format!("{:.1}M", bytes as f64 / 1_048_576.0)
+    } else {
+        format!("{:.1}G", bytes as f64 / 1_073_741_824.0)
+    }
+}
 const SKIP_DIRS: &[&str] = &[".git", "node_modules", "dist", ".next", "coverage", "__pycache__"];
 
 /// The `Find` tool searches for files using glob patterns.
@@ -37,10 +51,21 @@ impl Default for FindTool {
     }
 }
 
+/// Check if a path matches any of the exclude patterns.
+fn is_excluded(path: &std::path::Path, exclude_matchers: &[globset::GlobMatcher]) -> bool {
+    exclude_matchers.iter().any(|m| {
+        m.is_match(path)
+            || path
+                .file_name()
+                .is_some_and(|name| m.is_match(std::path::Path::new(name)))
+    })
+}
+
 /// Collect matching entries from a directory walk.
 fn collect_entries(
     search_root: &std::path::Path,
     glob: &globset::GlobMatcher,
+    exclude_matchers: &[globset::GlobMatcher],
     type_filter: &str,
     max_depth: Option<usize>,
     max_results: usize,
@@ -75,6 +100,11 @@ fn collect_entries(
 
         let rel_path = entry.path().strip_prefix(search_root).unwrap_or(entry.path());
         if !glob.is_match(rel_path) && !glob.is_match(entry.file_name()) {
+            continue;
+        }
+
+        // Check exclude patterns
+        if is_excluded(rel_path, exclude_matchers) {
             continue;
         }
 
@@ -119,6 +149,7 @@ impl TronTool for FindTool {
                     let _ = m.insert("type".into(), json!({"type": "string", "enum": ["file", "directory", "all"], "description": "Type filter"}));
                     let _ = m.insert("maxDepth".into(), json!({"type": "number", "description": "Maximum recursion depth"}));
                     let _ = m.insert("maxResults".into(), json!({"type": "number", "description": "Maximum number of results"}));
+                    let _ = m.insert("exclude".into(), json!({"type": "array", "description": "Patterns to exclude from results", "items": {"type": "string"}}));
                     let _ = m.insert("showSize".into(), json!({"type": "boolean", "description": "Include file sizes"}));
                     let _ = m.insert("sortByTime".into(), json!({"type": "boolean", "description": "Sort by modification time (newest first)"}));
                     m
@@ -151,21 +182,39 @@ impl TronTool for FindTool {
         let show_size = get_optional_bool(&params, "showSize").unwrap_or(false);
         let sort_by_time = get_optional_bool(&params, "sortByTime").unwrap_or(false);
 
+        // Parse exclude patterns
+        let exclude_matchers: Vec<globset::GlobMatcher> = params
+            .get("exclude")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .filter_map(|p| {
+                        globset::GlobBuilder::new(p)
+                            .literal_separator(false)
+                            .build()
+                            .ok()
+                            .map(|g| g.compile_matcher())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let glob = match globset::GlobBuilder::new(&pattern).literal_separator(false).build() {
             Ok(g) => g.compile_matcher(),
             Err(e) => return Ok(error_result(format!("Invalid glob pattern: {e}"))),
         };
 
-        let entries = collect_entries(&search_root, &glob, &type_filter, max_depth, max_results, show_size, sort_by_time);
+        let entries = collect_entries(&search_root, &glob, &exclude_matchers, &type_filter, max_depth, max_results, show_size, sort_by_time);
         let truncated = entries.len() >= max_results;
 
         let mut output = String::new();
         for (path, size, _) in &entries {
             if show_size {
                 if let Some(s) = size {
-                    let _ = writeln!(output, "{s:>10}  {path}");
+                    let _ = writeln!(output, "{:>8}  {path}", format_size(*s));
                 } else {
-                    let _ = writeln!(output, "         -  {path}");
+                    let _ = writeln!(output, "       -  {path}");
                 }
             } else {
                 output.push_str(path);
@@ -290,6 +339,110 @@ mod tests {
         let ctx = make_ctx(dir.path().to_str().unwrap());
         let r = tool.execute(json!({"pattern": "*.xyz"}), &ctx).await.unwrap();
         assert_eq!(r.details.unwrap()["matchCount"], 0);
+    }
+
+    // ── format_size tests ──
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(512), "512");
+    }
+
+    #[test]
+    fn format_size_zero() {
+        assert_eq!(format_size(0), "0");
+    }
+
+    #[test]
+    fn format_size_kilobytes() {
+        assert_eq!(format_size(6158), "6.0K");
+    }
+
+    #[test]
+    fn format_size_exact_boundary() {
+        assert_eq!(format_size(1024), "1.0K");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(format_size(2_500_000), "2.4M");
+    }
+
+    #[test]
+    fn format_size_gigabytes() {
+        assert_eq!(format_size(1_500_000_000), "1.4G");
+    }
+
+    #[tokio::test]
+    async fn show_size_human_readable() {
+        let dir = TempDir::new().unwrap();
+        // Write a file with known content (>1K so we get "K" suffix)
+        std::fs::write(dir.path().join("big.txt"), "x".repeat(6158)).unwrap();
+        let tool = FindTool::new();
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "big.txt", "showSize": true}), &ctx).await.unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains("6.0K"), "expected human-readable size, got: {text}");
+    }
+
+    #[tokio::test]
+    async fn show_size_8_char_width() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("f.txt"), "hello").unwrap();
+        let tool = FindTool::new();
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "f.txt", "showSize": true}), &ctx).await.unwrap();
+        let text = extract_text(&r);
+        // Size field is right-aligned in 8 chars: "       5  f.txt"
+        let line = text.lines().next().unwrap();
+        let size_part = &line[..8];
+        assert_eq!(size_part.len(), 8);
+        assert!(size_part.trim().parse::<u64>().is_ok() || size_part.contains('K') || size_part.contains('M'));
+    }
+
+    #[tokio::test]
+    async fn exclude_single_pattern() {
+        let dir = setup_test_dir();
+        let tool = FindTool::new();
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "**/*", "type": "file", "exclude": ["*.txt"]}), &ctx).await.unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains(".rs"), "should still find .rs files");
+        assert!(!text.contains("c.txt"), "should exclude .txt files");
+    }
+
+    #[tokio::test]
+    async fn exclude_multiple_patterns() {
+        let dir = setup_test_dir();
+        let tool = FindTool::new();
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "**/*", "type": "file", "exclude": ["*.txt", "*.ts"]}), &ctx).await.unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains(".rs"));
+        assert!(!text.contains("c.txt"));
+        assert!(!text.contains("test.ts"));
+    }
+
+    #[tokio::test]
+    async fn exclude_empty_array_no_effect() {
+        let dir = setup_test_dir();
+        let tool = FindTool::new();
+        let ctx = make_ctx(dir.path().to_str().unwrap());
+        let r = tool.execute(json!({"pattern": "*.rs", "exclude": []}), &ctx).await.unwrap();
+        let text = extract_text(&r);
+        assert!(text.contains("a.rs"));
+        assert!(text.contains("b.rs"));
+    }
+
+    #[tokio::test]
+    async fn exclude_schema_present() {
+        let tool = FindTool::new();
+        let def = tool.definition();
+        let props = def.parameters.properties.as_ref().unwrap();
+        assert!(props.contains_key("exclude"), "schema should have exclude property");
+        let exclude = &props["exclude"];
+        assert_eq!(exclude["type"], "array");
+        assert_eq!(exclude["items"]["type"], "string");
     }
 
     #[tokio::test]
