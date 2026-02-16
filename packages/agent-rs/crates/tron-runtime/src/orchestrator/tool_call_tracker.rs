@@ -100,7 +100,7 @@ mod tests {
         let _rx = tracker.register("tc_1");
         assert!(tracker.has_pending("tc_1"));
 
-        tracker.resolve("tc_1", json!(null));
+        let _ = tracker.resolve("tc_1", json!(null));
         assert!(!tracker.has_pending("tc_1"));
     }
 
@@ -132,11 +132,11 @@ mod tests {
         let rx3 = tracker.register("tc_3");
         assert_eq!(tracker.pending_count(), 3);
 
-        tracker.resolve("tc_2", json!("two"));
+        let _ = tracker.resolve("tc_2", json!("two"));
         assert_eq!(tracker.pending_count(), 2);
 
-        tracker.resolve("tc_1", json!("one"));
-        tracker.resolve("tc_3", json!("three"));
+        let _ = tracker.resolve("tc_1", json!("one"));
+        let _ = tracker.resolve("tc_3", json!("three"));
         assert_eq!(tracker.pending_count(), 0);
 
         assert_eq!(rx1.await.unwrap(), json!("one"));
@@ -167,7 +167,7 @@ mod tests {
         assert!(rx1.await.is_err());
 
         // New receiver should work
-        tracker.resolve("tc_1", json!("result"));
+        let _ = tracker.resolve("tc_1", json!("result"));
         assert_eq!(rx2.await.unwrap(), json!("result"));
     }
 }

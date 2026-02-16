@@ -280,7 +280,7 @@ pub(crate) mod test_helpers {
             tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store.clone()));
@@ -296,15 +296,11 @@ pub(crate) mod test_helpers {
             server_start_time: Instant::now(),
             browser_service: None,
             transcription_engine: None,
+            embedding_controller: None,
+            subagent_manager: None,
         }
     }
 
-    /// Build an `RpcContext` with agent deps (mock provider).
-    pub fn make_test_context_with_agent_deps() -> RpcContext {
-        let mut ctx = make_test_context();
-        ctx.agent_deps = Some(make_test_agent_deps());
-        ctx
-    }
 
     /// Build an `RpcContext` with task tables (same DB as events).
     pub fn make_test_context_with_tasks() -> RpcContext {
@@ -312,8 +308,8 @@ pub(crate) mod test_helpers {
             tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
-            tron_tasks::migrations::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_tasks::migrations::run_migrations(&conn).unwrap();
         }
         let task_pool = pool.clone();
         let store = Arc::new(EventStore::new(pool));
@@ -331,6 +327,8 @@ pub(crate) mod test_helpers {
             server_start_time: Instant::now(),
             browser_service: None,
             transcription_engine: None,
+            embedding_controller: None,
+            subagent_manager: None,
         }
     }
 }

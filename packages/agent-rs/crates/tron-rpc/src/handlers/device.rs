@@ -165,7 +165,7 @@ mod tests {
         let ctx = make_test_context();
         let token = "e".repeat(64);
         // Register first
-        RegisterTokenHandler
+        let _ = RegisterTokenHandler
             .handle(Some(json!({"deviceToken": token})), &ctx)
             .await
             .unwrap();

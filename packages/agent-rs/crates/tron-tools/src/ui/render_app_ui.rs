@@ -176,16 +176,6 @@ mod tests {
         }
     }
 
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
-        }
-    }
-
     #[tokio::test]
     async fn valid_ui_returns_stop_turn() {
         let tool = RenderAppUITool::new();

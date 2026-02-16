@@ -123,8 +123,6 @@ mod tests {
     // covered by integration tests in tests/integration.rs.
     // Unit tests here validate the helper logic.
 
-    use super::*;
-
     #[test]
     fn connected_message_has_required_fields() {
         let client_id = "test_client_123";

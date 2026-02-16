@@ -199,7 +199,7 @@ mod tests {
         let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store));
@@ -231,7 +231,7 @@ mod tests {
         let orch = make_orchestrator();
         let mut rx = orch.subscribe();
 
-        orch.broadcast()
+        let _ = orch.broadcast()
             .emit(tron_core::events::agent_start_event("s1"));
 
         let event = rx.try_recv().unwrap();
@@ -322,7 +322,7 @@ mod tests {
         let token = orch.start_run("s1", "run_1").unwrap();
         assert!(!token.is_cancelled());
 
-        orch.abort("s1").unwrap();
+        let _ = orch.abort("s1").unwrap();
         assert!(token.is_cancelled());
     }
 
@@ -345,7 +345,7 @@ mod tests {
         let t1 = orch.start_run("s1", "run_1").unwrap();
         let t2 = orch.start_run("s2", "run_2").unwrap();
 
-        orch.abort("s1").unwrap();
+        let _ = orch.abort("s1").unwrap();
         assert!(t1.is_cancelled());
         assert!(!t2.is_cancelled());
     }

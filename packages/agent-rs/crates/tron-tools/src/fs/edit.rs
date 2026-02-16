@@ -206,7 +206,7 @@ mod tests {
             Self { files: Mutex::new(HashMap::new()) }
         }
         fn with_file(self, path: impl Into<PathBuf>, content: impl AsRef<[u8]>) -> Self {
-            self.files.lock().unwrap().insert(path.into(), content.as_ref().to_vec());
+            let _ = self.files.lock().unwrap().insert(path.into(), content.as_ref().to_vec());
             self
         }
         fn read_content(&self, path: &Path) -> Option<String> {
@@ -221,7 +221,7 @@ mod tests {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
         }
         async fn write_file(&self, path: &Path, content: &[u8]) -> Result<(), io::Error> {
-            self.files.lock().unwrap().insert(path.to_path_buf(), content.to_vec());
+            let _ = self.files.lock().unwrap().insert(path.to_path_buf(), content.to_vec());
             Ok(())
         }
         async fn metadata(&self, _: &Path) -> Result<std::fs::Metadata, io::Error> {

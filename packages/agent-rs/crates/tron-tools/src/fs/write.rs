@@ -159,7 +159,7 @@ mod tests {
         }
 
         fn with_file(self, path: impl Into<PathBuf>, content: impl Into<Vec<u8>>) -> Self {
-            self.files.lock().unwrap().insert(path.into(), content.into());
+            let _ = self.files.lock().unwrap().insert(path.into(), content.into());
             self
         }
     }
@@ -175,7 +175,7 @@ mod tests {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
         }
         async fn write_file(&self, path: &Path, content: &[u8]) -> Result<(), io::Error> {
-            self.files
+            let _ = self.files
                 .lock()
                 .unwrap()
                 .insert(path.to_path_buf(), content.to_vec());

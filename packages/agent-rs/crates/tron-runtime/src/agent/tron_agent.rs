@@ -73,7 +73,7 @@ impl TronAgent {
         context_manager: ContextManager,
         session_id: String,
     ) -> Self {
-        let compaction = CompactionHandler::with_provider(provider.clone());
+        let compaction = CompactionHandler::new();
         Self {
             config,
             provider,
@@ -877,7 +877,7 @@ mod tests {
         agent.set_abort_token(token.clone());
 
         // Cancel the external token after a short delay
-        tokio::spawn(async move {
+        let _ = tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             token.cancel();
         });

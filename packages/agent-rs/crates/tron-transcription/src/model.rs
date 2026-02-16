@@ -79,7 +79,7 @@ fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
             Ok(cached_path) => {
                 // hf-hub caches to its own dir; copy to our model dir
                 if cached_path != target {
-                    std::fs::copy(&cached_path, &target).map_err(|e| {
+                    let _ = std::fs::copy(&cached_path, &target).map_err(|e| {
                         TranscriptionError::ModelNotAvailable(format!(
                             "failed to copy {filename}: {e}"
                         ))

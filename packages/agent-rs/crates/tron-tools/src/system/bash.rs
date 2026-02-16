@@ -168,8 +168,6 @@ impl TronTool for BashTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
     struct MockRunner {
         handler: Box<dyn Fn(&str) -> crate::traits::ProcessOutput + Send + Sync>,
     }

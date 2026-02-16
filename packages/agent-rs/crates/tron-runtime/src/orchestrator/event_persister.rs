@@ -148,7 +148,7 @@ mod tests {
             .expect("Failed to create in-memory pool");
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
         }
         Arc::new(EventStore::new(pool))
     }

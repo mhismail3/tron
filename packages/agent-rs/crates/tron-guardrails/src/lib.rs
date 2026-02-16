@@ -1234,7 +1234,7 @@ mod tests {
             enable_audit: Some(false),
             rule_overrides: {
                 let mut m = HashMap::new();
-                m.insert("path.traversal".into(), RuleOverride { enabled: Some(false) });
+                let _ = m.insert("path.traversal".into(), RuleOverride { enabled: Some(false) });
                 m
             },
             ..Default::default()
@@ -1250,7 +1250,7 @@ mod tests {
             enable_audit: Some(false),
             rule_overrides: {
                 let mut m = HashMap::new();
-                m.insert(
+                let _ = m.insert(
                     "core.destructive-commands".into(),
                     RuleOverride { enabled: Some(false) },
                 );
@@ -1337,7 +1337,7 @@ mod tests {
     fn audit_capacity_enforcement() {
         let mut logger = AuditLogger::new(Some(3));
         for i in 0..5 {
-            logger.log(AuditEntryParams {
+            let _ = logger.log(AuditEntryParams {
                 session_id: None,
                 tool_name: format!("Tool{i}"),
                 tool_call_id: None,
@@ -1362,7 +1362,7 @@ mod tests {
     fn audit_entries_for_session() {
         let mut logger = AuditLogger::new(None);
         for session in &["sess-1", "sess-2", "sess-1"] {
-            logger.log(AuditEntryParams {
+            let _ = logger.log(AuditEntryParams {
                 session_id: Some((*session).to_string()),
                 tool_name: "Bash".into(),
                 tool_call_id: None,
@@ -1386,7 +1386,7 @@ mod tests {
     #[test]
     fn audit_triggered_entries_filter() {
         let mut logger = AuditLogger::new(None);
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Bash".into(),
             tool_call_id: None,
@@ -1403,7 +1403,7 @@ mod tests {
                 duration_ms: 0,
             },
         });
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Read".into(),
             tool_call_id: None,
@@ -1427,7 +1427,7 @@ mod tests {
     #[test]
     fn audit_blocked_entries_filter() {
         let mut logger = AuditLogger::new(None);
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Bash".into(),
             tool_call_id: None,
@@ -1442,7 +1442,7 @@ mod tests {
                 duration_ms: 0,
             },
         });
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Read".into(),
             tool_call_id: None,
@@ -1464,7 +1464,7 @@ mod tests {
     #[test]
     fn audit_clear() {
         let mut logger = AuditLogger::new(None);
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Bash".into(),
             tool_call_id: None,
@@ -1488,7 +1488,7 @@ mod tests {
     #[test]
     fn audit_stats() {
         let mut logger = AuditLogger::new(None);
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Bash".into(),
             tool_call_id: None,
@@ -1505,7 +1505,7 @@ mod tests {
                 duration_ms: 0,
             },
         });
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Write".into(),
             tool_call_id: None,
@@ -1522,7 +1522,7 @@ mod tests {
                 duration_ms: 0,
             },
         });
-        logger.log(AuditEntryParams {
+        let _ = logger.log(AuditEntryParams {
             session_id: None,
             tool_name: "Bash".into(),
             tool_call_id: None,
@@ -1562,7 +1562,7 @@ mod tests {
             session_id: Some("sess".into()),
             tool_call_id: None,
         };
-        engine.evaluate(&ctx);
+        let _ = engine.evaluate(&ctx);
 
         let audit = engine.audit_logger().unwrap();
         let entries = audit.entries(None);

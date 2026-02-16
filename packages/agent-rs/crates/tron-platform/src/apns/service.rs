@@ -395,8 +395,8 @@ mod tests {
     #[test]
     fn build_payload_with_custom_data() {
         let mut data = std::collections::HashMap::new();
-        data.insert("sessionId".to_string(), "sess_1".to_string());
-        data.insert("toolCallId".to_string(), "tc_1".to_string());
+        let _ = data.insert("sessionId".to_string(), "sess_1".to_string());
+        let _ = data.insert("toolCallId".to_string(), "tc_1".to_string());
 
         let notification = ApnsNotification {
             title: "T".to_string(),
@@ -417,7 +417,7 @@ mod tests {
         });
         if let Some(obj) = payload.as_object_mut() {
             for (key, value) in &notification.data {
-                obj.insert(key.clone(), serde_json::json!(value));
+                let _ = obj.insert(key.clone(), serde_json::json!(value));
             }
         }
 

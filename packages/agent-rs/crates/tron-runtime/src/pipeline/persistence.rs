@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn build_content_json_tool_use_renames_arguments_to_input() {
         let mut args = Map::new();
-        args.insert("command".into(), json!("ls"));
+        let _ = args.insert("command".into(), json!("ls"));
         let content = vec![AssistantContent::ToolUse {
             id: "id1".into(),
             name: "bash".into(),
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn build_content_json_mixed_content() {
         let mut args = Map::new();
-        args.insert("command".into(), json!("ls"));
+        let _ = args.insert("command".into(), json!("ls"));
         let content = vec![
             AssistantContent::text("I'll run that command"),
             AssistantContent::ToolUse {

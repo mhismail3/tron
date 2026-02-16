@@ -286,12 +286,12 @@ mod tests {
 
         let h1 = std::thread::spawn(move || {
             for _ in 0..100 {
-                logs_a.events();
+                let _ = logs_a.events();
             }
         });
         let h2 = std::thread::spawn(move || {
             for _ in 0..100 {
-                logs_b.events();
+                let _ = logs_b.events();
             }
         });
 

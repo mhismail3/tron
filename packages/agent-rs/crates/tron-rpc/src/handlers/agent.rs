@@ -40,19 +40,19 @@ fn extract_skills(value: Option<&Value>) -> Vec<String> {
 /// Created inside the spawned task after `run_agent()` completes. Captures
 /// references to provider, event store, session manager, and broadcast.
 struct RuntimeMemoryDeps {
-    provider: Arc<dyn tron_llm::provider::Provider>,
+    subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
     event_store: Arc<tron_events::EventStore>,
     session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
     broadcast: Arc<tron_runtime::EventEmitter>,
     session_id: String,
     workspace_id: String,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 }
 
 #[async_trait]
 impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
     async fn execute_compaction(&self) -> Result<(), tron_memory::errors::MemoryError> {
-        use tron_context::llm_summarizer::LlmSummarizer;
-        use tron_runtime::agent::compaction_handler::ProviderSubsessionSpawner;
+        use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
 
         // Build a context manager from the session (same approach as CompactHandler)
         let state = self
@@ -83,13 +83,28 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             cm.add_message(msg.clone());
         }
 
-        // Execute compaction with LLM summarizer (provider-backed, falls back to keyword)
-        let summarizer = LlmSummarizer::new(ProviderSubsessionSpawner {
-            provider: self.provider.clone(),
-        });
-        let result = cm
-            .execute_compaction(&summarizer, None)
-            .await
+        // Execute compaction via subsession (LLM) or keyword fallback
+        let result = if let Some(ref manager) = self.subagent_manager {
+            let spawner = SubagentManagerSpawner {
+                manager: manager.clone(),
+                parent_session_id: self.session_id.clone(),
+                working_directory: state
+                    .state
+                    .working_directory
+                    .clone()
+                    .unwrap_or_default(),
+                system_prompt: tron_context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
+                    .to_string(),
+                model: None, // Use session's model
+            };
+            let summarizer = tron_context::llm_summarizer::LlmSummarizer::new(spawner);
+            cm.execute_compaction(&summarizer, None).await
+        } else {
+            let summarizer = tron_context::summarizer::KeywordSummarizer;
+            cm.execute_compaction(&summarizer, None).await
+        };
+
+        let result = result
             .map_err(|e| tron_memory::errors::MemoryError::Compaction(e.to_string()))?;
 
         // Persist compact.summary event
@@ -136,10 +151,32 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             return tron_memory::types::LedgerWriteResult::skipped("no messages");
         }
 
-        // Try LLM-based ledger
-        let llm_result =
-            tron_context::ledger_writer::try_llm_ledger(&*self.provider, &active.state.messages)
-                .await;
+        // Try LLM-based ledger via subsession
+        let llm_result = if let Some(ref manager) = self.subagent_manager {
+            use tron_context::llm_summarizer::SubsessionSpawner;
+            use tron_context::summarizer::serialize_messages;
+            use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
+
+            let transcript = serialize_messages(&active.state.messages);
+            let spawner = SubagentManagerSpawner {
+                manager: manager.clone(),
+                parent_session_id: self.session_id.clone(),
+                working_directory: self.workspace_id.clone(),
+                system_prompt: tron_context::system_prompts::MEMORY_LEDGER_PROMPT.to_string(),
+                model: Some("claude-haiku-4-5-20251001".to_string()),
+            };
+            let result = spawner.spawn_summarizer(&transcript).await;
+            if result.success {
+                result
+                    .output
+                    .as_deref()
+                    .and_then(|o| tron_context::ledger_writer::parse_ledger_response(o).ok())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         match llm_result {
             Some(tron_context::ledger_writer::LedgerParseResult::Skip) => {
@@ -226,11 +263,16 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
 
     async fn embed_memory(
         &self,
-        _event_id: &str,
-        _workspace_id: &str,
-        _payload: &serde_json::Value,
+        event_id: &str,
+        workspace_id: &str,
+        payload: &serde_json::Value,
     ) {
-        // No-op — embedding not wired in Rust yet
+        if let Some(ref ec) = self.embedding_controller {
+            let ctrl = ec.lock().await;
+            if let Err(e) = ctrl.embed_memory(event_id, workspace_id, payload).await {
+                warn!(error = %e, event_id, "failed to embed memory entry");
+            }
+        }
     }
 
     fn on_memory_written(&self, _payload: &serde_json::Value, _title: &str) {
@@ -370,7 +412,9 @@ impl MethodHandler for PromptHandler {
             let working_dir = session.working_directory.clone();
 
             let event_store = ctx.event_store.clone();
+            let embedding_controller = ctx.embedding_controller.clone();
             let skill_registry = ctx.skill_registry.clone();
+            let subagent_manager = ctx.subagent_manager.clone();
             let prompt_clone = prompt.clone();
             let reasoning_level_clone = reasoning_level.clone();
             let images_clone = images.clone();
@@ -440,7 +484,7 @@ impl MethodHandler for PromptHandler {
                     ..AgentConfig::default()
                 };
 
-                let provider_for_memory = provider.clone();
+                let provider_type_str = provider.provider_type().as_str().to_string();
                 let tools = tool_factory();
                 let mut agent = AgentFactory::create_agent(
                     config,
@@ -595,7 +639,7 @@ impl MethodHandler for PromptHandler {
                         error: error_msg.clone(),
                         context: None,
                         code: None,
-                        provider: Some(provider_for_memory.provider_type().as_str().to_string()),
+                        provider: Some(provider_type_str.clone()),
                         category: Some(parsed.category.to_string()),
                         suggestion: parsed.suggestion,
                         retryable: Some(parsed.is_retryable),
@@ -623,12 +667,13 @@ impl MethodHandler for PromptHandler {
                     };
 
                     let memory_deps = RuntimeMemoryDeps {
-                        provider: provider_for_memory,
+                        subagent_manager: subagent_manager.clone(),
                         event_store: event_store.clone(),
                         session_manager: session_manager.clone(),
                         broadcast: broadcast.clone(),
                         session_id: session_id_clone.clone(),
                         workspace_id: working_dir_for_memory.clone(),
+                        embedding_controller: embedding_controller.clone(),
                     };
 
                     let (recent_event_types, recent_tool_calls) =
@@ -795,7 +840,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use crate::context::AgentDeps;
-    use crate::handlers::test_helpers::{make_test_context, make_test_context_with_agent_deps};
+    use crate::handlers::test_helpers::make_test_context;
     use futures::stream;
     use serde_json::json;
     use tron_core::content::AssistantContent;

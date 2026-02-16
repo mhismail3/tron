@@ -115,9 +115,9 @@ mod tests {
         let mut rx = emitter.subscribe();
 
         // Emit 3 events into a capacity-2 channel
-        emitter.emit(agent_start_event("s1"));
-        emitter.emit(agent_start_event("s2"));
-        emitter.emit(agent_start_event("s3"));
+        let _ = emitter.emit(agent_start_event("s1"));
+        let _ = emitter.emit(agent_start_event("s2"));
+        let _ = emitter.emit(agent_start_event("s3"));
 
         // Receiver should be lagged
         let result = rx.recv().await;
@@ -147,9 +147,9 @@ mod tests {
         let emitter = EventEmitter::new();
         let mut rx = emitter.subscribe();
 
-        emitter.emit(agent_start_event("s1"));
-        emitter.emit(agent_start_event("s2"));
-        emitter.emit(agent_start_event("s1"));
+        let _ = emitter.emit(agent_start_event("s1"));
+        let _ = emitter.emit(agent_start_event("s2"));
+        let _ = emitter.emit(agent_start_event("s1"));
 
         let mut s1_events = vec![];
         for _ in 0..3 {
@@ -166,10 +166,10 @@ mod tests {
         let emitter = EventEmitter::new();
         assert_eq!(emitter.emit_count(), 0);
 
-        emitter.emit(agent_start_event("s1"));
+        let _ = emitter.emit(agent_start_event("s1"));
         assert_eq!(emitter.emit_count(), 1);
 
-        emitter.emit(agent_start_event("s2"));
+        let _ = emitter.emit(agent_start_event("s2"));
         assert_eq!(emitter.emit_count(), 2);
     }
 
@@ -178,11 +178,11 @@ mod tests {
         let emitter = EventEmitter::new();
         let mut rx = emitter.subscribe();
 
-        emitter.emit(TronEvent::TurnStart {
+        let _ = emitter.emit(TronEvent::TurnStart {
             base: BaseEvent::now("s1"),
             turn: 1,
         });
-        emitter.emit(TronEvent::MessageUpdate {
+        let _ = emitter.emit(TronEvent::MessageUpdate {
             base: BaseEvent::now("s1"),
             content: "hello".into(),
         });

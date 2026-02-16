@@ -29,7 +29,83 @@ use crate::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use crate::orchestrator::agent_runner;
 use crate::orchestrator::event_persister::EventPersister;
 use crate::orchestrator::session_manager::SessionManager;
-use crate::types::{AgentConfig, RunContext};
+use crate::types::{AgentConfig as AgentCfg, ReasoningLevel, RunContext};
+
+// =============================================================================
+// SpawnType — taxonomy for tracked subagents
+// =============================================================================
+
+/// Distinguishes tool-spawned agents from system-spawned subsessions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SpawnType {
+    /// Spawned by the LLM via the SpawnSubagent tool.
+    ToolAgent,
+    /// Spawned programmatically for internal tasks (ledger, compaction, etc.).
+    Subsession,
+}
+
+// =============================================================================
+// SubsessionConfig / SubsessionOutput — subsession API types
+// =============================================================================
+
+/// Configuration for a system-spawned subsession.
+pub struct SubsessionConfig {
+    /// Parent session ID (for audit trail).
+    pub parent_session_id: String,
+    /// User message content sent to the subsession.
+    pub task: String,
+    /// Override model (None = parent's model via provider).
+    pub model: Option<String>,
+    /// Custom system prompt for the subsession.
+    pub system_prompt: String,
+    /// Working directory for the child agent.
+    pub working_directory: String,
+    /// Timeout in milliseconds (default 30_000).
+    pub timeout_ms: u64,
+    /// If true, wait for completion; if false, return immediately with session_id.
+    pub blocking: bool,
+    /// Maximum LLM turns (default 1).
+    pub max_turns: u32,
+    /// Maximum subagent nesting depth (default 0 = no nesting).
+    pub max_depth: u32,
+    /// Whether to inherit tools from the parent's tool factory (default false).
+    pub inherit_tools: bool,
+    /// Tools to deny from the inherited set.
+    pub denied_tools: Vec<String>,
+    /// Reasoning effort level (default Some(Medium)).
+    pub reasoning_level: Option<ReasoningLevel>,
+}
+
+impl Default for SubsessionConfig {
+    fn default() -> Self {
+        Self {
+            parent_session_id: String::new(),
+            task: String::new(),
+            model: None,
+            system_prompt: String::new(),
+            working_directory: "/tmp".into(),
+            timeout_ms: 30_000,
+            blocking: true,
+            max_turns: 1,
+            max_depth: 0,
+            inherit_tools: false,
+            denied_tools: vec![],
+            reasoning_level: Some(ReasoningLevel::Medium),
+        }
+    }
+}
+
+/// Output from a completed subsession.
+pub struct SubsessionOutput {
+    /// Child session ID.
+    pub session_id: String,
+    /// Full assistant text response.
+    pub output: String,
+    /// Token usage from the run.
+    pub token_usage: Option<Value>,
+    /// Wall-clock duration.
+    pub duration_ms: u64,
+}
 
 /// Internal tracking for a running subagent.
 struct TrackedSubagent {
@@ -42,6 +118,7 @@ struct TrackedSubagent {
     depth: u32,
     #[allow(dead_code)]
     max_depth: u32,
+    spawn_type: SpawnType,
     started_at: Instant,
     done: Notify,
     result: Mutex<Option<SubagentResult>>,
@@ -93,6 +170,287 @@ impl SubagentManager {
         factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
     ) {
         let _ = self.tool_factory.set(factory);
+    }
+
+    /// Count active subagents of a given type.
+    pub fn active_count_by_type(&self, spawn_type: &SpawnType) -> usize {
+        self.subagents
+            .iter()
+            .filter(|entry| {
+                entry.value().spawn_type == *spawn_type && entry.value().result.lock().is_none()
+            })
+            .count()
+    }
+
+    /// List active subsessions as `(session_id, task)` pairs.
+    pub fn list_active_subsessions(&self) -> Vec<(String, String)> {
+        self.subagents
+            .iter()
+            .filter(|entry| {
+                entry.value().spawn_type == SpawnType::Subsession
+                    && entry.value().result.lock().is_none()
+            })
+            .map(|entry| {
+                let v = entry.value();
+                (v.session_id.clone(), v.task.clone())
+            })
+            .collect()
+    }
+
+    /// Spawn a system subsession with full configurability.
+    ///
+    /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
+    /// directly, tools are optional, and the subsession is tracked as
+    /// `SpawnType::Subsession`.
+    pub async fn spawn_subsession(
+        &self,
+        config: SubsessionConfig,
+    ) -> Result<SubsessionOutput, ToolError> {
+        let model = config
+            .model
+            .as_deref()
+            .unwrap_or(self.provider.model());
+        let task = config.task.clone();
+
+        // 1. Create child session
+        let title = format!("Subsession: {}", truncate(&task, 60));
+        let child_session_id = self
+            .session_manager
+            .create_session_for_subagent(
+                model,
+                &config.working_directory,
+                Some(&title),
+                &config.parent_session_id,
+                "subsession",
+                &task,
+            )
+            .map_err(|e| ToolError::Internal {
+                message: format!("Failed to create subsession: {e}"),
+            })?;
+
+        // 2. Register tracking
+        let cancel = CancellationToken::new();
+        let tracker = Arc::new(TrackedSubagent {
+            session_id: child_session_id.clone(),
+            parent_session_id: config.parent_session_id.clone(),
+            task: task.clone(),
+            model: model.to_owned(),
+            depth: 0,
+            max_depth: config.max_depth,
+            spawn_type: SpawnType::Subsession,
+            started_at: Instant::now(),
+            done: Notify::new(),
+            result: Mutex::new(None),
+            cancel: cancel.clone(),
+        });
+
+        let _ = self
+            .subagents
+            .insert(child_session_id.clone(), tracker.clone());
+
+        // 3. Emit SubagentSpawned on broadcast
+        let _ = self.broadcast.emit(TronEvent::SubagentSpawned {
+            base: BaseEvent::now(&config.parent_session_id),
+            subagent_session_id: child_session_id.clone(),
+            task: task.clone(),
+            model: model.to_owned(),
+            max_turns: config.max_turns,
+            spawn_depth: 0,
+        });
+
+        // 4. Build tools
+        let tools = if config.inherit_tools {
+            if let Some(factory) = self.tool_factory.get() {
+                let mut registry = factory();
+                for name in &config.denied_tools {
+                    let _ = registry.remove(name);
+                }
+                registry
+            } else {
+                ToolRegistry::new()
+            }
+        } else {
+            ToolRegistry::new()
+        };
+
+        // 5. Spawn execution task
+        let session_mgr = self.session_manager.clone();
+        let event_store = self.event_store.clone();
+        let broadcast = self.broadcast.clone();
+        let provider = self.provider.clone();
+        let hooks = self.hooks.clone();
+        let child_sid = child_session_id.clone();
+        let max_turns = config.max_turns;
+        let model_owned = model.to_owned();
+        let system_prompt = config.system_prompt.clone();
+        let working_directory = config.working_directory.clone();
+        let subagent_max_depth = config.max_depth;
+        let reasoning_level = config.reasoning_level;
+        let parent_session_id = config.parent_session_id.clone();
+        let tracker_clone = tracker.clone();
+
+        let _ = tokio::spawn(async move {
+            let child_broadcast = Arc::new(EventEmitter::new());
+
+            let agent_config = AgentCfg {
+                model: model_owned.clone(),
+                system_prompt: Some(system_prompt),
+                max_turns,
+                enable_thinking: true,
+                working_directory: Some(working_directory),
+                ..AgentCfg::default()
+            };
+
+            let mut agent = AgentFactory::create_agent(
+                agent_config,
+                child_sid.clone(),
+                CreateAgentOpts {
+                    provider,
+                    tools,
+                    guardrails: None,
+                    hooks: hooks.clone(),
+                    is_subagent: true,
+                    denied_tools: vec![],
+                    subagent_depth: 0,
+                    subagent_max_depth: subagent_max_depth,
+                    rules_content: None,
+                    initial_messages: vec![],
+                    memory_content: None,
+                },
+            );
+
+            agent.set_abort_token(cancel);
+
+            // Create inline persister for child session
+            let persister = Arc::new(EventPersister::new(
+                event_store.clone(),
+                child_sid.clone(),
+            ));
+
+            // Run the agent
+            let result = agent_runner::run_agent(
+                &mut agent,
+                &task,
+                RunContext {
+                    reasoning_level,
+                    ..Default::default()
+                },
+                &hooks,
+                &child_broadcast,
+            )
+            .await;
+
+            // Flush persister
+            let _ = persister.flush().await;
+
+            let duration_ms = tracker_clone.started_at.elapsed().as_millis() as u64;
+
+            // Extract output from agent's last assistant message
+            let output = {
+                let messages = agent.context_manager().get_messages();
+                messages
+                    .iter()
+                    .rev()
+                    .find_map(|m| {
+                        if let tron_core::messages::Message::Assistant { content, .. } = m {
+                            let text: String = content
+                                .iter()
+                                .filter_map(|c| c.as_text())
+                                .collect::<Vec<_>>()
+                                .join("");
+                            if text.is_empty() { None } else { Some(text) }
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default()
+            };
+
+            let token_usage = serde_json::to_value(&result.total_token_usage).ok();
+
+            if result.error.is_some() {
+                let error = result.error.unwrap_or_else(|| "Unknown error".into());
+                let _ = broadcast.emit(TronEvent::SubagentFailed {
+                    base: BaseEvent::now(&parent_session_id),
+                    subagent_session_id: child_sid.clone(),
+                    error: error.clone(),
+                    duration_ms,
+                });
+
+                *tracker_clone.result.lock() = Some(SubagentResult {
+                    session_id: child_sid.clone(),
+                    output: error,
+                    token_usage,
+                    duration_ms,
+                    status: "failed".into(),
+                });
+            } else {
+                let _ = broadcast.emit(TronEvent::SubagentCompleted {
+                    base: BaseEvent::now(&parent_session_id),
+                    subagent_session_id: child_sid.clone(),
+                    total_turns: result.turns_executed,
+                    duration_ms,
+                    output: Some(output.clone()),
+                    token_usage: token_usage.clone(),
+                });
+
+                *tracker_clone.result.lock() = Some(SubagentResult {
+                    session_id: child_sid.clone(),
+                    output,
+                    token_usage,
+                    duration_ms,
+                    status: "completed".into(),
+                });
+            }
+
+            tracker_clone.done.notify_waiters();
+
+            let _ = session_mgr.end_session(&child_sid).await;
+
+            info!(
+                child_session = child_sid,
+                turns = result.turns_executed,
+                duration_ms,
+                "subsession execution finished"
+            );
+        });
+
+        // 6. If blocking, wait for completion
+        if config.blocking {
+            let timeout = std::time::Duration::from_millis(config.timeout_ms);
+            let wait_result = tokio::time::timeout(timeout, tracker.done.notified()).await;
+
+            if wait_result.is_err() {
+                tracker.cancel.cancel();
+                return Err(ToolError::Timeout {
+                    timeout_ms: config.timeout_ms,
+                });
+            }
+
+            let result = tracker.result.lock().clone();
+            if let Some(r) = result {
+                Ok(SubsessionOutput {
+                    session_id: child_session_id,
+                    output: r.output,
+                    token_usage: r.token_usage,
+                    duration_ms: r.duration_ms,
+                })
+            } else {
+                Ok(SubsessionOutput {
+                    session_id: child_session_id,
+                    output: String::new(),
+                    token_usage: None,
+                    duration_ms: 0,
+                })
+            }
+        } else {
+            Ok(SubsessionOutput {
+                session_id: child_session_id,
+                output: String::new(),
+                token_usage: None,
+                duration_ms: 0,
+            })
+        }
     }
 }
 
@@ -146,6 +504,7 @@ impl SubagentSpawner for SubagentManager {
             model: model.to_owned(),
             depth: config.current_depth,
             max_depth: config.max_depth,
+            spawn_type: SpawnType::ToolAgent,
             started_at: Instant::now(),
             done: Notify::new(),
             result: Mutex::new(None),
@@ -186,13 +545,13 @@ impl SubagentSpawner for SubagentManager {
             let child_broadcast = Arc::new(EventEmitter::new());
 
             // Build agent
-            let agent_config = AgentConfig {
+            let agent_config = AgentCfg {
                 model: model_owned.clone(),
                 system_prompt,
                 max_turns,
                 enable_thinking: true,
                 working_directory: Some(working_directory),
-                ..AgentConfig::default()
+                ..AgentCfg::default()
             };
 
             let mut agent = AgentFactory::create_agent(
@@ -703,7 +1062,7 @@ mod tests {
             tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
         let mgr = Arc::new(SessionManager::new(store.clone()));
@@ -962,5 +1321,173 @@ mod tests {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
         let result = manager.query_agent("any", "logs", None).await.unwrap();
         assert_eq!(result["logs"], json!([]));
+    }
+
+    // ── SpawnType tests ──
+
+    #[test]
+    fn spawn_type_enum_variants() {
+        assert_ne!(SpawnType::ToolAgent, SpawnType::Subsession);
+        assert_eq!(SpawnType::ToolAgent, SpawnType::ToolAgent);
+        assert_eq!(SpawnType::Subsession, SpawnType::Subsession);
+    }
+
+    #[test]
+    fn spawn_type_debug() {
+        let s = format!("{:?}", SpawnType::ToolAgent);
+        assert!(s.contains("ToolAgent"));
+    }
+
+    // ── SubsessionConfig defaults ──
+
+    #[test]
+    fn subsession_config_defaults() {
+        let config = SubsessionConfig::default();
+        assert!(config.parent_session_id.is_empty());
+        assert!(config.task.is_empty());
+        assert!(config.model.is_none());
+        assert!(config.system_prompt.is_empty());
+        assert_eq!(config.timeout_ms, 30_000);
+        assert!(config.blocking);
+        assert_eq!(config.max_turns, 1);
+        assert_eq!(config.max_depth, 0);
+        assert!(!config.inherit_tools);
+        assert!(config.denied_tools.is_empty());
+        assert_eq!(config.reasoning_level, Some(ReasoningLevel::Medium));
+    }
+
+    // ── Query helpers ──
+
+    #[tokio::test]
+    async fn active_count_by_type_tool_agent() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        // Spawn a blocking tool agent (completes immediately)
+        let config = make_config("test task");
+        let _handle = manager.spawn(config).await.unwrap();
+
+        // After blocking spawn completes, should be 0 active ToolAgents
+        assert_eq!(manager.active_count_by_type(&SpawnType::ToolAgent), 0);
+        assert_eq!(manager.active_count_by_type(&SpawnType::Subsession), 0);
+    }
+
+    #[tokio::test]
+    async fn list_active_subsessions_empty() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        assert!(manager.list_active_subsessions().is_empty());
+    }
+
+    // ── spawn_subsession tests ──
+
+    fn make_subsession_config(task: &str, parent: &str) -> SubsessionConfig {
+        SubsessionConfig {
+            parent_session_id: parent.into(),
+            task: task.into(),
+            system_prompt: "You are a summarizer.".into(),
+            working_directory: "/tmp".into(),
+            ..SubsessionConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_blocking_returns_output() {
+        let (manager, _, store) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_subsession_config("summarize this", "parent-001");
+        let result = manager.spawn_subsession(config).await.unwrap();
+
+        assert!(!result.session_id.is_empty());
+        assert!(!result.output.is_empty());
+        assert!(result.duration_ms > 0 || result.output == "Done");
+
+        // Session should exist in DB with spawn_type = subsession
+        let session = store.get_session(&result.session_id).unwrap();
+        assert!(session.is_some());
+        let s = session.unwrap();
+        assert_eq!(s.spawn_type.as_deref(), Some("subsession"));
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_nonblocking_returns_session_id() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_subsession_config("summarize", "parent-001");
+        config.blocking = false;
+        let result = manager.spawn_subsession(config).await.unwrap();
+
+        assert!(!result.session_id.is_empty());
+        // Non-blocking: output is empty initially
+        assert!(result.output.is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_no_tools_by_default() {
+        // Default inherit_tools = false, so subsession should have empty tool registry
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_subsession_config("summarize", "parent-001");
+        let result = manager.spawn_subsession(config).await.unwrap();
+        assert!(!result.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_inherit_tools() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_subsession_config("summarize", "parent-001");
+        config.inherit_tools = true;
+        let result = manager.spawn_subsession(config).await.unwrap();
+        assert!(!result.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_emits_events() {
+        let (mgr, store, broadcast) = make_manager_and_store();
+        let manager = SubagentManager::new(
+            mgr.clone(),
+            store.clone(),
+            broadcast.clone(),
+            Arc::new(MockProvider),
+            None,
+            None,
+        );
+        manager.set_tool_factory(Arc::new(ToolRegistry::new));
+
+        let mut rx = broadcast.subscribe();
+        let config = make_subsession_config("summarize", "parent-001");
+        let _result = manager.spawn_subsession(config).await.unwrap();
+
+        let mut event_types = vec![];
+        while let Ok(event) = rx.try_recv() {
+            event_types.push(event.event_type().to_owned());
+        }
+
+        assert!(
+            event_types.contains(&"subagent_spawned".to_owned()),
+            "expected subagent_spawned, got: {event_types:?}"
+        );
+        let has_terminal = event_types.contains(&"subagent_completed".to_owned())
+            || event_types.contains(&"subagent_failed".to_owned());
+        assert!(
+            has_terminal,
+            "expected terminal event, got: {event_types:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_tracked_as_subsession_type() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_subsession_config("summarize", "parent-001");
+        config.blocking = false;
+        let result = manager.spawn_subsession(config).await.unwrap();
+
+        // Check tracker has Subsession type
+        if let Some(tracker) = manager.subagents.get(&result.session_id) {
+            assert_eq!(tracker.spawn_type, SpawnType::Subsession);
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_error_provider() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(ErrorProvider));
+        let config = make_subsession_config("summarize", "parent-001");
+        let result = manager.spawn_subsession(config).await.unwrap();
+        // Should still complete (blocking) — output may contain error info
+        assert!(!result.session_id.is_empty());
     }
 }

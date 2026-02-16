@@ -290,7 +290,7 @@ mod tests {
         let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
         }
         SessionManager::new(Arc::new(EventStore::new(pool)))
     }
@@ -310,7 +310,7 @@ mod tests {
         let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
 
         // Drop from active
-        mgr.active_sessions.remove(&sid);
+        let _ = mgr.active_sessions.remove(&sid);
         assert!(!mgr.is_active(&sid));
 
         // Resume should reconstruct

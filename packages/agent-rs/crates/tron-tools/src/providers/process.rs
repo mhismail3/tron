@@ -126,7 +126,7 @@ mod tests {
     async fn run_with_env() {
         let runner = TokioProcessRunner;
         let mut opts = default_opts();
-        opts.env.insert("TEST_VAR".into(), "test_value".into());
+        let _ = opts.env.insert("TEST_VAR".into(), "test_value".into());
         let result = runner.run_command("echo $TEST_VAR", &opts).await.unwrap();
         assert_eq!(result.stdout.trim(), "test_value");
     }

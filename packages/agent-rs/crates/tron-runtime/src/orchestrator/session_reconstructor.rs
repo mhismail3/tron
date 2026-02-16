@@ -90,7 +90,7 @@ mod tests {
         let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            run_migrations(&conn).unwrap();
+            let _ = run_migrations(&conn).unwrap();
         }
         EventStore::new(pool)
     }
@@ -113,7 +113,7 @@ mod tests {
         let sid = &session.session.id;
 
         // Add user message event
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageUser,
             payload: serde_json::json!({
@@ -124,7 +124,7 @@ mod tests {
         }).unwrap();
 
         // Add assistant message event
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
@@ -150,7 +150,7 @@ mod tests {
         let session = store.create_session("test-model", "/tmp", Some("test")).unwrap();
         let sid = &session.session.id;
 
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageUser,
             payload: serde_json::json!({"content": "write a file"}),
@@ -158,7 +158,7 @@ mod tests {
         }).unwrap();
 
         // Assistant message with tool_use using "input" (API wire format, as persistence stores it)
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
@@ -171,14 +171,14 @@ mod tests {
             parent_id: None,
         }).unwrap();
 
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::ToolResult,
             payload: serde_json::json!({"toolCallId": "toolu_01abc", "content": "File written", "isError": false}),
             parent_id: None,
         }).unwrap();
 
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
@@ -232,7 +232,7 @@ mod tests {
         let sid = &session.session.id;
 
         // Switch model via event
-        store.append(&AppendOptions {
+        let _ = store.append(&AppendOptions {
             session_id: sid,
             event_type: EventType::ConfigModelSwitch,
             payload: serde_json::json!({

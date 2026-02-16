@@ -24,8 +24,8 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
 
     let mut hint = Hint::new();
     match mime_type {
-        "audio/wav" | "audio/wave" | "audio/x-wav" => { hint.with_extension("wav"); }
-        "audio/m4a" | "audio/mp4" | "audio/x-m4a" | "audio/aac" => { hint.with_extension("m4a"); }
+        "audio/wav" | "audio/wave" | "audio/x-wav" => { let _ = hint.with_extension("wav"); }
+        "audio/m4a" | "audio/mp4" | "audio/x-m4a" | "audio/aac" => { let _ = hint.with_extension("m4a"); }
         _ => {}
     }
 
