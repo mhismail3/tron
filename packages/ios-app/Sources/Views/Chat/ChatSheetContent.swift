@@ -152,6 +152,10 @@ struct ChatSheetContent: View {
             GlobToolDetailSheet(data: liveData)
         case "search":
             SearchToolDetailSheet(data: liveData)
+        case "webfetch":
+            WebFetchToolDetailSheet(data: liveData)
+        case "websearch":
+            WebSearchToolDetailSheet(data: liveData)
         default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { url in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
