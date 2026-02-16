@@ -158,6 +158,8 @@ struct ChatSheetContent: View {
             WebSearchToolDetailSheet(data: liveData)
         case "openurl":
             OpenURLToolDetailSheet(data: liveData)
+        case "remember":
+            RememberToolDetailSheet(data: liveData)
         default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { url in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
