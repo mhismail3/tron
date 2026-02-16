@@ -82,6 +82,9 @@ pub async fn dispatch(
 
         // Context (engine-dependent)
         "context.get" => context_get(state, &params, id),
+        "context.getSnapshot" | "context.getDetailedSnapshot" => {
+            context_get_detailed_snapshot(state, &params, id)
+        }
         "context.compact" => context_compact(id),
         "context.preview" => context_preview(id),
 
@@ -478,6 +481,31 @@ fn context_get(
         Ok(session) => RpcResponse::success(id, compat::context_get_response(&session)),
         Err(e) => RpcResponse::internal_error(id, e.to_string()),
     }
+}
+
+fn context_get_detailed_snapshot(
+    state: &Arc<HandlerState>,
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let session_id = match rpc::require_str(params, "session_id") {
+        Ok(s) => SessionId::from_raw(s),
+        Err(e) => return RpcResponse::invalid_params(id, e),
+    };
+
+    let sess_repo = tron_store::sessions::SessionRepo::new(state.db.clone());
+    let session = match sess_repo.get(&session_id) {
+        Ok(s) => s,
+        Err(e) => return RpcResponse::internal_error(id, e.to_string()),
+    };
+
+    let event_repo = tron_store::events::EventRepo::new(state.db.clone());
+    let event_count = event_repo.count(&session_id).unwrap_or(0) as usize;
+
+    RpcResponse::success(
+        id,
+        compat::context_detailed_snapshot_response(&session, event_count),
+    )
 }
 
 fn context_compact(id: Option<serde_json::Value>) -> RpcResponse {
@@ -1329,6 +1357,43 @@ mod tests {
         assert!(result["totalInputTokens"].is_number());
         assert!(result["turnCount"].is_number());
         assert!(result.get("session_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn context_get_detailed_snapshot_returns_ios_shape() {
+        let state = setup();
+        let sid = create_session(&state).await;
+        let resp = dispatch(
+            &state,
+            "context.getDetailedSnapshot",
+            &serde_json::json!({"session_id": sid}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["currentTokens"].is_number());
+        assert!(result["contextLimit"].is_number());
+        assert!(result["usagePercent"].is_number());
+        assert!(result["thresholdLevel"].is_string());
+        assert!(result["breakdown"].is_object());
+        assert!(result["messages"].is_array());
+        assert!(result["addedSkills"].is_array());
+    }
+
+    #[tokio::test]
+    async fn context_get_snapshot_alias_works() {
+        let state = setup();
+        let sid = create_session(&state).await;
+        let resp = dispatch(
+            &state,
+            "context.getSnapshot",
+            &serde_json::json!({"session_id": sid}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        assert!(resp.result.unwrap()["currentTokens"].is_number());
     }
 
     // ── Model tests ──

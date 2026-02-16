@@ -309,6 +309,38 @@ pub fn default_settings_ios() -> serde_json::Value {
     })
 }
 
+/// Map persisted event types from Rust snake_case to iOS dot.notation.
+///
+/// Rust stores `message_user` (PersistenceEventType serde), iOS expects `message.user`.
+/// Special case: `config_model_switched` → `config.model_switch` (iOS drops the "d").
+pub fn persisted_event_type_to_ios(rust_type: &str) -> String {
+    match rust_type {
+        "message_user" => "message.user".into(),
+        "message_assistant" => "message.assistant".into(),
+        "tool_call" => "tool.call".into(),
+        "tool_result" => "tool.result".into(),
+        "stream_turn_start" => "stream.turn_start".into(),
+        "stream_turn_end" => "stream.turn_end".into(),
+        "compact_boundary" => "compact.boundary".into(),
+        "compact_summary" => "compact.summary".into(),
+        "context_cleared" => "context.cleared".into(),
+        "config_model_switched" => "config.model_switch".into(),
+        "skill_added" => "skill.added".into(),
+        "skill_removed" => "skill.removed".into(),
+        "memory_ledger" => "memory.ledger".into(),
+        "session_start" => "session.start".into(),
+        "session_fork" => "session.fork".into(),
+        // Fallback: replace first `_` with `.` for any unmapped types
+        other => {
+            if let Some(idx) = other.find('_') {
+                format!("{}.{}", &other[..idx], &other[idx + 1..])
+            } else {
+                other.to_string()
+            }
+        }
+    }
+}
+
 /// Convert an EventRow to iOS camelCase format.
 pub fn event_row_to_ios(event: &EventRow) -> serde_json::Value {
     serde_json::json!({
@@ -317,7 +349,7 @@ pub fn event_row_to_ios(event: &EventRow) -> serde_json::Value {
         "parentId": event.parent_id.as_ref().map(|id| id.to_string()),
         "sequence": event.sequence,
         "depth": event.depth,
-        "type": event.event_type,
+        "type": persisted_event_type_to_ios(&event.event_type),
         "timestamp": event.timestamp,
         "payload": event.payload,
         "workspaceId": event.workspace_id.to_string(),
@@ -349,6 +381,61 @@ pub fn context_get_response(session: &SessionRow) -> serde_json::Value {
         "lastTurnInputTokens": session.tokens.last_turn_input_tokens,
         "totalCostCents": session.tokens.total_cost_cents,
         "turnCount": session.tokens.turn_count,
+    })
+}
+
+/// context.getDetailedSnapshot / context.getSnapshot response.
+///
+/// iOS `DetailedContextSnapshotResult` expects: currentTokens, contextLimit,
+/// usagePercent, thresholdLevel, breakdown, messages, systemPromptContent,
+/// toolsContent, addedSkills, rules, memory, sessionMemories, taskContext.
+///
+/// Since the Rust server doesn't yet have a full context engine, we derive
+/// what we can from session token data and return empty/null for the rest.
+pub fn context_detailed_snapshot_response(
+    session: &SessionRow,
+    event_count: usize,
+) -> serde_json::Value {
+    let model_info = tron_llm::models::find_model(&session.model);
+    let context_limit = model_info.map(|m| m.context_window as u64).unwrap_or(200_000);
+    let current_tokens = session.tokens.last_turn_input_tokens;
+    let usage_pct = if context_limit > 0 {
+        (current_tokens as f64 / context_limit as f64) * 100.0
+    } else {
+        0.0
+    };
+    let threshold_level = if usage_pct > 80.0 {
+        "high"
+    } else if usage_pct > 50.0 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    serde_json::json!({
+        "currentTokens": current_tokens,
+        "contextLimit": context_limit,
+        "usagePercent": usage_pct,
+        "thresholdLevel": threshold_level,
+        "breakdown": {
+            "systemPrompt": 0,
+            "tools": 0,
+            "messages": current_tokens,
+            "other": 0
+        },
+        "messages": [],
+        "systemPromptContent": "",
+        "toolClarificationContent": null,
+        "toolsContent": [],
+        "addedSkills": [],
+        "rules": null,
+        "memory": null,
+        "sessionMemories": null,
+        "taskContext": null,
+        // Extra fields iOS may also read
+        "eventCount": event_count,
+        "sessionId": session.id.to_string(),
+        "model": session.model,
     })
 }
 
@@ -802,10 +889,40 @@ mod tests {
         assert!(settings["tools"]["web"]["fetch"]["timeoutMs"].is_number());
     }
 
+    // ── Persisted event type mapping tests ─────────────────────────────
+
+    #[test]
+    fn persisted_event_type_all_known_mappings() {
+        assert_eq!(persisted_event_type_to_ios("message_user"), "message.user");
+        assert_eq!(persisted_event_type_to_ios("message_assistant"), "message.assistant");
+        assert_eq!(persisted_event_type_to_ios("tool_call"), "tool.call");
+        assert_eq!(persisted_event_type_to_ios("tool_result"), "tool.result");
+        assert_eq!(persisted_event_type_to_ios("stream_turn_start"), "stream.turn_start");
+        assert_eq!(persisted_event_type_to_ios("stream_turn_end"), "stream.turn_end");
+        assert_eq!(persisted_event_type_to_ios("compact_boundary"), "compact.boundary");
+        assert_eq!(persisted_event_type_to_ios("compact_summary"), "compact.summary");
+        assert_eq!(persisted_event_type_to_ios("context_cleared"), "context.cleared");
+        assert_eq!(persisted_event_type_to_ios("config_model_switched"), "config.model_switch");
+        assert_eq!(persisted_event_type_to_ios("skill_added"), "skill.added");
+        assert_eq!(persisted_event_type_to_ios("skill_removed"), "skill.removed");
+        assert_eq!(persisted_event_type_to_ios("memory_ledger"), "memory.ledger");
+        assert_eq!(persisted_event_type_to_ios("session_start"), "session.start");
+        assert_eq!(persisted_event_type_to_ios("session_fork"), "session.fork");
+    }
+
+    #[test]
+    fn persisted_event_type_unknown_uses_fallback() {
+        // Unknown types: replace first `_` with `.`
+        assert_eq!(persisted_event_type_to_ios("foo_bar"), "foo.bar");
+        assert_eq!(persisted_event_type_to_ios("custom_event_type"), "custom.event_type");
+        // No underscore at all — pass through
+        assert_eq!(persisted_event_type_to_ios("nounderscore"), "nounderscore");
+    }
+
     // ── Event row transform tests ────────────────────────────────────
 
     #[test]
-    fn event_row_to_ios_camel_case() {
+    fn event_row_to_ios_converts_event_type() {
         use tron_core::ids::{EventId, WorkspaceId};
         let event = EventRow {
             id: EventId::new(),
@@ -813,16 +930,49 @@ mod tests {
             parent_id: None,
             sequence: 1,
             depth: 0,
-            event_type: "text_delta".into(),
+            event_type: "message_user".into(),
             timestamp: "2026-02-15T12:00:00Z".into(),
-            payload: serde_json::json!({"delta": "hello"}),
+            payload: serde_json::json!({"role": "user"}),
             workspace_id: WorkspaceId::new(),
         };
         let wire = event_row_to_ios(&event);
+        // Must be dot.notation, not snake_case
+        assert_eq!(wire["type"], "message.user");
         assert!(wire["sessionId"].is_string());
         assert!(wire["parentId"].is_null() || wire["parentId"].is_string());
         assert!(wire["workspaceId"].is_string());
         assert!(wire.get("session_id").is_none());
+    }
+
+    #[test]
+    fn event_row_to_ios_all_types_converted() {
+        use tron_core::ids::{EventId, WorkspaceId};
+        let types = vec![
+            ("message_user", "message.user"),
+            ("message_assistant", "message.assistant"),
+            ("tool_call", "tool.call"),
+            ("tool_result", "tool.result"),
+            ("compact_boundary", "compact.boundary"),
+            ("compact_summary", "compact.summary"),
+            ("session_start", "session.start"),
+            ("memory_ledger", "memory.ledger"),
+            ("config_model_switched", "config.model_switch"),
+        ];
+        for (rust_type, ios_type) in types {
+            let event = EventRow {
+                id: EventId::new(),
+                session_id: SessionId::new(),
+                parent_id: None,
+                sequence: 0,
+                depth: 0,
+                event_type: rust_type.into(),
+                timestamp: "2026-02-15T12:00:00Z".into(),
+                payload: serde_json::json!({}),
+                workspace_id: WorkspaceId::new(),
+            };
+            let wire = event_row_to_ios(&event);
+            assert_eq!(wire["type"], ios_type, "Failed for {rust_type}");
+        }
     }
 
     #[test]
@@ -855,6 +1005,35 @@ mod tests {
         assert!(wire["totalInputTokens"].is_number());
         assert!(wire["turnCount"].is_number());
         assert!(wire.get("session_id").is_none());
+    }
+
+    #[test]
+    fn context_detailed_snapshot_has_ios_shape() {
+        let session = make_test_session();
+        let wire = context_detailed_snapshot_response(&session, 10);
+
+        // Required fields for iOS DetailedContextSnapshotResult
+        assert!(wire["currentTokens"].is_number());
+        assert!(wire["contextLimit"].is_number());
+        assert!(wire["usagePercent"].is_number());
+        assert!(wire["thresholdLevel"].is_string());
+        assert!(wire["breakdown"].is_object());
+        assert!(wire["messages"].is_array());
+        assert!(wire["systemPromptContent"].is_string());
+        assert!(wire["toolsContent"].is_array());
+        assert!(wire["addedSkills"].is_array());
+
+        // Nullable fields
+        assert!(wire.get("rules").is_some());
+        assert!(wire.get("memory").is_some());
+        assert!(wire.get("sessionMemories").is_some());
+        assert!(wire.get("taskContext").is_some());
+
+        // Breakdown sub-fields
+        let bd = &wire["breakdown"];
+        assert!(bd["systemPrompt"].is_number());
+        assert!(bd["tools"].is_number());
+        assert!(bd["messages"].is_number());
     }
 
     // ── Agent state transform tests ──────────────────────────────────
