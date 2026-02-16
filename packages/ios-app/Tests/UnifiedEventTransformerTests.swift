@@ -1553,6 +1553,282 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(toolMessages.count, 1, "Failed tool should show error status")
     }
 
+    // MARK: - TokenRecord Fallback Tests (Tool-Only Turns)
+
+    func testTokenRecordFallbackToToolUseWhenNoTextBlock() {
+        // Turn with [thinking, tool_use] and no text block — tokenRecord should attach to tool message
+        let tokenRecordPayload: [String: Any] = [
+            "source": [
+                "provider": "anthropic",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "rawInputTokens": 10,
+                "rawOutputTokens": 261,
+                "rawCacheReadTokens": 12561,
+                "rawCacheCreationTokens": 498
+            ],
+            "computed": [
+                "contextWindowTokens": 12571,
+                "newInputTokens": 10,
+                "previousContextBaseline": 12561,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": 1,
+                "sessionId": "test-session",
+                "extractedAt": "2026-01-01T00:00:00Z",
+                "normalizedAt": "2026-01-01T00:00:00Z"
+            ]
+        ]
+
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Search"),
+                "toolCallId": AnyCodable("tc_1"),
+                "arguments": AnyCodable(["query": "test"]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_1"),
+                "content": AnyCodable("Found 3 results")
+            ], timestamp: timestamp(1), sequence: 2),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "thinking", "thinking": "Let me search for this..."],
+                    ["type": "tool_use", "id": "tc_1", "name": "Search", "input": ["query": "test"]]
+                ]),
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(3254),
+                "tokenRecord": AnyCodable(tokenRecordPayload)
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // thinking + tool_use = 2 messages
+        XCTAssertEqual(messages.count, 2)
+
+        // Tool message should have tokenRecord (fallback from text-less turn)
+        if case .toolUse = messages[1].content {
+            XCTAssertNotNil(messages[1].tokenRecord, "tokenRecord should be attached to toolUse when no text block exists")
+            XCTAssertEqual(messages[1].tokenRecord?.computed.newInputTokens, 10)
+            XCTAssertEqual(messages[1].tokenRecord?.source.rawOutputTokens, 261)
+            XCTAssertEqual(messages[1].tokenRecord?.source.rawCacheReadTokens, 12561)
+        } else {
+            XCTFail("Expected toolUse content at index 1")
+        }
+    }
+
+    func testTokenRecordFallbackWithMultipleToolUses() {
+        // Turn with [thinking, tool_use, tool_use] — only first tool gets tokenRecord
+        let tokenRecordPayload: [String: Any] = [
+            "source": [
+                "provider": "anthropic",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "rawInputTokens": 13,
+                "rawOutputTokens": 216,
+                "rawCacheReadTokens": 13059,
+                "rawCacheCreationTokens": 928
+            ],
+            "computed": [
+                "contextWindowTokens": 13072,
+                "newInputTokens": 13,
+                "previousContextBaseline": 13059,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": 2,
+                "sessionId": "test-session",
+                "extractedAt": "2026-01-01T00:00:00Z",
+                "normalizedAt": "2026-01-01T00:00:00Z"
+            ]
+        ]
+
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc_a"),
+                "arguments": AnyCodable(["file_path": "/src/a.ts"]),
+                "turn": AnyCodable(2)
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_a"),
+                "content": AnyCodable("file a contents")
+            ], timestamp: timestamp(1), sequence: 2),
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc_b"),
+                "arguments": AnyCodable(["file_path": "/src/b.ts"]),
+                "turn": AnyCodable(2)
+            ], timestamp: timestamp(2), sequence: 3),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_b"),
+                "content": AnyCodable("file b contents")
+            ], timestamp: timestamp(3), sequence: 4),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "thinking", "thinking": "Reading both files..."],
+                    ["type": "tool_use", "id": "tc_a", "name": "Read", "input": ["file_path": "/src/a.ts"]],
+                    ["type": "tool_use", "id": "tc_b", "name": "Read", "input": ["file_path": "/src/b.ts"]]
+                ]),
+                "turn": AnyCodable(2),
+                "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(1995),
+                "tokenRecord": AnyCodable(tokenRecordPayload)
+            ], timestamp: timestamp(4), sequence: 5)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // thinking + tool_use + tool_use = 3 messages
+        XCTAssertEqual(messages.count, 3)
+
+        // First tool should have tokenRecord
+        if case .toolUse = messages[1].content {
+            XCTAssertNotNil(messages[1].tokenRecord, "First toolUse should get tokenRecord")
+            XCTAssertEqual(messages[1].tokenRecord?.computed.newInputTokens, 13)
+        } else {
+            XCTFail("Expected toolUse at index 1")
+        }
+
+        // Second tool should NOT have tokenRecord
+        if case .toolUse = messages[2].content {
+            XCTAssertNil(messages[2].tokenRecord, "Second toolUse should NOT get tokenRecord")
+        } else {
+            XCTFail("Expected toolUse at index 2")
+        }
+    }
+
+    func testTokenRecordOnTextBlockNotOverriddenByFallback() {
+        // Turn with [thinking, text, tool_use] — text keeps tokenRecord, tool stays nil
+        let tokenRecordPayload: [String: Any] = [
+            "source": [
+                "provider": "anthropic",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "rawInputTokens": 14,
+                "rawOutputTokens": 787,
+                "rawCacheReadTokens": 13987,
+                "rawCacheCreationTokens": 7026
+            ],
+            "computed": [
+                "contextWindowTokens": 14001,
+                "newInputTokens": 14,
+                "previousContextBaseline": 13987,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": 3,
+                "sessionId": "test-session",
+                "extractedAt": "2026-01-01T00:00:00Z",
+                "normalizedAt": "2026-01-01T00:00:00Z"
+            ]
+        ]
+
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Bash"),
+                "toolCallId": AnyCodable("tc_x"),
+                "arguments": AnyCodable(["command": "echo hello"]),
+                "turn": AnyCodable(3)
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_x"),
+                "content": AnyCodable("hello")
+            ], timestamp: timestamp(1), sequence: 2),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "thinking", "thinking": "Running command..."],
+                    ["type": "text", "text": "Here's the result"],
+                    ["type": "tool_use", "id": "tc_x", "name": "Bash", "input": ["command": "echo hello"]]
+                ]),
+                "turn": AnyCodable(3),
+                "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(11087),
+                "tokenRecord": AnyCodable(tokenRecordPayload)
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // thinking + text + tool = 3 messages
+        XCTAssertEqual(messages.count, 3)
+
+        // Text message should have tokenRecord
+        if case .text(let text) = messages[1].content {
+            XCTAssertEqual(text, "Here's the result")
+            XCTAssertNotNil(messages[1].tokenRecord, "Text block should keep tokenRecord")
+            XCTAssertEqual(messages[1].tokenRecord?.source.rawOutputTokens, 787)
+        } else {
+            XCTFail("Expected text at index 1")
+        }
+
+        // Tool message should NOT have tokenRecord (text consumed it)
+        if case .toolUse = messages[2].content {
+            XCTAssertNil(messages[2].tokenRecord, "toolUse should NOT get tokenRecord when text block exists")
+        } else {
+            XCTFail("Expected toolUse at index 2")
+        }
+    }
+
+    func testTokenRecordFallbackIncludesModelAndLatency() {
+        // Verify the fallback also attaches model and latency metadata
+        let tokenRecordPayload: [String: Any] = [
+            "source": [
+                "provider": "anthropic",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "rawInputTokens": 10,
+                "rawOutputTokens": 100,
+                "rawCacheReadTokens": 5000,
+                "rawCacheCreationTokens": 0
+            ],
+            "computed": [
+                "contextWindowTokens": 5010,
+                "newInputTokens": 10,
+                "previousContextBaseline": 5000,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": 1,
+                "sessionId": "test-session",
+                "extractedAt": "2026-01-01T00:00:00Z",
+                "normalizedAt": "2026-01-01T00:00:00Z"
+            ]
+        ]
+
+        let events = [
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"),
+                "toolCallId": AnyCodable("tc_meta"),
+                "arguments": AnyCodable(["file_path": "/test.ts"]),
+                "turn": AnyCodable(1)
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_meta"),
+                "content": AnyCodable("contents")
+            ], timestamp: timestamp(1), sequence: 2),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": "tc_meta", "name": "Read", "input": ["file_path": "/test.ts"]]
+                ]),
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(2500),
+                "tokenRecord": AnyCodable(tokenRecordPayload)
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        XCTAssertEqual(messages.count, 1)
+
+        // Verify all metadata is attached
+        XCTAssertNotNil(messages[0].tokenRecord)
+        XCTAssertEqual(messages[0].model, "claude-opus-4-6")
+        XCTAssertEqual(messages[0].latencyMs, 2500)
+    }
+
+    // MARK: - Deletion Tests
+
     func testReconstructionSkipsDeletedEvents() {
         // Events targeted by message.deleted should be skipped in reconstruction
         let userEventId = UUID().uuidString

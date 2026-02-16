@@ -20,14 +20,24 @@ struct TokenBadge: View {
                 Text(record.formattedOutput)
             }
 
-            // Cache (combined read + write for simplicity)
-            if let cache = record.formattedCache {
+            // Cache read
+            if let cacheRead = record.formattedCacheRead {
                 HStack(spacing: 2) {
                     Image(systemName: "bolt.fill")
                         .font(TronTypography.labelSM)
-                    Text(cache)
+                    Text(cacheRead)
                 }
                 .foregroundStyle(.tronAmberLight)
+            }
+
+            // Cache write
+            if let cacheWrite = record.formattedCacheWrite {
+                HStack(spacing: 2) {
+                    Image(systemName: "pencil")
+                        .font(TronTypography.labelSM)
+                    Text(cacheWrite)
+                }
+                .foregroundStyle(.tronAmberLight.opacity(0.7))
             }
         }
         .font(TronTypography.codeSM)

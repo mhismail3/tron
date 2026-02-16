@@ -299,14 +299,24 @@ struct CachedSessionSidebarRow: View {
             }
             .foregroundStyle(.tronTextDisabled)
 
-            // Cache (combined read + write)
-            if session.cacheReadTokens + session.cacheCreationTokens > 0 {
+            // Cache read
+            if session.cacheReadTokens > 0 {
                 HStack(spacing: 2) {
                     Image(systemName: "bolt.fill")
                         .font(TronTypography.labelSM)
-                    Text((session.cacheReadTokens + session.cacheCreationTokens).formattedTokenCount)
+                    Text(session.cacheReadTokens.formattedTokenCount)
                 }
                 .foregroundStyle(.tronAmberLight)
+            }
+
+            // Cache write
+            if session.cacheCreationTokens > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "pencil")
+                        .font(TronTypography.labelSM)
+                    Text(session.cacheCreationTokens.formattedTokenCount)
+                }
+                .foregroundStyle(.tronAmberLight.opacity(0.7))
             }
         }
         .font(TronTypography.pill)

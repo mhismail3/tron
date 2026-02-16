@@ -206,6 +206,137 @@ final class TokenRecordTests: XCTestCase {
         XCTAssertEqual(record1, record2)
     }
 
+    // MARK: - Separate Cache Read/Write Formatting
+
+    func testFormattedCacheReadSeparate() throws {
+        let json = """
+        {
+            "source": {
+                "provider": "anthropic",
+                "timestamp": "2024-01-15T10:30:00.000Z",
+                "rawInputTokens": 10,
+                "rawOutputTokens": 261,
+                "rawCacheReadTokens": 12561,
+                "rawCacheCreationTokens": 498
+            },
+            "computed": {
+                "contextWindowTokens": 12571,
+                "newInputTokens": 10,
+                "previousContextBaseline": 12561,
+                "calculationMethod": "anthropic_cache_aware"
+            },
+            "meta": {
+                "turn": 1,
+                "sessionId": "sess_test",
+                "extractedAt": "2024-01-15T10:30:00.000Z",
+                "normalizedAt": "2024-01-15T10:30:00.001Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
+
+        // formattedCacheRead should return formatted cache read tokens
+        XCTAssertNotNil(record.formattedCacheRead)
+        XCTAssertEqual(record.formattedCacheRead, 12561.formattedTokenCount)
+    }
+
+    func testFormattedCacheWriteSeparate() throws {
+        let json = """
+        {
+            "source": {
+                "provider": "anthropic",
+                "timestamp": "2024-01-15T10:30:00.000Z",
+                "rawInputTokens": 10,
+                "rawOutputTokens": 261,
+                "rawCacheReadTokens": 12561,
+                "rawCacheCreationTokens": 498
+            },
+            "computed": {
+                "contextWindowTokens": 12571,
+                "newInputTokens": 10,
+                "previousContextBaseline": 12561,
+                "calculationMethod": "anthropic_cache_aware"
+            },
+            "meta": {
+                "turn": 1,
+                "sessionId": "sess_test",
+                "extractedAt": "2024-01-15T10:30:00.000Z",
+                "normalizedAt": "2024-01-15T10:30:00.001Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
+
+        // formattedCacheWrite should return formatted cache creation tokens
+        XCTAssertNotNil(record.formattedCacheWrite)
+        XCTAssertEqual(record.formattedCacheWrite, 498.formattedTokenCount)
+    }
+
+    func testFormattedCacheReadZeroReturnsNil() throws {
+        let json = """
+        {
+            "source": {
+                "provider": "openai",
+                "timestamp": "2024-01-15T10:30:00.000Z",
+                "rawInputTokens": 5000,
+                "rawOutputTokens": 200,
+                "rawCacheReadTokens": 0,
+                "rawCacheCreationTokens": 0
+            },
+            "computed": {
+                "contextWindowTokens": 5000,
+                "newInputTokens": 5000,
+                "previousContextBaseline": 0,
+                "calculationMethod": "direct"
+            },
+            "meta": {
+                "turn": 1,
+                "sessionId": "sess_test",
+                "extractedAt": "2024-01-15T10:30:00.000Z",
+                "normalizedAt": "2024-01-15T10:30:00.001Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
+
+        XCTAssertNil(record.formattedCacheRead, "Zero cache read should return nil")
+    }
+
+    func testFormattedCacheWriteZeroReturnsNil() throws {
+        let json = """
+        {
+            "source": {
+                "provider": "anthropic",
+                "timestamp": "2024-01-15T10:30:00.000Z",
+                "rawInputTokens": 500,
+                "rawOutputTokens": 100,
+                "rawCacheReadTokens": 17332,
+                "rawCacheCreationTokens": 0
+            },
+            "computed": {
+                "contextWindowTokens": 17832,
+                "newInputTokens": 500,
+                "previousContextBaseline": 17332,
+                "calculationMethod": "anthropic_cache_aware"
+            },
+            "meta": {
+                "turn": 2,
+                "sessionId": "sess_test",
+                "extractedAt": "2024-01-15T10:30:00.000Z",
+                "normalizedAt": "2024-01-15T10:30:00.001Z"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
+
+        XCTAssertNil(record.formattedCacheWrite, "Zero cache write should return nil")
+        XCTAssertNotNil(record.formattedCacheRead, "Non-zero cache read should still work")
+    }
+
     // MARK: - Edge Cases
 
     func testDecodesWithZeroTokens() throws {

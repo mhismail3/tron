@@ -63,6 +63,7 @@ enum InterleavedContentProcessor {
 
         var messages: [ChatMessage] = []
         var sawAskUserQuestion = false  // Track if AskUserQuestion was seen
+        var tokenRecordConsumed = false  // Track if a text block consumed the tokenRecord
 
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
@@ -86,6 +87,7 @@ enum InterleavedContentProcessor {
                     isFirstMessage: messages.isEmpty
                 ) {
                     messages.append(message)
+                    tokenRecordConsumed = true
                 }
             } else if blockType == "tool_use", let toolUseId = block["id"] as? String {
                 let toolCall = toolCalls[toolUseId]
@@ -124,6 +126,20 @@ enum InterleavedContentProcessor {
                 }
             }
             // Other block types (redacted, etc.) are skipped
+        }
+
+        // Fallback: if no text block consumed the tokenRecord (tool-only turns like
+        // [thinking, tool_use]), attach it to the first toolUse message so stats
+        // survive reconstruction. Mirrors TurnLifecycleCoordinator.handleTurnEnd().
+        if !tokenRecordConsumed, let record = effectiveTokenRecord {
+            if let idx = messages.firstIndex(where: {
+                if case .toolUse = $0.content { return true }
+                return false
+            }) {
+                messages[idx].tokenRecord = record
+                messages[idx].model = parsed.model
+                messages[idx].latencyMs = parsed.latencyMs
+            }
         }
 
         return messages
