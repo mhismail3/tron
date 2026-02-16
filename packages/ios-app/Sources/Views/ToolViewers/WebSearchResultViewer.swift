@@ -242,7 +242,6 @@ struct WebSearchParsedResults {
     private static func parseResults(from result: String) -> [SearchResult] {
         var results: [SearchResult] = []
 
-        // Try markdown format: "1. **Title**\n   URL\n   Snippet"
         let lines = result.components(separatedBy: "\n")
         var currentTitle = ""
         var currentUrl = ""
@@ -252,62 +251,71 @@ struct WebSearchParsedResults {
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-            // Check for numbered title with markdown bold
-            if let match = trimmed.firstMatch(of: /^(\d+)\.\s+\*\*(.+?)\*\*$/) {
-                // Save previous result if any
+            // Format A: "1. [Title](URL)" — markdown link (real server format)
+            if let match = trimmed.firstMatch(of: /^(\d+)\.\s+\[(.+?)\]\((.+?)\)/) {
                 if !currentTitle.isEmpty && !currentUrl.isEmpty {
                     results.append(SearchResult(
                         title: currentTitle,
                         url: currentUrl,
-                        snippet: currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines),
+                        snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
                         age: nil
                     ))
                 }
-
+                currentTitle = String(match.2)
+                currentUrl = String(match.3)
+                currentSnippet = ""
+                inResult = true
+            }
+            // Format B: "1. **Title**" — bold title, URL on next line
+            else if let match = trimmed.firstMatch(of: /^(\d+)\.\s+\*\*(.+?)\*\*$/) {
+                if !currentTitle.isEmpty && !currentUrl.isEmpty {
+                    results.append(SearchResult(
+                        title: currentTitle,
+                        url: currentUrl,
+                        snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
+                        age: nil
+                    ))
+                }
                 currentTitle = String(match.2)
                 currentUrl = ""
                 currentSnippet = ""
                 inResult = true
             }
-            // Check for numbered title without markdown
+            // Format C: "1. Title" — plain numbered title
             else if let match = trimmed.firstMatch(of: /^(\d+)\.\s+(.+)$/) {
-                // Could be title or could be continuation
                 if !inResult {
-                    // Save previous result if any
                     if !currentTitle.isEmpty && !currentUrl.isEmpty {
                         results.append(SearchResult(
                             title: currentTitle,
                             url: currentUrl,
-                            snippet: currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines),
+                            snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
                             age: nil
                         ))
                     }
-
                     currentTitle = String(match.2)
                     currentUrl = ""
                     currentSnippet = ""
                     inResult = true
                 }
             }
-            // Check for URL
+            // URL on its own line
             else if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
                 currentUrl = trimmed
             }
-            // Check for URL: prefix
+            // URL: prefix
             else if trimmed.hasPrefix("URL:") {
                 currentUrl = trimmed.replacingOccurrences(of: "URL:", with: "").trimmingCharacters(in: .whitespaces)
             }
-            // Otherwise it's snippet content
-            else if inResult && !trimmed.isEmpty && currentUrl.isEmpty == false {
+            // Snippet content (after URL is known)
+            else if inResult && !trimmed.isEmpty && !currentUrl.isEmpty {
                 if currentSnippet.isEmpty {
                     currentSnippet = trimmed
                 } else {
                     currentSnippet += " " + trimmed
                 }
             }
-            // Snippet before URL found
+            // Might be URL before snippet
             else if inResult && !trimmed.isEmpty && !currentTitle.isEmpty {
-                // This might be the URL on same line as title or snippet
                 if trimmed.hasPrefix("http") {
                     currentUrl = trimmed
                 }
@@ -319,12 +327,16 @@ struct WebSearchParsedResults {
             results.append(SearchResult(
                 title: currentTitle,
                 url: currentUrl,
-                snippet: currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines),
+                snippet: stripHTMLTags(currentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)),
                 age: nil
             ))
         }
 
         return results
+    }
+
+    private static func stripHTMLTags(_ text: String) -> String {
+        text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
     }
 }
 

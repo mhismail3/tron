@@ -213,20 +213,19 @@ struct WebFetchToolDetailSheet: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(Color.tronInfo)
+                    .frame(width: 3)
+
                 Text(parsed.answer)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(tint.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.tronInfo)
-                    .frame(width: 3)
-            }
-            .padding(14)
             .sectionFill(.tronSlate)
         }
     }
@@ -329,19 +328,18 @@ struct WebFetchToolDetailSheet: View {
                     .tint(.tronInfo)
             }
 
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(Color.tronInfo)
+                    .frame(width: 3)
+
                 Text(answer)
                     .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                     .foregroundStyle(tint.body)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.tronInfo)
-                    .frame(width: 3)
-            }
-            .padding(14)
             .sectionFill(.tronSlate)
         }
     }

@@ -215,23 +215,24 @@ struct WebSearchToolDetailSheet: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(parsed.results.enumerated()), id: \.offset) { index, result in
-                    if index > 0 {
-                        Divider()
-                            .background(Color.tronSlate.opacity(0.08))
-                            .padding(.horizontal, 8)
-                    }
-                    searchResultRow(result, index: index + 1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
+            HStack(alignment: .top, spacing: 0) {
                 Rectangle()
                     .fill(Color.tronInfo)
                     .frame(width: 3)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(parsed.results.enumerated()), id: \.offset) { index, result in
+                        if index > 0 {
+                            Divider()
+                                .background(Color.tronSlate.opacity(0.08))
+                                .padding(.horizontal, 8)
+                        }
+                        searchResultRow(result, index: index + 1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
             }
-            .padding(14)
             .sectionFill(.tronSlate)
         }
     }
@@ -243,7 +244,6 @@ struct WebSearchToolDetailSheet: View {
             }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-                // Title with index
                 HStack(alignment: .top, spacing: 6) {
                     Text("\(index).")
                         .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
@@ -257,14 +257,12 @@ struct WebSearchToolDetailSheet: View {
                         .multilineTextAlignment(.leading)
                 }
 
-                // URL
                 Text(result.displayUrl)
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
                     .padding(.leading, 26)
 
-                // Snippet
                 if !result.snippet.isEmpty {
                     Text(result.snippet)
                         .font(TronTypography.codeCaption)
@@ -274,7 +272,6 @@ struct WebSearchToolDetailSheet: View {
                         .padding(.leading, 26)
                 }
 
-                // Age
                 if let age = result.age {
                     Text(age)
                         .font(TronTypography.mono(size: TronTypography.sizeCaption))
@@ -384,23 +381,24 @@ struct WebSearchToolDetailSheet: View {
                     .tint(.tronInfo)
             }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
-                    if index > 0 {
-                        Divider()
-                            .background(Color.tronSlate.opacity(0.08))
-                            .padding(.horizontal, 8)
-                    }
-                    searchResultRow(result, index: index + 1)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .leading) {
+            HStack(alignment: .top, spacing: 0) {
                 Rectangle()
                     .fill(Color.tronInfo)
                     .frame(width: 3)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
+                        if index > 0 {
+                            Divider()
+                                .background(Color.tronSlate.opacity(0.08))
+                                .padding(.horizontal, 8)
+                        }
+                        searchResultRow(result, index: index + 1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
             }
-            .padding(14)
             .sectionFill(.tronSlate)
         }
     }
@@ -488,23 +486,7 @@ enum WebSearchDetailParser {
             status: .success,
             durationMs: 850,
             arguments: "{\"query\": \"Swift concurrency async await\"}",
-            result: """
-            Web search results for: "Swift concurrency async await"
-            Found 3 results:
-
-            **1. Swift Concurrency - Apple Developer**
-               https://developer.apple.com/documentation/swift/concurrency
-               Learn about Swift's modern approach to writing concurrent and asynchronous code with structured concurrency.
-               *2 days ago*
-
-            **2. Async/Await in Swift - Swift by Sundell**
-               https://www.swiftbysundell.com/articles/async-await-in-swift/
-               A comprehensive guide to using async/await patterns in Swift applications.
-
-            **3. WWDC21: Meet async/await in Swift**
-               https://developer.apple.com/videos/play/wwdc2021/10132/
-               Watch Apple's introduction of async/await at WWDC 2021.
-            """,
+            result: "1. [Swift Concurrency - Apple Developer](https://developer.apple.com/documentation/swift/concurrency)\n   Learn about Swift's modern approach to writing concurrent and asynchronous code with structured concurrency.\n\n2. [Async/Await in Swift - Swift by Sundell](https://www.swiftbysundell.com/articles/async-await-in-swift/)\n   A comprehensive guide to using async/await patterns in Swift applications.\n\n3. [WWDC21: Meet async/await in Swift](https://developer.apple.com/videos/play/wwdc2021/10132/)\n   Watch Apple's introduction of async/await at WWDC 2021.",
             isResultTruncated: false
         )
     )
@@ -584,18 +566,7 @@ enum WebSearchDetailParser {
             status: .success,
             durationMs: 600,
             arguments: "{\"query\": \"SwiftUI tutorials\", \"freshness\": \"pw\", \"allowedDomains\": [\"developer.apple.com\", \"swift.org\"]}",
-            result: """
-            Web search results for: "SwiftUI tutorials"
-            Found 2 results:
-
-            **1. SwiftUI Tutorials - Apple Developer**
-               https://developer.apple.com/tutorials/swiftui
-               Follow a series of guided tutorials to learn to make apps using SwiftUI.
-
-            **2. Swift.org - SwiftUI Resources**
-               https://swift.org/getting-started/swiftui/
-               Official SwiftUI resources and documentation from the Swift project.
-            """,
+            result: "1. [SwiftUI Tutorials - Apple Developer](https://developer.apple.com/tutorials/swiftui)\n   Follow a series of guided tutorials to learn to make apps using SwiftUI.\n\n2. [Swift.org - SwiftUI Resources](https://swift.org/getting-started/swiftui/)\n   Official SwiftUI resources and documentation from the Swift project.",
             isResultTruncated: false
         )
     )
@@ -615,20 +586,7 @@ enum WebSearchDetailParser {
             status: .success,
             durationMs: 450,
             arguments: "{\"query\": \"AI news\", \"endpoint\": \"news\", \"freshness\": \"pd\"}",
-            result: """
-            Web search results for: "AI news"
-            Found 2 results:
-
-            **1. OpenAI Announces New Model**
-               https://techcrunch.com/2026/02/15/openai-new-model
-               OpenAI has released a new model with improved reasoning capabilities.
-               *6 hours ago*
-
-            **2. Google DeepMind Research Update**
-               https://blog.google/technology/ai/deepmind-update
-               Latest research from Google DeepMind on multimodal AI systems.
-               *12 hours ago*
-            """,
+            result: "1. [OpenAI Announces New Model](https://techcrunch.com/2026/02/15/openai-new-model)\n   OpenAI has released a new model with improved reasoning capabilities.\n\n2. [Google DeepMind Research Update](https://blog.google/technology/ai/deepmind-update)\n   Latest research from Google DeepMind on multimodal AI systems.",
             isResultTruncated: false
         )
     )

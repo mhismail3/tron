@@ -275,8 +275,8 @@ struct WebSearchParsingTests {
         #expect(result.query == "Swift async")
     }
 
-    @Test("Parses markdown-format search results")
-    func testMarkdownResults() {
+    @Test("Parses bold-title format results")
+    func testBoldTitleResults() {
         let text = "Found 2 results:\n\n1. **First Result Title**\n   https://example.com/first\n   This is the first snippet.\n\n2. **Second Result Title**\n   https://example.com/second\n   This is the second snippet."
         let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"test\"}")
         #expect(result.results.count == 2)
@@ -285,6 +285,28 @@ struct WebSearchParsingTests {
         #expect(result.results[0].url == "https://example.com/first")
         #expect(result.results[0].snippet.contains("first snippet"))
         #expect(result.results[1].title == "Second Result Title")
+    }
+
+    @Test("Parses markdown-link format results (real server format)")
+    func testMarkdownLinkResults() {
+        let text = "1. [Claude AI Pricing](https://example.com/pricing)\n   February 2026 Updates: <strong>Anthropic released</strong> new pricing.\n\n2. [Claude Code Changelog](https://example.com/changelog)\n   Complete version history with all releases."
+        let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"claude pricing\"}")
+        #expect(result.results.count == 2)
+        guard result.results.count >= 2 else { return }
+        #expect(result.results[0].title == "Claude AI Pricing")
+        #expect(result.results[0].url == "https://example.com/pricing")
+        #expect(result.results[0].snippet == "February 2026 Updates: Anthropic released new pricing.")
+        #expect(result.results[1].title == "Claude Code Changelog")
+        #expect(result.results[1].url == "https://example.com/changelog")
+    }
+
+    @Test("Strips HTML tags from snippets")
+    func testHTMLTagStripping() {
+        let text = "1. [Result Title](https://example.com)\n   Text with <strong>bold</strong> and <em>italic</em> content."
+        let result = WebSearchParsedResults(from: text, arguments: "{\"query\": \"test\"}")
+        #expect(result.results.count == 1)
+        guard let first = result.results.first else { return }
+        #expect(first.snippet == "Text with bold and italic content.")
     }
 
     @Test("Extracts total results count")
