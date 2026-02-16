@@ -50,21 +50,21 @@ struct LogViewer: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 12) {
-                        Button {
-                            copyLogsToClipboard()
-                        } label: {
-                            Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
-                                .contentTransition(.symbolEffect(.replace.downUp))
-                        }
+                    Button {
+                        exportLogsToServer()
+                    } label: {
+                        Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
+                            .contentTransition(.symbolEffect(.replace.downUp))
+                    }
+                    .disabled(isExporting)
+                }
 
-                        Button {
-                            exportLogsToServer()
-                        } label: {
-                            Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
-                                .contentTransition(.symbolEffect(.replace.downUp))
-                        }
-                        .disabled(isExporting)
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        copyLogsToClipboard()
+                    } label: {
+                        Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
+                            .contentTransition(.symbolEffect(.replace.downUp))
                     }
                 }
             }
