@@ -143,6 +143,8 @@ struct ChatSheetContent: View {
             ReadToolDetailSheet(data: liveData)
         case "write":
             WriteToolDetailSheet(data: liveData)
+        case "edit":
+            EditToolDetailSheet(data: liveData)
         default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { url in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
