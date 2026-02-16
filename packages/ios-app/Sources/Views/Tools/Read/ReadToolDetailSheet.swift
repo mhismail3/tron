@@ -30,7 +30,7 @@ struct ReadToolDetailSheet: View {
     }
 
     private var langColor: Color {
-        Self.languageColor(for: fileExtension)
+        FileDisplayHelpers.languageColor(for: fileExtension)
     }
 
     var body: some View {
@@ -116,7 +116,7 @@ struct ReadToolDetailSheet: View {
     private var fileInfoSection: some View {
         ToolDetailSection(title: "File", accent: .tronSlate, tint: tint) {
             HStack(spacing: 8) {
-                Image(systemName: Self.fileIcon(for: fileName))
+                Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
                     .font(.system(size: 16))
                     .foregroundStyle(langColor)
 
@@ -184,7 +184,7 @@ struct ReadToolDetailSheet: View {
 
     private func contentSection(_ result: String) -> some View {
         let parsedLines = ContentLineParser.parse(result)
-        let lineNumWidth = Self.lineNumberWidth(for: parsedLines)
+        let lineNumWidth = FileDisplayHelpers.lineNumberWidth(for: parsedLines)
         let accentColor: Color = .tronSlate
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -321,62 +321,11 @@ struct ReadToolDetailSheet: View {
         return "From line \(start)"
     }
 
-    // MARK: - Static Helpers
+    // MARK: - Static Helpers (delegate to shared FileDisplayHelpers)
 
-    static func languageColor(for ext: String) -> Color {
-        switch ext.lowercased() {
-        case "swift": return Color(hex: "#F05138")
-        case "ts", "tsx": return Color(hex: "#3178C6")
-        case "js", "jsx": return Color(hex: "#F7DF1E")
-        case "py": return Color(hex: "#3776AB")
-        case "rs": return Color(hex: "#CE412B")
-        case "go": return Color(hex: "#00ADD8")
-        case "md", "markdown": return Color(hex: "#083FA1")
-        case "json": return Color(hex: "#F5A623")
-        case "css", "scss": return Color(hex: "#264DE4")
-        case "yaml", "yml": return Color(hex: "#CB171E")
-        case "html", "htm": return Color(hex: "#E44D26")
-        case "rb": return Color(hex: "#CC342D")
-        case "java": return Color(hex: "#B07219")
-        case "kt": return Color(hex: "#A97BFF")
-        case "c", "h": return Color(hex: "#555555")
-        case "cpp", "cc", "hpp": return Color(hex: "#F34B7D")
-        case "sh", "bash", "zsh": return Color(hex: "#89E051")
-        case "toml": return Color(hex: "#9C4221")
-        case "xml": return Color(hex: "#0060AC")
-        case "sql": return Color(hex: "#E38C00")
-        default: return .tronSlate
-        }
-    }
-
-    static func fileIcon(for filename: String) -> String {
-        let ext = (filename as NSString).pathExtension.lowercased()
-        switch ext {
-        case "md", "markdown": return "doc.text"
-        case "json": return "curlybraces"
-        case "py": return "chevron.left.forwardslash.chevron.right"
-        case "ts", "tsx", "js", "jsx": return "chevron.left.forwardslash.chevron.right"
-        case "swift": return "swift"
-        case "sh", "bash", "zsh": return "terminal"
-        case "yml", "yaml": return "list.bullet"
-        case "rs": return "gearshape"
-        case "go": return "chevron.left.forwardslash.chevron.right"
-        case "html", "htm": return "globe"
-        case "css", "scss": return "paintbrush"
-        case "sql": return "cylinder"
-        case "xml": return "chevron.left.forwardslash.chevron.right"
-        case "toml": return "list.bullet"
-        case "txt": return "doc.plaintext"
-        case "pdf": return "doc.richtext"
-        default: return "doc"
-        }
-    }
-
-    static func lineNumberWidth(for lines: [ContentLineParser.ParsedLine]) -> CGFloat {
-        let maxNum = lines.last?.lineNum ?? lines.count
-        let digits = String(maxNum).count
-        return CGFloat(max(digits * 8, 16))
-    }
+    static func languageColor(for ext: String) -> Color { FileDisplayHelpers.languageColor(for: ext) }
+    static func fileIcon(for filename: String) -> String { FileDisplayHelpers.fileIcon(for: filename) }
+    static func lineNumberWidth(for lines: [ContentLineParser.ParsedLine]) -> CGFloat { FileDisplayHelpers.lineNumberWidth(for: lines) }
 }
 
 // MARK: - ReadError

@@ -138,9 +138,12 @@ struct ChatSheetContent: View {
             }
             return fallback
         }()
-        if liveData.normalizedName == "read" {
+        switch liveData.normalizedName {
+        case "read":
             ReadToolDetailSheet(data: liveData)
-        } else {
+        case "write":
+            WriteToolDetailSheet(data: liveData)
+        default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { url in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     sheetCoordinator?.showSafari(url)

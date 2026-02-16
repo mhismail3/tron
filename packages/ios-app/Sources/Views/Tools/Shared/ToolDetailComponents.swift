@@ -166,6 +166,176 @@ struct ToolInfoPill: View {
 
 // MARK: - Error View
 
+// MARK: - File Display Helpers
+
+/// Shared file metadata helpers for tool detail sheets (language colors, icons, sizing).
+enum FileDisplayHelpers {
+
+    static func languageColor(for ext: String) -> Color {
+        switch ext.lowercased() {
+        case "swift": return Color(hex: "#F05138")
+        case "ts", "tsx": return Color(hex: "#3178C6")
+        case "js", "jsx": return Color(hex: "#F7DF1E")
+        case "py": return Color(hex: "#3776AB")
+        case "rs": return Color(hex: "#CE412B")
+        case "go": return Color(hex: "#00ADD8")
+        case "md", "markdown": return Color(hex: "#083FA1")
+        case "json": return Color(hex: "#F5A623")
+        case "css", "scss": return Color(hex: "#264DE4")
+        case "yaml", "yml": return Color(hex: "#CB171E")
+        case "html", "htm": return Color(hex: "#E44D26")
+        case "rb": return Color(hex: "#CC342D")
+        case "java": return Color(hex: "#B07219")
+        case "kt": return Color(hex: "#A97BFF")
+        case "c", "h": return Color(hex: "#555555")
+        case "cpp", "cc", "hpp": return Color(hex: "#F34B7D")
+        case "sh", "bash", "zsh": return Color(hex: "#89E051")
+        case "toml": return Color(hex: "#9C4221")
+        case "xml": return Color(hex: "#0060AC")
+        case "sql": return Color(hex: "#E38C00")
+        default: return .tronSlate
+        }
+    }
+
+    static func fileIcon(for filename: String) -> String {
+        let ext = (filename as NSString).pathExtension.lowercased()
+        switch ext {
+        case "md", "markdown": return "doc.text"
+        case "json": return "curlybraces"
+        case "py": return "chevron.left.forwardslash.chevron.right"
+        case "ts", "tsx", "js", "jsx": return "chevron.left.forwardslash.chevron.right"
+        case "swift": return "swift"
+        case "sh", "bash", "zsh": return "terminal"
+        case "yml", "yaml": return "list.bullet"
+        case "rs": return "gearshape"
+        case "go": return "chevron.left.forwardslash.chevron.right"
+        case "html", "htm": return "globe"
+        case "css", "scss": return "paintbrush"
+        case "sql": return "cylinder"
+        case "xml": return "chevron.left.forwardslash.chevron.right"
+        case "toml": return "list.bullet"
+        case "txt": return "doc.plaintext"
+        case "pdf": return "doc.richtext"
+        default: return "doc"
+        }
+    }
+
+    static func lineNumberWidth(for lines: [ContentLineParser.ParsedLine]) -> CGFloat {
+        let maxNum = lines.last?.lineNum ?? lines.count
+        let digits = String(maxNum).count
+        return CGFloat(max(digits * 8, 16))
+    }
+
+    static func lineNumberWidth(lineCount: Int) -> CGFloat {
+        let digits = String(lineCount).count
+        return CGFloat(max(digits * 8, 16))
+    }
+
+    static func formattedSize(_ byteCount: Int) -> String {
+        if byteCount < 1024 {
+            return "\(byteCount) B"
+        } else if byteCount < 1024 * 1024 {
+            return String(format: "%.1f KB", Double(byteCount) / 1024.0)
+        } else {
+            return String(format: "%.1f MB", Double(byteCount) / (1024.0 * 1024.0))
+        }
+    }
+}
+
+// MARK: - File Write Error
+
+/// Classifies file write error messages into structured types.
+/// Shared across Write (and potentially other file-mutating) tool detail sheets.
+enum FileWriteError {
+    case permissionDenied(path: String)
+    case directoryNotFound(path: String)
+    case isDirectory(path: String)
+    case diskFull
+    case invalidPath
+    case generic(message: String)
+
+    static func parse(from result: String) -> FileWriteError {
+        if result.contains("Permission denied") || result.contains("permission denied") || result.contains("EACCES") {
+            let path = extractPath(from: result, prefix: "Permission denied:")
+            return .permissionDenied(path: path)
+        }
+        if result.contains("no such file or directory") || result.contains("ENOENT") || result.contains("directory does not exist") {
+            let path = extractPath(from: result, prefix: "ENOENT:")
+            return .directoryNotFound(path: path)
+        }
+        if result.contains("is a directory") || result.contains("EISDIR") {
+            let path = extractPath(from: result, prefix: "EISDIR:")
+            return .isDirectory(path: path)
+        }
+        if result.contains("ENOSPC") || result.contains("No space left") || result.contains("disk full") {
+            return .diskFull
+        }
+        if result.contains("Missing required parameter") || result.contains("Invalid") && result.contains("path") {
+            return .invalidPath
+        }
+        return .generic(message: result)
+    }
+
+    var title: String {
+        switch self {
+        case .permissionDenied: return "Permission Denied"
+        case .directoryNotFound: return "Directory Not Found"
+        case .isDirectory: return "Path Is a Directory"
+        case .diskFull: return "Disk Full"
+        case .invalidPath: return "Invalid Path"
+        case .generic: return "Write Error"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .permissionDenied: return "lock.fill"
+        case .directoryNotFound: return "questionmark.folder"
+        case .isDirectory: return "folder.fill"
+        case .diskFull: return "externaldrive.fill.badge.xmark"
+        case .invalidPath: return "exclamationmark.triangle.fill"
+        case .generic: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var errorCode: String? {
+        switch self {
+        case .permissionDenied: return "EACCES"
+        case .directoryNotFound: return "ENOENT"
+        case .isDirectory: return "EISDIR"
+        case .diskFull: return "ENOSPC"
+        case .invalidPath: return nil
+        case .generic: return nil
+        }
+    }
+
+    var suggestion: String {
+        switch self {
+        case .permissionDenied:
+            return "The process does not have permission to write to this location."
+        case .directoryNotFound:
+            return "The parent directory does not exist. Create it first."
+        case .isDirectory:
+            return "This path points to a directory, not a file."
+        case .diskFull:
+            return "There is not enough disk space to complete the write."
+        case .invalidPath:
+            return "The file path parameter is missing or invalid."
+        case .generic:
+            return "An unexpected error occurred while writing the file."
+        }
+    }
+
+    private static func extractPath(from result: String, prefix: String) -> String {
+        if let range = result.range(of: prefix) {
+            return result[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
+    }
+}
+
+// MARK: - Error View
+
 /// Structured error display with icon, title, path, error code badge, and suggestion
 @available(iOS 26.0, *)
 struct ToolErrorView: View {
