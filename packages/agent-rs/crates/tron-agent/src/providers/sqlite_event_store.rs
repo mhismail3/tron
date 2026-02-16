@@ -15,11 +15,25 @@ use tron_tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
 /// Real event store query backed by `SQLite` via `EventStore`.
 pub struct SqliteEventStoreQuery {
     store: Arc<EventStore>,
+    embedding_controller:
+        Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 }
 
 impl SqliteEventStoreQuery {
     pub fn new(store: Arc<EventStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            embedding_controller: None,
+        }
+    }
+
+    /// Set the embedding controller for semantic recall.
+    pub fn with_embedding_controller(
+        mut self,
+        ec: Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>,
+    ) -> Self {
+        self.embedding_controller = Some(ec);
+        self
     }
 }
 
@@ -36,7 +50,71 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         query: &str,
         limit: u32,
     ) -> Result<Vec<MemoryEntry>, ToolError> {
-        // FTS search across all sessions (same as "search" but unscoped)
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Try semantic vector search first
+        if let Some(ref ec) = self.embedding_controller {
+            let ctrl = ec.lock().await;
+            if ctrl.is_ready() {
+                let opts = tron_embeddings::SearchOptions {
+                    limit: limit as usize,
+                    ..Default::default()
+                };
+                if let Ok(results) = ctrl.search(query, &opts).await {
+                    if !results.is_empty() {
+                        let entries: Vec<MemoryEntry> = results
+                            .into_iter()
+                            .filter_map(|r| {
+                                let event = self
+                                    .store
+                                    .get_event(&r.event_id)
+                                    .ok()
+                                    .flatten()?;
+                                let payload: Value =
+                                    serde_json::from_str(&event.payload).ok()?;
+                                let title = payload
+                                    .get("title")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("Untitled");
+                                let lessons = payload
+                                    .get("lessons")
+                                    .and_then(Value::as_array)
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(Value::as_str)
+                                            .collect::<Vec<_>>()
+                                            .join("; ")
+                                    })
+                                    .unwrap_or_default();
+                                let content = if lessons.is_empty() {
+                                    title.to_string()
+                                } else {
+                                    format!("{title}: {lessons}")
+                                };
+                                #[allow(
+                                    clippy::cast_possible_truncation,
+                                    clippy::cast_sign_loss
+                                )]
+                                let score = (r.similarity * 100.0).round() as u32;
+                                Some(MemoryEntry {
+                                    content,
+                                    session_id: Some(event.session_id),
+                                    score: Some(score.min(100)),
+                                    timestamp: Some(event.timestamp),
+                                })
+                            })
+                            .collect();
+                        if !entries.is_empty() {
+                            return Ok(entries);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to FTS
         self.search_memory(None, query, limit, 0).await
     }
 

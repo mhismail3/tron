@@ -29,11 +29,7 @@ pub fn adapt_tools_content(bare_names: &[String], tool_defs: &[Tool]) -> Vec<Str
         .map(|name| {
             if let Some(desc) = lookup.get(name.as_str()) {
                 let first_line = desc.lines().next().unwrap_or(desc);
-                let truncated = if first_line.len() > 120 {
-                    format!("{}...", &first_line[..117])
-                } else {
-                    first_line.to_string()
-                };
+                let truncated = tron_core::text::truncate_with_suffix(first_line, 120, "...");
                 format!("{name}: {truncated}")
             } else {
                 name.clone()

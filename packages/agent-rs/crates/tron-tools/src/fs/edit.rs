@@ -31,11 +31,9 @@ impl EditTool {
 }
 
 fn truncate_preview(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_owned()
-    } else {
-        format!("{}...", &s[..max_len])
-    }
+    // max_len is the body limit; total output may be up to max_len + suffix.
+    let total = max_len.saturating_add(3);
+    tron_core::text::truncate_with_suffix(s, total, "...")
 }
 
 #[async_trait]

@@ -50,7 +50,7 @@ impl PathRule {
                         format!("{}: Command would modify protected path", self.base.name),
                     )
                     .with_details(serde_json::json!({
-                        "command": &value[..value.len().min(200)]
+                        "command": tron_core::text::truncate_str(value, 200)
                     }));
                 }
                 // For bash, also check hidden mkdir
@@ -60,7 +60,7 @@ impl PathRule {
                         self.base.severity,
                         format!("{}: Hidden paths not allowed", self.base.name),
                     )
-                    .with_details(serde_json::json!({ "command": &value[..value.len().min(200)] }));
+                    .with_details(serde_json::json!({ "command": tron_core::text::truncate_str(value, 200) }));
                 }
                 continue;
             }

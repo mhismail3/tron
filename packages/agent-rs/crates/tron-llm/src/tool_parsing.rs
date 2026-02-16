@@ -57,7 +57,7 @@ pub fn parse_tool_call_arguments(
                 tool_name = context.and_then(|c| c.tool_name.as_deref()),
                 provider = context.and_then(|c| c.provider.as_deref()),
                 error = %e,
-                args_preview = &trimmed[..trimmed.len().min(100)],
+                args_preview = tron_core::text::truncate_str(trimmed, 100),
                 "Failed to parse tool call arguments, returning empty object"
             );
             Map::new()

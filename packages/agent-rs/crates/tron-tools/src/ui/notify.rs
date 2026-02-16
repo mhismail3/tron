@@ -91,17 +91,9 @@ impl TronTool for NotifyAppTool {
             Err(e) => return Ok(e),
         };
 
-        // Truncate to limits
-        let title = if title.len() > MAX_TITLE_LENGTH {
-            format!("{}...", &title[..MAX_TITLE_LENGTH - 3])
-        } else {
-            title
-        };
-        let body = if body.len() > MAX_BODY_LENGTH {
-            format!("{}...", &body[..MAX_BODY_LENGTH - 3])
-        } else {
-            body
-        };
+        // Truncate to limits (UTF-8–safe)
+        let title = tron_core::text::truncate_with_suffix(&title, MAX_TITLE_LENGTH, "...");
+        let body = tron_core::text::truncate_with_suffix(&body, MAX_BODY_LENGTH, "...");
 
         let priority = get_optional_string(&params, "priority").unwrap_or_else(|| "normal".into());
         #[allow(clippy::cast_possible_truncation)]

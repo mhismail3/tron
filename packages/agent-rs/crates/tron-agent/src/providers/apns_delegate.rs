@@ -15,6 +15,11 @@ use tron_platform::apns::{ApnsNotification, ApnsService};
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{Notification, NotifyDelegate, NotifyResult};
 
+/// Return the first 8 bytes of a token for logging (UTF-8–safe).
+fn token_prefix(token: &str) -> &str {
+    tron_core::text::truncate_str(token, 8)
+}
+
 /// Real APNS notification delegate.
 pub struct ApnsNotifyDelegate {
     apns: Arc<ApnsService>,
@@ -83,7 +88,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         info!(
             device_count = total,
             title = %notification.title,
-            tokens = ?token_strings.iter().map(|t| format!("{}...({})", &t[..8.min(t.len())], t.len())).collect::<Vec<_>>(),
+            tokens = ?token_strings.iter().map(|t| format!("{}...({})", token_prefix(t), t.len())).collect::<Vec<_>>(),
             "Sending APNS notification"
         );
 
@@ -95,7 +100,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
 
         for result in &results {
             info!(
-                token_prefix = &result.device_token[..8.min(result.device_token.len())],
+                token_prefix = token_prefix(&result.device_token),
                 token_len = result.device_token.len(),
                 success = result.success,
                 status = ?result.status_code,
@@ -110,7 +115,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             } else {
                 if result.status_code == Some(410) {
                     debug!(
-                        device_token = &result.device_token[..8.min(result.device_token.len())],
+                        device_token = token_prefix(&result.device_token),
                         "Marking expired token as invalid"
                     );
                     let _ = DeviceTokenRepo::mark_invalid(&conn, &result.device_token);
@@ -118,7 +123,7 @@ impl NotifyDelegate for ApnsNotifyDelegate {
                 if let Some(ref err) = result.error {
                     errors.push(format!(
                         "{}...(len={}): {}",
-                        &result.device_token[..8.min(result.device_token.len())],
+                        token_prefix(&result.device_token),
                         result.device_token.len(),
                         err
                     ));

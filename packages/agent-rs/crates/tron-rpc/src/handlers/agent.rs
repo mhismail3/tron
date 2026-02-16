@@ -142,14 +142,17 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         &self,
         _opts: &tron_memory::types::LedgerWriteOpts,
     ) -> tron_memory::types::LedgerWriteResult {
-        // Resume session to get messages
-        let Ok(active) = self.session_manager.resume_session(&self.session_id) else {
-            return tron_memory::types::LedgerWriteResult::skipped("session not found");
+        // Compute cycle messages (only messages since last memory.ledger boundary).
+        // Multiple ledger entries per session are expected — each covers a different cycle.
+        let cycle = crate::handlers::memory::compute_cycle_messages(
+            &self.event_store,
+            &self.session_manager,
+            &self.session_id,
+        );
+        let cycle = match cycle {
+            Some(c) if !c.messages.is_empty() => c,
+            _ => return tron_memory::types::LedgerWriteResult::skipped("no new messages since last boundary"),
         };
-
-        if active.state.messages.is_empty() {
-            return tron_memory::types::LedgerWriteResult::skipped("no messages");
-        }
 
         // Try LLM-based ledger via subsession
         let llm_result = if let Some(ref manager) = self.subagent_manager {
@@ -157,7 +160,7 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             use tron_context::summarizer::serialize_messages;
             use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
 
-            let transcript = serialize_messages(&active.state.messages);
+            let transcript = serialize_messages(&cycle.messages);
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
                 parent_session_id: self.session_id.clone(),
@@ -194,42 +197,15 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
                     .as_ref()
                     .map(|s| s.latest_model.clone())
                     .unwrap_or_default();
-                let head_event_id = session_info
-                    .as_ref()
-                    .and_then(|s| s.head_event_id.clone())
-                    .unwrap_or_default();
-
-                // Get first event ID
-                let first_event_id = self
-                    .event_store
-                    .get_events_by_session(
-                        &self.session_id,
-                        &tron_events::sqlite::repositories::event::ListEventsOptions {
-                            limit: Some(1),
-                            offset: None,
-                        },
-                    )
-                    .ok()
-                    .and_then(|events| events.first().map(|e| e.id.clone()))
-                    .unwrap_or_default();
-
-                // Count turns (user messages)
-                #[allow(clippy::cast_possible_wrap)]
-                let user_turns = active
-                    .state
-                    .messages
-                    .iter()
-                    .filter(|m| m.is_user())
-                    .count() as i64;
 
                 let payload = serde_json::json!({
                     "eventRange": {
-                        "firstEventId": first_event_id,
-                        "lastEventId": head_event_id,
+                        "firstEventId": cycle.first_event_id,
+                        "lastEventId": cycle.last_event_id,
                     },
                     "turnRange": {
-                        "firstTurn": 1,
-                        "lastTurn": user_turns,
+                        "firstTurn": cycle.first_turn,
+                        "lastTurn": cycle.last_turn,
                     },
                     "title": entry.title,
                     "entryType": entry.entry_type,
@@ -498,14 +474,33 @@ impl MethodHandler for PromptHandler {
                 // 4. Merge rules (global first, then project)
                 let combined_rules = tron_context::loader::merge_rules(global_rules, project_rules);
 
-                // 5. Load memory from ~/.tron/notes/MEMORY.md
+                // 5. Load workspace memory from ledger entries
                 // (rules.loaded / memory.loaded events are emitted optimistically
                 // at session.create time so iOS shows pills immediately)
-                let memory = home_dir
-                    .as_ref()
-                    .map(|h| h.join(".tron").join("notes").join("MEMORY.md"))
-                    .and_then(|p| std::fs::read_to_string(p).ok())
-                    .filter(|s| !s.trim().is_empty());
+                let memory = {
+                    let settings = tron_settings::get_settings();
+                    let auto_inject = &settings.context.memory.auto_inject;
+
+                    if auto_inject.enabled {
+                        if let Some(ref ec) = embedding_controller {
+                            let ctrl = ec.lock().await;
+                            let workspace_id = event_store
+                                .get_workspace_by_path(&working_dir)
+                                .ok()
+                                .flatten()
+                                .map(|ws| ws.id);
+                            workspace_id.and_then(|ws_id| {
+                                let count = auto_inject.count.clamp(1, 10);
+                                ctrl.load_workspace_memory(&event_store, &ws_id, count)
+                                    .map(|wm| wm.content)
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
 
                 // 6. Get messages from reconstructed state
                 let messages = state.messages.clone();
@@ -701,13 +696,21 @@ impl MethodHandler for PromptHandler {
                         0.0
                     };
 
+                    // Resolve workspace path → ID for embedding storage
+                    let resolved_workspace_id = event_store
+                        .get_workspace_by_path(&working_dir_for_memory)
+                        .ok()
+                        .flatten()
+                        .map(|ws| ws.id)
+                        .unwrap_or_else(|| working_dir_for_memory.clone());
+
                     let memory_deps = RuntimeMemoryDeps {
                         subagent_manager: subagent_manager.clone(),
                         event_store: event_store.clone(),
                         session_manager: session_manager.clone(),
                         broadcast: broadcast.clone(),
                         session_id: session_id_clone.clone(),
-                        workspace_id: working_dir_for_memory.clone(),
+                        workspace_id: resolved_workspace_id,
                         embedding_controller: embedding_controller.clone(),
                     };
 

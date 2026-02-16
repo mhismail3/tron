@@ -102,12 +102,12 @@ pub fn truncate_output(
         };
     }
 
-    // Simple character-based truncation
+    // Simple character-based truncation (UTF-8–safe)
     let available = max_chars.saturating_sub(message_chars);
     let truncated_content = if available > 0 && available < output.len() {
+        let safe_slice = tron_core::text::truncate_str(output, available);
         // Try to break at a line boundary
-        let slice = &output[..available];
-        let break_at = slice.rfind('\n').unwrap_or(available);
+        let break_at = safe_slice.rfind('\n').map_or(safe_slice.len(), |pos| pos);
         format!("{}{message}", &output[..break_at])
     } else {
         message.clone()

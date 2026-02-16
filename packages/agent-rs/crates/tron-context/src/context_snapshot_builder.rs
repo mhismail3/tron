@@ -217,11 +217,7 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
 
 /// Truncate content for display, appending "..." if truncated.
 fn summarize_content(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        text.to_owned()
-    } else {
-        format!("{}...", &text[..max_len.saturating_sub(3)])
-    }
+    tron_core::text::truncate_with_suffix(text, max_len, "...")
 }
 
 // =============================================================================
@@ -466,6 +462,17 @@ mod tests {
         let result = summarize_content(&long, 50);
         assert!(result.ends_with("..."));
         assert!(result.len() <= 50);
+    }
+
+    #[test]
+    fn summarize_multibyte_boundary() {
+        // Em dash '—' is 3 bytes (U+2014). If the truncation point lands
+        // inside a multi-byte char, we must snap to the preceding char boundary.
+        let text = "a".repeat(95) + "—quiet work"; // byte 95..98 is '—'
+        let result = summarize_content(&text, 100);
+        assert!(result.ends_with("..."));
+        // Must not panic, and boundary should be before the em dash
+        assert!(!result.contains('—'));
     }
 
     // -- ThresholdLevel::from_ratio --

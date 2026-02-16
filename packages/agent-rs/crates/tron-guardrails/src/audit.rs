@@ -183,12 +183,10 @@ fn redact_sensitive(args: &serde_json::Value) -> serde_json::Value {
                     let _ = redacted.insert(key.clone(), serde_json::json!("[REDACTED]"));
                 } else if let serde_json::Value::String(s) = value {
                     if s.len() > MAX_STRING_LENGTH {
+                        let prefix = tron_core::text::truncate_str(s, MAX_STRING_LENGTH);
                         let _ = redacted.insert(
                             key.clone(),
-                            serde_json::json!(format!(
-                                "{}... [truncated]",
-                                &s[..MAX_STRING_LENGTH]
-                            )),
+                            serde_json::json!(format!("{prefix}... [truncated]")),
                         );
                     } else {
                         let _ = redacted.insert(key.clone(), value.clone());

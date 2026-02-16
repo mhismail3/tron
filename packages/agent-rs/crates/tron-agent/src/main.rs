@@ -320,6 +320,7 @@ struct ToolRegistryConfig {
     brave_api_key: Option<String>,
     browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>>,
     apns_service: Option<Arc<tron_platform::apns::ApnsService>>,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -341,9 +342,13 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(ReqwestHttpClient::new());
 
     // Real providers backed by SQLite
-    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> = Arc::new(
-        providers::SqliteEventStoreQuery::new(config.event_store.clone()),
-    );
+    let mut store_query_builder =
+        providers::SqliteEventStoreQuery::new(config.event_store.clone());
+    if let Some(ref ec) = config.embedding_controller {
+        store_query_builder = store_query_builder.with_embedding_controller(ec.clone());
+    }
+    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> =
+        Arc::new(store_query_builder);
     let task_mgr: Arc<dyn tron_tools::traits::TaskManagerDelegate> = Arc::new(
         providers::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
     );
@@ -523,6 +528,48 @@ async fn main() -> Result<()> {
         tracing::info!("No APNS config — push notifications disabled");
     }
 
+    // Embedding controller (optional — fire-and-forget ONNX model loading)
+    let embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>> = {
+        let emb_settings = &settings.context.memory.embedding;
+        if emb_settings.enabled {
+            let emb_config = tron_embeddings::EmbeddingConfig::from_settings(emb_settings);
+            let mut ctrl = tron_embeddings::EmbeddingController::new(emb_config.clone());
+
+            // Create vector repository with a dedicated connection (VectorRepository owns a
+            // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
+            let vec_conn = rusqlite::Connection::open(&db_path)
+                .expect("db connection for vectors");
+            vec_conn
+                .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
+                .expect("vector connection pragmas");
+            let repo = tron_embeddings::VectorRepository::new(vec_conn, emb_config.dimensions);
+            repo.ensure_table().expect("vector table creation");
+            ctrl.set_vector_repo(Arc::new(parking_lot::Mutex::new(repo)));
+
+            let ctrl_arc = Arc::new(tokio::sync::Mutex::new(ctrl));
+
+            // Fire-and-forget: load ONNX model + backfill unembedded entries
+            let service = Arc::new(tron_embeddings::ort_service::OnnxEmbeddingService::new(emb_config));
+            let service_clone = Arc::clone(&service);
+            let ctrl_for_init = Arc::clone(&ctrl_arc);
+
+            drop(tokio::spawn(async move {
+                if let Err(e) = service_clone.initialize().await {
+                    tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
+                    return;
+                }
+                ctrl_for_init.lock().await.set_service(service_clone);
+                tracing::info!("embedding service ready — semantic memory enabled");
+            }));
+
+            tracing::info!("embedding controller created (vector repo ready)");
+            Some(ctrl_arc)
+        } else {
+            tracing::info!("embeddings disabled in settings");
+            None
+        }
+    };
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -530,6 +577,7 @@ async fn main() -> Result<()> {
         brave_api_key,
         browser_delegate,
         apns_service,
+        embedding_controller: embedding_controller.clone(),
     });
 
     // Agent dependencies (LLM provider + tool factory)
@@ -619,7 +667,7 @@ async fn main() -> Result<()> {
         server_start_time: std::time::Instant::now(),
         browser_service: browser_service.clone(),
         transcription_engine,
-        embedding_controller: None,
+        embedding_controller,
         subagent_manager: shared_subagent_manager,
     };
 
@@ -1033,6 +1081,7 @@ mod tests {
             brave_api_key: None,
             browser_delegate: None,
             apns_service: None,
+            embedding_controller: None,
         }
     }
 

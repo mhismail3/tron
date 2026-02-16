@@ -403,11 +403,12 @@ impl ContextManager {
                 original_size: None,
             }
         } else {
+            let body_budget = max_size.saturating_sub(100);
+            let prefix = tron_core::text::truncate_str(content, body_budget);
             let truncated_content = format!(
-                "{}...\n[Truncated: {} chars total, showing first {}]",
-                &content[..max_size.saturating_sub(100)],
+                "{prefix}...\n[Truncated: {} chars total, showing first {}]",
                 content.len(),
-                max_size.saturating_sub(100),
+                prefix.len(),
             );
             ProcessedToolResult {
                 tool_call_id: tool_call_id.to_owned(),

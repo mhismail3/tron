@@ -20,6 +20,7 @@ tron-settings.workspace = true
 tron-logging.workspace = true
 tron-auth.workspace = true
 tron-tokens.workspace = true
+tron-embeddings = { workspace = true, features = ["ort"] }
 tron-llm.workspace = true
 tron-llm-anthropic.workspace = true
 tron-llm-google.workspace = true

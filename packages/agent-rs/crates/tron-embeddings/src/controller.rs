@@ -11,6 +11,16 @@ use crate::service::EmbeddingService;
 use crate::text::build_embedding_text_from_json;
 use crate::vector_repo::{SearchOptions, VectorRepository, VectorSearchResult};
 
+/// Workspace memory loaded from ledger entries.
+pub struct WorkspaceMemory {
+    /// Formatted markdown content for injection into system prompt.
+    pub content: String,
+    /// Number of ledger entries included.
+    pub count: usize,
+    /// Estimated token count (content.len() / 4).
+    pub tokens: u64,
+}
+
 /// Result of a backfill operation.
 #[derive(Clone, Debug)]
 pub struct BackfillResult {
@@ -115,6 +125,99 @@ impl EmbeddingController {
 
         let query_embedding = service.embed_single(query_text).await?;
         repo.lock().search(&query_embedding, opts)
+    }
+
+    /// Load workspace memory from ledger entries for injection into system prompt.
+    ///
+    /// Queries the event store for `memory.ledger` events matching the workspace,
+    /// formats them as markdown, and returns the content for prompt injection.
+    pub fn load_workspace_memory(
+        &self,
+        event_store: &tron_events::EventStore,
+        workspace_id: &str,
+        count: usize,
+    ) -> Option<WorkspaceMemory> {
+        if workspace_id.is_empty() {
+            return None;
+        }
+
+        #[allow(clippy::cast_possible_wrap)]
+        let events = event_store
+            .get_events_by_workspace_and_types(
+                workspace_id,
+                &["memory.ledger"],
+                Some(count as i64),
+                None,
+            )
+            .unwrap_or_default();
+
+        if events.is_empty() {
+            return None;
+        }
+
+        // Reverse so oldest entries come first (chronological reading order)
+        let mut entries: Vec<serde_json::Value> = events
+            .iter()
+            .filter_map(|e| serde_json::from_str(&e.payload).ok())
+            .collect();
+        entries.reverse();
+
+        if entries.is_empty() {
+            return None;
+        }
+
+        let mut sections = Vec::new();
+        sections.push("# Memory\n\n## Recent sessions in this workspace".to_string());
+
+        for entry in &entries {
+            let title = entry
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("Untitled");
+
+            let mut section = format!("\n### {title}");
+
+            // Lessons
+            if let Some(lessons) = entry.get("lessons").and_then(serde_json::Value::as_array) {
+                for lesson in lessons {
+                    if let Some(text) = lesson.as_str() {
+                        if !text.is_empty() {
+                            section.push_str(&format!("\n- {text}"));
+                        }
+                    }
+                }
+            }
+
+            // Decisions
+            if let Some(decisions) = entry.get("decisions").and_then(serde_json::Value::as_array) {
+                for decision in decisions {
+                    let choice = decision
+                        .get("choice")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    let reason = decision
+                        .get("reason")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    if !choice.is_empty() {
+                        section.push_str(&format!("\n- {choice}: {reason}"));
+                    }
+                }
+            }
+
+            sections.push(section);
+        }
+
+        let content = sections.join("\n");
+        #[allow(clippy::cast_possible_truncation)]
+        let tokens = (content.len() as u64) / 4;
+        let entry_count = entries.len();
+
+        Some(WorkspaceMemory {
+            content,
+            count: entry_count,
+            tokens,
+        })
     }
 
     /// Backfill embeddings for entries that don't have vectors yet.
@@ -448,6 +551,110 @@ mod tests {
         // Both
         ctrl.set_vector_repo(make_repo(512));
         assert!(ctrl.is_ready());
+    }
+
+    // ── Workspace memory tests ──
+
+    fn make_event_store() -> Arc<tron_events::EventStore> {
+        let pool = tron_events::new_in_memory(
+            &tron_events::ConnectionConfig::default(),
+        )
+        .unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        Arc::new(tron_events::EventStore::new(pool))
+    }
+
+    #[test]
+    fn load_workspace_memory_no_entries_returns_none() {
+        let ctrl = make_controller(512);
+        let store = make_event_store();
+        let result = ctrl.load_workspace_memory(&store, "/tmp/project", 5);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_workspace_memory_empty_workspace_returns_none() {
+        let ctrl = make_controller(512);
+        let store = make_event_store();
+        let result = ctrl.load_workspace_memory(&store, "", 5);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_workspace_memory_formats_markdown() {
+        let ctrl = make_controller(512);
+        let store = make_event_store();
+
+        // Create session and get workspace ID
+        let result = store
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"))
+            .unwrap();
+        let sid = result.root_event.session_id;
+        let ws_id = store
+            .get_workspace_by_path("/tmp/project")
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let _ = store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: serde_json::json!({
+                "title": "Added auth system",
+                "entryType": "feature",
+                "lessons": ["Use JWT for stateless auth", "Always hash passwords"],
+                "decisions": [{"choice": "bcrypt", "reason": "industry standard"}],
+            }),
+            parent_id: None,
+        });
+
+        let wm = ctrl
+            .load_workspace_memory(&store, &ws_id, 5)
+            .unwrap();
+        assert_eq!(wm.count, 1);
+        assert!(wm.content.contains("# Memory"));
+        assert!(wm.content.contains("### Added auth system"));
+        assert!(wm.content.contains("Use JWT for stateless auth"));
+        assert!(wm.content.contains("Always hash passwords"));
+        assert!(wm.content.contains("bcrypt: industry standard"));
+        assert!(wm.tokens > 0);
+    }
+
+    #[test]
+    fn load_workspace_memory_respects_count() {
+        let ctrl = make_controller(512);
+        let store = make_event_store();
+
+        let result = store
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"))
+            .unwrap();
+        let sid = result.root_event.session_id;
+        let ws_id = store
+            .get_workspace_by_path("/tmp/project")
+            .unwrap()
+            .unwrap()
+            .id;
+
+        for i in 0..5 {
+            let _ = store.append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: serde_json::json!({
+                    "title": format!("Entry {i}"),
+                    "lessons": [format!("Lesson from entry {i}")],
+                }),
+                parent_id: None,
+            });
+        }
+
+        // Request only 2
+        let wm = ctrl
+            .load_workspace_memory(&store, &ws_id, 2)
+            .unwrap();
+        assert_eq!(wm.count, 2);
     }
 
     #[test]

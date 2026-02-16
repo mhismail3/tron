@@ -132,7 +132,7 @@ pub fn parse_sse_data<T: serde::de::DeserializeOwned>(data: &str, provider: &str
             warn!(
                 provider = provider,
                 error = %e,
-                data_preview = &data[..data.len().min(100)],
+                data_preview = tron_core::text::truncate_str(data, 100),
                 "Failed to parse SSE data"
             );
             None

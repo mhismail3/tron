@@ -124,7 +124,7 @@ impl ApnsService {
         info!(
             url = %url,
             token_len = device_token.len(),
-            token_prefix = &device_token[..8.min(device_token.len())],
+            token_prefix = tron_core::text::truncate_str(device_token, 8),
             bundle_id = %self.config.bundle_id,
             priority = priority,
             payload = %payload,
@@ -157,7 +157,7 @@ impl ApnsService {
                     info!(
                         status,
                         http_version = %http_version,
-                        device_token = &device_token[..8.min(device_token.len())],
+                        device_token = tron_core::text::truncate_str(device_token, 8),
                         apns_id = ?apns_id,
                         "APNS send OK"
                     );
@@ -180,7 +180,7 @@ impl ApnsService {
                         http_version = %http_version,
                         reason = ?reason,
                         body = %body,
-                        device_token = &device_token[..8.min(device_token.len())],
+                        device_token = tron_core::text::truncate_str(device_token, 8),
                         "APNS send FAILED"
                     );
 

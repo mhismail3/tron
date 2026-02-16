@@ -43,7 +43,8 @@ fn format_lines(lines: &[&str], start: usize, end: usize) -> String {
     for (i, line) in lines.iter().enumerate() {
         let line_num = start + i + 1;
         let display_line = if line.len() > MAX_LINE_LENGTH {
-            format!("{}... [line truncated]", &line[..MAX_LINE_LENGTH])
+            let prefix = tron_core::text::truncate_str(line, MAX_LINE_LENGTH);
+            format!("{prefix}... [line truncated]")
         } else {
             (*line).to_string()
         };

@@ -20,7 +20,7 @@ pub mod text;
 pub mod vector_repo;
 
 pub use config::EmbeddingConfig;
-pub use controller::EmbeddingController;
+pub use controller::{EmbeddingController, WorkspaceMemory};
 pub use errors::{EmbeddingError, Result};
 pub use normalize::{
     batch_truncate_normalize, cosine_similarity, euclidean_distance, l2_norm, l2_normalize,

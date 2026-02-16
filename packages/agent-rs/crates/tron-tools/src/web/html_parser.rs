@@ -25,12 +25,8 @@ pub struct HtmlParseResult {
 pub fn parse_html(html: &str, _base_url: Option<&str>) -> HtmlParseResult {
     let original_length = html.len();
 
-    // Truncate very large HTML before parsing
-    let html = if html.len() > MAX_CONTENT_LENGTH {
-        &html[..MAX_CONTENT_LENGTH]
-    } else {
-        html
-    };
+    // Truncate very large HTML before parsing (UTF-8–safe)
+    let html = tron_core::text::truncate_str(html, MAX_CONTENT_LENGTH);
 
     let document = Html::parse_document(html);
 

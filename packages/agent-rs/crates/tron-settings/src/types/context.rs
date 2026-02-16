@@ -144,7 +144,7 @@ pub struct MemoryAutoInjectSettings {
 impl Default for MemoryAutoInjectSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             count: 5,
         }
     }
@@ -237,7 +237,7 @@ mod tests {
         assert!(m.embedding.enabled);
         assert_eq!(m.embedding.dtype, "q4");
         assert_eq!(m.embedding.dimensions, 512);
-        assert!(!m.auto_inject.enabled);
+        assert!(m.auto_inject.enabled);
         assert_eq!(m.auto_inject.count, 5);
         assert!(m.ledger.enabled);
     }

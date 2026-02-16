@@ -279,20 +279,20 @@ fn cap_transcript(text: &str, max_chars: usize) -> String {
     }
 
     let quarter = max_chars / 4;
-    let head = &text[..quarter];
-    let tail = &text[text.len() - quarter..];
-    let omitted = text.len() - (2 * quarter);
+    // Snap to char boundaries so we don't split multi-byte characters.
+    let head = tron_core::text::truncate_str(text, quarter);
+    // For the tail, walk forward from the target start to find a char boundary.
+    let tail_start = text.len().saturating_sub(quarter);
+    let tail_boundary = text.ceil_char_boundary(tail_start);
+    let tail = &text[tail_boundary..];
+    let omitted = text.len().saturating_sub(head.len() + tail.len());
 
     format!("{head}\n[... {omitted} characters omitted ...]\n{tail}")
 }
 
 /// Truncate a string to a maximum length, appending "..." if truncated.
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
+    tron_core::text::truncate_with_suffix(s, max_len, "...")
 }
 
 // =============================================================================

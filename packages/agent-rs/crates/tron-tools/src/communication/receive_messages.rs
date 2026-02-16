@@ -99,11 +99,9 @@ impl TronTool for ReceiveMessagesTool {
                     .map(|m| {
                         let payload_str = serde_json::to_string(&m.payload)
                             .unwrap_or_default();
-                        let truncated = if payload_str.len() > 100 {
-                            format!("{}...", &payload_str[..100])
-                        } else {
-                            payload_str
-                        };
+                        let truncated = tron_core::text::truncate_with_suffix(
+                            &payload_str, 103, "...",
+                        );
                         format!(
                             "- [{}] from {}: {}",
                             m.message_type, m.from_session_id, truncated

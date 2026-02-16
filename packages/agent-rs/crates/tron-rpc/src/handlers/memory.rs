@@ -7,12 +7,151 @@ use serde_json::Value;
 use tracing::{debug, instrument, warn};
 
 use tron_context::ledger_writer::LedgerParseResult;
-use tron_core::messages::Message;
+use tron_core::messages::{Message, UserMessageContent};
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
+
+// =============================================================================
+// Cycle boundary helpers
+// =============================================================================
+
+/// Information about a "cycle" — the messages between two memory.ledger boundaries.
+pub(crate) struct CycleInfo {
+    /// Messages in this cycle (after the last boundary).
+    pub messages: Vec<Message>,
+    /// First event ID in this cycle.
+    pub first_event_id: String,
+    /// Last event ID in this cycle.
+    pub last_event_id: String,
+    /// First user turn number in this cycle.
+    pub first_turn: i64,
+    /// Last user turn number in this cycle.
+    pub last_turn: i64,
+}
+
+/// Compute messages in the current cycle (after the last `memory.ledger` boundary).
+///
+/// Multiple ledger entries per session are expected — each covers a different cycle.
+/// This mirrors the TS server's `computeCycleRange()` pattern.
+pub(crate) fn compute_cycle_messages(
+    event_store: &tron_events::EventStore,
+    session_manager: &tron_runtime::orchestrator::session_manager::SessionManager,
+    session_id: &str,
+) -> Option<CycleInfo> {
+    // 1. Find the last memory.ledger event's sequence (the boundary)
+    let ledger_events = event_store
+        .get_events_by_type(session_id, &["memory.ledger"], Some(1000))
+        .unwrap_or_default();
+    let boundary_sequence = ledger_events.last().map(|e| e.sequence);
+
+    // 2. Get events after the boundary (or all events if no boundary)
+    let cycle_events = if let Some(seq) = boundary_sequence {
+        event_store
+            .get_events_since(session_id, seq)
+            .unwrap_or_default()
+    } else {
+        let opts = tron_events::sqlite::repositories::event::ListEventsOptions {
+            limit: None,
+            offset: None,
+        };
+        event_store
+            .get_events_by_session(session_id, &opts)
+            .unwrap_or_default()
+    };
+
+    if cycle_events.is_empty() {
+        return None;
+    }
+
+    let first_event_id = cycle_events.first().map(|e| e.id.clone()).unwrap_or_default();
+    let last_event_id = cycle_events.last().map(|e| e.id.clone()).unwrap_or_default();
+
+    // 3. Reconstruct messages from cycle events
+    //    If there's no boundary, use all messages from the session.
+    //    If there IS a boundary, only include messages from cycle events.
+    let messages = if boundary_sequence.is_some() {
+        // Build messages from cycle events by parsing message.user / message.assistant events
+        let mut msgs = Vec::new();
+        for ev in &cycle_events {
+            match ev.event_type.as_str() {
+                "message.user" => {
+                    if let Ok(payload) = serde_json::from_str::<Value>(&ev.payload) {
+                        let content = payload
+                            .get("content")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
+                        msgs.push(Message::User {
+                            content: UserMessageContent::Text(content),
+                            timestamp: None,
+                        });
+                    }
+                }
+                "message.assistant" => {
+                    if let Ok(msg) = serde_json::from_str::<Message>(&format!(
+                        r#"{{"role":"assistant","payload":{}}}"#,
+                        ev.payload
+                    )) {
+                        msgs.push(msg);
+                    } else if let Ok(payload) = serde_json::from_str::<Value>(&ev.payload) {
+                        // Fallback: wrap payload into a Message::Assistant via serde
+                        let wrapper = serde_json::json!({
+                            "role": "assistant",
+                            "content": payload.get("content").cloned().unwrap_or(Value::Array(vec![])),
+                        });
+                        if let Ok(msg) = serde_json::from_value::<Message>(wrapper) {
+                            msgs.push(msg);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        msgs
+    } else {
+        // No boundary — use full session messages
+        let active = session_manager.resume_session(session_id).ok()?;
+        active.state.messages.clone()
+    };
+
+    if messages.is_empty() {
+        return None;
+    }
+
+    // 4. Compute turn range from cycle events
+    //    Count turns that already happened before this cycle (offset) + turns in this cycle
+    let prior_user_turns = if let Some(seq) = boundary_sequence {
+        // Count user message events before the boundary
+        let all_events = event_store
+            .get_events_by_type(session_id, &["message.user"], Some(10000))
+            .unwrap_or_default();
+        #[allow(clippy::cast_possible_wrap)]
+        let count = all_events.iter().filter(|e| e.sequence <= seq).count() as i64;
+        count
+    } else {
+        0
+    };
+
+    let cycle_user_turns = messages
+        .iter()
+        .filter(|m| matches!(m, Message::User { .. }))
+        .count();
+    #[allow(clippy::cast_possible_wrap)]
+    let first_turn = prior_user_turns + 1;
+    #[allow(clippy::cast_possible_wrap)]
+    let last_turn = prior_user_turns + cycle_user_turns as i64;
+
+    Some(CycleInfo {
+        messages,
+        first_event_id,
+        last_event_id,
+        first_turn,
+        last_turn,
+    })
+}
 
 /// Emit `MemoryUpdated` event via the orchestrator broadcast.
 fn emit_memory_updated(ctx: &RpcContext, session_id: &str, title: Option<&str>, entry_type: Option<&str>) {
@@ -177,31 +316,33 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         }
 
-        // Deduplication: skip if a memory.ledger event already exists for this session
-        let existing_ledger = ctx
-            .event_store
-            .get_events_by_type(session_id, &["memory.ledger"], Some(1))
-            .unwrap_or_default();
-        if !existing_ledger.is_empty() {
-            debug!(session_id, "ledger entry already exists, skipping duplicate write");
-            emit_memory_updated(ctx, session_id, None, Some("skipped"));
-            return Ok(serde_json::json!({
-                "written": false,
-                "title": null,
-                "entryType": null,
-                "reason": "already_exists",
-            }));
-        }
+        // Compute cycle messages (only messages since last memory.ledger boundary).
+        // Multiple ledger entries per session are expected — each covers a different cycle.
+        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, session_id);
+        let cycle = match cycle {
+            Some(c) if !c.messages.is_empty() => c,
+            _ => {
+                debug!(session_id, "no new messages since last boundary");
+                emit_memory_updated(ctx, session_id, None, Some("skipped"));
+                return Ok(serde_json::json!({
+                    "written": false,
+                    "title": null,
+                    "entryType": null,
+                    "reason": "no_new_messages",
+                }));
+            }
+        };
 
         // Try LLM-based ledger writing via subsession
         let has_subagent_manager = ctx.subagent_manager.is_some();
-        debug!(session_id, has_subagent_manager, message_count, "attempting ledger update");
+        let cycle_message_count = cycle.messages.len();
+        debug!(session_id, has_subagent_manager, cycle_message_count, "attempting ledger update");
         let llm_result = if let Some(ref manager) = ctx.subagent_manager {
             use tron_context::llm_summarizer::SubsessionSpawner;
             use tron_context::summarizer::serialize_messages;
             use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
 
-            let transcript = serialize_messages(&active.state.messages);
+            let transcript = serialize_messages(&cycle.messages);
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
@@ -250,43 +391,17 @@ impl MethodHandler for UpdateLedgerHandler {
                     .working_directory
                     .clone()
                     .unwrap_or_default();
-                let head_event_id = session_info
-                    .as_ref()
-                    .and_then(|s| s.head_event_id.clone())
-                    .unwrap_or_default();
-
-                // Get first event ID
-                let first_event_id = ctx
-                    .event_store
-                    .get_events_by_session(
-                        session_id,
-                        &tron_events::sqlite::repositories::event::ListEventsOptions {
-                            limit: Some(1),
-                            offset: None,
-                        },
-                    )
-                    .ok()
-                    .and_then(|events| events.first().map(|e| e.id.clone()))
-                    .unwrap_or_default();
-
-                // Count turns (user messages)
-                #[allow(clippy::cast_possible_wrap)]
-                let user_turns = active
-                    .state
-                    .messages
-                    .iter()
-                    .filter(|m| matches!(m, Message::User { .. }))
-                    .count() as i64;
 
                 // Build full MemoryLedgerPayload (matches TS server format)
+                // Event range and turn range come from the cycle (not full session)
                 let payload = serde_json::json!({
                     "eventRange": {
-                        "firstEventId": first_event_id,
-                        "lastEventId": head_event_id,
+                        "firstEventId": cycle.first_event_id,
+                        "lastEventId": cycle.last_event_id,
                     },
                     "turnRange": {
-                        "firstTurn": 1,
-                        "lastTurn": user_turns,
+                        "firstTurn": cycle.first_turn,
+                        "lastTurn": cycle.last_turn,
                     },
                     "title": entry.title,
                     "entryType": entry.entry_type,
@@ -321,8 +436,14 @@ impl MethodHandler for UpdateLedgerHandler {
                     parent_id: None,
                 }).map(|row| row.id).unwrap_or_default();
 
-                // Fire-and-forget embedding
-                spawn_embed_memory(ctx, &event_id, &workspace, &payload);
+                // Fire-and-forget embedding (resolve workspace path → ID for vector storage)
+                let embed_ws_id = ctx.event_store
+                    .get_workspace_by_path(&workspace)
+                    .ok()
+                    .flatten()
+                    .map(|ws| ws.id)
+                    .unwrap_or(workspace.clone());
+                spawn_embed_memory(ctx, &event_id, &embed_ws_id, &payload);
 
                 // Broadcast memory updated event
                 emit_memory_updated(ctx, session_id, Some(&entry.title), Some(&entry.entry_type));
@@ -750,10 +871,10 @@ mod tests {
         assert!(result["handoffs"].is_array());
     }
 
-    // ── Ledger deduplication tests ──
+    // ── Cycle boundary tests ──
 
     #[tokio::test]
-    async fn update_ledger_deduplicates_existing_entry() {
+    async fn update_ledger_skips_when_no_new_messages_after_boundary() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
@@ -778,7 +899,7 @@ mod tests {
             parent_id: None,
         });
 
-        // Pre-seed a memory.ledger event (simulating a previous successful write)
+        // Pre-seed a memory.ledger event AFTER the messages (boundary)
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid,
             event_type: tron_events::EventType::MemoryLedger,
@@ -787,12 +908,131 @@ mod tests {
         });
         ctx.session_manager.invalidate_session(&sid);
 
-        // Call should skip (duplicate exists)
+        // No new messages after boundary → should skip
         let result = UpdateLedgerHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["written"], false);
-        assert_eq!(result["reason"], "already_exists");
+        assert_eq!(result["reason"], "no_new_messages");
+    }
+
+    #[tokio::test]
+    async fn compute_cycle_messages_no_boundary_returns_all() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Hello"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Hi there."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 5, "outputTokens": 3}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, &sid);
+        let cycle = cycle.expect("should return cycle");
+        // No boundary → all messages returned
+        assert!(!cycle.messages.is_empty());
+        assert_eq!(cycle.first_turn, 1);
+        assert_eq!(cycle.last_turn, 1);
+    }
+
+    #[tokio::test]
+    async fn compute_cycle_messages_with_boundary_returns_after_boundary() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        // First cycle messages
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "First request"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "First response."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+
+        // Boundary (first ledger entry)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "First cycle", "entryType": "feature"}),
+            parent_id: None,
+        });
+
+        // Second cycle messages (after boundary)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Second request"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Second response."}],
+                "turn": 2,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, &sid);
+        let cycle = cycle.expect("should return cycle");
+        // Only second cycle messages (after boundary)
+        assert_eq!(cycle.messages.len(), 2); // 1 user + 1 assistant
+        assert_eq!(cycle.first_turn, 2); // Prior cycle had 1 user turn
+        assert_eq!(cycle.last_turn, 2);
+
+        // Verify the message content is from second cycle
+        if let Message::User { ref content, .. } = cycle.messages[0] {
+            match content {
+                UserMessageContent::Text(t) => assert_eq!(t, "Second request"),
+                _ => panic!("expected text content"),
+            }
+        } else {
+            panic!("expected user message first");
+        }
+    }
+
+    #[tokio::test]
+    async fn compute_cycle_messages_empty_session_returns_none() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, &sid);
+        // session.start event exists but no message events → cycle has no messages
+        // compute_cycle_messages returns None or Some with empty messages
+        assert!(cycle.is_none() || cycle.unwrap().messages.is_empty());
     }
 }

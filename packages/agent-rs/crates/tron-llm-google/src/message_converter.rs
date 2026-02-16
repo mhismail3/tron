@@ -261,7 +261,7 @@ fn truncate_tool_result(content: &str) -> String {
     if content.len() <= TOOL_RESULT_MAX_LENGTH {
         content.to_string()
     } else {
-        let truncated = &content[..TOOL_RESULT_MAX_LENGTH];
+        let truncated = tron_core::text::truncate_str(content, TOOL_RESULT_MAX_LENGTH);
         format!("{truncated}\n\n[Content truncated — {TOOL_RESULT_MAX_LENGTH} char limit]")
     }
 }

@@ -984,11 +984,7 @@ impl SubagentSpawner for SubagentManager {
 }
 
 fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..max]
-    }
+    tron_core::text::truncate_str(s, max)
 }
 
 #[cfg(test)]

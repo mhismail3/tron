@@ -105,10 +105,11 @@ Returns the page content with title. Results are cached for 15 minutes — same 
         // Parse HTML
         let parsed = parse_html(&response.body, Some(&url));
 
-        // Truncate content for summarization
-        let truncated_content = if parsed.markdown.len() > MAX_CONTENT_TOKENS * 4 {
-            let max_chars = MAX_CONTENT_TOKENS * 4;
-            format!("{}...\n[Content truncated]", &parsed.markdown[..max_chars])
+        // Truncate content for summarization (UTF-8–safe)
+        let max_bytes = MAX_CONTENT_TOKENS * 4;
+        let truncated_content = if parsed.markdown.len() > max_bytes {
+            let prefix = tron_core::text::truncate_str(&parsed.markdown, max_bytes);
+            format!("{prefix}...\n[Content truncated]")
         } else {
             parsed.markdown.clone()
         };

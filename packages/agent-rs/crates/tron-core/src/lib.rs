@@ -25,4 +25,5 @@ pub mod ids;
 pub mod memory;
 pub mod messages;
 pub mod retry;
+pub mod text;
 pub mod tools;
