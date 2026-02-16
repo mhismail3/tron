@@ -25,7 +25,7 @@ pub fn normalize_tokens(
     meta: TokenMeta,
 ) -> TokenRecord {
     let (context_window_tokens, calculation_method) = compute_context_window(&source);
-    let new_input_tokens = compute_new_input_tokens(context_window_tokens, previous_baseline);
+    let new_input_tokens = compute_new_input_tokens(&source, context_window_tokens, previous_baseline);
 
     let computed = ComputedTokens {
         context_window_tokens,
@@ -63,18 +63,24 @@ fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
 }
 
 /// Compute per-turn delta (new tokens added this turn).
-fn compute_new_input_tokens(context_window_tokens: u64, previous_baseline: u64) -> u64 {
-    if previous_baseline == 0 {
-        // First turn: all tokens are "new"
-        return context_window_tokens;
+///
+/// For Anthropic: `rawInputTokens` represents genuinely new, non-cached input.
+/// iOS displays this as the down-arrow metric (separate from cache lightning bolt).
+/// For other providers: use context window delta (no cache semantics).
+fn compute_new_input_tokens(
+    source: &TokenSource,
+    context_window_tokens: u64,
+    previous_baseline: u64,
+) -> u64 {
+    match source.provider {
+        ProviderType::Anthropic => source.raw_input_tokens,
+        _ => {
+            if previous_baseline == 0 {
+                return context_window_tokens;
+            }
+            context_window_tokens.saturating_sub(previous_baseline)
+        }
     }
-
-    if context_window_tokens < previous_baseline {
-        // Context shrank (compaction, truncation, cache eviction)
-        return 0;
-    }
-
-    context_window_tokens - previous_baseline
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,28 +180,53 @@ mod tests {
 
     // ── Per-turn delta calculation ──
 
+    // ── Anthropic: newInputTokens = rawInputTokens (non-cached) ──
+
     #[test]
-    fn first_turn_all_new() {
+    fn anthropic_first_turn_new_input_is_raw_only() {
+        // rawInput=604, cacheRead=8266 → newInputTokens = 604 (NOT 8870)
         let source = anthropic_source(604, 8266, 0);
         let record = normalize_tokens(source, 0, make_meta(1));
-        assert_eq!(record.computed.new_input_tokens, 604 + 8266);
+        assert_eq!(record.computed.new_input_tokens, 604);
+        assert_eq!(record.computed.context_window_tokens, 604 + 8266);
         assert_eq!(record.computed.previous_context_baseline, 0);
     }
 
     #[test]
-    fn second_turn_delta() {
+    fn anthropic_second_turn_new_input_is_raw_only() {
         let source = anthropic_source(604, 8266, 0);
-        // Previous baseline was 8768
         let record = normalize_tokens(source, 8768, make_meta(2));
         assert_eq!(record.computed.context_window_tokens, 8870);
-        assert_eq!(record.computed.new_input_tokens, 8870 - 8768); // 102
+        assert_eq!(record.computed.new_input_tokens, 604);
         assert_eq!(record.computed.previous_context_baseline, 8768);
+    }
+
+    #[test]
+    fn anthropic_cache_creation_new_input_is_raw() {
+        let source = anthropic_source(100, 500, 200);
+        let record = normalize_tokens(source, 0, make_meta(1));
+        assert_eq!(record.computed.new_input_tokens, 100);
+    }
+
+    // ── Google/OpenAI: delta-based (no cache semantics) ──
+
+    #[test]
+    fn google_first_turn_new_input_is_full_context() {
+        let source = google_source(5000);
+        let record = normalize_tokens(source, 0, make_meta(1));
+        assert_eq!(record.computed.new_input_tokens, 5000);
+    }
+
+    #[test]
+    fn google_second_turn_new_input_is_delta() {
+        let source = google_source(5500);
+        let record = normalize_tokens(source, 5000, make_meta(2));
+        assert_eq!(record.computed.new_input_tokens, 500);
     }
 
     #[test]
     fn context_shrank_delta_zero() {
         let source = google_source(5000);
-        // Previous was 10000, context shrank (compaction)
         let record = normalize_tokens(source, 10_000, make_meta(3));
         assert_eq!(record.computed.new_input_tokens, 0);
     }

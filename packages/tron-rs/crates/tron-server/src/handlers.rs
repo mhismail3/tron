@@ -78,7 +78,7 @@ pub async fn dispatch(
 
         // Events
         "events.list" | "events.getHistory" => events_list(state, &params, id),
-        "events.sync" => events_sync(state, &params, id),
+        "events.sync" | "events.getSince" => events_sync(state, &params, id),
 
         // Context (engine-dependent)
         "context.get" => context_get(state, &params, id),
@@ -108,7 +108,7 @@ pub async fn dispatch(
         // Task
         "task.create" => task_create(&params, id),
         "task.update" => task_update(&params, id),
-        "task.list" => task_list(id),
+        "task.list" | "tasks.list" => task_list(id),
         "task.delete" => task_delete(&params, id),
 
         // Canvas (deferred)
@@ -126,6 +126,11 @@ pub async fn dispatch(
         // Telemetry
         "telemetry.logs" | "logs.export" => telemetry_logs(state, &params, id),
         "telemetry.metrics" => telemetry_metrics(state, &params, id),
+
+        // Filesystem
+        "filesystem.getHome" => filesystem_get_home(id),
+        "filesystem.listDir" => filesystem_list_dir(&params, id),
+        "filesystem.createDir" => filesystem_create_dir(&params, id),
 
         // Areas
         "areas.list" => stub_empty_array(id, "areas"),
@@ -264,18 +269,33 @@ fn session_list(
     params: &serde_json::Value,
     id: Option<serde_json::Value>,
 ) -> RpcResponse {
-    let status = rpc::optional_str(params, "status").and_then(|s| match s {
+    let explicit_status = rpc::optional_str(params, "status").and_then(|s| match s {
         "active" => Some(SessionStatus::Active),
         "archived" => Some(SessionStatus::Archived),
         "deleted" => Some(SessionStatus::Deleted),
         _ => None,
     });
+    let include_archived = rpc::optional_bool(params, "include_archived").unwrap_or(false);
     let limit = rpc::optional_i64(params, "limit").unwrap_or(50) as u32;
     let offset = rpc::optional_i64(params, "offset").unwrap_or(0) as u32;
 
+    let has_explicit_status = explicit_status.is_some();
+    let status = if has_explicit_status {
+        explicit_status
+    } else if include_archived {
+        None
+    } else {
+        Some(SessionStatus::Active)
+    };
+
     let repo = tron_store::sessions::SessionRepo::new(state.db.clone());
     match repo.list(&state.default_workspace_id, status.as_ref(), limit, offset) {
-        Ok(sessions) => RpcResponse::success(id, compat::session_list_response(&sessions)),
+        Ok(mut sessions) => {
+            if include_archived && !has_explicit_status {
+                sessions.retain(|s| s.status != SessionStatus::Deleted);
+            }
+            RpcResponse::success(id, compat::session_list_response(&sessions, limit))
+        }
         Err(e) => RpcResponse::internal_error(id, e.to_string()),
     }
 }
@@ -423,11 +443,19 @@ fn events_sync(
         Ok(s) => SessionId::from_raw(s),
         Err(e) => return RpcResponse::invalid_params(id, e),
     };
-    let after_sequence = rpc::optional_i64(params, "after_sequence").unwrap_or(0);
     let limit = rpc::optional_i64(params, "limit").unwrap_or(1000) as u32;
 
     let repo = tron_store::events::EventRepo::new(state.db.clone());
-    match repo.list_after_sequence(&session_id, after_sequence, limit) {
+
+    // Support both after_sequence (events.sync) and after_timestamp (events.getSince)
+    let result = if let Some(after_ts) = rpc::optional_str(params, "after_timestamp") {
+        repo.list_after_timestamp(&session_id, after_ts, limit)
+    } else {
+        let after_sequence = rpc::optional_i64(params, "after_sequence").unwrap_or(0);
+        repo.list_after_sequence(&session_id, after_sequence, limit)
+    };
+
+    match result {
         Ok(events) => RpcResponse::success(id, compat::events_list_response(&events)),
         Err(e) => RpcResponse::internal_error(id, e.to_string()),
     }
@@ -650,6 +678,12 @@ fn model_switch(params: &serde_json::Value, id: Option<serde_json::Value>) -> Rp
     }
 
     let mut settings = load_settings_from_disk();
+    let previous_model = settings
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude-sonnet-4-5-20250929")
+        .to_string();
+
     if let Some(obj) = settings.as_object_mut() {
         obj.insert("model".to_string(), serde_json::json!(model_name));
     }
@@ -672,7 +706,8 @@ fn model_switch(params: &serde_json::Value, id: Option<serde_json::Value>) -> Rp
     RpcResponse::success(
         id,
         serde_json::json!({
-            "model": model_name,
+            "previousModel": previous_model,
+            "newModel": model_name,
             "switched": true,
         }),
     )
@@ -760,6 +795,117 @@ fn device_register(params: &serde_json::Value, id: Option<serde_json::Value>) ->
             "platform": platform,
         }),
     )
+}
+
+// ── Filesystem handlers ──
+
+fn filesystem_get_home(id: Option<serde_json::Value>) -> RpcResponse {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let suggested = common_workspace_paths(&home);
+    RpcResponse::success(
+        id,
+        serde_json::json!({
+            "homePath": home,
+            "suggestedPaths": suggested,
+        }),
+    )
+}
+
+fn common_workspace_paths(home: &str) -> Vec<serde_json::Value> {
+    let candidates = ["Projects", "Workspace", "Developer", "Code", "src", "repos"];
+    let mut paths = Vec::new();
+    for name in &candidates {
+        let p = std::path::Path::new(home).join(name);
+        let exists = p.exists();
+        if exists {
+            paths.push(serde_json::json!({
+                "name": name,
+                "path": p.to_string_lossy(),
+                "exists": exists,
+            }));
+        }
+    }
+    paths
+}
+
+fn filesystem_list_dir(
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let path = match rpc::optional_str(params, "path") {
+        Some(p) => p.to_string(),
+        None => std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
+    };
+    let show_hidden = rpc::optional_bool(params, "show_hidden").unwrap_or(false);
+
+    let dir_path = std::path::Path::new(&path);
+    let parent = dir_path.parent().map(|p| p.to_string_lossy().to_string());
+
+    let read_dir = match std::fs::read_dir(dir_path) {
+        Ok(rd) => rd,
+        Err(e) => return RpcResponse::internal_error(id, format!("Cannot read directory: {e}")),
+    };
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for entry in read_dir.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !show_hidden && name.starts_with('.') {
+            continue;
+        }
+        let entry_path = entry.path();
+        let metadata = entry.metadata().ok();
+        let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let is_symlink = entry_path.is_symlink();
+        let size = metadata.as_ref().and_then(|m| if m.is_file() { Some(m.len() as i64) } else { None });
+
+        entries.push(serde_json::json!({
+            "name": name,
+            "path": entry_path.to_string_lossy(),
+            "isDirectory": is_dir,
+            "isSymlink": is_symlink,
+            "size": size,
+        }));
+    }
+
+    entries.sort_by(|a, b| {
+        let a_dir = a["isDirectory"].as_bool().unwrap_or(false);
+        let b_dir = b["isDirectory"].as_bool().unwrap_or(false);
+        b_dir.cmp(&a_dir).then_with(|| {
+            let a_name = a["name"].as_str().unwrap_or("");
+            let b_name = b["name"].as_str().unwrap_or("");
+            a_name.to_lowercase().cmp(&b_name.to_lowercase())
+        })
+    });
+
+    RpcResponse::success(
+        id,
+        serde_json::json!({
+            "path": path,
+            "parent": parent,
+            "entries": entries,
+        }),
+    )
+}
+
+fn filesystem_create_dir(
+    params: &serde_json::Value,
+    id: Option<serde_json::Value>,
+) -> RpcResponse {
+    let path = match rpc::require_str(params, "path") {
+        Ok(p) => p,
+        Err(e) => return RpcResponse::invalid_params(id, e),
+    };
+
+    match std::fs::create_dir_all(path) {
+        Ok(_) => RpcResponse::success(
+            id,
+            serde_json::json!({
+                "created": true,
+                "path": path,
+            }),
+        ),
+        Err(e) => RpcResponse::internal_error(id, format!("Failed to create directory: {e}")),
+    }
 }
 
 // ── Stub handlers for iOS-expected methods ──
@@ -1719,5 +1865,235 @@ mod tests {
         .await;
         assert!(resp.error.is_none());
         assert_eq!(resp.result.unwrap()["enabled"], false);
+    }
+
+    #[tokio::test]
+    async fn session_list_has_more_field() {
+        let state = setup();
+        create_session(&state).await;
+        let resp = dispatch(
+            &state,
+            "session.list",
+            &serde_json::json!({}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["hasMore"], false); // 1 session < default limit 50
+    }
+
+    #[tokio::test]
+    async fn session_list_defaults_to_active_only() {
+        let state = setup();
+        create_session(&state).await;
+        let sid2 = create_session(&state).await;
+        dispatch(
+            &state,
+            "session.archive",
+            &serde_json::json!({"session_id": sid2}),
+            Some(serde_json::json!(99)),
+        )
+        .await;
+
+        let resp = dispatch(
+            &state,
+            "session.list",
+            &serde_json::json!({}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["sessions"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn session_list_include_archived() {
+        let state = setup();
+        create_session(&state).await;
+        let sid2 = create_session(&state).await;
+        dispatch(
+            &state,
+            "session.archive",
+            &serde_json::json!({"session_id": sid2}),
+            Some(serde_json::json!(99)),
+        )
+        .await;
+
+        let resp = dispatch(
+            &state,
+            "session.list",
+            &serde_json::json!({"includeArchived": true}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["sessions"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn session_list_include_archived_excludes_deleted() {
+        let state = setup();
+        create_session(&state).await;
+        let sid2 = create_session(&state).await;
+        // Soft-delete via update_status (session.delete hard-deletes)
+        let repo = tron_store::sessions::SessionRepo::new(state.db.clone());
+        repo.update_status(
+            &tron_core::ids::SessionId::from_raw(&sid2),
+            SessionStatus::Deleted,
+        )
+        .unwrap();
+
+        let resp = dispatch(
+            &state,
+            "session.list",
+            &serde_json::json!({"includeArchived": true}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        let result = resp.result.unwrap();
+        assert_eq!(result["sessions"].as_array().unwrap().len(), 1);
+    }
+
+    // ── Filesystem tests ──
+
+    #[tokio::test]
+    async fn filesystem_get_home_returns_path() {
+        let state = setup();
+        let resp = dispatch(
+            &state,
+            "filesystem.getHome",
+            &serde_json::json!({}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["homePath"].is_string());
+        assert!(!result["homePath"].as_str().unwrap().is_empty());
+        assert!(result["suggestedPaths"].is_array());
+    }
+
+    #[tokio::test]
+    async fn filesystem_list_dir_returns_entries() {
+        let state = setup();
+        let resp = dispatch(
+            &state,
+            "filesystem.listDir",
+            &serde_json::json!({"path": "/tmp"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert_eq!(result["path"], "/tmp");
+        assert!(result["entries"].is_array());
+    }
+
+    #[tokio::test]
+    async fn filesystem_list_dir_hides_dotfiles_by_default() {
+        let state = setup();
+        let home = std::env::var("HOME").unwrap();
+        let resp = dispatch(
+            &state,
+            "filesystem.listDir",
+            &serde_json::json!({"path": home}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        let result = resp.result.unwrap();
+        let entries = result["entries"].as_array().unwrap();
+        let has_dotfile = entries.iter().any(|e| {
+            e["name"].as_str().unwrap_or("").starts_with('.')
+        });
+        assert!(!has_dotfile, "Should hide dotfiles by default");
+    }
+
+    #[tokio::test]
+    async fn filesystem_create_dir_works() {
+        let state = setup();
+        let dir = format!("/tmp/tron-test-{}", uuid::Uuid::now_v7());
+        let resp = dispatch(
+            &state,
+            "filesystem.createDir",
+            &serde_json::json!({"path": dir}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        assert_eq!(resp.result.unwrap()["created"], true);
+        std::fs::remove_dir(&dir).ok();
+    }
+
+    // ── Model switch response shape ──
+
+    #[tokio::test]
+    async fn model_switch_returns_ios_shape() {
+        let state = setup();
+        let resp = dispatch(
+            &state,
+            "model.switch",
+            &serde_json::json!({"model": "claude-opus-4-6"}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["previousModel"].is_string(), "previousModel missing");
+        assert_eq!(result["newModel"], "claude-opus-4-6");
+    }
+
+    // ── Events aliases ──
+
+    #[tokio::test]
+    async fn events_get_since_alias_works() {
+        let state = setup();
+        let sid = create_session(&state).await;
+        let resp = dispatch(
+            &state,
+            "events.getSince",
+            &serde_json::json!({"sessionId": sid}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+        let result = resp.result.unwrap();
+        assert!(result["events"].is_array());
+        assert!(result["hasMore"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn tasks_list_plural_alias_works() {
+        let state = setup();
+        let resp = dispatch(
+            &state,
+            "tasks.list",
+            &serde_json::json!({}),
+            Some(serde_json::json!(1)),
+        )
+        .await;
+        assert!(resp.error.is_none());
+    }
+
+    // ── Session list iOS fields ──
+
+    #[tokio::test]
+    async fn session_list_ios_fields_present() {
+        let state = setup();
+        create_session(&state).await;
+        let resp = dispatch(
+            &state,
+            "session.list",
+            &serde_json::json!({}),
+            Some(serde_json::json!(2)),
+        )
+        .await;
+        let result = resp.result.unwrap();
+        let session = &result["sessions"][0];
+        assert!(session["messageCount"].is_number(), "messageCount missing");
+        assert!(session["cost"].is_number(), "cost missing");
+        assert!(session["lastActivity"].is_string(), "lastActivity missing");
+        assert!(session["cacheReadTokens"].is_number(), "cacheReadTokens missing");
+        assert!(session["cacheCreationTokens"].is_number(), "cacheCreationTokens missing");
+        assert!(session["lastTurnInputTokens"].is_number(), "lastTurnInputTokens missing");
     }
 }

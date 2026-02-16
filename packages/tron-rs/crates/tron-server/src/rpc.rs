@@ -108,6 +108,11 @@ pub fn optional_i64(params: &serde_json::Value, key: &str) -> Option<i64> {
     params.get(key).and_then(|v| v.as_i64())
 }
 
+/// Extract an optional bool param.
+pub fn optional_bool(params: &serde_json::Value, key: &str) -> Option<bool> {
+    params.get(key).and_then(|v| v.as_bool())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,11 +185,13 @@ mod tests {
 
     #[test]
     fn optional_helpers() {
-        let params = serde_json::json!({"name": "test", "count": 5});
+        let params = serde_json::json!({"name": "test", "count": 5, "flag": true});
         assert_eq!(optional_str(&params, "name"), Some("test"));
         assert_eq!(optional_str(&params, "missing"), None);
         assert_eq!(optional_i64(&params, "count"), Some(5));
         assert_eq!(optional_i64(&params, "missing"), None);
+        assert_eq!(optional_bool(&params, "flag"), Some(true));
+        assert_eq!(optional_bool(&params, "missing"), None);
     }
 
     #[test]

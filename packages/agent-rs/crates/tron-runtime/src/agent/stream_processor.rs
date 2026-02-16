@@ -261,7 +261,10 @@ fn build_message(
     }
 
     if !text.is_empty() {
-        content.push(AssistantContent::text(text));
+        let trimmed = text.trim_end();
+        if !trimmed.is_empty() {
+            content.push(AssistantContent::text(trimmed));
+        }
     }
 
     for tc in tool_calls {
@@ -686,5 +689,42 @@ mod tests {
     fn build_message_empty() {
         let msg = build_message("", "", None, &[]);
         assert!(msg.content.is_empty());
+    }
+
+    #[test]
+    fn build_message_trims_trailing_whitespace() {
+        let msg = build_message("Hello world\n\n\n", "", None, &[]);
+        assert_eq!(msg.content.len(), 1);
+        if let AssistantContent::Text { text, .. } = &msg.content[0] {
+            assert_eq!(text, "Hello world");
+        } else {
+            panic!("Expected text content");
+        }
+    }
+
+    #[test]
+    fn build_message_preserves_leading_whitespace() {
+        let msg = build_message("  indented\n\n", "", None, &[]);
+        if let AssistantContent::Text { text, .. } = &msg.content[0] {
+            assert_eq!(text, "  indented");
+        } else {
+            panic!("Expected text content");
+        }
+    }
+
+    #[test]
+    fn build_message_only_whitespace_produces_empty() {
+        let msg = build_message("\n\n  \n", "", None, &[]);
+        assert!(msg.content.is_empty());
+    }
+
+    #[test]
+    fn build_message_preserves_internal_newlines() {
+        let msg = build_message("line1\n\nline2\n\n", "", None, &[]);
+        if let AssistantContent::Text { text, .. } = &msg.content[0] {
+            assert_eq!(text, "line1\n\nline2");
+        } else {
+            panic!("Expected text content");
+        }
     }
 }

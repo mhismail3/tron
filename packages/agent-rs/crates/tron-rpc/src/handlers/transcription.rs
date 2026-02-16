@@ -14,6 +14,17 @@ use crate::registry::MethodHandler;
 /// Maximum audio size in bytes (50 MB).
 const MAX_AUDIO_SIZE: usize = 50 * 1024 * 1024;
 
+/// Strip data URI prefix from base64-encoded audio.
+///
+/// iOS sends `data:audio/m4a;base64,AAAA...` — this extracts the raw base64
+/// portion after the `;base64,` marker. Plain base64 passes through unchanged.
+pub fn normalize_base64(input: &str) -> &str {
+    match input.find(";base64,") {
+        Some(idx) => &input[idx + 8..],
+        None => input,
+    }
+}
+
 /// Transcribe audio bytes via the sidecar service.
 ///
 /// Loads settings from `settings_path`, verifies transcription is enabled,
@@ -102,6 +113,9 @@ impl MethodHandler for TranscribeAudioHandler {
                 message: "Missing required parameter: audioBase64".into(),
             })?;
 
+        // Strip data URI prefix if present (iOS sends "data:audio/m4a;base64,...")
+        let audio_base64 = normalize_base64(audio_base64);
+
         // Decode and validate size
         let audio_bytes = base64::engine::general_purpose::STANDARD
             .decode(audio_base64)
@@ -176,6 +190,24 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), "NOT_AVAILABLE");
+    }
+
+    // ── normalize_base64 tests ──
+
+    #[test]
+    fn normalize_base64_strips_data_uri() {
+        assert_eq!(normalize_base64("data:audio/m4a;base64,AAAA"), "AAAA");
+        assert_eq!(normalize_base64("data:audio/wav;base64,BBBB"), "BBBB");
+    }
+
+    #[test]
+    fn normalize_base64_passthrough_plain() {
+        assert_eq!(normalize_base64("SGVsbG8="), "SGVsbG8=");
+    }
+
+    #[test]
+    fn normalize_base64_empty() {
+        assert_eq!(normalize_base64(""), "");
     }
 
     // ── Shared helper tests ──

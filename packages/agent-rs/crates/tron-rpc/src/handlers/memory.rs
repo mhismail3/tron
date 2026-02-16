@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use tron_context::ledger_writer::{try_llm_ledger, LedgerParseResult};
 use tron_context::summarizer::{KeywordSummarizer, Summarizer};
@@ -117,6 +117,7 @@ impl MethodHandler for UpdateLedgerHandler {
 
         // Resume session to get messages
         let Ok(active) = ctx.session_manager.resume_session(session_id) else {
+            debug!(session_id, "session not found or empty during resume");
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
@@ -125,30 +126,38 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         };
 
+        let message_count = active.state.messages.len();
+        debug!(session_id, message_count, "reconstructed session messages");
+
         // Need messages to summarize
         if active.state.messages.is_empty() {
+            debug!(session_id, "no messages in session");
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
                 "entryType": null,
-                "reason": "no messages in session",
+                "reason": "no_messages",
             }));
         }
 
         // Try LLM-based ledger writing (if provider available)
+        let has_provider = ctx.agent_deps.is_some();
+        debug!(session_id, has_provider, message_count, "attempting ledger update");
         let llm_result = if let Some(ref agent_deps) = ctx.agent_deps {
             try_llm_ledger(&*agent_deps.provider, &active.state.messages).await
         } else {
+            debug!(session_id, "no LLM provider, falling back to keyword summarizer");
             None
         };
 
         match llm_result {
             Some(LedgerParseResult::Skip) => {
+                debug!(session_id, "LLM classified interaction as trivial, skipping");
                 return Ok(serde_json::json!({
                     "written": false,
                     "title": null,
                     "entryType": null,
-                    "reason": "trivial interaction (skipped by summarizer)",
+                    "reason": "skipped",
                 }));
             }
             Some(LedgerParseResult::Entry(ref entry)) => {
@@ -246,10 +255,12 @@ impl MethodHandler for UpdateLedgerHandler {
                     },
                 );
 
+                debug!(session_id, title = %entry.title, entry_type = %entry.entry_type, "LLM ledger entry written");
                 return Ok(serde_json::json!({
                     "written": true,
                     "title": entry.title,
                     "entryType": entry.entry_type,
+                    "reason": "written",
                 }));
             }
             None => {
@@ -330,10 +341,12 @@ impl MethodHandler for UpdateLedgerHandler {
             },
         );
 
+        debug!(session_id, %title, entry_type, "keyword summarizer ledger entry written");
         Ok(serde_json::json!({
             "written": true,
             "title": title,
             "entryType": entry_type,
+            "reason": "written",
         }))
     }
 }
@@ -663,6 +676,70 @@ mod tests {
             .await
             .unwrap();
         assert!(result["handoffs"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_ledger_empty_session_returns_reason() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], false);
+        assert_eq!(result["reason"], "no_messages");
+    }
+
+    #[tokio::test]
+    async fn update_ledger_nonexistent_returns_reason() {
+        let ctx = make_test_context();
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": "nonexistent"})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], false);
+        assert!(
+            result.get("reason").is_some(),
+            "Response must include 'reason' field"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_ledger_success_returns_reason() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Implement dark mode for the dashboard"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Done, dark mode is now active."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 50, "outputTokens": 20}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], true);
+        assert_eq!(result["reason"], "written");
     }
 
     #[tokio::test]

@@ -176,7 +176,23 @@ pub async fn execute_turn(
         };
     }
 
-    // 7. Emit ResponseComplete (BEFORE tool execution)
+    // 7. Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
+    let token_record_json = stream_result.token_usage.as_ref().map(|usage| {
+        persistence::build_token_record(
+            usage,
+            provider.provider_type(),
+            session_id,
+            turn,
+            previous_context_baseline,
+        )
+    });
+
+    let cost = stream_result
+        .token_usage
+        .as_ref()
+        .map(|u| pricing::calculate_cost(provider.model(), u));
+
+    // 7b. Emit ResponseComplete (BEFORE tool execution)
     let response_token_usage = stream_result.token_usage.as_ref().map(|u| ResponseTokenUsage {
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
@@ -193,6 +209,8 @@ pub async fn execute_turn(
         token_usage: response_token_usage,
         has_tool_calls: !stream_result.tool_calls.is_empty(),
         tool_call_count: stream_result.tool_calls.len() as u32,
+        token_record: token_record_json.clone(),
+        model: Some(provider.model().to_owned()),
     });
 
     // 8. Add assistant message to context — preserve metadata (fix: was None/None)
@@ -231,23 +249,6 @@ pub async fn execute_turn(
     if let Some(ref usage) = stream_result.token_usage {
         context_manager.set_api_context_tokens(usage.input_tokens + usage.output_tokens);
     }
-
-    // 8b. Build token record once — reused for persistence AND TurnEnd event
-    let token_record_json = stream_result.token_usage.as_ref().map(|usage| {
-        persistence::build_token_record(
-            usage,
-            provider.provider_type(),
-            session_id,
-            turn,
-            previous_context_baseline,
-        )
-    });
-
-    // 8c. Calculate cost for this turn
-    let cost = stream_result
-        .token_usage
-        .as_ref()
-        .map(|u| pricing::calculate_cost(provider.model(), u));
 
     // 8d. Persist message.assistant inline
     if let Some(p) = persister {
@@ -392,6 +393,7 @@ pub async fn execute_turn(
         cost,
         stop_reason: Some(stream_result.stop_reason.clone()),
         context_limit: Some(context_manager.get_context_limit()),
+        model: Some(provider.model().to_owned()),
     });
 
     // Persist stream.turn_end for iOS reconstruction (turn tracking + tokenRecord)

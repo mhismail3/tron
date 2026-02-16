@@ -11,6 +11,26 @@ use crate::errors::{self, RpcError};
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
 
+/// Extract skill/spell names from a JSON array.
+///
+/// iOS sends objects `[{name: "skill-name", source: "global"}]` while
+/// desktop may send plain strings `["skill-name"]`. This handles both.
+fn extract_skills(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| {
+                    v.get("name")
+                        .and_then(|n| n.as_str())
+                        .or_else(|| v.as_str())
+                        .map(String::from)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // =============================================================================
 // RuntimeMemoryDeps — implements MemoryManagerDeps for the prompt handler
 // =============================================================================
@@ -301,24 +321,14 @@ impl MethodHandler for PromptHandler {
             .and_then(|p| p.get("attachments"))
             .and_then(|v| v.as_array())
             .cloned();
-        let skills = params
-            .as_ref()
-            .and_then(|p| p.get("skills"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            });
-        let spells = params
-            .as_ref()
-            .and_then(|p| p.get("spells"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            });
+        let skills = {
+            let v = extract_skills(params.as_ref().and_then(|p| p.get("skills")));
+            if v.is_empty() { None } else { Some(v) }
+        };
+        let spells = {
+            let v = extract_skills(params.as_ref().and_then(|p| p.get("spells")));
+            if v.is_empty() { None } else { Some(v) }
+        };
 
         // Verify the session exists and get its details
         let session = ctx
@@ -409,15 +419,24 @@ impl MethodHandler for PromptHandler {
                 // 4. Merge rules (global first, then project)
                 let combined_rules = tron_context::loader::merge_rules(global_rules, project_rules);
 
-                // 4b. Persist rules.loaded event if any rules were found
+                // 4b. Persist + broadcast rules.loaded if any rules were found
                 if combined_rules.is_some() {
+                    // Count how many rule sources actually loaded
+                    let total_files = 1u32; // at least one rules file found
+                    let dynamic_rules_count = 0u32;
                     let _ = event_store.append(&tron_events::AppendOptions {
                         session_id: &session_id_clone,
                         event_type: tron_events::EventType::RulesLoaded,
                         payload: serde_json::json!({
-                            "sources": ["project", "global"],
+                            "totalFiles": total_files,
+                            "dynamicRulesCount": dynamic_rules_count,
                         }),
                         parent_id: None,
+                    });
+                    let _ = broadcast.emit(tron_core::events::TronEvent::RulesLoaded {
+                        base: tron_core::events::BaseEvent::now(&session_id_clone),
+                        total_files,
+                        dynamic_rules_count,
                     });
                 }
 
@@ -427,6 +446,14 @@ impl MethodHandler for PromptHandler {
                     .map(|h| h.join(".tron").join("notes").join("MEMORY.md"))
                     .and_then(|p| std::fs::read_to_string(p).ok())
                     .filter(|s| !s.trim().is_empty());
+
+                // 5b. Broadcast memory.loaded if memory was found
+                if memory.is_some() {
+                    let _ = broadcast.emit(tron_core::events::TronEvent::MemoryLoaded {
+                        base: tron_core::events::BaseEvent::now(&session_id_clone),
+                        count: 1,
+                    });
+                }
 
                 // 6. Get messages from reconstructed state
                 let messages = state.messages.clone();
@@ -804,6 +831,42 @@ mod tests {
     use tron_llm::models::types::ProviderType;
     use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::registry::ToolRegistry;
+
+    // ── extract_skills tests ──
+
+    #[test]
+    fn skills_extracted_from_object_format() {
+        let params = json!({"skills": [{"name": "my-skill", "source": "global"}]});
+        let skills = extract_skills(params.get("skills"));
+        assert_eq!(skills, vec!["my-skill"]);
+    }
+
+    #[test]
+    fn skills_extracted_from_string_format() {
+        let params = json!({"skills": ["my-skill"]});
+        let skills = extract_skills(params.get("skills"));
+        assert_eq!(skills, vec!["my-skill"]);
+    }
+
+    #[test]
+    fn skills_extracted_mixed_format() {
+        let params = json!({"skills": [{"name": "a", "source": "global"}, "b"]});
+        let skills = extract_skills(params.get("skills"));
+        assert_eq!(skills, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn skills_extracted_empty_array() {
+        let params = json!({"skills": []});
+        let skills = extract_skills(params.get("skills"));
+        assert!(skills.is_empty());
+    }
+
+    #[test]
+    fn skills_extracted_none() {
+        let skills = extract_skills(None);
+        assert!(skills.is_empty());
+    }
 
     /// A mock provider that returns a single text response.
     struct TextProvider {

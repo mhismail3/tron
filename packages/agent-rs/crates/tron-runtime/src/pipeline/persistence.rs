@@ -289,8 +289,8 @@ mod tests {
         let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
         // contextWindowTokens = input + cacheRead + cacheCreation
         assert_eq!(record["computed"]["contextWindowTokens"], 115);
-        // First turn (baseline=0): newInput = contextWindow
-        assert_eq!(record["computed"]["newInputTokens"], 115);
+        // Anthropic: newInputTokens = rawInputTokens only (non-cached)
+        assert_eq!(record["computed"]["newInputTokens"], 100);
         assert_eq!(record["computed"]["previousContextBaseline"], 0);
         assert_eq!(record["computed"]["calculationMethod"], "anthropic_cache_aware");
     }
@@ -307,8 +307,8 @@ mod tests {
         // Previous baseline was 9521 (from turn 1 context window)
         let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 2, 9521);
         assert_eq!(record["computed"]["contextWindowTokens"], 9735); // 14 + 9521 + 200
-        // Delta: 9735 - 9521 = 214
-        assert_eq!(record["computed"]["newInputTokens"], 214);
+        // Anthropic: newInputTokens = rawInputTokens only (non-cached)
+        assert_eq!(record["computed"]["newInputTokens"], 14);
         assert_eq!(record["computed"]["previousContextBaseline"], 9521);
     }
 
@@ -322,7 +322,8 @@ mod tests {
         // Previous baseline was 10000, context shrank (compaction)
         let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 3, 10_000);
         assert_eq!(record["computed"]["contextWindowTokens"], 5000);
-        assert_eq!(record["computed"]["newInputTokens"], 0);
+        // Anthropic: newInputTokens = rawInputTokens only (non-cached)
+        assert_eq!(record["computed"]["newInputTokens"], 5000);
     }
 
     #[test]

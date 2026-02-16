@@ -169,6 +169,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             cost,
             stop_reason,
             context_limit,
+            model,
             ..
         } => {
             let mut data = serde_json::json!({
@@ -190,6 +191,9 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             }
             if let Some(limit) = context_limit {
                 data["contextLimit"] = serde_json::json!(limit);
+            }
+            if let Some(m) = model {
+                data["model"] = serde_json::json!(m);
             }
             Some(data)
         }
@@ -337,6 +341,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             token_usage,
             has_tool_calls,
             tool_call_count,
+            token_record,
+            model,
             ..
         } => {
             let mut data = serde_json::json!({
@@ -347,6 +353,12 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             });
             if let Some(usage) = token_usage {
                 data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
+            }
+            if let Some(record) = token_record {
+                data["tokenRecord"] = record.clone();
+            }
+            if let Some(m) = model {
+                data["model"] = serde_json::json!(m);
             }
             Some(data)
         }
@@ -613,6 +625,17 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "targetTurn": target_turn,
             "reason": reason,
         })),
+        TronEvent::RulesLoaded {
+            total_files,
+            dynamic_rules_count,
+            ..
+        } => Some(serde_json::json!({
+            "totalFiles": total_files,
+            "dynamicRulesCount": dynamic_rules_count,
+        })),
+        TronEvent::MemoryLoaded { count, .. } => Some(serde_json::json!({
+            "count": count,
+        })),
         TronEvent::SkillRemoved { skill_name, .. } => Some(serde_json::json!({
             "skillName": skill_name,
         })),
@@ -729,6 +752,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         "memory_updated" => "agent.memory_updated",
         "context_cleared" => "agent.context_cleared",
         "message_deleted" => "agent.message_deleted",
+        "rules_loaded" => "rules.loaded",
+        "memory_loaded" => "memory.loaded",
         "skill_removed" => "agent.skill_removed",
         "subagent_spawned" => "agent.subagent_spawned",
         "subagent_status_update" => "agent.subagent_status",
@@ -804,6 +829,7 @@ mod tests {
             cost: None,
             stop_reason: None,
             context_limit: None,
+            model: None,
         };
         assert_eq!(tron_event_to_rpc(&start).event_type, "agent.turn_start");
         assert_eq!(tron_event_to_rpc(&end).event_type, "agent.turn_end");
@@ -948,6 +974,7 @@ mod tests {
             cost: None,
             stop_reason: None,
             context_limit: None,
+            model: None,
         };
         let rpc = tron_event_to_rpc(&event);
         let data = rpc.data.unwrap();
@@ -971,6 +998,7 @@ mod tests {
             cost: None,
             stop_reason: None,
             context_limit: None,
+            model: None,
         };
         let rpc = tron_event_to_rpc(&event);
         let data = rpc.data.unwrap();
@@ -993,6 +1021,7 @@ mod tests {
             cost: Some(0.005),
             stop_reason: Some("end_turn".into()),
             context_limit: Some(200_000),
+            model: None,
         };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.turn_end");
@@ -1355,9 +1384,9 @@ mod tests {
             TronEvent::AgentReady { base: base.clone() },
             TronEvent::AgentInterrupted { base: base.clone(), turn: 1, partial_content: None, active_tool: None },
             TronEvent::TurnStart { base: base.clone(), turn: 1 },
-            TronEvent::TurnEnd { base: base.clone(), turn: 1, duration: 0, token_usage: None, token_record: None, cost: None, stop_reason: None, context_limit: None },
+            TronEvent::TurnEnd { base: base.clone(), turn: 1, duration: 0, token_usage: None, token_record: None, cost: None, stop_reason: None, context_limit: None, model: None },
             TronEvent::TurnFailed { base: base.clone(), turn: 1, error: "e".into(), code: None, category: None, recoverable: false, partial_content: None },
-            TronEvent::ResponseComplete { base: base.clone(), turn: 1, stop_reason: "end_turn".into(), token_usage: None, has_tool_calls: false, tool_call_count: 0 },
+            TronEvent::ResponseComplete { base: base.clone(), turn: 1, stop_reason: "end_turn".into(), token_usage: None, has_tool_calls: false, tool_call_count: 0, token_record: None, model: None },
             TronEvent::MessageUpdate { base: base.clone(), content: "c".into() },
             TronEvent::ToolExecutionStart { base: base.clone(), tool_call_id: "id".into(), tool_name: "n".into(), arguments: None },
             TronEvent::ToolExecutionEnd { base: base.clone(), tool_call_id: "id".into(), tool_name: "n".into(), duration: 0, is_error: None, result: None },
@@ -1393,6 +1422,8 @@ mod tests {
             TronEvent::MemoryUpdated { base: base.clone(), title: None, entry_type: None },
             TronEvent::ContextCleared { base: base.clone(), tokens_before: 0, tokens_after: 0 },
             TronEvent::MessageDeleted { base: base.clone(), target_event_id: "id".into(), target_type: "t".into(), target_turn: None, reason: None },
+            TronEvent::RulesLoaded { base: base.clone(), total_files: 3, dynamic_rules_count: 1 },
+            TronEvent::MemoryLoaded { base: base.clone(), count: 2 },
             TronEvent::SkillRemoved { base: base.clone(), skill_name: "n".into() },
             TronEvent::SubagentSpawned { base: base.clone(), subagent_session_id: "sub-1".into(), task: "t".into(), model: "m".into(), max_turns: 5, spawn_depth: 0 },
             TronEvent::SubagentStatusUpdate { base: base.clone(), subagent_session_id: "sub-1".into(), status: "running".into(), current_turn: 1, activity: None },
@@ -1510,6 +1541,31 @@ mod tests {
         assert_eq!(rpc.event_type, "agent.skill_removed");
         let data = rpc.data.unwrap();
         assert_eq!(data["skillName"], "web-search");
+    }
+
+    #[test]
+    fn rules_loaded_wire_format() {
+        let event = TronEvent::RulesLoaded {
+            base: BaseEvent::now("s1"),
+            total_files: 5,
+            dynamic_rules_count: 2,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "rules.loaded");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["totalFiles"], 5);
+        assert_eq!(data["dynamicRulesCount"], 2);
+    }
+
+    #[test]
+    fn memory_loaded_wire_format() {
+        let event = TronEvent::MemoryLoaded {
+            base: BaseEvent::now("s1"),
+            count: 3,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "memory.loaded");
+        assert_eq!(rpc.data.unwrap()["count"], 3);
     }
 
     #[test]

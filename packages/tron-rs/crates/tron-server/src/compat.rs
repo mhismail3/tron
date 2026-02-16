@@ -24,6 +24,8 @@ const CAMEL_TO_SNAKE: &[(&str, &str)] = &[
     ("toolCallId", "tool_call_id"),
     ("mimeType", "mime_type"),
     ("fileName", "file_name"),
+    ("includeArchived", "include_archived"),
+    ("showHidden", "show_hidden"),
 ];
 
 /// Normalize iOS camelCase params to snake_case for Rust handlers.
@@ -188,6 +190,14 @@ pub fn session_to_ios(session: &SessionRow) -> serde_json::Value {
         "isArchived": is_archived,
         "inputTokens": session.tokens.total_input_tokens,
         "outputTokens": session.tokens.total_output_tokens,
+        // iOS SessionInfo fields
+        "messageCount": session.tokens.turn_count,
+        "cost": session.tokens.total_cost_cents / 100.0,
+        "lastActivity": session.updated_at,
+        "cacheReadTokens": session.tokens.total_cache_read_tokens,
+        "cacheCreationTokens": session.tokens.total_cache_creation_tokens,
+        "lastTurnInputTokens": session.tokens.last_turn_input_tokens,
+        // Backward compat
         "turnCount": session.tokens.turn_count,
         "totalCostCents": session.tokens.total_cost_cents,
         "createdAt": session.created_at,
@@ -205,12 +215,13 @@ pub fn session_create_response(session: &SessionRow) -> serde_json::Value {
 }
 
 /// session.list response.
-pub fn session_list_response(sessions: &[SessionRow]) -> serde_json::Value {
+pub fn session_list_response(sessions: &[SessionRow], limit: u32) -> serde_json::Value {
     let items: Vec<serde_json::Value> = sessions.iter().map(session_to_ios).collect();
     let count = items.len();
     serde_json::json!({
         "sessions": items,
         "totalCount": count,
+        "hasMore": count as u32 >= limit,
     })
 }
 
@@ -306,21 +317,24 @@ pub fn event_row_to_ios(event: &EventRow) -> serde_json::Value {
         "parentId": event.parent_id.as_ref().map(|id| id.to_string()),
         "sequence": event.sequence,
         "depth": event.depth,
-        "eventType": event.event_type,
+        "type": event.event_type,
         "timestamp": event.timestamp,
         "payload": event.payload,
         "workspaceId": event.workspace_id.to_string(),
     })
 }
 
-/// events.list / events.sync response.
+/// events.list / events.sync / events.getSince response.
+/// Includes fields for all iOS result types: oldestEventId (getHistory), nextCursor (getSince).
 pub fn events_list_response(events: &[EventRow]) -> serde_json::Value {
     let items: Vec<serde_json::Value> = events.iter().map(event_row_to_ios).collect();
     let oldest_id = events.first().map(|e| e.id.to_string());
+    let newest_ts = events.last().map(|e| e.timestamp.clone());
     serde_json::json!({
         "events": items,
         "hasMore": false,
         "oldestEventId": oldest_id,
+        "nextCursor": newest_ts,
     })
 }
 
@@ -716,7 +730,7 @@ mod tests {
     #[test]
     fn session_list_response_shape() {
         let sessions = vec![make_test_session(), make_test_session()];
-        let wire = session_list_response(&sessions);
+        let wire = session_list_response(&sessions, 50);
         assert_eq!(wire["sessions"].as_array().unwrap().len(), 2);
         assert_eq!(wire["totalCount"], 2);
         assert!(wire["sessions"][0]["sessionId"].is_string());
@@ -888,5 +902,55 @@ mod tests {
         let with_count = add_total_count(resp, 2);
         assert_eq!(with_count["totalCount"], 2);
         assert_eq!(with_count["skills"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn session_to_ios_has_all_ios_session_info_fields() {
+        let session = make_test_session();
+        let wire = session_to_ios(&session);
+
+        // Non-optional in iOS — MUST exist
+        assert!(wire["messageCount"].is_number(), "messageCount missing");
+        assert_eq!(wire["messageCount"], 3);
+
+        // Optional but expected
+        assert!(wire["cost"].is_number(), "cost missing");
+        let cost = wire["cost"].as_f64().unwrap();
+        assert!((cost - 0.005).abs() < 0.0001, "cost should be 0.005, got {cost}");
+
+        assert!(wire["lastActivity"].is_string(), "lastActivity missing");
+        assert_eq!(wire["lastActivity"], "2026-02-15T12:30:00Z");
+
+        assert!(wire["cacheReadTokens"].is_number(), "cacheReadTokens missing");
+        assert_eq!(wire["cacheReadTokens"], 200);
+
+        assert!(wire["cacheCreationTokens"].is_number(), "cacheCreationTokens missing");
+        assert_eq!(wire["cacheCreationTokens"], 50);
+
+        assert!(wire["lastTurnInputTokens"].is_number(), "lastTurnInputTokens missing");
+        assert_eq!(wire["lastTurnInputTokens"], 100);
+
+        // Backward compat fields still present
+        assert!(wire["turnCount"].is_number());
+        assert!(wire["totalCostCents"].is_number());
+        assert!(wire["updatedAt"].is_string());
+    }
+
+    #[test]
+    fn session_list_response_has_more_field() {
+        let sessions = vec![make_test_session(), make_test_session()];
+        let wire = session_list_response(&sessions, 50);
+        assert_eq!(wire["hasMore"], false); // 2 < 50
+
+        let wire = session_list_response(&sessions, 2);
+        assert_eq!(wire["hasMore"], true); // 2 >= 2
+    }
+
+    #[test]
+    fn normalize_include_archived() {
+        let params = serde_json::json!({"includeArchived": true});
+        let n = normalize_params(&params);
+        assert_eq!(n["include_archived"], true);
+        assert!(n.get("includeArchived").is_none());
     }
 }

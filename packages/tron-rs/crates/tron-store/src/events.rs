@@ -221,6 +221,31 @@ impl EventRepo {
         })
     }
 
+    /// List events after a given timestamp.
+    #[instrument(skip(self), fields(session_id = %session_id, after_timestamp))]
+    pub fn list_after_timestamp(
+        &self,
+        session_id: &SessionId,
+        after_timestamp: &str,
+        limit: u32,
+    ) -> Result<Vec<EventRow>, StoreError> {
+        self.db.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload, workspace_id
+                 FROM events WHERE session_id = ?1 AND timestamp > ?2
+                 ORDER BY sequence ASC
+                 LIMIT ?3",
+            )?;
+            let mut rows =
+                stmt.query(rusqlite::params![session_id.as_str(), after_timestamp, limit])?;
+            let mut results = Vec::new();
+            while let Some(row) = rows.next()? {
+                results.push(row_to_event(row)?);
+            }
+            Ok(results)
+        })
+    }
+
     /// Reconstruct messages from events for a session.
     /// Walks events in order, applying compaction boundaries:
     /// - Events before a compact_boundary are skipped

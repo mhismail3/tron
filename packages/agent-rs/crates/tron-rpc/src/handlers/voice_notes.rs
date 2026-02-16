@@ -8,12 +8,12 @@ use tracing::{instrument, warn};
 use crate::context::RpcContext;
 use crate::errors::RpcError;
 use crate::handlers::require_string_param;
-use crate::handlers::transcription::transcribe_audio_via_sidecar;
+use crate::handlers::transcription::{normalize_base64, transcribe_audio_via_sidecar};
 use crate::registry::MethodHandler;
 
 fn notes_dir() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    format!("{home}/.tron/notes")
+    format!("{home}/.tron/notes/Voice Notes")
 }
 
 /// Save a voice note (accepts base64 audio, writes markdown with frontmatter).
@@ -45,9 +45,12 @@ impl MethodHandler for SaveHandler {
         let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S"));
         let filepath = format!("{dir}/{filename}");
 
+        // Strip data URI prefix if present (iOS sends "data:audio/m4a;base64,...")
+        let audio_base64 = normalize_base64(&audio_base64);
+
         // Decode audio
         let audio_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&audio_base64)
+            .decode(audio_base64)
             .map_err(|e| RpcError::InvalidParams {
                 message: format!("Invalid base64 audio data: {e}"),
             })?;
@@ -228,6 +231,32 @@ mod tests {
     use crate::handlers::test_helpers::make_test_context;
     use serde_json::json;
     use std::io::Write;
+
+    #[test]
+    fn notes_dir_returns_voice_notes_subdirectory() {
+        let dir = notes_dir();
+        assert!(
+            dir.ends_with("Voice Notes"),
+            "Expected 'Voice Notes' subdir, got: {dir}"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_voice_note_with_data_uri_prefix() {
+        // iOS sends: "data:audio/m4a;base64,SGVsbG8gV29ybGQ="
+        let ctx = make_test_context();
+        let result = SaveHandler
+            .handle(
+                Some(json!({"audioBase64": "data:audio/m4a;base64,SGVsbG8gV29ybGQ="})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+        if let Some(fp) = result["filepath"].as_str() {
+            let _ = std::fs::remove_file(fp);
+        }
+    }
 
     #[tokio::test]
     async fn save_voice_note_success() {

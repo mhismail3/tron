@@ -20,6 +20,7 @@ members = [
     "crates/tron-guardrails",
     "crates/tron-memory",
     "crates/tron-tasks",
+    "crates/tron-transcription",
     "crates/tron-rpc",
     "crates/tron-server",
     "crates/tron-browser",
@@ -93,8 +94,12 @@ gix = { version = "0.70", default-features = false, features = ["worktree-mutati
 scraper = "0.22"
 html2text = "0.14"
 
-# Embeddings (feature-gated)
+# Embeddings / Inference
 ort = "2.0.0-rc.11"
+symphonia = { version = "0.5", features = ["aac", "isomp4", "pcm", "wav"] }
+rubato = "0.15"
+hf-hub = "0.4"
+ndarray = "0.16"
 
 # Testing
 wiremock = "0.6"
@@ -141,6 +146,7 @@ tron-skills = { path = "crates/tron-skills" }
 tron-guardrails = { path = "crates/tron-guardrails" }
 tron-memory = { path = "crates/tron-memory" }
 tron-tasks = { path = "crates/tron-tasks" }
+tron-transcription = { path = "crates/tron-transcription" }
 tron-rpc = { path = "crates/tron-rpc" }
 tron-browser = { path = "crates/tron-browser" }
 tron-server = { path = "crates/tron-server" }

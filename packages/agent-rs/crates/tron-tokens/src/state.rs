@@ -168,7 +168,8 @@ mod tests {
         let record = mgr.record_turn(source, make_meta(1), 0.05);
 
         assert_eq!(record.computed.context_window_tokens, 604 + 8266);
-        assert_eq!(record.computed.new_input_tokens, 604 + 8266);
+        // Anthropic: new_input_tokens = raw_input_tokens only (non-cached)
+        assert_eq!(record.computed.new_input_tokens, 604);
         assert_eq!(record.computed.previous_context_baseline, 0);
 
         let state = mgr.state();
@@ -191,8 +192,8 @@ mod tests {
 
         assert_eq!(record2.computed.context_window_tokens, 700 + 8266);
         assert_eq!(record2.computed.previous_context_baseline, 8870);
-        // New input = 8966 - 8870 = 96
-        assert_eq!(record2.computed.new_input_tokens, 96);
+        // Anthropic: new_input_tokens = raw_input_tokens only (non-cached)
+        assert_eq!(record2.computed.new_input_tokens, 700);
 
         let state = mgr.state();
         assert_eq!(state.history.len(), 2);

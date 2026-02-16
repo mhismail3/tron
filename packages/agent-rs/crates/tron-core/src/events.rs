@@ -354,6 +354,9 @@ pub enum TronEvent {
         /// Context window limit (for iOS sync after model switch).
         #[serde(rename = "contextLimit", skip_serializing_if = "Option::is_none")]
         context_limit: Option<u64>,
+        /// Model used for this turn.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
 
     /// Turn failed.
@@ -399,6 +402,12 @@ pub enum TronEvent {
         /// Number of tool calls.
         #[serde(rename = "toolCallCount")]
         tool_call_count: u32,
+        /// Canonical token record (iOS attaches stats from this).
+        #[serde(rename = "tokenRecord", skip_serializing_if = "Option::is_none")]
+        token_record: Option<Value>,
+        /// Model used for this response.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
 
     // -- Message --
@@ -930,6 +939,30 @@ pub enum TronEvent {
         reason: Option<String>,
     },
 
+    /// Rules loaded (workspace rules loaded into context).
+    #[serde(rename = "rules_loaded")]
+    RulesLoaded {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Number of rule files loaded.
+        #[serde(rename = "totalFiles")]
+        total_files: u32,
+        /// Number of dynamic rules loaded.
+        #[serde(rename = "dynamicRulesCount")]
+        dynamic_rules_count: u32,
+    },
+
+    /// Memory loaded (memory context loaded).
+    #[serde(rename = "memory_loaded")]
+    MemoryLoaded {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Number of memory entries loaded.
+        count: u32,
+    },
+
     /// Skill removed.
     #[serde(rename = "skill_removed")]
     SkillRemoved {
@@ -1067,6 +1100,8 @@ impl TronEvent {
             | Self::MemoryUpdated { base, .. }
             | Self::ContextCleared { base, .. }
             | Self::MessageDeleted { base, .. }
+            | Self::RulesLoaded { base, .. }
+            | Self::MemoryLoaded { base, .. }
             | Self::SkillRemoved { base, .. }
             | Self::SubagentSpawned { base, .. }
             | Self::SubagentStatusUpdate { base, .. }
@@ -1130,6 +1165,8 @@ impl TronEvent {
             Self::MemoryUpdated { .. } => "memory_updated",
             Self::ContextCleared { .. } => "context_cleared",
             Self::MessageDeleted { .. } => "message_deleted",
+            Self::RulesLoaded { .. } => "rules_loaded",
+            Self::MemoryLoaded { .. } => "memory_loaded",
             Self::SkillRemoved { .. } => "skill_removed",
             Self::SubagentSpawned { .. } => "subagent_spawned",
             Self::SubagentStatusUpdate { .. } => "subagent_status_update",
@@ -1471,6 +1508,7 @@ mod tests {
             cost: Some(0.005),
             stop_reason: Some("end_turn".into()),
             context_limit: Some(200_000),
+            model: None,
         };
         let json = serde_json::to_value(&e).unwrap();
         assert_eq!(json["tokenUsage"]["inputTokens"], 100);
@@ -1615,6 +1653,7 @@ mod tests {
                 cost: None,
                 stop_reason: None,
                 context_limit: None,
+                model: None,
             },
             TronEvent::TurnFailed {
                 base: base.clone(),
@@ -1632,6 +1671,8 @@ mod tests {
                 token_usage: None,
                 has_tool_calls: false,
                 tool_call_count: 0,
+                token_record: None,
+                model: None,
             },
             TronEvent::MessageUpdate {
                 base: base.clone(),
@@ -1801,6 +1842,15 @@ mod tests {
                 target_turn: None,
                 reason: None,
             },
+            TronEvent::RulesLoaded {
+                base: base.clone(),
+                total_files: 3,
+                dynamic_rules_count: 1,
+            },
+            TronEvent::MemoryLoaded {
+                base: base.clone(),
+                count: 2,
+            },
             TronEvent::SkillRemoved {
                 base: base.clone(),
                 skill_name: "n".into(),
@@ -1836,13 +1886,13 @@ mod tests {
             },
         ];
 
-        // All 39 variants
-        assert_eq!(events.len(), 39);
+        // All 41 variants
+        assert_eq!(events.len(), 41);
 
         let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
         types.sort();
         types.dedup();
-        assert_eq!(types.len(), 39);
+        assert_eq!(types.len(), 41);
     }
 
     #[test]
@@ -1911,6 +1961,30 @@ mod tests {
         assert_eq!(json["targetEventId"], "evt-123");
         assert_eq!(json["targetType"], "message.user");
         assert_eq!(json["targetTurn"], 3);
+    }
+
+    #[test]
+    fn rules_loaded_event_type() {
+        let e = TronEvent::RulesLoaded {
+            base: BaseEvent::now("s1"),
+            total_files: 3,
+            dynamic_rules_count: 1,
+        };
+        assert_eq!(e.event_type(), "rules_loaded");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["totalFiles"], 3);
+        assert_eq!(json["dynamicRulesCount"], 1);
+    }
+
+    #[test]
+    fn memory_loaded_event_type() {
+        let e = TronEvent::MemoryLoaded {
+            base: BaseEvent::now("s1"),
+            count: 2,
+        };
+        assert_eq!(e.event_type(), "memory_loaded");
+        let json = serde_json::to_value(&e).unwrap();
+        assert_eq!(json["count"], 2);
     }
 
     #[test]
