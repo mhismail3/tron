@@ -10,6 +10,8 @@ use tron_guardrails::GuardrailEngine;
 use tron_hooks::engine::HookEngine;
 use tron_llm::provider::Provider;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
+use tron_runtime::orchestrator::subagent_manager::SubagentManager;
+use tron_embeddings::EmbeddingController;
 use tron_transcription::TranscriptionEngine;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_skills::registry::SkillRegistry;
@@ -49,6 +51,10 @@ pub struct RpcContext {
     pub browser_service: Option<Arc<tron_browser::service::BrowserService>>,
     /// Native transcription engine (None = sidecar fallback).
     pub transcription_engine: Option<Arc<TranscriptionEngine>>,
+    /// Embedding controller for vector search (None = embeddings not loaded).
+    pub embedding_controller: Option<Arc<tokio::sync::Mutex<EmbeddingController>>>,
+    /// Subagent manager for spawning subsessions (None = fallback to keyword summarizer).
+    pub subagent_manager: Option<Arc<SubagentManager>>,
 }
 
 #[cfg(test)]

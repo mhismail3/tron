@@ -194,8 +194,43 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
                     .as_ref()
                     .map(|s| s.latest_model.clone())
                     .unwrap_or_default();
+                let head_event_id = session_info
+                    .as_ref()
+                    .and_then(|s| s.head_event_id.clone())
+                    .unwrap_or_default();
+
+                // Get first event ID
+                let first_event_id = self
+                    .event_store
+                    .get_events_by_session(
+                        &self.session_id,
+                        &tron_events::sqlite::repositories::event::ListEventsOptions {
+                            limit: Some(1),
+                            offset: None,
+                        },
+                    )
+                    .ok()
+                    .and_then(|events| events.first().map(|e| e.id.clone()))
+                    .unwrap_or_default();
+
+                // Count turns (user messages)
+                #[allow(clippy::cast_possible_wrap)]
+                let user_turns = active
+                    .state
+                    .messages
+                    .iter()
+                    .filter(|m| m.is_user())
+                    .count() as i64;
 
                 let payload = serde_json::json!({
+                    "eventRange": {
+                        "firstEventId": first_event_id,
+                        "lastEventId": head_event_id,
+                    },
+                    "turnRange": {
+                        "firstTurn": 1,
+                        "lastTurn": user_turns,
+                    },
                     "title": entry.title,
                     "entryType": entry.entry_type,
                     "status": entry.status,

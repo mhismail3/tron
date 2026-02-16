@@ -81,6 +81,8 @@ mod tests {
             server_start_time: std::time::Instant::now(),
             browser_service: None,
             transcription_engine: None,
+            subagent_manager: None,
+            embedding_controller: None,
         }
     }
 

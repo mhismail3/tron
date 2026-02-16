@@ -4,16 +4,8 @@
 //! to return structured JSON describing what happened in a session.
 //! This module parses that response into a [`LedgerEntry`].
 
-use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
-use tracing::warn;
-
-use crate::summarizer::serialize_messages;
-use crate::system_prompts::MEMORY_LEDGER_PROMPT;
-use tron_core::events::StreamEvent;
-use tron_core::messages::{Context, Message};
-use tron_llm::provider::{Provider, ProviderStreamOptions};
 
 // =============================================================================
 // Types
@@ -97,7 +89,7 @@ pub enum LedgerParseResult {
 /// Returns `Ok(Entry(..))` if the interaction is worth recording.
 /// Returns `Err(..)` if the response couldn't be parsed.
 pub fn parse_ledger_response(output: &str) -> Result<LedgerParseResult, String> {
-    let cleaned = strip_code_fences(output.trim());
+    let cleaned = extract_json(output);
 
     let parsed: Value =
         serde_json::from_str(&cleaned).map_err(|e| format!("invalid JSON: {e}"))?;
@@ -118,116 +110,87 @@ pub fn parse_ledger_response(output: &str) -> Result<LedgerParseResult, String> 
     Ok(LedgerParseResult::Entry(Box::new(entry)))
 }
 
-/// Strip markdown code fences from a response string.
-fn strip_code_fences(s: &str) -> String {
-    let trimmed = s.trim();
-    if let Some(rest) = trimmed.strip_prefix("```json") {
-        rest.strip_suffix("```")
-            .unwrap_or(rest)
-            .trim()
-            .to_string()
-    } else if let Some(rest) = trimmed.strip_prefix("```") {
-        rest.strip_suffix("```")
-            .unwrap_or(rest)
-            .trim()
-            .to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-// =============================================================================
-// LLM ledger helper
-// =============================================================================
-
-/// Timeout for the LLM ledger call (30 seconds).
-const LEDGER_LLM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Attempt to write a ledger entry using the LLM provider.
+/// Extract JSON from an LLM response that may contain code fences and surrounding text.
 ///
-/// Returns `None` if the provider call fails, times out, or the response is
-/// unparseable — signalling the caller to fall back to `KeywordSummarizer`.
-pub async fn try_llm_ledger(
-    provider: &dyn Provider,
-    messages: &[Message],
-) -> Option<LedgerParseResult> {
-    match tokio::time::timeout(LEDGER_LLM_TIMEOUT, try_llm_ledger_inner(provider, messages)).await
-    {
-        Ok(result) => result,
-        Err(_elapsed) => {
-            warn!("LLM ledger call timed out after {}s, falling back to keyword summarizer", LEDGER_LLM_TIMEOUT.as_secs());
-            None
-        }
+/// Strategy 1: Code fence extraction — find `` ```json `` or `` ``` `` followed by a
+/// newline, then find `\n````. Extract only the content between the fences.
+///
+/// Strategy 2: Brace matching — locate first `{` and walk forward tracking brace
+/// depth while respecting JSON string literals (handle `\"` escapes). Extract the
+/// first complete top-level JSON object.
+///
+/// Strategy 3: Passthrough — return trimmed input (will fail at `serde_json::from_str`).
+fn extract_json(s: &str) -> String {
+    let trimmed = s.trim();
+
+    // Strategy 1: code fence extraction
+    if let Some(json) = extract_from_code_fence(trimmed) {
+        return json;
     }
+
+    // Strategy 2: brace matching
+    if let Some(json) = extract_by_brace_matching(trimmed) {
+        return json;
+    }
+
+    // Strategy 3: passthrough
+    trimmed.to_string()
 }
 
-/// Inner implementation without timeout wrapper.
-async fn try_llm_ledger_inner(
-    provider: &dyn Provider,
-    messages: &[Message],
-) -> Option<LedgerParseResult> {
-    let transcript = serialize_messages(messages);
-    if transcript.is_empty() {
-        return None;
-    }
+/// Try to extract JSON content from inside code fences.
+fn extract_from_code_fence(s: &str) -> Option<String> {
+    // Find opening fence: ```json\n or ```\n
+    let fence_start = s.find("```json\n").map(|i| i + 8) // skip "```json\n"
+        .or_else(|| s.find("```json\r\n").map(|i| i + 9))
+        .or_else(|| s.find("```\n").map(|i| i + 4))
+        .or_else(|| s.find("```\r\n").map(|i| i + 5))?;
 
-    let context = Context {
-        system_prompt: Some(MEMORY_LEDGER_PROMPT.to_owned()),
-        messages: vec![Message::user(&transcript)],
-        ..Default::default()
-    };
+    // Find closing fence: \n``` (newline followed by triple backtick)
+    let remaining = &s[fence_start..];
+    let fence_end = remaining.find("\n```")
+        .or_else(|| remaining.find("\r\n```"))?;
 
-    let options = ProviderStreamOptions {
-        max_tokens: Some(4096),
-        enable_thinking: Some(false),
-        ..Default::default()
-    };
+    Some(remaining[..fence_end].trim().to_string())
+}
 
-    let mut stream = match provider.stream(&context, &options).await {
-        Ok(s) => s,
-        Err(e) => {
-            warn!(error = %e, "LLM call failed for ledger writer");
-            return None;
-        }
-    };
+/// Try to extract the first complete JSON object by brace matching.
+fn extract_by_brace_matching(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let start = bytes.iter().position(|&b| b == b'{')?;
 
-    let mut text = String::new();
-    while let Some(event) = stream.next().await {
-        match event {
-            Ok(StreamEvent::Done { message, .. }) => {
-                let complete: String = message
-                    .content
-                    .iter()
-                    .filter_map(|c| c.as_text())
-                    .collect::<Vec<_>>()
-                    .join("");
-                if !complete.is_empty() {
-                    text = complete;
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut i = start;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if in_string {
+            if b == b'\\' {
+                // Skip escaped character
+                i += 2;
+                continue;
+            }
+            if b == b'"' {
+                in_string = false;
+            }
+        } else {
+            match b {
+                b'"' => in_string = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(s[start..=i].to_string());
+                    }
                 }
+                _ => {}
             }
-            Ok(StreamEvent::TextDelta { delta }) => {
-                text.push_str(&delta);
-            }
-            Err(e) => {
-                warn!(error = %e, "Stream error during ledger LLM call");
-                return None;
-            }
-            _ => {}
         }
+        i += 1;
     }
 
-    if text.is_empty() {
-        warn!("LLM returned empty response for ledger writer");
-        return None;
-    }
-
-    match parse_ledger_response(&text) {
-        Ok(result) => Some(result),
-        Err(e) => {
-            warn!(error = %e, "Failed to parse ledger LLM response");
-            None
-        }
-    }
+    None // Unclosed brace
 }
 
 // =============================================================================
@@ -383,21 +346,173 @@ mod tests {
         }
     }
 
+    // ── extract_json: code fence variations ──
+
     #[test]
-    fn strip_json_code_fence() {
-        let input = "```json\n{\"key\": \"value\"}\n```";
-        assert_eq!(strip_code_fences(input), "{\"key\": \"value\"}");
+    fn parse_code_fence_with_trailing_emoji() {
+        let input = "```json\n{\"title\": \"Test\", \"entryType\": \"feature\"}\n```\n\n\u{1FACE}";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
     }
 
     #[test]
-    fn strip_plain_code_fence() {
-        let input = "```\n{\"key\": \"value\"}\n```";
-        assert_eq!(strip_code_fences(input), "{\"key\": \"value\"}");
+    fn parse_code_fence_with_trailing_text() {
+        let input = "```json\n{\"title\": \"Test\", \"entryType\": \"feature\"}\n```\n\nHere's the summary!";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
     }
 
     #[test]
-    fn no_code_fence_passthrough() {
-        let input = "{\"key\": \"value\"}";
-        assert_eq!(strip_code_fences(input), input);
+    fn parse_code_fence_with_leading_text() {
+        let input = "Sure!\n```json\n{\"title\": \"Test\", \"entryType\": \"feature\"}\n```";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    #[test]
+    fn parse_code_fence_with_both_surrounding() {
+        let input = "Here:\n```json\n{\"title\": \"Test\", \"entryType\": \"feature\"}\n```\nDone!";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    #[test]
+    fn parse_plain_fence_with_trailing() {
+        let input = "```\n{\"title\": \"Test\", \"entryType\": \"feature\"}\n```\nExtra";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    #[test]
+    fn parse_code_fence_multiline_json() {
+        let input = "```json\n{\n  \"title\": \"T\",\n  \"entryType\": \"feature\"\n}\n```";
+        let result = parse_ledger_response(input).unwrap();
+        match result {
+            LedgerParseResult::Entry(e) => assert_eq!(e.title, "T"),
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    // ── extract_json: bare JSON variations ──
+
+    #[test]
+    fn parse_bare_json_with_trailing_text() {
+        let input = "{\"title\": \"Test\", \"entryType\": \"feature\"}\n\nLet me know if you need changes!";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    #[test]
+    fn parse_bare_json_with_leading_text() {
+        let input = "Here is the JSON:\n{\"title\": \"Test\", \"entryType\": \"feature\"}";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    #[test]
+    fn parse_bare_json_with_nested_braces() {
+        let input = r#"{"title":"T","entryType":"feature","files":[{"path":"a","op":"M"}]}"#;
+        let result = parse_ledger_response(input).unwrap();
+        match result {
+            LedgerParseResult::Entry(e) => {
+                assert_eq!(e.title, "T");
+                assert_eq!(e.files.len(), 1);
+            }
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    #[test]
+    fn parse_bare_json_with_string_braces() {
+        let input = r#"{"title":"contains {braces} in text","entryType":"feature"}"#;
+        let result = parse_ledger_response(input).unwrap();
+        match result {
+            LedgerParseResult::Entry(e) => {
+                assert_eq!(e.title, "contains {braces} in text");
+            }
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    #[test]
+    fn parse_bare_json_with_escaped_quotes() {
+        let input = r#"{"title":"say \"hello\"","entryType":"feature"}"#;
+        let result = parse_ledger_response(input).unwrap();
+        match result {
+            LedgerParseResult::Entry(e) => {
+                assert_eq!(e.title, r#"say "hello""#);
+            }
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    // ── Multiple objects ──
+
+    #[test]
+    fn parse_multiple_json_objects_takes_first() {
+        let input = "{\"title\":\"First\",\"entryType\":\"feature\"}\n{\"title\":\"Second\",\"entryType\":\"bugfix\"}";
+        let result = parse_ledger_response(input).unwrap();
+        match result {
+            LedgerParseResult::Entry(e) => assert_eq!(e.title, "First"),
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    // ── Skip signal ──
+
+    #[test]
+    fn parse_skip_inside_code_fence() {
+        let input = "```json\n{\"skip\": true}\n```";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Skip));
+    }
+
+    // ── Error cases ──
+
+    #[test]
+    fn parse_empty_string_errors() {
+        assert!(parse_ledger_response("").is_err());
+    }
+
+    #[test]
+    fn parse_whitespace_only_errors() {
+        assert!(parse_ledger_response("   \n  ").is_err());
+    }
+
+    #[test]
+    fn parse_no_json_at_all_errors() {
+        assert!(parse_ledger_response("Just some text, no JSON").is_err());
+    }
+
+    #[test]
+    fn parse_unclosed_brace_errors() {
+        assert!(parse_ledger_response("{\"title\": \"oops").is_err());
+    }
+
+    #[test]
+    fn parse_unclosed_fence_falls_back_to_brace_match() {
+        let input = "```json\n{\"title\": \"Test\", \"entryType\": \"feature\"}";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    // ── extract_json unit tests ──
+
+    #[test]
+    fn extract_json_fence_strips_surrounding() {
+        let input = "Sure!\n```json\n{\"key\": \"value\"}\n```\nDone!";
+        assert_eq!(extract_json(input), "{\"key\": \"value\"}");
+    }
+
+    #[test]
+    fn extract_json_bare_object() {
+        let input = "Here: {\"key\": \"value\"} trailing";
+        assert_eq!(extract_json(input), "{\"key\": \"value\"}");
+    }
+
+    #[test]
+    fn extract_json_passthrough() {
+        let input = "no json here";
+        assert_eq!(extract_json(input), "no json here");
     }
 }

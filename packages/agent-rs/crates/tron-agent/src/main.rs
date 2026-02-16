@@ -534,6 +534,7 @@ async fn main() -> Result<()> {
 
     // Agent dependencies (LLM provider + tool factory)
     // OAuth is primary auth, API key is fallback — matching the TypeScript server.
+    let mut shared_subagent_manager: Option<Arc<SubagentManager>> = None;
     let agent_deps = create_provider(&settings).await.map(|provider| {
         tracing::info!(
             provider = settings.server.default_provider.as_str(),
@@ -570,6 +571,9 @@ async fn main() -> Result<()> {
 
         // Break circular dep: SubagentManager needs tool_factory to spawn children
         subagent_manager.set_tool_factory(tool_factory.clone());
+
+        // Store for RpcContext
+        shared_subagent_manager = Some(subagent_manager);
 
         AgentDeps {
             provider,
@@ -615,6 +619,8 @@ async fn main() -> Result<()> {
         server_start_time: std::time::Instant::now(),
         browser_service: browser_service.clone(),
         transcription_engine,
+        embedding_controller: None,
+        subagent_manager: shared_subagent_manager,
     };
 
     // Method registry
@@ -949,6 +955,8 @@ mod tests {
             server_start_time: std::time::Instant::now(),
             browser_service: None,
             transcription_engine: None,
+            embedding_controller: None,
+            subagent_manager: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1109,6 +1117,8 @@ mod tests {
             server_start_time: std::time::Instant::now(),
             browser_service: None,
             transcription_engine: None,
+            embedding_controller: None,
+            subagent_manager: None,
         };
 
         let mut registry = MethodRegistry::new();

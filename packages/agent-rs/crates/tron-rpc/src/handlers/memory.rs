@@ -1,17 +1,45 @@
 //! Memory handlers: getLedger, updateLedger, search, getHandoffs.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
-use tron_context::ledger_writer::{try_llm_ledger, LedgerParseResult};
-use tron_context::summarizer::{KeywordSummarizer, Summarizer};
+use tron_context::ledger_writer::LedgerParseResult;
 use tron_core::messages::Message;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
+
+/// Emit `MemoryUpdated` event via the orchestrator broadcast.
+fn emit_memory_updated(ctx: &RpcContext, session_id: &str, title: Option<&str>, entry_type: Option<&str>) {
+    let _ = ctx.orchestrator.broadcast().emit(
+        tron_core::events::TronEvent::MemoryUpdated {
+            base: tron_core::events::BaseEvent::now(session_id),
+            title: title.map(String::from),
+            entry_type: entry_type.map(String::from),
+        },
+    );
+}
+
+/// Spawn a fire-and-forget embedding task for a ledger entry.
+fn spawn_embed_memory(ctx: &RpcContext, event_id: &str, workspace_id: &str, payload: &Value) {
+    if let Some(ref ec) = ctx.embedding_controller {
+        let ec = Arc::clone(ec);
+        let event_id = event_id.to_owned();
+        let workspace_id = workspace_id.to_owned();
+        let payload = payload.clone();
+        let _ = tokio::spawn(async move {
+            let ctrl = ec.lock().await;
+            if let Err(e) = ctrl.embed_memory(&event_id, &workspace_id, &payload).await {
+                warn!(error = %e, event_id, "failed to embed ledger entry");
+            }
+        });
+    }
+}
 
 /// Get ledger entries for a workspace.
 pub struct GetLedgerHandler;
@@ -115,9 +143,17 @@ impl MethodHandler for UpdateLedgerHandler {
         }
         let session_id = &session_id_owned;
 
+        // Emit memory_updating immediately (iOS shows spinner pill)
+        let _ = ctx.orchestrator.broadcast().emit(
+            tron_core::events::TronEvent::MemoryUpdating {
+                base: tron_core::events::BaseEvent::now(session_id),
+            },
+        );
+
         // Resume session to get messages
         let Ok(active) = ctx.session_manager.resume_session(session_id) else {
             debug!(session_id, "session not found or empty during resume");
+            emit_memory_updated(ctx, session_id, None, Some("skipped"));
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
@@ -132,6 +168,7 @@ impl MethodHandler for UpdateLedgerHandler {
         // Need messages to summarize
         if active.state.messages.is_empty() {
             debug!(session_id, "no messages in session");
+            emit_memory_updated(ctx, session_id, None, Some("skipped"));
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
@@ -147,6 +184,7 @@ impl MethodHandler for UpdateLedgerHandler {
             .unwrap_or_default();
         if !existing_ledger.is_empty() {
             debug!(session_id, "ledger entry already exists, skipping duplicate write");
+            emit_memory_updated(ctx, session_id, None, Some("skipped"));
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
@@ -155,25 +193,47 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         }
 
-        // Try LLM-based ledger writing (if provider available)
-        let has_provider = ctx.agent_deps.is_some();
-        debug!(session_id, has_provider, message_count, "attempting ledger update");
-        let llm_result = if let Some(ref agent_deps) = ctx.agent_deps {
-            try_llm_ledger(&*agent_deps.provider, &active.state.messages).await
+        // Try LLM-based ledger writing via subsession
+        let has_subagent_manager = ctx.subagent_manager.is_some();
+        debug!(session_id, has_subagent_manager, message_count, "attempting ledger update");
+        let llm_result = if let Some(ref manager) = ctx.subagent_manager {
+            use tron_context::llm_summarizer::SubsessionSpawner;
+            use tron_context::summarizer::serialize_messages;
+            use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
+
+            let transcript = serialize_messages(&active.state.messages);
+            let spawner = SubagentManagerSpawner {
+                manager: manager.clone(),
+                parent_session_id: session_id.to_owned(),
+                working_directory: active.state.working_directory.clone().unwrap_or_default(),
+                system_prompt: tron_context::system_prompts::MEMORY_LEDGER_PROMPT.to_string(),
+                model: Some("claude-haiku-4-5-20251001".to_string()),
+            };
+            let result = spawner.spawn_summarizer(&transcript).await;
+            if result.success {
+                result
+                    .output
+                    .as_deref()
+                    .and_then(|o| tron_context::ledger_writer::parse_ledger_response(o).ok())
+            } else {
+                debug!(session_id, error = ?result.error, "subsession ledger call failed");
+                None
+            }
         } else {
-            debug!(session_id, "no LLM provider, falling back to keyword summarizer");
+            debug!(session_id, "no subagent manager, falling back to keyword summarizer");
             None
         };
 
         match llm_result {
             Some(LedgerParseResult::Skip) => {
                 debug!(session_id, "LLM classified interaction as trivial, skipping");
-                return Ok(serde_json::json!({
+                emit_memory_updated(ctx, session_id, None, Some("skipped"));
+                Ok(serde_json::json!({
                     "written": false,
                     "title": null,
                     "entryType": null,
                     "reason": "skipped",
-                }));
+                }))
             }
             Some(LedgerParseResult::Entry(ref entry)) => {
                 // Get session metadata for the full payload
@@ -218,7 +278,7 @@ impl MethodHandler for UpdateLedgerHandler {
                     .filter(|m| matches!(m, Message::User { .. }))
                     .count() as i64;
 
-                // Build full MemoryLedgerPayload
+                // Build full MemoryLedgerPayload (matches TS server format)
                 let payload = serde_json::json!({
                     "eventRange": {
                         "firstEventId": first_event_id,
@@ -254,117 +314,39 @@ impl MethodHandler for UpdateLedgerHandler {
                 });
 
                 // Persist as memory.ledger event
-                let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                let event_id = ctx.event_store.append(&tron_events::AppendOptions {
                     session_id,
                     event_type: tron_events::EventType::MemoryLedger,
-                    payload,
+                    payload: payload.clone(),
                     parent_id: None,
-                });
+                }).map(|row| row.id).unwrap_or_default();
+
+                // Fire-and-forget embedding
+                spawn_embed_memory(ctx, &event_id, &workspace, &payload);
 
                 // Broadcast memory updated event
-                let _ = ctx.orchestrator.broadcast().emit(
-                    tron_core::events::TronEvent::MemoryUpdated {
-                        base: tron_core::events::BaseEvent::now(session_id),
-                        title: Some(entry.title.clone()),
-                        entry_type: Some(entry.entry_type.clone()),
-                    },
-                );
+                emit_memory_updated(ctx, session_id, Some(&entry.title), Some(&entry.entry_type));
 
-                debug!(session_id, title = %entry.title, entry_type = %entry.entry_type, "LLM ledger entry written");
-                return Ok(serde_json::json!({
+                debug!(session_id, title = %entry.title, entry_type = %entry.entry_type, "ledger entry written");
+                Ok(serde_json::json!({
                     "written": true,
                     "title": entry.title,
                     "entryType": entry.entry_type,
                     "reason": "written",
-                }));
+                }))
             }
             None => {
-                // Fall through to keyword summarizer
+                // No LLM available or LLM call failed — gracefully skip
+                debug!(session_id, "ledger write skipped: no LLM provider or LLM call failed");
+                emit_memory_updated(ctx, session_id, None, Some("skipped"));
+                Ok(serde_json::json!({
+                    "written": false,
+                    "title": null,
+                    "entryType": null,
+                    "reason": "llm_unavailable",
+                }))
             }
         }
-
-        // ── Fallback: keyword summarizer ────────────────────────────────────
-        // Used when no LLM provider is configured or the LLM call failed.
-
-        // Derive title from first user message
-        let title = active
-            .state
-            .messages
-            .iter()
-            .find_map(|m| match m {
-                Message::User { content, .. } => {
-                    let text = match content {
-                        tron_core::messages::UserMessageContent::Text(t) => t.clone(),
-                        tron_core::messages::UserMessageContent::Blocks(blocks) => blocks
-                            .iter()
-                            .filter_map(|b| b.as_text())
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    };
-                    let trimmed = text.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        let t = trimmed.to_owned();
-                        Some(if t.len() > 80 {
-                            format!("{}...", &t[..77])
-                        } else {
-                            t
-                        })
-                    }
-                }
-                _ => None,
-            })
-            .unwrap_or_else(|| "Untitled session".to_owned());
-
-        let summarizer = KeywordSummarizer::new();
-        let summary_result = summarizer
-            .summarize(&active.state.messages)
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Summarization failed: {e}"),
-            })?;
-
-        let entry_type = if summary_result
-            .extracted_data
-            .files_modified
-            .is_empty()
-        {
-            "conversation"
-        } else {
-            "feature"
-        };
-
-        // Persist as memory.ledger event (sparse payload)
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id,
-            event_type: tron_events::EventType::MemoryLedger,
-            payload: serde_json::json!({
-                "title": title,
-                "summary": summary_result.narrative,
-                "entryType": entry_type,
-                "filesModified": summary_result.extracted_data.files_modified,
-                "topicsDiscussed": summary_result.extracted_data.topics_discussed,
-            }),
-            parent_id: None,
-        });
-
-        // Broadcast memory updated event
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::MemoryUpdated {
-                base: tron_core::events::BaseEvent::now(session_id),
-                title: Some(title.clone()),
-                entry_type: Some(entry_type.to_owned()),
-            },
-        );
-
-        debug!(session_id, %title, entry_type, "keyword summarizer ledger entry written");
-        Ok(serde_json::json!({
-            "written": true,
-            "title": title,
-            "entryType": entry_type,
-            "reason": "written",
-        }))
     }
 }
 
@@ -568,8 +550,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_ledger_with_session_and_messages() {
-        let ctx = make_test_context();
+    async fn update_ledger_without_llm_returns_unavailable() {
+        let ctx = make_test_context(); // no subagent_manager
         let sid = ctx
             .session_manager
             .create_session("claude-opus-4-6", "/tmp", Some("test"))
@@ -598,9 +580,8 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        assert_eq!(result["written"], true);
-        assert!(result["title"].is_string());
-        assert!(result["entryType"].is_string());
+        assert_eq!(result["written"], false);
+        assert_eq!(result["reason"], "llm_unavailable");
     }
 
     #[tokio::test]
@@ -726,8 +707,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_ledger_success_returns_reason() {
-        let ctx = make_test_context();
+    async fn update_ledger_llm_unavailable_returns_reason() {
+        let ctx = make_test_context(); // no subagent_manager
         let sid = ctx
             .session_manager
             .create_session("claude-opus-4-6", "/tmp", Some("test"))
@@ -755,8 +736,8 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        assert_eq!(result["written"], true);
-        assert_eq!(result["reason"], "written");
+        assert_eq!(result["written"], false);
+        assert_eq!(result["reason"], "llm_unavailable");
     }
 
     #[tokio::test]
@@ -779,7 +760,7 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp", Some("test"))
             .unwrap();
 
-        // Add a user message
+        // Add messages
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid,
             event_type: tron_events::EventType::MessageUser,
@@ -796,96 +777,22 @@ mod tests {
             }),
             parent_id: None,
         });
+
+        // Pre-seed a memory.ledger event (simulating a previous successful write)
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Implement dark mode", "entryType": "feature"}),
+            parent_id: None,
+        });
         ctx.session_manager.invalidate_session(&sid);
 
-        // First call should write
-        let result = UpdateLedgerHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
-        assert_eq!(result["written"], true);
-
-        // Invalidate to force re-read
-        ctx.session_manager.invalidate_session(&sid);
-
-        // Second call should skip (duplicate)
+        // Call should skip (duplicate exists)
         let result = UpdateLedgerHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["written"], false);
         assert_eq!(result["reason"], "already_exists");
-    }
-
-    // ── Whitespace-only user message tests ──
-
-    #[tokio::test]
-    async fn update_ledger_whitespace_only_user_message_gets_untitled() {
-        let ctx = make_test_context();
-        let sid = ctx
-            .session_manager
-            .create_session("claude-opus-4-6", "/tmp", Some("test"))
-            .unwrap();
-
-        // Add a whitespace-only user message
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
-            payload: json!({"content": "   \n\t  "}),
-            parent_id: None,
-        });
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageAssistant,
-            payload: json!({
-                "content": [{"type": "text", "text": "Response here."}],
-                "turn": 1,
-                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
-            }),
-            parent_id: None,
-        });
-        ctx.session_manager.invalidate_session(&sid);
-
-        let result = UpdateLedgerHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
-        assert_eq!(result["written"], true);
-        assert_eq!(result["title"], "Untitled session");
-    }
-
-    #[tokio::test]
-    async fn update_ledger_title_trimmed() {
-        let ctx = make_test_context();
-        let sid = ctx
-            .session_manager
-            .create_session("claude-opus-4-6", "/tmp", Some("test"))
-            .unwrap();
-
-        // Add a user message with leading/trailing whitespace
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
-            payload: json!({"content": "  Fix the login bug  "}),
-            parent_id: None,
-        });
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageAssistant,
-            payload: json!({
-                "content": [{"type": "text", "text": "Done."}],
-                "turn": 1,
-                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
-            }),
-            parent_id: None,
-        });
-        ctx.session_manager.invalidate_session(&sid);
-
-        let result = UpdateLedgerHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
-        assert_eq!(result["written"], true);
-        assert_eq!(result["title"], "Fix the login bug");
     }
 }

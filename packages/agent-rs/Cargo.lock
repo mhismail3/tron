@@ -4661,6 +4661,7 @@ dependencies = [
  "tron-browser",
  "tron-context",
  "tron-core",
+ "tron-embeddings",
  "tron-events",
  "tron-guardrails",
  "tron-hooks",

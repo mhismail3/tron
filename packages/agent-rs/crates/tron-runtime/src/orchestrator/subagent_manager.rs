@@ -326,6 +326,7 @@ impl SubagentManager {
                 event_store.clone(),
                 child_sid.clone(),
             ));
+            agent.set_persister(Some(persister.clone()));
 
             // Run the agent
             let result = agent_runner::run_agent(
