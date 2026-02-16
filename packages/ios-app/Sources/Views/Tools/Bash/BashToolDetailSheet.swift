@@ -185,6 +185,7 @@ struct BashToolDetailSheet: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -261,13 +262,14 @@ struct BashToolDetailSheet: View {
                             .foregroundStyle(tint.body)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(minHeight: 16)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
                 }
 
                 if shouldCollapse && !showAllLines {
                     collapsedIndicator
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 3)
             .overlay(alignment: .leading) {
                 Rectangle()
@@ -436,9 +438,10 @@ struct BashToolDetailSheet: View {
                             .foregroundStyle(tint.body)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(minHeight: 16)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 3)
             .overlay(alignment: .leading) {
                 Rectangle()
