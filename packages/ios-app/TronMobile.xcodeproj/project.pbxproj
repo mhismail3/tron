@@ -396,6 +396,7 @@
 		CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */; };
 		CBAAAEBFE99D816083CE9986 /* ThinkingCaption.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA29BF65193E68C18A29255 /* ThinkingCaption.swift */; };
 		CBC62CA1AF015D6A65D6BCF3 /* SessionHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FE4369053D03ED80C8114F /* SessionHistoryView.swift */; };
+		CBD48D92B58C17763EB6F62F /* OpenURLToolDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E777080FA5606DC83FA7802 /* OpenURLToolDetailSheet.swift */; };
 		CD8059BC9B4B2D963C1A3538 /* RPCClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3984D131F07C099480816DD /* RPCClient.swift */; };
 		CE43E4FE68B936BE07D57162 /* ImageContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B474F56DF5573C102B41B7FA /* ImageContent.swift */; };
 		CE58B70611975E8E46695749 /* ToolEventContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EA53C381BBE642C4DC0F897 /* ToolEventContext.swift */; };
@@ -504,6 +505,7 @@
 		FD1390D745F24A8E71922902 /* ChatViewModel+DeepLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69823DCE8B26E8CA4F96CCB /* ChatViewModel+DeepLinks.swift */; };
 		FD72499B130BAAFC4D76591D /* SessionUpdatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF4DD3D3F1D425D20483C7 /* SessionUpdatedPlugin.swift */; };
 		FDC5CDA8F51929D887B90881 /* PaginationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FA4F749EAC0CDE488463E0A /* PaginationCoordinatorTests.swift */; };
+		FDE9F0BD858B25C8D4D7EFA3 /* OpenURLToolDetailSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F829170F078C7D35F9C2CCC /* OpenURLToolDetailSheetTests.swift */; };
 		FE3D89D152521876D2DDF464 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */; };
 		FEF77052D6956E5B6AE05BDB /* RPCTypes+Task.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5F4C1CCA13C7C459D7D82 /* RPCTypes+Task.swift */; };
 		FEFEB6F2F6B479F5D422E56A /* EventIconProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B23C91EE877275B8030EE0 /* EventIconProvider.swift */; };
@@ -595,6 +597,7 @@
 		1E1E2A2B22732B153F35C836 /* ConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionCoordinator.swift; sourceTree = "<group>"; };
 		1EB42A678D783DF00F87C9A2 /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
 		1F2053B281CE1B157F6162BC /* AudioAvailabilityMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAvailabilityMonitorTests.swift; sourceTree = "<group>"; };
+		1F829170F078C7D35F9C2CCC /* OpenURLToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenURLToolDetailSheetTests.swift; sourceTree = "<group>"; };
 		1F88902FF851CB3600BB8054 /* CompactionDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactionDetailSheet.swift; sourceTree = "<group>"; };
 		20C6AD7C1E54D055E3FA5C8A /* RPCTypes+Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Settings.swift"; sourceTree = "<group>"; };
 		20D71FD429E259D6D18119E1 /* ContentAreaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentAreaView.swift; sourceTree = "<group>"; };
@@ -620,6 +623,7 @@
 		2CDECC5E6127C91917466DEC /* MessageFinder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFinder.swift; sourceTree = "<group>"; };
 		2D786829632E0BB3A1EB79D4 /* UICanvasContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UICanvasContext.swift; sourceTree = "<group>"; };
 		2E0965260D231AB02406E417 /* RPCTypes+Filesystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RPCTypes+Filesystem.swift"; sourceTree = "<group>"; };
+		2E777080FA5606DC83FA7802 /* OpenURLToolDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenURLToolDetailSheet.swift; sourceTree = "<group>"; };
 		2ED3322DDABB60F27852BE4C /* IBMPlexSerif-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexSerif-Medium.ttf"; sourceTree = "<group>"; };
 		2F0A74579921C78A4D7B5060 /* SendMessageUseCaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendMessageUseCaseTests.swift; sourceTree = "<group>"; };
 		30B832B56DE0E975AF9306CE /* EditToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditToolDetailSheetTests.swift; sourceTree = "<group>"; };
@@ -1384,6 +1388,14 @@
 			path = Search;
 			sourceTree = "<group>";
 		};
+		3E35C3A2237FFF1D5654312A /* OpenURL */ = {
+			isa = PBXGroup;
+			children = (
+				2E777080FA5606DC83FA7802 /* OpenURLToolDetailSheet.swift */,
+			);
+			path = OpenURL;
+			sourceTree = "<group>";
+		};
 		4094E094AA76D4C9C4061C92 /* Skills */ = {
 			isa = PBXGroup;
 			children = (
@@ -1742,6 +1754,7 @@
 				A3A02552A079C014847C0ECE /* Edit */,
 				D5CEA84D4956CE29A5D4D963 /* Glob */,
 				346413E27BD40B8686B1A566 /* NotifyApp */,
+				3E35C3A2237FFF1D5654312A /* OpenURL */,
 				F743C54B685B97BECE625428 /* Read */,
 				39A05F33F4CA9AA5ED37A877 /* RenderAppUI */,
 				3AE0AAB92D5523687D2BF20F /* Search */,
@@ -1842,6 +1855,7 @@
 				F1C3717ED891C0CEA74C73E7 /* BashToolDetailSheetTests.swift */,
 				30B832B56DE0E975AF9306CE /* EditToolDetailSheetTests.swift */,
 				8B4F70DF69E979904787A84B /* GlobToolDetailSheetTests.swift */,
+				1F829170F078C7D35F9C2CCC /* OpenURLToolDetailSheetTests.swift */,
 				DDE48AED9F3AABED528BFA21 /* ReadToolDetailSheetTests.swift */,
 				CB366E399C3166CDD80589C9 /* WebToolDetailSheetTests.swift */,
 				272CFD5FF021F314737B8249 /* WriteToolDetailSheetTests.swift */,
@@ -2837,6 +2851,7 @@
 				23E61B03B012FDC179EEFCDB /* NotifyAppChip.swift in Sources */,
 				17B5974A12F8C119953C3D4C /* NotifyAppDetailSheet.swift in Sources */,
 				6C0BFCAC80C2804D4C33EF6D /* NotifyAppTypes.swift in Sources */,
+				CBD48D92B58C17763EB6F62F /* OpenURLToolDetailSheet.swift in Sources */,
 				2F755300CB121D5A8BDB554A /* OrbitingParticleIndicator.swift in Sources */,
 				F637ECFE7699B6266D28D5C0 /* PaginationContext.swift in Sources */,
 				91CE99A14E9E67CC8BCED3C6 /* PaginationCoordinator.swift in Sources */,
@@ -3085,6 +3100,7 @@
 				B4442D14DEA3295B00CB88B5 /* ModelFilteringServiceTests.swift in Sources */,
 				30250787DE1AF976B3DDE92D /* ModelPickerStateTests.swift in Sources */,
 				3C0CA6E0441C3A478F8B9661 /* NotificationPillTests.swift in Sources */,
+				FDE9F0BD858B25C8D4D7EFA3 /* OpenURLToolDetailSheetTests.swift in Sources */,
 				FDC5CDA8F51929D887B90881 /* PaginationCoordinatorTests.swift in Sources */,
 				2C023B43C34B01278C3387DF /* ProtocolConstantsTests.swift in Sources */,
 				5CE59C4DD7A0797C80783325 /* PushNotificationServiceTests.swift in Sources */,
