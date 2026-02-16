@@ -230,7 +230,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             });
             // Extract result text from TronToolResult
             if let Some(tool_result) = result {
-                let result_text = match &tool_result.content {
+                let mut result_text = match &tool_result.content {
                     tron_core::tools::ToolResultBody::Text(t) => t.clone(),
                     tron_core::tools::ToolResultBody::Blocks(blocks) => {
                         blocks
@@ -246,6 +246,19 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                             .join("\n")
                     }
                 };
+                // ADAPTER(ios-compat): Format TaskManager JSON as text for iOS parsing.
+                // REMOVE: delete this block when iOS parses TaskManager JSON natively.
+                if tool_name == "TaskManager" && success {
+                    if let Some(action) = tool_result
+                        .details
+                        .as_ref()
+                        .and_then(|d| d.get("action"))
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        result_text =
+                            tron_rpc::adapters::adapt_task_manager_result(action, &result_text);
+                    }
+                }
                 if success {
                     data["output"] = serde_json::json!(result_text);
                     data["result"] = serde_json::json!(result_text);
@@ -600,10 +613,11 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "parentSessionId": parent_session_id,
         })),
         TronEvent::MemoryUpdated {
-            title, entry_type, ..
+            title, entry_type, event_id, ..
         } => Some(serde_json::json!({
             "title": title,
             "entryType": entry_type,
+            "eventId": event_id,
         })),
         TronEvent::ContextCleared {
             tokens_before,
@@ -701,7 +715,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "error": error,
             "durationMs": duration_ms,
         })),
-        // Events with no additional data
+        // Events with no additional data (empty object so iOS can decode `data: {}`)
         TronEvent::AgentStart { .. }
         | TronEvent::AgentReady { .. }
         | TronEvent::ThinkingStart { .. }
@@ -710,7 +724,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         | TronEvent::SessionLoaded { .. }
         | TronEvent::SessionArchived { .. }
         | TronEvent::SessionUnarchived { .. }
-        | TronEvent::SessionDeleted { .. } => None,
+        | TronEvent::SessionDeleted { .. } => Some(serde_json::json!({})),
     };
 
     // Map internal event types to wire format
@@ -1419,7 +1433,7 @@ mod tests {
                 parent_session_id: None,
             },
             TronEvent::MemoryUpdating { base: base.clone() },
-            TronEvent::MemoryUpdated { base: base.clone(), title: None, entry_type: None },
+            TronEvent::MemoryUpdated { base: base.clone(), title: None, entry_type: None, event_id: None },
             TronEvent::ContextCleared { base: base.clone(), tokens_before: 0, tokens_after: 0 },
             TronEvent::MessageDeleted { base: base.clone(), target_event_id: "id".into(), target_type: "t".into(), target_turn: None, reason: None },
             TronEvent::RulesLoaded { base: base.clone(), total_files: 3, dynamic_rules_count: 1 },
@@ -1482,7 +1496,7 @@ mod tests {
         let event = TronEvent::MemoryUpdating { base: BaseEvent::now("s1") };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.memory_updating");
-        assert!(rpc.data.is_none());
+        assert_eq!(rpc.data, Some(serde_json::json!({})));
     }
 
     #[test]
@@ -1491,12 +1505,14 @@ mod tests {
             base: BaseEvent::now("s1"),
             title: Some("My Entry".into()),
             entry_type: Some("feature".into()),
+            event_id: Some("evt_abc123".into()),
         };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.memory_updated");
         let data = rpc.data.unwrap();
         assert_eq!(data["title"], "My Entry");
         assert_eq!(data["entryType"], "feature");
+        assert_eq!(data["eventId"], "evt_abc123");
     }
 
     #[test]
