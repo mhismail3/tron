@@ -9,10 +9,14 @@ license.workspace = true
 [lints]
 workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 tron-core.workspace = true
 tron-rpc = { path = "../tron-rpc" }
 tron-runtime = { path = "../tron-runtime" }
+tron-browser = { path = "../tron-browser" }
 axum.workspace = true
 axum-extra.workspace = true
 tower.workspace = true

@@ -1,6 +1,6 @@
 [package]
-name = "tron-hooks"
-description = "Hook engine, registry, and background tracker for the Tron agent"
+name = "tron-browser"
+description = "CDP-based browser automation and screencast streaming"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,20 +9,27 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+browser-integration = []
+
 [lib]
 doctest = false
 
 [dependencies]
 tron-core.workspace = true
+tron-tools.workspace = true
 async-trait.workspace = true
-chrono.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tracing.workspace = true
+base64.workspace = true
+dashmap.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-mockall.workspace = true
-tokio = { workspace = true, features = ["test-util"] }

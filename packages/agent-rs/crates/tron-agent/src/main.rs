@@ -318,6 +318,7 @@ struct ToolRegistryConfig {
     event_store: Arc<tron_events::EventStore>,
     task_pool: tron_events::ConnectionPool,
     brave_api_key: Option<String>,
+    browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -367,9 +368,9 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     // 6: Find
     registry.register(Arc::new(tron_tools::fs::find::FindTool::new()));
 
-    // 7: BrowseTheWeb (stub delegate — iOS shows browser via tool events)
+    // 7: BrowseTheWeb (real CDP delegate if Chrome found, otherwise stub)
     let browser_delegate: Arc<dyn tron_tools::traits::BrowserDelegate> =
-        Arc::new(StubBrowserDelegate);
+        config.browser_delegate.clone().unwrap_or_else(|| Arc::new(StubBrowserDelegate));
     registry.register(Arc::new(
         tron_tools::browser::browse_the_web::BrowseTheWebTool::new(browser_delegate),
     ));
@@ -428,6 +429,7 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
@@ -470,11 +472,28 @@ async fn main() -> Result<()> {
         tracing::info!("Brave API key loaded — WebSearch tool enabled");
     }
 
+    // Browser service (optional — only if Chrome is found)
+    let browser_service = tron_browser::chrome::find_chrome().map(|chrome_path| {
+        tracing::info!(path = %chrome_path.display(), "Chrome found — browser streaming enabled");
+        Arc::new(tron_browser::service::BrowserService::new(chrome_path))
+    });
+    if browser_service.is_none() {
+        tracing::info!("Chrome not found — browser streaming disabled");
+    }
+
+    // Browser delegate for tool registry (real CDP if Chrome found)
+    let browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>> =
+        browser_service.as_ref().map(|svc| {
+            Arc::new(tron_browser::delegate::CdpBrowserDelegate::new(svc.clone()))
+                as Arc<dyn tron_tools::traits::BrowserDelegate>
+        });
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
         task_pool: task_pool.clone(),
         brave_api_key,
+        browser_delegate,
     });
 
     // Agent dependencies (LLM provider + tool factory)
@@ -537,6 +556,7 @@ async fn main() -> Result<()> {
         settings_path,
         agent_deps,
         server_start_time: std::time::Instant::now(),
+        browser_service: browser_service.clone(),
     };
 
     // Method registry
@@ -554,8 +574,9 @@ async fn main() -> Result<()> {
     // Build and start server
     let server = TronServer::new(config, registry, rpc_context);
 
-    // Event bridge: orchestrator events → WebSocket clients
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone());
+    // Event bridge: orchestrator events + browser frames → WebSocket clients
+    let browser_rx = browser_service.as_ref().map(|svc| svc.subscribe());
+    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), browser_rx);
     let _bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, handle) = server
@@ -864,6 +885,7 @@ mod tests {
             settings_path,
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
+            browser_service: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -872,7 +894,7 @@ mod tests {
         let config = ServerConfig::default();
         let server = TronServer::new(config, registry, rpc_context);
 
-        let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone());
+        let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
         let _bridge = tokio::spawn(bridge.run());
 
         let (addr, handle) = server.listen().await.unwrap();
@@ -938,6 +960,7 @@ mod tests {
             event_store,
             task_pool: pool,
             brave_api_key: None,
+            browser_delegate: None,
         }
     }
 
@@ -1020,6 +1043,7 @@ mod tests {
             settings_path: dir.path().join("settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
+            browser_service: None,
         };
 
         let mut registry = MethodRegistry::new();

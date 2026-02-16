@@ -22,6 +22,7 @@ members = [
     "crates/tron-tasks",
     "crates/tron-rpc",
     "crates/tron-server",
+    "crates/tron-browser",
     "crates/tron-platform",
     "crates/tron-agent",
 ]
@@ -141,6 +142,7 @@ tron-guardrails = { path = "crates/tron-guardrails" }
 tron-memory = { path = "crates/tron-memory" }
 tron-tasks = { path = "crates/tron-tasks" }
 tron-rpc = { path = "crates/tron-rpc" }
+tron-browser = { path = "crates/tron-browser" }
 tron-server = { path = "crates/tron-server" }
 tron-platform = { path = "crates/tron-platform" }
 

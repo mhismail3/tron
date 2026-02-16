@@ -12,7 +12,7 @@ use tron_events::EventStore;
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
 
-/// Real event store query backed by SQLite via `EventStore`.
+/// Real event store query backed by `SQLite` via `EventStore`.
 pub struct SqliteEventStoreQuery {
     store: Arc<EventStore>,
 }
@@ -67,6 +67,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                     r.snippet
                 };
                 // BM25 score is negative (lower = better); normalize to 0-100
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                 let normalized = ((-r.score).min(20.0) / 20.0 * 100.0) as u32;
                 MemoryEntry {
                     content,
@@ -98,7 +99,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                 title: r.title,
                 created_at: Some(r.created_at),
                 archived: r.ended_at.as_ref().map(|_| true),
-                event_count: Some(r.event_count as u64),
+                event_count: Some(r.event_count.unsigned_abs()),
             })
             .collect())
     }
@@ -110,7 +111,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             title: r.title,
             created_at: Some(r.created_at),
             archived: r.ended_at.as_ref().map(|_| true),
-            event_count: Some(r.event_count as u64),
+            event_count: Some(r.event_count.unsigned_abs()),
         }))
     }
 
@@ -141,7 +142,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             .into_iter()
             .filter(|r| {
                 if let Some(t) = turn {
-                    r.turn.map_or(true, |rt| rt == i64::from(t))
+                    r.turn.is_none_or(|rt| rt == i64::from(t))
                 } else {
                     true
                 }
@@ -263,7 +264,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         let schemas: Vec<String> = stmt
             .query_map([], |row| row.get(0))
             .map_err(tool_err)?
-            .filter_map(|r| r.ok())
+            .filter_map(Result::ok)
             .collect();
         Ok(schemas.join("\n\n"))
     }

@@ -14,13 +14,20 @@ pub struct StartStreamHandler;
 
 #[async_trait]
 impl MethodHandler for StartStreamHandler {
-    #[instrument(skip(self, _ctx), fields(method = "browser.startStream"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Err(RpcError::NotAvailable {
-            message: "Browser streaming requires CDP infrastructure not available in Rust server"
-                .into(),
-        })
+    #[instrument(skip(self, ctx), fields(method = "browser.startStream"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let Some(ref svc) = ctx.browser_service else {
+            return Err(RpcError::NotAvailable {
+                message: "Browser streaming not available (Chrome not found)".into(),
+            });
+        };
+        svc.start_stream(&session_id).await.map_err(|e| {
+            RpcError::Internal {
+                message: e.to_string(),
+            }
+        })?;
+        Ok(serde_json::json!({ "success": true }))
     }
 }
 
@@ -29,11 +36,17 @@ pub struct StopStreamHandler;
 
 #[async_trait]
 impl MethodHandler for StopStreamHandler {
-    #[instrument(skip(self, _ctx), fields(method = "browser.stopStream"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        // No-op stop is safe
-        Ok(serde_json::json!({ "success": true, "error": null }))
+    #[instrument(skip(self, ctx), fields(method = "browser.stopStream"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        if let Some(ref svc) = ctx.browser_service {
+            svc.stop_stream(&session_id).await.map_err(|e| {
+                RpcError::Internal {
+                    message: e.to_string(),
+                }
+            })?;
+        }
+        Ok(serde_json::json!({ "success": true }))
     }
 }
 
@@ -42,14 +55,15 @@ pub struct GetStatusHandler;
 
 #[async_trait]
 impl MethodHandler for GetStatusHandler {
-    #[instrument(skip(self, _ctx), fields(method = "browser.getStatus"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let _session_id = require_string_param(params.as_ref(), "sessionId")?;
-        Ok(serde_json::json!({
-            "hasBrowser": false,
-            "isStreaming": false,
-            "currentUrl": null,
-        }))
+    #[instrument(skip(self, ctx), fields(method = "browser.getStatus"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let status = ctx
+            .browser_service
+            .as_ref()
+            .map(|svc| svc.get_status(&session_id))
+            .unwrap_or_default();
+        Ok(serde_json::to_value(status).unwrap_or_default())
     }
 }
 
@@ -60,7 +74,7 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn start_stream_not_available() {
+    async fn start_stream_not_available_when_no_service() {
         let ctx = make_test_context();
         let err = StartStreamHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
@@ -80,7 +94,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_stream_success() {
+    async fn stop_stream_no_service_succeeds() {
         let ctx = make_test_context();
         let result = StopStreamHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)
@@ -90,7 +104,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_status_no_browser() {
+    async fn get_status_no_service_returns_defaults() {
         let ctx = make_test_context();
         let result = GetStatusHandler
             .handle(Some(json!({"sessionId": "s1"})), &ctx)

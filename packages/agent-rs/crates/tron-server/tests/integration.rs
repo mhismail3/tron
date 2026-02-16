@@ -58,6 +58,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
+        browser_service: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -66,7 +67,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
     let config = ServerConfig::default(); // port 0 = auto-assign
     let server = Arc::new(TronServer::new(config, registry, rpc_context));
 
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone());
+    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
     let _bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
@@ -201,6 +202,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
             hooks: None,
         }),
         server_start_time: std::time::Instant::now(),
+        browser_service: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -209,7 +211,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
     let config = ServerConfig::default();
     let server = Arc::new(TronServer::new(config, registry, rpc_context));
 
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone());
+    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
     drop(tokio::spawn(bridge.run()));
 
     let (addr, _handle) = server.listen().await.unwrap();

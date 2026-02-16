@@ -13,6 +13,9 @@ workspace = true
 default = []
 vector-search = []
 
+[lib]
+doctest = false
+
 [dependencies]
 tron-core.workspace = true
 rusqlite.workspace = true

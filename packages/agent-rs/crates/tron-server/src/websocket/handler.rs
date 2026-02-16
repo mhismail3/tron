@@ -79,6 +79,7 @@ mod tests {
             settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
+            browser_service: None,
         }
     }
 

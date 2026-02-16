@@ -1,17 +1,20 @@
 //! Real `TaskManagerDelegate` backed by `tron_tasks::TaskService`.
 //!
-//! Provides the TaskManager tool with actual database access for CRUD
+//! Provides the `TaskManager` tool with actual database access for CRUD
 //! operations on tasks, projects, and areas.
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tron_events::ConnectionPool;
 use tron_tasks::service::TaskService;
-use tron_tasks::types::*;
+use tron_tasks::types::{
+    AreaCreateParams, ProjectCreateParams, ProjectStatus, ProjectUpdateParams, TaskCreateParams,
+    TaskPriority, TaskStatus, TaskUpdateParams,
+};
 use tron_tools::errors::ToolError;
 use tron_tools::traits::TaskManagerDelegate;
 
-/// Real task manager backed by SQLite via `TaskService`.
+/// Real task manager backed by `SQLite` via `TaskService`.
 pub struct SqliteTaskManagerDelegate {
     pool: ConnectionPool,
 }
@@ -52,6 +55,7 @@ fn parse_project_status(s: &str) -> Option<ProjectStatus> {
 }
 
 #[async_trait]
+#[allow(clippy::too_many_lines)]
 impl TaskManagerDelegate for SqliteTaskManagerDelegate {
     async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError> {
         let conn = self.pool.get().map_err(tool_err)?;
@@ -122,7 +126,7 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                 sql_params.push(Box::new(offset));
 
                 let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    sql_params.iter().map(|p| p.as_ref()).collect();
+                    sql_params.iter().map(AsRef::as_ref).collect();
                 let mut stmt = conn.prepare(&sql).map_err(tool_err)?;
                 let rows: Vec<Value> = stmt
                     .query_map(param_refs.as_slice(), |row| {
@@ -139,7 +143,7 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                         }))
                     })
                     .map_err(tool_err)?
-                    .filter_map(|r| r.ok())
+                    .filter_map(Result::ok)
                     .collect();
 
                 Ok(json!({ "tasks": rows, "count": rows.len() }))
@@ -167,7 +171,7 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                         }))
                     })
                     .map_err(tool_err)?
-                    .filter_map(|r| r.ok())
+                    .filter_map(Result::ok)
                     .collect();
 
                 Ok(json!({ "tasks": rows, "count": rows.len() }))
@@ -175,9 +179,9 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
             "log_time" => {
                 let id = get_str(&params, "taskId")
                     .ok_or_else(|| tool_err("taskId is required for log_time"))?;
+                #[allow(clippy::cast_possible_truncation)]
                 let minutes = get_i64(&params, "minutes")
-                    .ok_or_else(|| tool_err("minutes is required for log_time"))?
-                    as i32;
+                    .ok_or_else(|| tool_err("minutes is required for log_time"))? as i32;
                 TaskService::log_time(&conn, &id, minutes, None).map_err(tool_err)?;
                 Ok(json!({ "success": true, "taskId": id, "minutesLogged": minutes }))
             }
@@ -267,7 +271,7 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                                 }))
                             })
                             .map_err(tool_err)?
-                            .filter_map(|r| r.ok())
+                            .filter_map(Result::ok)
                             .collect();
                         Ok(json!({ "projects": rows, "count": rows.len() }))
                     }
@@ -358,7 +362,7 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                                 }))
                             })
                             .map_err(tool_err)?
-                            .filter_map(|r| r.ok())
+                            .filter_map(Result::ok)
                             .collect();
                         Ok(json!({ "areas": rows, "count": rows.len() }))
                     }

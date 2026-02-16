@@ -9,6 +9,9 @@ license.workspace = true
 [lints]
 workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 tron-core.workspace = true
 tron-runtime = { path = "../tron-runtime" }
@@ -23,6 +26,7 @@ tron-guardrails = { path = "../tron-guardrails" }
 tron-hooks = { path = "../tron-hooks" }
 tron-memory = { path = "../tron-memory" }
 tron-tokens = { path = "../tron-tokens" }
+tron-browser = { path = "../tron-browser" }
 futures.workspace = true
 parking_lot.workspace = true
 async-trait.workspace = true

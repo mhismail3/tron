@@ -9,6 +9,9 @@ license.workspace = true
 [lints]
 workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 reqwest.workspace = true
 serde.workspace = true

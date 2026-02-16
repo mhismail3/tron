@@ -4,42 +4,80 @@
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
+use tron_browser::types::BrowserEvent;
 use tron_core::events::TronEvent;
 use tron_rpc::types::RpcEvent;
 
 use super::broadcast::BroadcastManager;
 
-/// Bridges orchestrator events to WebSocket clients.
+/// Bridges orchestrator events and browser events to WebSocket clients.
 pub struct EventBridge {
     rx: broadcast::Receiver<TronEvent>,
+    browser_rx: Option<broadcast::Receiver<BrowserEvent>>,
     broadcast: Arc<BroadcastManager>,
 }
 
 impl EventBridge {
     /// Create a new event bridge.
-    pub fn new(rx: broadcast::Receiver<TronEvent>, broadcast: Arc<BroadcastManager>) -> Self {
-        Self { rx, broadcast }
+    ///
+    /// `browser_rx` is optional — when `None`, browser frame delivery is disabled.
+    pub fn new(
+        rx: broadcast::Receiver<TronEvent>,
+        broadcast: Arc<BroadcastManager>,
+        browser_rx: Option<broadcast::Receiver<BrowserEvent>>,
+    ) -> Self {
+        Self {
+            rx,
+            browser_rx,
+            broadcast,
+        }
     }
 
     /// Run the bridge loop. Exits when the broadcast sender is dropped.
     #[tracing::instrument(skip_all, name = "event_bridge")]
     pub async fn run(mut self) {
-        loop {
-            match self.rx.recv().await {
-                Ok(event) => {
-                    let event_type = event.event_type();
-                    tracing::debug!(event_type, "bridging event to client");
-                    let rpc_event = tron_event_to_rpc(&event);
-                    let session_id = event.session_id();
-
-                    if session_id.is_empty() {
-                        self.broadcast.broadcast_all(&rpc_event).await;
-                    } else {
-                        self.broadcast
-                            .broadcast_to_session(session_id, &rpc_event)
-                            .await;
+        if let Some(mut browser_rx) = self.browser_rx.take() {
+            // Dual-channel select: TronEvent + BrowserEvent
+            loop {
+                tokio::select! {
+                    result = self.rx.recv() => {
+                        match result {
+                            Ok(event) => self.bridge_tron_event(&event).await,
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(lagged = n, "event bridge lagged");
+                            }
+                            Err(broadcast::error::RecvError::Closed) => {
+                                tracing::info!("Event bridge: sender closed, exiting");
+                                break;
+                            }
+                        }
+                    }
+                    result = browser_rx.recv() => {
+                        match result {
+                            Ok(event) => self.bridge_browser_event(&event).await,
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                tracing::warn!(lagged = n, "browser event bridge lagged");
+                            }
+                            Err(broadcast::error::RecvError::Closed) => {
+                                tracing::debug!("browser event channel closed, continuing with TronEvent only");
+                                // Fall through to single-channel mode
+                                self.run_tron_only().await;
+                                break;
+                            }
+                        }
                     }
                 }
+            }
+        } else {
+            // Single-channel: TronEvent only (no browser)
+            self.run_tron_only().await;
+        }
+    }
+
+    async fn run_tron_only(&mut self) {
+        loop {
+            match self.rx.recv().await {
+                Ok(event) => self.bridge_tron_event(&event).await,
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!(lagged = n, "event bridge lagged");
                 }
@@ -49,6 +87,63 @@ impl EventBridge {
                 }
             }
         }
+    }
+
+    async fn bridge_tron_event(&self, event: &TronEvent) {
+        let event_type = event.event_type();
+        tracing::debug!(event_type, "bridging event to client");
+        let rpc_event = tron_event_to_rpc(event);
+        let session_id = event.session_id();
+
+        if session_id.is_empty() {
+            self.broadcast.broadcast_all(&rpc_event).await;
+        } else {
+            self.broadcast
+                .broadcast_to_session(session_id, &rpc_event)
+                .await;
+        }
+    }
+
+    async fn bridge_browser_event(&self, event: &BrowserEvent) {
+        let rpc_event = browser_event_to_rpc(event);
+        let session_id = match event {
+            BrowserEvent::Frame { session_id, .. } | BrowserEvent::Closed { session_id } => {
+                session_id
+            }
+        };
+        self.broadcast
+            .broadcast_to_session(session_id, &rpc_event)
+            .await;
+    }
+}
+
+/// Convert a `BrowserEvent` to an `RpcEvent` for WebSocket transmission.
+fn browser_event_to_rpc(event: &BrowserEvent) -> RpcEvent {
+    match event {
+        BrowserEvent::Frame {
+            session_id, frame, ..
+        } => RpcEvent {
+            event_type: "browser.frame".to_string(),
+            session_id: Some(session_id.clone()),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            data: Some(serde_json::json!({
+                "sessionId": frame.session_id,
+                "data": frame.data,
+                "frameId": frame.frame_id,
+                "timestamp": frame.timestamp,
+                "metadata": frame.metadata,
+            })),
+            run_id: None,
+        },
+        BrowserEvent::Closed { session_id } => RpcEvent {
+            event_type: "browser.closed".to_string(),
+            session_id: Some(session_id.clone()),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            data: Some(serde_json::json!({
+                "sessionId": session_id,
+            })),
+            run_id: None,
+        },
     }
 }
 
@@ -762,7 +857,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone());
+        let bridge = EventBridge::new(rx, bm.clone(), None);
 
         // Spawn bridge
         let handle = tokio::spawn(bridge.run());
@@ -795,7 +890,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone());
+        let bridge = EventBridge::new(rx, bm.clone(), None);
         let handle = tokio::spawn(bridge.run());
 
         // Send event with empty session_id (global)

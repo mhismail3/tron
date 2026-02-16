@@ -293,6 +293,7 @@ pub(crate) mod test_helpers {
             settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: Instant::now(),
+            browser_service: None,
         }
     }
 
@@ -326,6 +327,7 @@ pub(crate) mod test_helpers {
             settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
             agent_deps: None,
             server_start_time: Instant::now(),
+            browser_service: None,
         }
     }
 }

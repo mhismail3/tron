@@ -3926,6 +3926,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tron-auth",
+ "tron-browser",
  "tron-context",
  "tron-core",
  "tron-events",
@@ -3965,6 +3966,27 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+]
+
+[[package]]
+name = "tron-browser"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64",
+ "dashmap",
+ "futures",
+ "parking_lot",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tracing",
+ "tron-core",
+ "tron-tools",
 ]
 
 [[package]]
@@ -4229,6 +4251,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tron-browser",
  "tron-context",
  "tron-core",
  "tron-events",
@@ -4303,6 +4326,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tron-browser",
  "tron-core",
  "tron-events",
  "tron-guardrails",

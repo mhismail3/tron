@@ -13,6 +13,9 @@ workspace = true
 default = []
 ort = ["dep:ort"]
 
+[lib]
+doctest = false
+
 [dependencies]
 tron-core.workspace = true
 tron-events.workspace = true

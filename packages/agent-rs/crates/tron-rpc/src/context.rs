@@ -44,6 +44,8 @@ pub struct RpcContext {
     pub agent_deps: Option<AgentDeps>,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
+    /// Browser service for CDP-based browser automation (None = browser not available).
+    pub browser_service: Option<Arc<tron_browser::service::BrowserService>>,
 }
 
 #[cfg(test)]
