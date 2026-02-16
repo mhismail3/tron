@@ -1,10 +1,12 @@
 //! Agent handlers: prompt, abort, getState.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{info, instrument, warn};
+use tron_events::EventType;
 
 use crate::context::RpcContext;
 use crate::errors::{self, RpcError};
@@ -29,6 +31,107 @@ fn extract_skills(value: Option<&Value>) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+// =============================================================================
+// Subagent results — reconstruction from event store
+// =============================================================================
+
+/// Query unconsumed subagent results from the event store.
+///
+/// Returns `(event_id, payload_json)` pairs for `notification.subagent_result`
+/// events that have no matching `subagent.results_consumed` event referencing
+/// their ID. Works identically for live sessions and session resume.
+fn get_pending_subagent_results(
+    event_store: &tron_events::EventStore,
+    session_id: &str,
+) -> Vec<(String, Value)> {
+    let notifications = event_store
+        .get_events_by_type(session_id, &["notification.subagent_result"], None)
+        .unwrap_or_default();
+
+    if notifications.is_empty() {
+        return vec![];
+    }
+
+    // Build set of consumed notification event IDs
+    let consumed_events = event_store
+        .get_events_by_type(session_id, &["subagent.results_consumed"], None)
+        .unwrap_or_default();
+
+    let mut consumed_ids: HashSet<String> = HashSet::new();
+    for event in &consumed_events {
+        if let Ok(payload) = serde_json::from_str::<Value>(&event.payload) {
+            if let Some(ids) = payload.get("consumedEventIds").and_then(|v| v.as_array()) {
+                for id in ids {
+                    if let Some(s) = id.as_str() {
+                        let _ = consumed_ids.insert(s.to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    // Filter unconsumed notifications
+    notifications
+        .into_iter()
+        .filter(|e| !consumed_ids.contains(&e.id))
+        .filter_map(|e| {
+            serde_json::from_str::<Value>(&e.payload)
+                .ok()
+                .map(|p| (e.id, p))
+        })
+        .collect()
+}
+
+/// Format pending subagent results into markdown context string.
+fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
+    if results.is_empty() {
+        return None;
+    }
+
+    let mut ctx = String::from("# Completed Sub-Agent Results\n\n");
+    ctx.push_str(
+        "The following sub-agent(s) have completed since your last turn. \
+         Review their results and incorporate them into your response.\n\n",
+    );
+
+    for (_event_id, payload) in results {
+        let success = payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let icon = if success { "+" } else { "x" };
+        let subagent_id = payload
+            .get("subagentSessionId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let task = payload
+            .get("task")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let total_turns = payload.get("totalTurns").and_then(|v| v.as_i64()).unwrap_or(0);
+        let duration = payload.get("duration").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        ctx.push_str(&format!("## [{icon}] Sub-Agent: `{subagent_id}`\n\n"));
+        ctx.push_str(&format!("**Task**: {task}\n"));
+        ctx.push_str(&format!(
+            "**Status**: {}\n",
+            if success { "Completed" } else { "Failed" }
+        ));
+        ctx.push_str(&format!("**Turns**: {total_turns}\n"));
+        ctx.push_str(&format!("**Duration**: {:.1}s\n", duration as f64 / 1000.0));
+
+        if let Some(output) = payload.get("output").and_then(|v| v.as_str()) {
+            if !output.is_empty() {
+                let truncated = if output.len() > 2000 {
+                    format!("{}\n\n... [Output truncated]", &output[..2000])
+                } else {
+                    output.to_string()
+                };
+                ctx.push_str(&format!("\n**Output**:\n```\n{truncated}\n```\n"));
+            }
+        }
+        ctx.push_str("\n---\n\n");
+    }
+    Some(ctx)
 }
 
 // =============================================================================
@@ -142,115 +245,24 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         &self,
         _opts: &tron_memory::types::LedgerWriteOpts,
     ) -> tron_memory::types::LedgerWriteResult {
-        // Compute cycle messages (only messages since last memory.ledger boundary).
-        // Multiple ledger entries per session are expected — each covers a different cycle.
-        let cycle = crate::handlers::memory::compute_cycle_messages(
-            &self.event_store,
-            &self.session_manager,
+        // Delegate to the shared pipeline (same codepath as manual UpdateLedgerHandler).
+        let deps = crate::handlers::memory::LedgerWriteDeps {
+            event_store: self.event_store.clone(),
+            session_manager: self.session_manager.clone(),
+            subagent_manager: self.subagent_manager.clone(),
+            embedding_controller: self.embedding_controller.clone(),
+        };
+        crate::handlers::memory::execute_ledger_write(
             &self.session_id,
-        );
-        let cycle = match cycle {
-            Some(c) if !c.messages.is_empty() => c,
-            _ => return tron_memory::types::LedgerWriteResult::skipped("no new messages since last boundary"),
-        };
-
-        // Try LLM-based ledger via subsession
-        let llm_result = if let Some(ref manager) = self.subagent_manager {
-            use tron_context::llm_summarizer::SubsessionSpawner;
-            use tron_context::summarizer::serialize_messages;
-            use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
-
-            let transcript = serialize_messages(&cycle.messages);
-            let spawner = SubagentManagerSpawner {
-                manager: manager.clone(),
-                parent_session_id: self.session_id.clone(),
-                working_directory: self.workspace_id.clone(),
-                system_prompt: tron_context::system_prompts::MEMORY_LEDGER_PROMPT.to_string(),
-                model: Some("claude-haiku-4-5-20251001".to_string()),
-            };
-            let result = spawner.spawn_summarizer(&transcript).await;
-            if result.success {
-                result
-                    .output
-                    .as_deref()
-                    .and_then(|o| tron_context::ledger_writer::parse_ledger_response(o).ok())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        match llm_result {
-            Some(tron_context::ledger_writer::LedgerParseResult::Skip) => {
-                tron_memory::types::LedgerWriteResult::skipped("trivial interaction")
-            }
-            Some(tron_context::ledger_writer::LedgerParseResult::Entry(entry)) => {
-                let session_info = self.session_manager
-                    .get_session(&self.session_id)
-                    .ok()
-                    .flatten();
-                let (total_input, total_output) = session_info
-                    .as_ref()
-                    .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
-                let model = session_info
-                    .as_ref()
-                    .map(|s| s.latest_model.clone())
-                    .unwrap_or_default();
-
-                let payload = serde_json::json!({
-                    "eventRange": {
-                        "firstEventId": cycle.first_event_id,
-                        "lastEventId": cycle.last_event_id,
-                    },
-                    "turnRange": {
-                        "firstTurn": cycle.first_turn,
-                        "lastTurn": cycle.last_turn,
-                    },
-                    "title": entry.title,
-                    "entryType": entry.entry_type,
-                    "status": entry.status,
-                    "tags": entry.tags,
-                    "input": entry.input,
-                    "actions": entry.actions,
-                    "files": entry.files.iter().map(|f| serde_json::json!({
-                        "path": f.path, "op": f.op, "why": f.why,
-                    })).collect::<Vec<_>>(),
-                    "decisions": entry.decisions.iter().map(|d| serde_json::json!({
-                        "choice": d.choice, "reason": d.reason,
-                    })).collect::<Vec<_>>(),
-                    "lessons": entry.lessons,
-                    "thinkingInsights": entry.thinking_insights,
-                    "tokenCost": { "input": total_input, "output": total_output },
-                    "model": model,
-                    "workingDirectory": self.workspace_id,
-                });
-
-                // Persist as memory.ledger event
-                let event_id = self
-                    .event_store
-                    .append(&tron_events::AppendOptions {
-                        session_id: &self.session_id,
-                        event_type: tron_events::EventType::MemoryLedger,
-                        payload: payload.clone(),
-                        parent_id: None,
-                    })
-                    .map(|row| row.id)
-                    .unwrap_or_default();
-
-                tron_memory::types::LedgerWriteResult::written(
-                    entry.title.clone(),
-                    entry.entry_type.clone(),
-                    event_id,
-                    payload,
-                )
-            }
-            None => tron_memory::types::LedgerWriteResult::skipped("LLM call failed"),
-        }
+            &self.workspace_id,
+            &deps,
+            "auto",
+        )
+        .await
     }
 
     fn is_ledger_enabled(&self) -> bool {
-        true
+        tron_settings::get_settings().context.memory.ledger.enabled
     }
 
     fn emit_memory_updating(&self, _session_id: &str) {
@@ -264,26 +276,14 @@ impl tron_memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         _session_id: &str,
         title: Option<&str>,
         entry_type: Option<&str>,
+        event_id: Option<&str>,
     ) {
         let _ = self.broadcast.emit(tron_core::events::TronEvent::MemoryUpdated {
             base: tron_core::events::BaseEvent::now(&self.session_id),
             title: title.map(String::from),
             entry_type: entry_type.map(String::from),
+            event_id: event_id.map(String::from),
         });
-    }
-
-    async fn embed_memory(
-        &self,
-        event_id: &str,
-        workspace_id: &str,
-        payload: &serde_json::Value,
-    ) {
-        if let Some(ref ec) = self.embedding_controller {
-            let ctrl = ec.lock().await;
-            if let Err(e) = ctrl.embed_memory(event_id, workspace_id, payload).await {
-                warn!(error = %e, event_id, "failed to embed memory entry");
-            }
-        }
     }
 
     fn on_memory_written(&self, _payload: &serde_json::Value, _title: &str) {
@@ -610,6 +610,31 @@ impl MethodHandler for PromptHandler {
                     }
                 };
 
+                // Subagent results (from event store — works for both live and resumed sessions)
+                let subagent_results_context = {
+                    let pending = get_pending_subagent_results(&event_store, &session_id_clone);
+                    if !pending.is_empty() {
+                        let event_ids: Vec<String> =
+                            pending.iter().map(|(id, _)| id.clone()).collect();
+                        let formatted = format_subagent_results(&pending);
+                        // Persist consumption marker
+                        if formatted.is_some() {
+                            let _ = event_store.append(&tron_events::AppendOptions {
+                                session_id: &session_id_clone,
+                                event_type: EventType::SubagentResultsConsumed,
+                                payload: serde_json::json!({
+                                    "consumedEventIds": event_ids,
+                                    "count": pending.len(),
+                                }),
+                                parent_id: None,
+                            });
+                        }
+                        formatted
+                    } else {
+                        None
+                    }
+                };
+
                 // Build RunContext with iOS params
                 let run_context = RunContext {
                     reasoning_level: reasoning_level_clone.and_then(|s| {
@@ -640,11 +665,38 @@ impl MethodHandler for PromptHandler {
                             if found.is_empty() {
                                 None
                             } else {
+                                // Persist skill.added events (deduplicate against existing)
+                                let existing = event_store
+                                    .get_events_by_type(&session_id_clone, &["skill.added"], None)
+                                    .unwrap_or_default();
+                                let existing_names: std::collections::HashSet<String> = existing.iter()
+                                    .filter_map(|e| {
+                                        serde_json::from_str::<serde_json::Value>(&e.payload).ok()
+                                            .and_then(|p| p.get("skillName").and_then(|n| n.as_str()).map(String::from))
+                                    })
+                                    .collect();
+                                for skill in &found {
+                                    if !existing_names.contains(&skill.name) {
+                                        let _ = event_store.append(&tron_events::AppendOptions {
+                                            session_id: &session_id_clone,
+                                            event_type: tron_events::EventType::SkillAdded,
+                                            payload: serde_json::json!({
+                                                "skillName": skill.name,
+                                                "source": skill.source.to_string(),
+                                                "addedVia": "mention",
+                                                "tokens": skill.content.len() as u64 / 4,
+                                            }),
+                                            parent_id: None,
+                                        });
+                                    }
+                                }
+
                                 let ctx = tron_skills::injector::build_skill_context(&found);
                                 if ctx.is_empty() { None } else { Some(ctx) }
                             }
                         }
                     },
+                    subagent_results: subagent_results_context,
                     user_content_override,
                     ..Default::default()
                 };
@@ -2428,5 +2480,351 @@ mod tests {
             "tokenRecord.source.rawInputTokens should be a number, got: {}",
             payload["tokenRecord"]
         );
+    }
+
+    // ── get_pending_subagent_results tests ──
+
+    fn make_event_store() -> Arc<tron_events::EventStore> {
+        let pool =
+            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        Arc::new(tron_events::EventStore::new(pool))
+    }
+
+    #[test]
+    fn get_pending_no_notifications_returns_empty() {
+        let store = make_event_store();
+        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+
+        let results = get_pending_subagent_results(&store, &sid);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn get_pending_with_notification_returns_it() {
+        let store = make_event_store();
+        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-1",
+                    "task": "research",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 3,
+                    "duration": 5000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z",
+                    "output": "result text"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let results = get_pending_subagent_results(&store, &sid);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1["task"], "research");
+    }
+
+    #[test]
+    fn get_pending_skips_consumed() {
+        let store = make_event_store();
+        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+
+        let notification = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-1",
+                    "task": "research",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 3,
+                    "duration": 5000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z",
+                    "output": "result text"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Mark it as consumed
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::SubagentResultsConsumed,
+                payload: json!({
+                    "consumedEventIds": [notification.id],
+                    "count": 1
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let results = get_pending_subagent_results(&store, &sid);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn get_pending_partial_consumed() {
+        let store = make_event_store();
+        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+
+        let n1 = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-1",
+                    "task": "task-1",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 1,
+                    "duration": 1000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let _n2 = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-2",
+                    "task": "task-2",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 2,
+                    "duration": 2000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Consume only n1
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::SubagentResultsConsumed,
+                payload: json!({
+                    "consumedEventIds": [n1.id],
+                    "count": 1
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let results = get_pending_subagent_results(&store, &sid);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1["task"], "task-2");
+    }
+
+    #[test]
+    fn get_pending_multiple_consumption_events() {
+        let store = make_event_store();
+        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+
+        // Three notifications
+        let n1 = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-1",
+                    "task": "task-1",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 1,
+                    "duration": 1000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let n2 = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-2",
+                    "task": "task-2",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 2,
+                    "duration": 2000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let _n3 = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::NotificationSubagentResult,
+                payload: json!({
+                    "parentSessionId": sid,
+                    "subagentSessionId": "child-3",
+                    "task": "task-3",
+                    "resultSummary": "done",
+                    "success": true,
+                    "totalTurns": 3,
+                    "duration": 3000,
+                    "tokenUsage": {},
+                    "completedAt": "2026-01-01T00:00:00Z"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Two separate consumption events: first consumes n1, second consumes n2
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::SubagentResultsConsumed,
+                payload: json!({
+                    "consumedEventIds": [n1.id],
+                    "count": 1
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: EventType::SubagentResultsConsumed,
+                payload: json!({
+                    "consumedEventIds": [n2.id],
+                    "count": 1
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Only n3 should remain (union of consumed IDs across both events)
+        let results = get_pending_subagent_results(&store, &sid);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1["task"], "task-3");
+    }
+
+    // ── format_subagent_results tests ──
+
+    #[test]
+    fn format_subagent_results_empty_returns_none() {
+        assert!(format_subagent_results(&[]).is_none());
+    }
+
+    #[test]
+    fn format_subagent_results_success() {
+        let results = vec![(
+            "evt-1".to_string(),
+            json!({
+                "subagentSessionId": "child-1",
+                "task": "research task",
+                "success": true,
+                "totalTurns": 3,
+                "duration": 5000,
+                "output": "Found the answer."
+            }),
+        )];
+        let formatted = format_subagent_results(&results).unwrap();
+        assert!(formatted.contains("Completed Sub-Agent Results"));
+        assert!(formatted.contains("research task"));
+        assert!(formatted.contains("Completed"));
+        assert!(formatted.contains("Found the answer."));
+        assert!(formatted.contains("[+]"));
+    }
+
+    #[test]
+    fn format_subagent_results_failure() {
+        let results = vec![(
+            "evt-1".to_string(),
+            json!({
+                "subagentSessionId": "child-1",
+                "task": "failing task",
+                "success": false,
+                "totalTurns": 1,
+                "duration": 500,
+                "output": "Auth error"
+            }),
+        )];
+        let formatted = format_subagent_results(&results).unwrap();
+        assert!(formatted.contains("Failed"));
+        assert!(formatted.contains("[x]"));
+    }
+
+    #[test]
+    fn format_subagent_results_truncates_long_output() {
+        let long_output = "x".repeat(3000);
+        let results = vec![(
+            "evt-1".to_string(),
+            json!({
+                "subagentSessionId": "child-1",
+                "task": "task",
+                "success": true,
+                "totalTurns": 1,
+                "duration": 100,
+                "output": long_output
+            }),
+        )];
+        let formatted = format_subagent_results(&results).unwrap();
+        assert!(formatted.contains("[Output truncated]"));
+        assert!(formatted.len() < long_output.len());
+    }
+
+    #[test]
+    fn format_subagent_results_multiple() {
+        let results = vec![
+            (
+                "evt-1".to_string(),
+                json!({
+                    "subagentSessionId": "child-1",
+                    "task": "task-1",
+                    "success": true,
+                    "totalTurns": 1,
+                    "duration": 100,
+                    "output": "out-1"
+                }),
+            ),
+            (
+                "evt-2".to_string(),
+                json!({
+                    "subagentSessionId": "child-2",
+                    "task": "task-2",
+                    "success": false,
+                    "totalTurns": 2,
+                    "duration": 200,
+                    "output": "out-2"
+                }),
+            ),
+        ];
+        let formatted = format_subagent_results(&results).unwrap();
+        assert!(formatted.contains("task-1"));
+        assert!(formatted.contains("task-2"));
+        assert!(formatted.contains("out-1"));
+        assert!(formatted.contains("out-2"));
     }
 }

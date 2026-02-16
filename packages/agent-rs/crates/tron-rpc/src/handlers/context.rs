@@ -69,12 +69,38 @@ fn build_context_manager_for_session(
         .and_then(loader::load_global_rules);
     let rules = loader::merge_rules(global_rules, project_rules);
 
-    // 5. Load memory
-    let memory = home_dir
-        .as_ref()
-        .map(|h| h.join(".tron").join("notes").join("MEMORY.md"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .filter(|s| !s.trim().is_empty());
+    // 5. Load workspace memory from ledger entries
+    let memory = {
+        let settings = tron_settings::get_settings();
+        let auto_inject = &settings.context.memory.auto_inject;
+        if auto_inject.enabled {
+            ctx.event_store.get_workspace_by_path(wd).ok().flatten().and_then(|ws| {
+                #[allow(clippy::cast_possible_wrap)]
+                let count = auto_inject.count.clamp(1, 10) as i64;
+                let events = ctx.event_store
+                    .get_events_by_workspace_and_types(&ws.id, &["memory.ledger"], Some(count), None)
+                    .unwrap_or_default();
+                if events.is_empty() { return None; }
+                let mut sections = vec!["# Memory\n\n## Recent sessions in this workspace".to_string()];
+                for event in events.iter().rev() {
+                    if let Ok(entry) = serde_json::from_str::<Value>(&event.payload) {
+                        let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
+                        let mut section = format!("\n### {title}");
+                        if let Some(lessons) = entry.get("lessons").and_then(|v| v.as_array()) {
+                            for lesson in lessons.iter().filter_map(|l| l.as_str()).filter(|t| !t.is_empty()) {
+                                section.push_str(&format!("\n- {lesson}"));
+                            }
+                        }
+                        sections.push(section);
+                    }
+                }
+                let content = sections.join("\n");
+                if content.trim().is_empty() { None } else { Some(content) }
+            })
+        } else {
+            None
+        }
+    };
 
     // 6. Get tool definitions
     let tools = ctx
@@ -322,14 +348,36 @@ impl MethodHandler for GetDetailedSnapshotHandler {
         };
 
         // Build memory matching iOS LoadedMemory shape: { count, tokens, entries }
-        let memory_info: Option<Value> = cm.get_full_memory_content().map(|content| {
-            let tokens = content.len() / 4; // rough estimate: ~4 chars per token
-            json!({
-                "count": 1,
-                "tokens": tokens,
-                "entries": [{ "title": "Memory", "content": content }],
-            })
-        });
+        let memory_info: Option<Value> = {
+            let settings = tron_settings::get_settings();
+            let auto_inject = &settings.context.memory.auto_inject;
+            if !auto_inject.enabled {
+                None
+            } else {
+                ctx.event_store.get_workspace_by_path(&session.working_directory).ok().flatten().and_then(|ws| {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let count = auto_inject.count.clamp(1, 10) as i64;
+                    let events = ctx.event_store
+                        .get_events_by_workspace_and_types(&ws.id, &["memory.ledger"], Some(count), None)
+                        .unwrap_or_default();
+                    if events.is_empty() { return None; }
+                    let entries: Vec<Value> = events.iter().rev().filter_map(|e| {
+                        let payload: Value = serde_json::from_str(&e.payload).ok()?;
+                        let title = payload.get("title").and_then(Value::as_str).unwrap_or("Untitled");
+                        let mut summary = format!("### {title}");
+                        if let Some(lessons) = payload.get("lessons").and_then(Value::as_array) {
+                            for lesson in lessons.iter().filter_map(|l| l.as_str()).filter(|t| !t.is_empty()) {
+                                summary.push_str(&format!("\n- {lesson}"));
+                            }
+                        }
+                        Some(json!({ "title": title, "content": summary }))
+                    }).collect();
+                    if entries.is_empty() { return None; }
+                    let tokens = cm.get_full_memory_content().map(|c| c.len() / 4).unwrap_or(0);
+                    Some(json!({ "count": entries.len(), "tokens": tokens, "entries": entries }))
+                })
+            }
+        };
 
         // Build sessionMemories matching iOS LoadedMemory shape
         let session_memories: Option<Value> = {
@@ -1169,5 +1217,65 @@ mod tests {
             .get_events_by_type(&sid, &["context.cleared"], Some(10))
             .unwrap();
         assert!(!events.is_empty(), "context.cleared event should be persisted");
+    }
+
+    // ── Memory from workspace ledger ──
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_memory_from_ledger() {
+        let ctx = make_test_context();
+        let workspace_path = "/tmp/memory-test-ws";
+
+        // Create an older session in the same workspace with a ledger entry
+        let older_sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", workspace_path, Some("older"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &older_sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({
+                "title": "Implemented dark mode",
+                "entryType": "feature",
+                "lessons": ["Use CSS variables for theming", "Test both light and dark"],
+            }),
+            parent_id: None,
+        });
+
+        // Create the current session in the same workspace
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", workspace_path, Some("current"))
+            .unwrap();
+
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        let memory = &result["memory"];
+        assert!(memory.is_object(), "memory should be populated from ledger, got: {memory}");
+        assert!(memory["count"].as_u64().unwrap() > 0);
+        assert!(memory["tokens"].as_u64().is_some());
+
+        let entries = memory["entries"].as_array().unwrap();
+        assert!(!entries.is_empty());
+        assert_eq!(entries[0]["title"], "Implemented dark mode");
+        let content = entries[0]["content"].as_str().unwrap();
+        assert!(content.contains("dark mode"), "entry content should contain title");
+        assert!(content.contains("CSS variables"), "entry content should contain lessons");
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_memory_null_when_no_ledger() {
+        let (ctx, sid) = ctx_with_session();
+
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        // /tmp has no workspace ledger entries → memory should be null
+        assert!(result["memory"].is_null(), "memory should be null with no ledger entries");
     }
 }

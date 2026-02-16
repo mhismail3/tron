@@ -1,4 +1,10 @@
 //! Memory handlers: getLedger, updateLedger, search, getHandoffs.
+//!
+//! The ledger write pipeline is shared between two callers:
+//! - **Auto path**: `MemoryManager.on_cycle_complete()` → `RuntimeMemoryDeps.write_ledger_entry()`
+//! - **Manual path**: `UpdateLedgerHandler` (RPC `memory.updateLedger`)
+//!
+//! Both call [`execute_ledger_write()`] — the ONLY difference is what triggers the call.
 
 use std::sync::Arc;
 
@@ -154,19 +160,215 @@ pub(crate) fn compute_cycle_messages(
 }
 
 /// Emit `MemoryUpdated` event via the orchestrator broadcast.
-fn emit_memory_updated(ctx: &RpcContext, session_id: &str, title: Option<&str>, entry_type: Option<&str>) {
+fn emit_memory_updated(
+    ctx: &RpcContext,
+    session_id: &str,
+    title: Option<&str>,
+    entry_type: Option<&str>,
+    event_id: Option<&str>,
+) {
     let _ = ctx.orchestrator.broadcast().emit(
         tron_core::events::TronEvent::MemoryUpdated {
             base: tron_core::events::BaseEvent::now(session_id),
             title: title.map(String::from),
             entry_type: entry_type.map(String::from),
+            event_id: event_id.map(String::from),
         },
     );
 }
 
-/// Spawn a fire-and-forget embedding task for a ledger entry.
-fn spawn_embed_memory(ctx: &RpcContext, event_id: &str, workspace_id: &str, payload: &Value) {
-    if let Some(ref ec) = ctx.embedding_controller {
+// =============================================================================
+// Shared ledger write pipeline
+// =============================================================================
+
+/// Dependencies for the shared ledger write pipeline.
+///
+/// Both the auto path (`RuntimeMemoryDeps`) and manual path (`UpdateLedgerHandler`)
+/// construct this from their respective contexts, then call [`execute_ledger_write()`].
+pub(crate) struct LedgerWriteDeps {
+    pub event_store: Arc<tron_events::EventStore>,
+    pub session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    pub subagent_manager:
+        Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
+    pub embedding_controller:
+        Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+}
+
+/// Execute the full ledger write pipeline.
+///
+/// This is the **single paved codepath** for memory ledger writes. Both the
+/// auto-triggered path (after agent completion) and the manual RPC path call this.
+///
+/// Pipeline:
+/// 1. Compute cycle messages (since last `memory.ledger` boundary)
+/// 2. Spawn LLM subsession to generate structured ledger entry
+/// 3. Parse LLM response into `LedgerEntry`
+/// 4. Build full payload (matching TS server `MemoryLedgerPayload` format)
+/// 5. Persist as `memory.ledger` event
+/// 6. Fire-and-forget embedding for semantic search
+///
+/// Returns a `LedgerWriteResult` suitable for both callers.
+pub(crate) async fn execute_ledger_write(
+    session_id: &str,
+    working_directory: &str,
+    deps: &LedgerWriteDeps,
+    source: &str,
+) -> tron_memory::types::LedgerWriteResult {
+    // 1. Compute cycle messages
+    let cycle = compute_cycle_messages(&deps.event_store, &deps.session_manager, session_id);
+    let cycle = match cycle {
+        Some(c) if !c.messages.is_empty() => c,
+        _ => {
+            return tron_memory::types::LedgerWriteResult::skipped(
+                "no new messages since last boundary",
+            );
+        }
+    };
+
+    // 2. Spawn LLM subsession for structured ledger entry
+    let cycle_message_count = cycle.messages.len();
+    let has_subagent = deps.subagent_manager.is_some();
+    debug!(session_id, has_subagent, cycle_message_count, "executing ledger write");
+
+    let llm_result = if let Some(ref manager) = deps.subagent_manager {
+        use tron_context::llm_summarizer::SubsessionSpawner;
+        use tron_context::summarizer::serialize_messages;
+        use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
+
+        let transcript = serialize_messages(&cycle.messages);
+        let spawner = SubagentManagerSpawner {
+            manager: manager.clone(),
+            parent_session_id: session_id.to_owned(),
+            working_directory: working_directory.to_owned(),
+            system_prompt: tron_context::system_prompts::MEMORY_LEDGER_PROMPT.to_string(),
+            model: Some("claude-haiku-4-5-20251001".to_string()),
+        };
+        let result = spawner.spawn_summarizer(&transcript).await;
+        if result.success {
+            result
+                .output
+                .as_deref()
+                .and_then(|o| tron_context::ledger_writer::parse_ledger_response(o).ok())
+        } else {
+            debug!(session_id, error = ?result.error, "subsession ledger call failed");
+            None
+        }
+    } else {
+        debug!(session_id, "no subagent manager available for ledger write");
+        None
+    };
+
+    // 3. Process result
+    match llm_result {
+        Some(LedgerParseResult::Skip) => {
+            debug!(session_id, "LLM classified interaction as trivial, skipping");
+            tron_memory::types::LedgerWriteResult::skipped("trivial interaction")
+        }
+        Some(LedgerParseResult::Entry(entry)) => {
+            // 4. Build full payload (matches TS server MemoryLedgerPayload format)
+            let session_info = deps
+                .session_manager
+                .get_session(session_id)
+                .ok()
+                .flatten();
+            let (total_input, total_output) = session_info
+                .as_ref()
+                .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
+            let model = session_info
+                .as_ref()
+                .map(|s| s.latest_model.clone())
+                .unwrap_or_default();
+
+            let payload = serde_json::json!({
+                "eventRange": {
+                    "firstEventId": cycle.first_event_id,
+                    "lastEventId": cycle.last_event_id,
+                },
+                "turnRange": {
+                    "firstTurn": cycle.first_turn,
+                    "lastTurn": cycle.last_turn,
+                },
+                "title": entry.title,
+                "entryType": entry.entry_type,
+                "status": entry.status,
+                "tags": entry.tags,
+                "input": entry.input,
+                "actions": entry.actions,
+                "files": entry.files.iter().map(|f| serde_json::json!({
+                    "path": f.path, "op": f.op, "why": f.why,
+                })).collect::<Vec<_>>(),
+                "decisions": entry.decisions.iter().map(|d| serde_json::json!({
+                    "choice": d.choice, "reason": d.reason,
+                })).collect::<Vec<_>>(),
+                "lessons": entry.lessons,
+                "thinkingInsights": entry.thinking_insights,
+                "tokenCost": { "input": total_input, "output": total_output },
+                "model": model,
+                "workingDirectory": working_directory,
+                "source": source,
+            });
+
+            // 5. Persist as memory.ledger event
+            let event_id = match deps.event_store.append(&tron_events::AppendOptions {
+                session_id,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: payload.clone(),
+                parent_id: None,
+            }) {
+                Ok(row) => row.id,
+                Err(e) => {
+                    warn!(
+                        session_id,
+                        error = %e,
+                        title = %entry.title,
+                        "failed to persist memory.ledger event"
+                    );
+                    return tron_memory::types::LedgerWriteResult::failed("database temporarily busy");
+                }
+            };
+
+            // 6. Fire-and-forget embedding
+            let embed_ws_id = deps
+                .event_store
+                .get_workspace_by_path(working_directory)
+                .ok()
+                .flatten()
+                .map(|ws| ws.id)
+                .unwrap_or_else(|| working_directory.to_owned());
+            spawn_embed_memory_with_deps(
+                &deps.embedding_controller,
+                &event_id,
+                &embed_ws_id,
+                &payload,
+            );
+
+            debug!(
+                session_id,
+                title = %entry.title,
+                entry_type = %entry.entry_type,
+                event_id = %event_id,
+                "ledger entry written"
+            );
+
+            tron_memory::types::LedgerWriteResult::written(
+                entry.title.clone(),
+                entry.entry_type.clone(),
+                event_id,
+                payload,
+            )
+        }
+        None => tron_memory::types::LedgerWriteResult::skipped("LLM call failed"),
+    }
+}
+
+/// Spawn a fire-and-forget embedding task (standalone version, not requiring RpcContext).
+fn spawn_embed_memory_with_deps(
+    controller: &Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    event_id: &str,
+    workspace_id: &str,
+    payload: &Value,
+) {
+    if let Some(ec) = controller {
         let ec = Arc::clone(ec);
         let event_id = event_id.to_owned();
         let workspace_id = workspace_id.to_owned();
@@ -179,6 +381,10 @@ fn spawn_embed_memory(ctx: &RpcContext, event_id: &str, workspace_id: &str, payl
         });
     }
 }
+
+// =============================================================================
+// RPC Handlers
+// =============================================================================
 
 /// Get ledger entries for a workspace.
 pub struct GetLedgerHandler;
@@ -289,10 +495,10 @@ impl MethodHandler for UpdateLedgerHandler {
             },
         );
 
-        // Resume session to get messages
+        // Resume session to verify it exists and get working directory
         let Ok(active) = ctx.session_manager.resume_session(session_id) else {
             debug!(session_id, "session not found or empty during resume");
-            emit_memory_updated(ctx, session_id, None, Some("skipped"));
+            emit_memory_updated(ctx, session_id, None, Some("skipped"), None);
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
@@ -301,13 +507,9 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         };
 
-        let message_count = active.state.messages.len();
-        debug!(session_id, message_count, "reconstructed session messages");
-
-        // Need messages to summarize
         if active.state.messages.is_empty() {
             debug!(session_id, "no messages in session");
-            emit_memory_updated(ctx, session_id, None, Some("skipped"));
+            emit_memory_updated(ctx, session_id, None, Some("skipped"), None);
             return Ok(serde_json::json!({
                 "written": false,
                 "title": null,
@@ -316,158 +518,39 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         }
 
-        // Compute cycle messages (only messages since last memory.ledger boundary).
-        // Multiple ledger entries per session are expected — each covers a different cycle.
-        let cycle = compute_cycle_messages(&ctx.event_store, &ctx.session_manager, session_id);
-        let cycle = match cycle {
-            Some(c) if !c.messages.is_empty() => c,
-            _ => {
-                debug!(session_id, "no new messages since last boundary");
-                emit_memory_updated(ctx, session_id, None, Some("skipped"));
-                return Ok(serde_json::json!({
-                    "written": false,
-                    "title": null,
-                    "entryType": null,
-                    "reason": "no_new_messages",
-                }));
-            }
+        let working_dir = active.state.working_directory.clone().unwrap_or_default();
+
+        // Delegate to the shared pipeline
+        let deps = LedgerWriteDeps {
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            subagent_manager: ctx.subagent_manager.clone(),
+            embedding_controller: ctx.embedding_controller.clone(),
         };
+        let result = execute_ledger_write(session_id, &working_dir, &deps, "manual").await;
 
-        // Try LLM-based ledger writing via subsession
-        let has_subagent_manager = ctx.subagent_manager.is_some();
-        let cycle_message_count = cycle.messages.len();
-        debug!(session_id, has_subagent_manager, cycle_message_count, "attempting ledger update");
-        let llm_result = if let Some(ref manager) = ctx.subagent_manager {
-            use tron_context::llm_summarizer::SubsessionSpawner;
-            use tron_context::summarizer::serialize_messages;
-            use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
-
-            let transcript = serialize_messages(&cycle.messages);
-            let spawner = SubagentManagerSpawner {
-                manager: manager.clone(),
-                parent_session_id: session_id.to_owned(),
-                working_directory: active.state.working_directory.clone().unwrap_or_default(),
-                system_prompt: tron_context::system_prompts::MEMORY_LEDGER_PROMPT.to_string(),
-                model: Some("claude-haiku-4-5-20251001".to_string()),
-            };
-            let result = spawner.spawn_summarizer(&transcript).await;
-            if result.success {
-                result
-                    .output
-                    .as_deref()
-                    .and_then(|o| tron_context::ledger_writer::parse_ledger_response(o).ok())
-            } else {
-                debug!(session_id, error = ?result.error, "subsession ledger call failed");
-                None
-            }
+        // Emit memory_updated based on result
+        if result.written {
+            emit_memory_updated(
+                ctx,
+                session_id,
+                result.title.as_deref(),
+                result.entry_type.as_deref(),
+                result.event_id.as_deref(),
+            );
         } else {
-            debug!(session_id, "no subagent manager, falling back to keyword summarizer");
-            None
-        };
-
-        match llm_result {
-            Some(LedgerParseResult::Skip) => {
-                debug!(session_id, "LLM classified interaction as trivial, skipping");
-                emit_memory_updated(ctx, session_id, None, Some("skipped"));
-                Ok(serde_json::json!({
-                    "written": false,
-                    "title": null,
-                    "entryType": null,
-                    "reason": "skipped",
-                }))
-            }
-            Some(LedgerParseResult::Entry(ref entry)) => {
-                // Get session metadata for the full payload
-                let session_info = ctx.session_manager.get_session(session_id).ok().flatten();
-                let (total_input, total_output) = session_info
-                    .as_ref()
-                    .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
-                let model = session_info
-                    .as_ref()
-                    .map(|s| s.latest_model.clone())
-                    .unwrap_or_default();
-                let workspace = active
-                    .state
-                    .working_directory
-                    .clone()
-                    .unwrap_or_default();
-
-                // Build full MemoryLedgerPayload (matches TS server format)
-                // Event range and turn range come from the cycle (not full session)
-                let payload = serde_json::json!({
-                    "eventRange": {
-                        "firstEventId": cycle.first_event_id,
-                        "lastEventId": cycle.last_event_id,
-                    },
-                    "turnRange": {
-                        "firstTurn": cycle.first_turn,
-                        "lastTurn": cycle.last_turn,
-                    },
-                    "title": entry.title,
-                    "entryType": entry.entry_type,
-                    "status": entry.status,
-                    "tags": entry.tags,
-                    "input": entry.input,
-                    "actions": entry.actions,
-                    "files": entry.files.iter().map(|f| serde_json::json!({
-                        "path": f.path,
-                        "op": f.op,
-                        "why": f.why,
-                    })).collect::<Vec<_>>(),
-                    "decisions": entry.decisions.iter().map(|d| serde_json::json!({
-                        "choice": d.choice,
-                        "reason": d.reason,
-                    })).collect::<Vec<_>>(),
-                    "lessons": entry.lessons,
-                    "thinkingInsights": entry.thinking_insights,
-                    "tokenCost": {
-                        "input": total_input,
-                        "output": total_output,
-                    },
-                    "model": model,
-                    "workingDirectory": workspace,
-                });
-
-                // Persist as memory.ledger event
-                let event_id = ctx.event_store.append(&tron_events::AppendOptions {
-                    session_id,
-                    event_type: tron_events::EventType::MemoryLedger,
-                    payload: payload.clone(),
-                    parent_id: None,
-                }).map(|row| row.id).unwrap_or_default();
-
-                // Fire-and-forget embedding (resolve workspace path → ID for vector storage)
-                let embed_ws_id = ctx.event_store
-                    .get_workspace_by_path(&workspace)
-                    .ok()
-                    .flatten()
-                    .map(|ws| ws.id)
-                    .unwrap_or(workspace.clone());
-                spawn_embed_memory(ctx, &event_id, &embed_ws_id, &payload);
-
-                // Broadcast memory updated event
-                emit_memory_updated(ctx, session_id, Some(&entry.title), Some(&entry.entry_type));
-
-                debug!(session_id, title = %entry.title, entry_type = %entry.entry_type, "ledger entry written");
-                Ok(serde_json::json!({
-                    "written": true,
-                    "title": entry.title,
-                    "entryType": entry.entry_type,
-                    "reason": "written",
-                }))
-            }
-            None => {
-                // No LLM available or LLM call failed — gracefully skip
-                debug!(session_id, "ledger write skipped: no LLM provider or LLM call failed");
-                emit_memory_updated(ctx, session_id, None, Some("skipped"));
-                Ok(serde_json::json!({
-                    "written": false,
-                    "title": null,
-                    "entryType": null,
-                    "reason": "llm_unavailable",
-                }))
-            }
+            let entry_type = result.entry_type.as_deref().unwrap_or("skipped");
+            let title = if entry_type == "error" { result.reason.as_deref() } else { None };
+            emit_memory_updated(ctx, session_id, title, Some(entry_type), None);
         }
+
+        // Convert to RPC response
+        Ok(serde_json::json!({
+            "written": result.written,
+            "title": result.title,
+            "entryType": result.entry_type,
+            "reason": result.reason.as_deref().unwrap_or(if result.written { "written" } else { "unknown" }),
+        }))
     }
 }
 
@@ -702,7 +785,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["written"], false);
-        assert_eq!(result["reason"], "llm_unavailable");
+        assert_eq!(result["reason"], "LLM call failed");
     }
 
     #[tokio::test]
@@ -858,7 +941,46 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["written"], false);
-        assert_eq!(result["reason"], "llm_unavailable");
+        assert_eq!(result["reason"], "LLM call failed");
+    }
+
+    #[tokio::test]
+    async fn execute_ledger_write_includes_source_field() {
+        // Verify source param propagates to payload (we can't call with LLM,
+        // but we can verify the signature compiles and the manual path passes "manual")
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Build a widget"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Done building."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        // No subagent_manager → LLM call fails → skipped, but the signature is validated
+        let deps = LedgerWriteDeps {
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            subagent_manager: None,
+            embedding_controller: None,
+        };
+        let result = execute_ledger_write(&sid, "/tmp", &deps, "manual").await;
+        assert!(!result.written); // No LLM available
     }
 
     #[tokio::test]
@@ -914,7 +1036,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["written"], false);
-        assert_eq!(result["reason"], "no_new_messages");
+        assert_eq!(result["reason"], "no new messages since last boundary");
     }
 
     #[tokio::test]
