@@ -335,12 +335,12 @@ struct CommandToolTypesTests {
         #expect(chipData.status == .running)
     }
 
-    @Test("Factory uses past-tense display name for completed tools")
-    func testFactoryUsesPastTenseForCompleted() {
+    @Test("Factory preserves display name for completed tools")
+    func testFactoryPreservesNameForCompleted() {
         let tools: [(String, String, String)] = [
-            ("Write", "Wrote", "{\"file_path\": \"/path/file.ts\", \"content\": \"x\"}"),
-            ("Edit", "Edited", "{\"file_path\": \"/path/file.ts\", \"old_string\": \"a\", \"new_string\": \"b\"}"),
-            ("Bash", "Ran", "{\"command\": \"git status\"}"),
+            ("Write", "Write", "{\"file_path\": \"/path/file.ts\", \"content\": \"x\"}"),
+            ("Edit", "Edit", "{\"file_path\": \"/path/file.ts\", \"old_string\": \"a\", \"new_string\": \"b\"}"),
+            ("Bash", "Bash", "{\"command\": \"git status\"}"),
         ]
 
         for (toolName, expectedDisplayName, args) in tools {

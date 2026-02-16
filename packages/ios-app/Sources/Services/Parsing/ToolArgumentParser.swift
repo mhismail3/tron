@@ -18,6 +18,17 @@ enum ToolArgumentParser {
         return value
     }
 
+    /// Extract an integer value for a given key from JSON arguments.
+    /// Returns nil if the key is missing, the value is not a number, or JSON is invalid.
+    static func integer(_ key: String, from args: String) -> Int? {
+        guard let data = args.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = json[key] as? Int else {
+            return nil
+        }
+        return value
+    }
+
     /// Extract a string array for a given key from JSON arguments.
     static func stringArray(_ key: String, from args: String) -> [String]? {
         guard let data = args.data(using: .utf8),

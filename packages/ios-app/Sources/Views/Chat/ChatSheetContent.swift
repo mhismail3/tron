@@ -138,11 +138,15 @@ struct ChatSheetContent: View {
             }
             return fallback
         }()
-        CommandToolDetailSheet(data: liveData, onOpenURL: { url in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                sheetCoordinator?.showSafari(url)
-            }
-        })
+        if liveData.normalizedName == "read" {
+            ReadToolDetailSheet(data: liveData)
+        } else {
+            CommandToolDetailSheet(data: liveData, onOpenURL: { url in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    sheetCoordinator?.showSafari(url)
+                }
+            })
+        }
     }
 
     @ViewBuilder
