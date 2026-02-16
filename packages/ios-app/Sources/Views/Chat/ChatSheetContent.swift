@@ -66,6 +66,7 @@ struct ChatSheetContent: View {
                 title: data.title,
                 entryType: data.entryType,
                 sessionId: data.sessionId,
+                eventId: data.eventId,
                 rpcClient: rpcClient
             )
             .adaptivePresentationDetents([.medium, .large])
@@ -147,6 +148,10 @@ struct ChatSheetContent: View {
             EditToolDetailSheet(data: liveData)
         case "bash":
             BashToolDetailSheet(data: liveData)
+        case "glob", "find":
+            GlobToolDetailSheet(data: liveData)
+        case "search":
+            SearchToolDetailSheet(data: liveData)
         default:
             CommandToolDetailSheet(data: liveData, onOpenURL: { url in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
