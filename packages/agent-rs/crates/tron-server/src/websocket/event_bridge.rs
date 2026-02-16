@@ -1594,4 +1594,127 @@ mod tests {
         // Verify no legacy "update" field
         assert!(data.get("update").is_none());
     }
+
+    // ── Compaction event chain verification ──
+
+    #[test]
+    fn compaction_start_wire_format_and_data() {
+        let event = TronEvent::CompactionStart {
+            base: BaseEvent::now("s1"),
+            reason: tron_core::events::CompactionReason::ThresholdExceeded,
+            tokens_before: 95_000,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.compaction_started");
+        assert_eq!(rpc.session_id.as_deref(), Some("s1"));
+        let data = rpc.data.unwrap();
+        assert_eq!(data["tokensBefore"], 95_000);
+        assert!(data.get("reason").is_some());
+    }
+
+    #[test]
+    fn compaction_complete_wire_format_and_data() {
+        let event = TronEvent::CompactionComplete {
+            base: BaseEvent::now("s1"),
+            success: true,
+            tokens_before: 95_000,
+            tokens_after: 30_000,
+            compression_ratio: 0.316,
+            reason: Some(tron_core::events::CompactionReason::ThresholdExceeded),
+            summary: Some("Compacted 3 turns into summary".into()),
+            estimated_context_tokens: Some(32_000),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.compaction");
+        assert_eq!(rpc.session_id.as_deref(), Some("s1"));
+        let data = rpc.data.unwrap();
+        assert_eq!(data["success"], true);
+        assert_eq!(data["tokensBefore"], 95_000);
+        assert_eq!(data["tokensAfter"], 30_000);
+        assert_eq!(data["compressionRatio"], 0.316);
+        assert_eq!(data["summary"], "Compacted 3 turns into summary");
+        assert_eq!(data["estimatedContextTokens"], 32_000);
+        assert!(data.get("reason").is_some());
+    }
+
+    #[test]
+    fn compaction_complete_minimal_fields() {
+        let event = TronEvent::CompactionComplete {
+            base: BaseEvent::now("s1"),
+            success: false,
+            tokens_before: 50_000,
+            tokens_after: 50_000,
+            compression_ratio: 1.0,
+            reason: None,
+            summary: None,
+            estimated_context_tokens: None,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.compaction");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["success"], false);
+        assert_eq!(data["tokensBefore"], 50_000);
+        assert_eq!(data["tokensAfter"], 50_000);
+        assert_eq!(data["compressionRatio"], 1.0);
+        // Optional fields should be absent
+        assert!(data.get("summary").is_none());
+        assert!(data.get("estimatedContextTokens").is_none());
+        assert!(data.get("reason").is_none());
+    }
+
+    #[tokio::test]
+    async fn compaction_events_route_through_bridge() {
+        let (tx, _) = broadcast::channel(16);
+        let bm = Arc::new(BroadcastManager::new());
+
+        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
+        let conn =
+            super::super::connection::ClientConnection::new("c1".into(), conn_tx);
+        conn.bind_session("s1".into());
+        bm.add(Arc::new(conn)).await;
+
+        let rx = tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), None);
+        let handle = tokio::spawn(bridge.run());
+
+        // Send CompactionStart
+        tx.send(TronEvent::CompactionStart {
+            base: BaseEvent::now("s1"),
+            reason: tron_core::events::CompactionReason::ThresholdExceeded,
+            tokens_before: 80_000,
+        })
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let msg = conn_rx.try_recv().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["type"], "agent.compaction_started");
+        assert_eq!(parsed["data"]["tokensBefore"], 80_000);
+
+        // Send CompactionComplete
+        tx.send(TronEvent::CompactionComplete {
+            base: BaseEvent::now("s1"),
+            success: true,
+            tokens_before: 80_000,
+            tokens_after: 25_000,
+            compression_ratio: 0.3125,
+            reason: None,
+            summary: Some("Summary text".into()),
+            estimated_context_tokens: None,
+        })
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let msg = conn_rx.try_recv().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(parsed["type"], "agent.compaction");
+        assert_eq!(parsed["data"]["success"], true);
+        assert_eq!(parsed["data"]["tokensAfter"], 25_000);
+        assert_eq!(parsed["data"]["summary"], "Summary text");
+
+        drop(tx);
+        let _ = handle.await;
+    }
 }

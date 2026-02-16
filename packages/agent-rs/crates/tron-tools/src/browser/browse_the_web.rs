@@ -61,7 +61,33 @@ impl TronTool for BrowseTheWebTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "BrowseTheWeb".into(),
-            description: "Automate browser interactions via Playwright.".into(),
+            description: "Control a web browser with automation capabilities.\n\n\
+IMPORTANT: Execute browser actions ONE AT A TIME sequentially — wait for each action to complete \
+before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.\n\n\
+Recommended workflow:\n\
+1. navigate to URL → wait for result\n\
+2. snapshot to get page structure → wait for result\n\
+3. screenshot to see visual state → wait for result\n\
+4. interact (click/fill/etc.) → wait for result\n\n\
+Actions:\n\
+- navigate: Go to a URL. Required: url\n\
+- snapshot: Get accessibility tree with element references (call AFTER navigate)\n\
+- screenshot: Capture visual screenshot of current viewport\n\
+- click: Click an element. Required: selector (CSS or element ref e.g. \"e1\")\n\
+- fill: Fill an input field. Required: selector, value\n\
+- type: Type text character by character. Required: selector, text\n\
+- select: Select dropdown option(s). Required: selector, value\n\
+- wait: Wait for element or timeout. Optional: selector, timeout (ms)\n\
+- scroll: Scroll page or element. Required: direction (up/down/left/right). Optional: amount (px)\n\
+- goBack / goForward / reload: Navigation history\n\
+- hover: Hover over an element. Required: selector\n\
+- pressKey: Press a keyboard key. Required: key (e.g. \"Enter\", \"Tab\")\n\
+- getText: Get text from element. Required: selector\n\
+- getAttribute: Get attribute value. Required: selector, attribute\n\
+- pdf: Generate PDF. Optional: path\n\
+- close: Close browser session\n\n\
+Element references from snapshot (e1, e2) are automatically resolved. \
+Browser sessions are persistent — once created, you can perform multiple actions.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

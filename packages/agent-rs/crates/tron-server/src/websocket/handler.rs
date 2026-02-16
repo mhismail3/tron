@@ -80,6 +80,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_service: None,
+            transcription_engine: None,
         }
     }
 

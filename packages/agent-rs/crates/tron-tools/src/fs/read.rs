@@ -65,7 +65,7 @@ impl TronTool for ReadTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Read".into(),
-            description: "Read the contents of a file.".into(),
+            description: "Read the contents of a file. Returns the file content with line numbers.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

@@ -45,7 +45,13 @@ impl TronTool for WebFetchTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "WebFetch".into(),
-            description: "Fetch a URL and answer a question about its content.".into(),
+            description: "Fetch a web page and answer a question about its content.\n\n\
+The tool fetches the URL, extracts the main content, and summarizes it to answer your question. \
+This is much more efficient than including raw web content in context.\n\n\
+Parameters:\n\
+- **url**: The URL to fetch (required). HTTP is auto-upgraded to HTTPS.\n\
+- **prompt**: Your question about the content (required). Be specific for better answers.\n\n\
+Returns the page content with title. Results are cached for 15 minutes — same URL + same prompt = instant cached response.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

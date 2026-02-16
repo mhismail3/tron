@@ -49,7 +49,25 @@ impl TronTool for RenderAppUITool {
     fn definition(&self) -> Tool {
         Tool {
             name: "RenderAppUI".into(),
-            description: "Render a custom UI component tree in the iOS app.".into(),
+            description: "Render a native iOS UI interface for the user to interact with.\n\n\
+Use this tool to create custom interfaces when you need to:\n\
+- Build interactive forms or settings screens\n\
+- Display structured data with charts, lists, or tables\n\
+- Create multi-step wizards or workflows\n\
+- Present options with buttons, toggles, or sliders\n\
+- Show progress or status dashboards\n\n\
+The UI renders as a native SwiftUI sheet on iOS with liquid glass styling.\n\n\
+## Usage Pattern\n\
+1. Call RenderAppUI with your UI definition\n\
+2. The iOS app renders the UI as a sheet\n\
+3. When user interacts: button taps return actionId, state changes return bindingId + value\n\
+4. You can update the UI by calling RenderAppUI again with the same canvasId\n\n\
+## Tips\n\
+- Use semantic colors: \"primary\", \"secondary\", \"accent\", \"destructive\"\n\
+- Keep UIs simple and focused on the task\n\
+- Use Sections to group related controls\n\n\
+IMPORTANT: After calling this tool, do NOT output additional text. The UI will be \
+presented to the user, and their response will come back as a new message.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

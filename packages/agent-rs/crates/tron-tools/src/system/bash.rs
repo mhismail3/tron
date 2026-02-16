@@ -77,7 +77,7 @@ impl TronTool for BashTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Bash".into(),
-            description: "Execute a shell command.".into(),
+            description: "Execute a shell command. Commands that are potentially destructive require confirmation.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

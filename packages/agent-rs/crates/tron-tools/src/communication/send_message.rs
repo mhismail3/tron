@@ -42,7 +42,7 @@ impl TronTool for SendMessageTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "send_message".into(),
-            description: "Send a message to another agent session.".into(),
+            description: "Send a message to another agent session. Can optionally wait for a reply.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

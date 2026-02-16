@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::config::ApnsConfig;
 use super::types::{ApnsNotification, ApnsSendResult};
@@ -62,8 +62,10 @@ impl ApnsService {
                 reason: e.to_string(),
             })?;
 
-        // reqwest with rustls-tls negotiates HTTP/2 via ALPN
+        // APNs requires HTTP/2. Force it via http2_prior_knowledge — ALPN
+        // alone isn't enough because reqwest defaults to HTTP/1.1 unless told otherwise.
         let client = reqwest::Client::builder()
+            .http2_prior_knowledge()
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| ApnsError::ClientBuild {
@@ -119,6 +121,16 @@ impl ApnsService {
 
         let payload = self.build_payload(notification);
 
+        info!(
+            url = %url,
+            token_len = device_token.len(),
+            token_prefix = &device_token[..8.min(device_token.len())],
+            bundle_id = %self.config.bundle_id,
+            priority = priority,
+            payload = %payload,
+            "APNS request"
+        );
+
         let result = self
             .client
             .post(&url)
@@ -139,12 +151,15 @@ impl ApnsService {
                     .get("apns-id")
                     .and_then(|v| v.to_str().ok())
                     .map(String::from);
+                let http_version = format!("{:?}", response.version());
 
                 if response.status().is_success() {
-                    debug!(
+                    info!(
+                        status,
+                        http_version = %http_version,
                         device_token = &device_token[..8.min(device_token.len())],
                         apns_id = ?apns_id,
-                        "APNS notification sent"
+                        "APNS send OK"
                     );
                     ApnsSendResult {
                         success: true,
@@ -162,9 +177,11 @@ impl ApnsService {
 
                     warn!(
                         status,
+                        http_version = %http_version,
                         reason = ?reason,
+                        body = %body,
                         device_token = &device_token[..8.min(device_token.len())],
-                        "APNS notification failed"
+                        "APNS send FAILED"
                     );
 
                     ApnsSendResult {
@@ -178,7 +195,12 @@ impl ApnsService {
                 }
             }
             Err(e) => {
-                warn!(error = %e, "APNS HTTP request failed");
+                warn!(
+                    error = %e,
+                    error_debug = ?e,
+                    url = %url,
+                    "APNS HTTP request FAILED (transport error)"
+                );
                 ApnsSendResult {
                     success: false,
                     device_token: device_token.to_string(),

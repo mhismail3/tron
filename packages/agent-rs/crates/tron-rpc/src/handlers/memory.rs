@@ -140,6 +140,21 @@ impl MethodHandler for UpdateLedgerHandler {
             }));
         }
 
+        // Deduplication: skip if a memory.ledger event already exists for this session
+        let existing_ledger = ctx
+            .event_store
+            .get_events_by_type(session_id, &["memory.ledger"], Some(1))
+            .unwrap_or_default();
+        if !existing_ledger.is_empty() {
+            debug!(session_id, "ledger entry already exists, skipping duplicate write");
+            return Ok(serde_json::json!({
+                "written": false,
+                "title": null,
+                "entryType": null,
+                "reason": "already_exists",
+            }));
+        }
+
         // Try LLM-based ledger writing (if provider available)
         let has_provider = ctx.agent_deps.is_some();
         debug!(session_id, has_provider, message_count, "attempting ledger update");
@@ -286,13 +301,15 @@ impl MethodHandler for UpdateLedgerHandler {
                             .collect::<Vec<_>>()
                             .join(" "),
                     };
-                    if text.is_empty() {
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
                         None
                     } else {
-                        Some(if text.len() > 80 {
-                            format!("{}...", &text[..77])
+                        let t = trimmed.to_owned();
+                        Some(if t.len() > 80 {
+                            format!("{}...", &t[..77])
                         } else {
-                            text
+                            t
                         })
                     }
                 }
@@ -750,5 +767,125 @@ mod tests {
             .await
             .unwrap();
         assert!(result["handoffs"].is_array());
+    }
+
+    // ── Ledger deduplication tests ──
+
+    #[tokio::test]
+    async fn update_ledger_deduplicates_existing_entry() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        // Add a user message
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Implement dark mode"}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Done."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        // First call should write
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], true);
+
+        // Invalidate to force re-read
+        ctx.session_manager.invalidate_session(&sid);
+
+        // Second call should skip (duplicate)
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], false);
+        assert_eq!(result["reason"], "already_exists");
+    }
+
+    // ── Whitespace-only user message tests ──
+
+    #[tokio::test]
+    async fn update_ledger_whitespace_only_user_message_gets_untitled() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        // Add a whitespace-only user message
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "   \n\t  "}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Response here."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], true);
+        assert_eq!(result["title"], "Untitled session");
+    }
+
+    #[tokio::test]
+    async fn update_ledger_title_trimmed() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", Some("test"))
+            .unwrap();
+
+        // Add a user message with leading/trailing whitespace
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "  Fix the login bug  "}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": "Done."}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        let result = UpdateLedgerHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["written"], true);
+        assert_eq!(result["title"], "Fix the login bug");
     }
 }

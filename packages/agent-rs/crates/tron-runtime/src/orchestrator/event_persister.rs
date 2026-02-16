@@ -75,12 +75,14 @@ impl EventPersister {
         event_type: EventType,
         payload: Value,
     ) {
-        let _ = self.tx.try_send(PersistRequest {
+        if let Err(e) = self.tx.try_send(PersistRequest {
             session_id: session_id.to_owned(),
             event_type,
             payload,
             reply: None,
-        });
+        }) {
+            tracing::warn!(?event_type, error = %e, "fire-and-forget persist dropped: channel full");
+        }
     }
 
     /// Flush all pending events (waits for the queue to drain).

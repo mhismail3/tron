@@ -43,7 +43,21 @@ impl TronTool for NotifyAppTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "NotifyApp".into(),
-            description: "Send a push notification to the iOS app.".into(),
+            description: "Send a push notification to the Tron iOS app.\n\n\
+## When to Use\n\
+- Long-running task has completed and the user should know\n\
+- Important results are ready that need user attention\n\
+- User input is required and the app may be backgrounded\n\
+- Agent wants to prompt user to return to the conversation\n\n\
+## When NOT to Use\n\
+- For routine progress updates (use text output instead)\n\
+- When the user is actively engaged in the conversation\n\
+- For trivial or unimportant information\n\n\
+## Guidelines\n\
+- Keep titles concise (max 50 chars)\n\
+- Keep body text brief (max 200 chars)\n\
+- Use high priority sparingly (only for urgent notifications)\n\
+- Include relevant context in the body to help user understand why they're being notified".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -106,10 +120,17 @@ impl TronTool for NotifyAppTool {
 
         match self.delegate.send_notification(&notification).await {
             Ok(result) => {
-                let msg = if result.success { "Notification sent successfully" } else { "Notification delivery failed" };
+                let msg = if result.success {
+                    result.message.as_deref()
+                        .map_or_else(|| "Notification sent successfully".to_string(), String::from)
+                } else {
+                    result.message.as_deref()
+                        .map_or_else(|| "Notification delivery failed".to_string(),
+                            |m| format!("Notification delivery failed. {m}"))
+                };
                 Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
-                        tron_core::content::ToolResultContent::text(msg),
+                        tron_core::content::ToolResultContent::text(&msg),
                     ]),
                     details: Some(json!({
                         "title": title,
@@ -137,7 +158,7 @@ mod tests {
 
     impl MockNotify {
         fn success() -> Self {
-            Self { result: NotifyResult { success: true } }
+            Self { result: NotifyResult { success: true, message: None } }
         }
     }
 

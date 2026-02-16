@@ -18,6 +18,16 @@ impl MethodHandler for RegisterTokenHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let device_token = require_string_param(params.as_ref(), "deviceToken")?;
 
+        // Validate token format: APNS device tokens are 32 bytes = 64 hex chars
+        if device_token.len() != 64 || !device_token.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(RpcError::InvalidParams {
+                message: format!(
+                    "Invalid device token: expected 64 hex chars, got {} chars",
+                    device_token.len()
+                ),
+            });
+        }
+
         let session_id = params
             .as_ref()
             .and_then(|p| p.get("sessionId"))
@@ -201,6 +211,37 @@ mod tests {
         assert!(result.get("created").is_some(), "missing 'created' field");
         assert!(result["id"].is_string(), "'id' must be String");
         assert!(result["created"].is_boolean(), "'created' must be Bool");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_too_long_token() {
+        let ctx = make_test_context();
+        let err = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": "a".repeat(160)})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_too_short_token() {
+        let ctx = make_test_context();
+        let err = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": "abc123"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_non_hex_token() {
+        let ctx = make_test_context();
+        let token = "g".repeat(64); // 'g' is not hex
+        let err = RegisterTokenHandler
+            .handle(Some(json!({"deviceToken": token})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     #[tokio::test]

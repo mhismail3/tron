@@ -120,7 +120,10 @@ impl SqliteTransport {
         }
 
         let entries: Vec<PendingEntry> = guard.batch.drain(..).collect();
-        let _ = write_batch(&guard.conn, &entries);
+        if let Err(e) = write_batch(&guard.conn, &entries) {
+            // Use eprintln — cannot use tracing here (reentrancy risk).
+            eprintln!("[tron-logging] write_batch failed ({} entries dropped): {e}", entries.len());
+        }
     }
 }
 
@@ -336,7 +339,9 @@ where
 
             if should_flush || guard.batch.len() >= self.config.batch_size {
                 let entries: Vec<PendingEntry> = guard.batch.drain(..).collect();
-                let _ = write_batch(&guard.conn, &entries);
+                if let Err(e) = write_batch(&guard.conn, &entries) {
+                    eprintln!("[tron-logging] write_batch failed ({} entries dropped): {e}", entries.len());
+                }
             }
         }
     }
@@ -363,20 +368,16 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
     let tx = conn.unchecked_transaction()?;
 
     {
-        let mut log_stmt = tx.prepare_cached(
+        let mut stmt = tx.prepare_cached(
             "INSERT INTO logs (timestamp, level, level_num, component, message, \
              session_id, workspace_id, event_id, turn, trace_id, \
              parent_trace_id, depth, data, error_message, error_stack) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         )?;
 
-        let mut fts_stmt = tx.prepare_cached(
-            "INSERT INTO logs_fts (log_id, session_id, component, message, error_message) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-        )?;
-
+        // FTS population is handled by the logs_fts_insert trigger (from migrations).
         for entry in entries {
-            let _ = log_stmt.execute(rusqlite::params![
+            let _ = stmt.execute(rusqlite::params![
                 entry.timestamp,
                 entry.level,
                 entry.level_num,
@@ -388,20 +389,10 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
                 entry.turn,
                 entry.trace_id,
                 entry.parent_trace_id,
-                entry.depth,
+                entry.depth.unwrap_or(0),
                 entry.data,
                 entry.error_message,
                 entry.error_stack,
-            ])?;
-
-            let log_id = tx.last_insert_rowid();
-
-            let _ = fts_stmt.execute(rusqlite::params![
-                log_id,
-                entry.session_id,
-                entry.component,
-                entry.message,
-                entry.error_message,
             ])?;
         }
     }
@@ -446,7 +437,13 @@ mod tests {
                 message,
                 error_message,
                 tokenize='porter unicode61'
-            );",
+            );
+            CREATE TRIGGER IF NOT EXISTS logs_fts_insert
+            AFTER INSERT ON logs
+            BEGIN
+              INSERT INTO logs_fts (log_id, session_id, component, message, error_message)
+              VALUES (NEW.id, NEW.session_id, NEW.component, NEW.message, COALESCE(NEW.error_message, ''));
+            END;",
         )
         .unwrap();
         conn

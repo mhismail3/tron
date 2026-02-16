@@ -40,7 +40,7 @@ impl TronTool for WriteTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Write".into(),
-            description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does.".into(),
+            description: "Write content to a file. Creates parent directories if they do not exist.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

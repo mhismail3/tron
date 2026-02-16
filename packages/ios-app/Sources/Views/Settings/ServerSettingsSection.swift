@@ -18,26 +18,25 @@ struct ServerSettingsSection: View {
                 .autocorrectionDisabled()
                 .onSubmit { onHostSubmit() }
 
-            HStack {
-                TextField("Custom Port", text: $serverPort)
-                    .font(TronTypography.subheadline)
-                    .keyboardType(.numberPad)
-                    .onChange(of: serverPort) { _, newValue in
-                        if !newValue.isEmpty {
-                            onPortChange(newValue)
-                        }
-                    }
-
-                Picker("", selection: Binding(
-                    get: { selectedEnvironment },
-                    set: { onEnvironmentChange($0) }
-                )) {
-                    Text("Beta").tag("beta")
-                    Text("Prod").tag("prod")
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 120)
+            Picker("", selection: Binding(
+                get: { selectedEnvironment },
+                set: { onEnvironmentChange($0) }
+            )) {
+                Text("TS Beta").tag("tsBeta")
+                Text("TS Prod").tag("tsProd")
+                Text("Agent RS").tag("agentRs")
+                Text("Tron RS").tag("tronRs")
             }
+            .pickerStyle(.segmented)
+
+            TextField("Custom Port", text: $serverPort)
+                .font(TronTypography.subheadline)
+                .keyboardType(.numberPad)
+                .onChange(of: serverPort) { _, newValue in
+                    if !newValue.isEmpty {
+                        onPortChange(newValue)
+                    }
+                }
         } header: {
             Text("Server")
                 .font(TronTypography.bodySM)

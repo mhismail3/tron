@@ -491,6 +491,12 @@ pub async fn handle_ws_connection(
                 WsMessage::Text(text) => {
                     let _ = on_message.send((reader_cid.clone(), text.to_string())).await;
                 }
+                WsMessage::Binary(bytes) => {
+                    // iOS sends RPC requests as binary WebSocket frames
+                    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                        let _ = on_message.send((reader_cid.clone(), text)).await;
+                    }
+                }
                 WsMessage::Pong(_) => {
                     if let Some(entry) = reader_registry.clients.get(&reader_cid) {
                         if let Ok(c) = entry.value().try_lock() {
@@ -500,7 +506,6 @@ pub async fn handle_ws_connection(
                 }
                 WsMessage::Close(_) => break,
                 WsMessage::Ping(_) => {} // axum handles pong automatically
-                _ => {}
             }
         }
     });

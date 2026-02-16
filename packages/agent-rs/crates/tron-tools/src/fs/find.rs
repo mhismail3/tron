@@ -139,7 +139,7 @@ impl TronTool for FindTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Find".into(),
-            description: "Find files and directories matching a glob pattern.".into(),
+            description: "Search for files matching a glob pattern. Returns file paths relative to search directory.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

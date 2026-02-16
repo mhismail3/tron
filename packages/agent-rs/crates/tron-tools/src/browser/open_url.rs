@@ -44,7 +44,17 @@ impl TronTool for OpenURLTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "OpenURL".into(),
-            description: "Open a URL in the iOS app (Safari).".into(),
+            description: "Open a URL in the native iOS Safari browser for the user to view.\n\n\
+Use this tool when you want to:\n\
+- Show the user a webpage, documentation, or article\n\
+- Direct the user to a website for reference\n\
+- Open external links for the user to explore\n\n\
+The URL opens in Safari within the app. The user can browse, interact with the page, \
+and dismiss it when done. This is a fire-and-forget action — you don't need to wait \
+for the user to close the browser.\n\n\
+Examples:\n\
+- Open documentation: { \"url\": \"https://docs.swift.org/swift-book/\" }\n\
+- Show a reference: { \"url\": \"https://developer.apple.com/documentation/swiftui\" }".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -133,7 +143,7 @@ mod tests {
             &self,
             _notification: &Notification,
         ) -> Result<NotifyResult, ToolError> {
-            Ok(NotifyResult { success: true })
+            Ok(NotifyResult { success: true, message: None })
         }
 
         async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {

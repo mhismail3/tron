@@ -42,7 +42,7 @@ impl TronTool for ReceiveMessagesTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "receive_messages".into(),
-            description: "Check for messages sent to this session from other agents.".into(),
+            description: "Check for messages sent to this session from other agents. Can filter by type or sender.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

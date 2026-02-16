@@ -3,12 +3,12 @@
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
-use tracing::{instrument, warn};
+use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::RpcError;
 use crate::handlers::require_string_param;
-use crate::handlers::transcription::{normalize_base64, transcribe_audio_via_sidecar};
+use crate::handlers::transcription::{normalize_base64, transcribe_audio};
 use crate::registry::MethodHandler;
 
 fn notes_dir() -> String {
@@ -55,39 +55,9 @@ impl MethodHandler for SaveHandler {
                 message: format!("Invalid base64 audio data: {e}"),
             })?;
 
-        // Rough duration estimate: ~16KB/s for compressed audio
-        #[allow(clippy::cast_precision_loss)]
-        let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
-
-        // Try transcription via sidecar
+        // Transcribe via native engine → sidecar → stub fallback
         let (transcript_text, language, duration_seconds) =
-            match transcribe_audio_via_sidecar(&ctx.settings_path, &audio_bytes, mime_type, file_name).await {
-                Ok(result) => {
-                    let text = result
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .unwrap_or("(transcription failed)")
-                        .to_string();
-                    let lang = result
-                        .get("language")
-                        .and_then(Value::as_str)
-                        .unwrap_or("en")
-                        .to_string();
-                    let dur = result
-                        .get("durationSeconds")
-                        .and_then(Value::as_f64)
-                        .unwrap_or(estimated_duration);
-                    (text, lang, dur)
-                }
-                Err(e) => {
-                    warn!(error = %e, "Transcription failed, using stub");
-                    (
-                        "(transcription not available)".to_string(),
-                        "en".to_string(),
-                        estimated_duration,
-                    )
-                }
-            };
+            transcribe_audio(ctx, &audio_bytes, mime_type, file_name).await;
 
         // Write markdown with frontmatter
         let content = format!(

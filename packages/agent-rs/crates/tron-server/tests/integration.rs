@@ -59,6 +59,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
         browser_service: None,
+        transcription_engine: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -203,6 +204,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         }),
         server_start_time: std::time::Instant::now(),
         browser_service: None,
+        transcription_engine: None,
     };
 
     let mut registry = MethodRegistry::new();

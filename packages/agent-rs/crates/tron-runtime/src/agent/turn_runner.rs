@@ -271,7 +271,9 @@ pub async fn execute_turn(
         if let Some(c) = cost {
             payload["cost"] = json!(c);
         }
-        p.append_fire_and_forget(session_id, EventType::MessageAssistant, payload);
+        if let Err(e) = p.append(session_id, EventType::MessageAssistant, payload).await {
+            tracing::error!(session_id, error = %e, "failed to persist message.assistant");
+        }
     }
 
     // 9. Execute tool calls if present

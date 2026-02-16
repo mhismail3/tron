@@ -42,7 +42,14 @@ impl TronTool for WaitForAgentsTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "WaitForAgents".into(),
-            description: "Wait for one or more subagent sessions to complete.".into(),
+            description: "Wait for spawned sub-agent(s) to complete and get their results.\n\n\
+                Use this when you need the output of a sub-agent before proceeding. The tool will block until:\n\
+                - The sub-agent(s) complete (success or failure)\n\
+                - The timeout is reached (default: 5 minutes)\n\n\
+                Mode:\n\
+                - 'all' (default): Wait for ALL sub-agents to complete\n\
+                - 'any': Return as soon as ANY sub-agent completes\n\n\
+                Returns the full result including output, token usage, and duration.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

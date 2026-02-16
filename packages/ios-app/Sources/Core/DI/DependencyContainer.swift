@@ -26,7 +26,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     @AppStorage("serverHost") private var _serverHost = AppConstants.defaultHost
 
     @ObservationIgnored
-    @AppStorage("serverPort") private var _serverPort = AppConstants.betaPort
+    @AppStorage("serverPort") private var _serverPort = AppConstants.tsBetaPort
 
     @ObservationIgnored
     @AppStorage("useTLS") private var _useTLS = false
@@ -114,7 +114,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     init() {
         // Read persisted values before initialization (workaround for @AppStorage in init)
         let host = UserDefaults.standard.string(forKey: "serverHost") ?? AppConstants.defaultHost
-        let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.betaPort
+        let port = UserDefaults.standard.string(forKey: "serverPort") ?? AppConstants.tsBetaPort
         let tls = UserDefaults.standard.bool(forKey: "useTLS")
 
         // Initialize core services that persist across server changes

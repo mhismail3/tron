@@ -56,7 +56,20 @@ impl TronTool for AskUserQuestionTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "AskUserQuestion".into(),
-            description: "Present questions with options to the user.".into(),
+            description: "Ask the user interactive questions with multiple choice options.\n\n\
+Use this tool when you need to:\n\
+- Get user preferences or choices\n\
+- Clarify requirements before proceeding\n\
+- Present options for the user to select from\n\
+- Get approval for a plan or action\n\n\
+The user will see a question sheet with selectable options. Questions can be single-select \
+(choose one) or multi-select (choose multiple). You can also allow free-form \"Other\" input.\n\n\
+Rules:\n\
+- Maximum 5 questions per call\n\
+- Each question must have at least 2 options\n\
+- Question IDs must be unique within the call\n\n\
+IMPORTANT: When using this tool, do NOT output any text response after calling it. \
+The question tool should be the FINAL action in your response.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

@@ -4353,6 +4353,7 @@ dependencies = [
  "tron-tasks",
  "tron-tokens",
  "tron-tools",
+ "tron-transcription",
 ]
 
 [[package]]
@@ -4671,6 +4672,7 @@ dependencies = [
  "tron-tasks",
  "tron-tokens",
  "tron-tools",
+ "tron-transcription",
  "uuid",
 ]
 

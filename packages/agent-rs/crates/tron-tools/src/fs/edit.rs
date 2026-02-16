@@ -51,7 +51,7 @@ impl TronTool for EditTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Edit".into(),
-            description: "Replace exact string occurrences in a file.".into(),
+            description: "Edit a file by replacing old_string with new_string. Requires exact match.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

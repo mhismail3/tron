@@ -51,7 +51,24 @@ impl TronTool for SearchTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Search".into(),
-            description: "Search for patterns in code using text regex or AST structural matching.".into(),
+            description: "Search code using text or AST patterns. Automatically detects search mode.\n\n\
+Text search (default):\n\
+- Fast regex-based content search\n\
+- Works for any text pattern\n\n\
+AST search (auto-detected):\n\
+- Structural code search using AST\n\
+- Triggered by $VAR or $$$ in pattern\n\
+- Example: \"function $NAME() {}\" finds all function definitions\n\n\
+Parameters:\n\
+- pattern: Search pattern (regex for text, AST pattern with $VAR for structural)\n\
+- path: File or directory to search (default: current directory)\n\
+- type: Force search mode ('text' or 'ast'), optional\n\
+- filePattern: Glob to filter files (e.g., \"*.ts\")\n\
+- context: Lines of context around matches (text mode only)\n\n\
+Examples:\n\
+- Text: { \"pattern\": \"TODO.*bug\" }\n\
+- AST: { \"pattern\": \"function $NAME() {}\" }\n\
+- Force: { \"pattern\": \"test\", \"type\": \"ast\" }".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

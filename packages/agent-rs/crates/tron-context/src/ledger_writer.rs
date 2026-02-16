@@ -140,11 +140,29 @@ fn strip_code_fences(s: &str) -> String {
 // LLM ledger helper
 // =============================================================================
 
+/// Timeout for the LLM ledger call (30 seconds).
+const LEDGER_LLM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Attempt to write a ledger entry using the LLM provider.
 ///
-/// Returns `None` if the provider call fails or the response is unparseable,
-/// signalling the caller to fall back to `KeywordSummarizer`.
+/// Returns `None` if the provider call fails, times out, or the response is
+/// unparseable — signalling the caller to fall back to `KeywordSummarizer`.
 pub async fn try_llm_ledger(
+    provider: &dyn Provider,
+    messages: &[Message],
+) -> Option<LedgerParseResult> {
+    match tokio::time::timeout(LEDGER_LLM_TIMEOUT, try_llm_ledger_inner(provider, messages)).await
+    {
+        Ok(result) => result,
+        Err(_elapsed) => {
+            warn!("LLM ledger call timed out after {}s, falling back to keyword summarizer", LEDGER_LLM_TIMEOUT.as_secs());
+            None
+        }
+    }
+}
+
+/// Inner implementation without timeout wrapper.
+async fn try_llm_ledger_inner(
     provider: &dyn Provider,
     messages: &[Message],
 ) -> Option<LedgerParseResult> {

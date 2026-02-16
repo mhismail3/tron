@@ -168,6 +168,7 @@ fn register_platform(registry: &mut MethodRegistry) {
     // Transcription
     registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
     registry.register("transcribe.listModels", transcription::ListModelsHandler);
+    registry.register("transcribe.downloadModel", transcription::DownloadModelHandler);
 
     // Device
     registry.register("device.register", device::RegisterTokenHandler);
@@ -294,6 +295,7 @@ pub(crate) mod test_helpers {
             agent_deps: None,
             server_start_time: Instant::now(),
             browser_service: None,
+            transcription_engine: None,
         }
     }
 
@@ -328,6 +330,7 @@ pub(crate) mod test_helpers {
             agent_deps: None,
             server_start_time: Instant::now(),
             browser_service: None,
+            transcription_engine: None,
         }
     }
 }
@@ -353,8 +356,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            100,
-            "expected 100 methods, got {}",
+            101,
+            "expected 101 methods, got {}",
             reg.methods().len()
         );
     }

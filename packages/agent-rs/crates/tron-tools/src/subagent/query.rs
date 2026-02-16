@@ -42,7 +42,13 @@ impl TronTool for QueryAgentTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "QueryAgent".into(),
-            description: "Query a subagent's status, events, logs, or output.".into(),
+            description: "Query the status, events, logs, or output of a spawned sub-agent.\n\n\
+                Query types:\n\
+                - **status**: Get current status (running/completed/failed), turn count, token usage, and task\n\
+                - **events**: Get recent events from the sub-agent session\n\
+                - **logs**: Get log entries from the sub-agent session\n\
+                - **output**: Get the final assistant response (only available when completed)\n\n\
+                Use this to monitor sub-agents you've spawned with SpawnSubagent.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

@@ -31,7 +31,7 @@ pub use test_utils::{capture_logs, CapturedLogs};
 pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
 pub use types::{LogEntry, LogLevel, LogQueryOptions};
 
-/// Initialize the global tracing subscriber with stderr output.
+/// Initialize the global tracing subscriber with stderr output only.
 ///
 /// Call once at application startup. Subsequent calls are no-ops.
 /// The subscriber writes human-readable output to stderr.
@@ -53,6 +53,62 @@ pub fn init_subscriber(level: &str) {
 
     // set_global_default is a no-op if already set
     let _ = subscriber.try_init();
+}
+
+/// Initialize the global tracing subscriber with stderr output AND `SQLite` persistence.
+///
+/// Composes a `fmt` layer (stderr) with [`SqliteTransport`] (database) on a
+/// shared [`tracing_subscriber::Registry`]. Call once at application startup.
+///
+/// Returns a [`TransportHandle`] for manual flushing and shutdown cleanup.
+///
+/// # Arguments
+///
+/// * `level` - Minimum log level to display/persist.
+/// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
+pub fn init_subscriber_with_sqlite(
+    level: &str,
+    conn: rusqlite::Connection,
+) -> TransportHandle {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(level));
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .compact();
+
+    let transport = SqliteTransport::new(conn, TransportConfig::default());
+    let handle = transport.handle();
+
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(transport)
+        .try_init();
+
+    handle
+}
+
+/// Spawn a periodic flush task for the log transport.
+///
+/// Flushes pending log entries to `SQLite` at the configured interval (default 1s).
+/// Returns a [`tokio::task::JoinHandle`] — abort it on shutdown after a final
+/// [`TransportHandle::flush`].
+pub fn spawn_flush_task(handle: TransportHandle) -> tokio::task::JoinHandle<()> {
+    let interval_ms = TransportConfig::default().flush_interval_ms;
+    tokio::spawn(async move {
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_millis(interval_ms));
+        loop {
+            let _ = interval.tick().await;
+            handle.flush();
+        }
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

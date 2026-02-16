@@ -4,9 +4,9 @@ import SwiftUI
 
 struct SettingsView: View {
     #if BETA
-    private static let defaultPort = AppConstants.betaPort
+    private static let defaultPort = AppConstants.tsBetaPort
     #else
-    private static let defaultPort = AppConstants.prodPort
+    private static let defaultPort = AppConstants.tsProdPort
     #endif
 
     @Environment(\.dismiss) private var dismiss
@@ -40,18 +40,20 @@ struct SettingsView: View {
     private var selectedEnvironment: String {
         if !serverPort.isEmpty {
             switch serverPort {
-            case AppConstants.betaPort: return "beta"
-            case AppConstants.prodPort: return "prod"
+            case AppConstants.tsBetaPort: return "tsBeta"
+            case AppConstants.tsProdPort: return "tsProd"
+            case AppConstants.agentRsPort: return "agentRs"
+            case AppConstants.tronRsPort: return "tronRs"
             default: return "custom"
             }
         }
-        return "beta"
+        return "tsBeta"
     }
 
     /// Effective port to use for connections
     private var effectivePort: String {
         if !serverPort.isEmpty { return serverPort }
-        return AppConstants.betaPort
+        return AppConstants.tsBetaPort
     }
 
     /// Selected model display name
@@ -79,8 +81,10 @@ struct SettingsView: View {
                     onEnvironmentChange: { newValue in
                         let newPort: String
                         switch newValue {
-                        case "beta": newPort = AppConstants.betaPort
-                        case "prod": newPort = AppConstants.prodPort
+                        case "tsBeta": newPort = AppConstants.tsBetaPort
+                        case "tsProd": newPort = AppConstants.tsProdPort
+                        case "agentRs": newPort = AppConstants.agentRsPort
+                        case "tronRs": newPort = AppConstants.tronRsPort
                         default: return
                         }
                         serverPort = newPort
@@ -247,7 +251,7 @@ struct SettingsView: View {
         confirmArchive = true
         settingsState.resetToDefaults()
         updateServerSetting { settingsState.buildResetUpdate() }
-        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: AppConstants.betaPort, useTLS: false)
+        dependencies.updateServerSettings(host: AppConstants.defaultHost, port: AppConstants.tsBetaPort, useTLS: false)
     }
 
     private func archiveAllSessions() {

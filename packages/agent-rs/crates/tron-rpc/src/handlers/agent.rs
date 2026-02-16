@@ -419,41 +419,14 @@ impl MethodHandler for PromptHandler {
                 // 4. Merge rules (global first, then project)
                 let combined_rules = tron_context::loader::merge_rules(global_rules, project_rules);
 
-                // 4b. Persist + broadcast rules.loaded if any rules were found
-                if combined_rules.is_some() {
-                    // Count how many rule sources actually loaded
-                    let total_files = 1u32; // at least one rules file found
-                    let dynamic_rules_count = 0u32;
-                    let _ = event_store.append(&tron_events::AppendOptions {
-                        session_id: &session_id_clone,
-                        event_type: tron_events::EventType::RulesLoaded,
-                        payload: serde_json::json!({
-                            "totalFiles": total_files,
-                            "dynamicRulesCount": dynamic_rules_count,
-                        }),
-                        parent_id: None,
-                    });
-                    let _ = broadcast.emit(tron_core::events::TronEvent::RulesLoaded {
-                        base: tron_core::events::BaseEvent::now(&session_id_clone),
-                        total_files,
-                        dynamic_rules_count,
-                    });
-                }
-
                 // 5. Load memory from ~/.tron/notes/MEMORY.md
+                // (rules.loaded / memory.loaded events are emitted optimistically
+                // at session.create time so iOS shows pills immediately)
                 let memory = home_dir
                     .as_ref()
                     .map(|h| h.join(".tron").join("notes").join("MEMORY.md"))
                     .and_then(|p| std::fs::read_to_string(p).ok())
                     .filter(|s| !s.trim().is_empty());
-
-                // 5b. Broadcast memory.loaded if memory was found
-                if memory.is_some() {
-                    let _ = broadcast.emit(tron_core::events::TronEvent::MemoryLoaded {
-                        base: tron_core::events::BaseEvent::now(&session_id_clone),
-                        count: 1,
-                    });
-                }
 
                 // 6. Get messages from reconstructed state
                 let messages = state.messages.clone();

@@ -44,7 +44,28 @@ impl TronTool for SpawnSubagentTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "SpawnSubagent".into(),
-            description: "Spawn a child agent to execute a task.".into(),
+            description: "Spawn an agent to handle a specific task. Supports two execution modes:\n\n\
+**1. In-Process Mode (default):**\n\
+- Runs in the same process, sharing the event store\n\
+- **Blocking by default**: Waits for completion and returns full results\n\
+- Efficient for quick tasks (< 5 minutes)\n\
+- Use `blocking: false` for fire-and-forget\n\n\
+**2. Tmux Mode:**\n\
+- Runs in a separate tmux session with its own process\n\
+- Always fire-and-forget (returns immediately)\n\
+- Persists beyond this conversation\n\
+- Best for long-running tasks (hours/days)\n\n\
+Parameters:\n\
+- **task**: The task description for the agent (required)\n\
+- **mode**: 'inProcess' (default) or 'tmux'\n\
+- **blocking**: If true (default), waits for completion (inProcess only)\n\
+- **timeout**: Max wait time in ms (default: 30 minutes, inProcess only)\n\
+- **model**, **systemPrompt**, **toolDenials**, **skills**, **workingDirectory**, **maxTurns**: Optional overrides\n\
+- **toolDenials**: Deny tools/patterns. Use { denyAll: true } for text-only agents\n\n\
+Returns (when mode=inProcess and blocking=true):\n\
+- Full output from the agent\n\
+- Token usage and duration statistics\n\
+- Success/failure status".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

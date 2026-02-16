@@ -27,6 +27,7 @@ tron-hooks = { path = "../tron-hooks" }
 tron-memory = { path = "../tron-memory" }
 tron-tokens = { path = "../tron-tokens" }
 tron-browser = { path = "../tron-browser" }
+tron-transcription = { path = "../tron-transcription" }
 futures.workspace = true
 parking_lot.workspace = true
 async-trait.workspace = true

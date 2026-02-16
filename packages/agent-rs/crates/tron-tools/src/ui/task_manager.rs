@@ -46,7 +46,36 @@ impl TronTool for TaskManagerTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "TaskManager".into(),
-            description: "Manage tasks, projects, and areas.".into(),
+            description: "Persistent task, project, and area manager (PARA model). Tasks survive across sessions.\n\n\
+## PARA Model\n\
+- **Projects**: Time-bound scoped efforts with tasks\n\
+- **Areas**: Ongoing responsibilities the agent maintains awareness of (e.g., \"Security\", \"Code Quality\")\n\
+- **Tasks**: Individual work items, optionally linked to a project and/or area\n\n\
+## Actions\n\n\
+### Tasks\n\
+- **create**: Create a task. Required: title. Optional: description, status, priority, projectId, areaId\n\
+- **update**: Update a task. Required: taskId. Optional: status, title, description, priority, projectId, areaId\n\
+- **get**: Get task details. Required: taskId\n\
+- **list**: List tasks. Optional: filter by status/priority/projectId/areaId, limit, offset\n\
+- **search**: Full-text search. Required: query. Optional: limit\n\
+- **log_time**: Log time spent. Required: taskId, minutes\n\
+- **delete**: Delete a task. Required: taskId\n\n\
+### Projects\n\
+- **create_project**: Required: projectTitle. Optional: projectDescription, areaId\n\
+- **update_project**: Required: projectId. Optional: projectTitle, projectDescription, projectStatus, areaId\n\
+- **get_project**: Get project details with tasks. Required: projectId\n\
+- **delete_project**: Delete project (orphans tasks). Required: projectId\n\
+- **list_projects**: List projects. Optional: filter by status/areaId\n\n\
+### Areas\n\
+- **create_area**: Required: areaTitle. Optional: areaDescription\n\
+- **update_area**: Required: areaId. Optional: areaTitle, areaDescription, areaStatus\n\
+- **get_area** / **delete_area** / **list_areas**\n\n\
+## Status Model\n\
+backlog → pending → in_progress → completed/cancelled\n\n\
+## Key Behaviors\n\
+- status→in_progress auto-sets startedAt; status→completed auto-sets completedAt\n\
+- notes append with timestamps (never replace)\n\
+- Dependencies: addBlocks/addBlockedBy create blocking relationships; circular deps rejected".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

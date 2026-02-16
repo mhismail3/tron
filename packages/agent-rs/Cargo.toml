@@ -45,7 +45,7 @@ axum-extra = "0.10"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 tokio-tungstenite = "0.26"
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "http2"], default-features = false }
 eventsource-stream = "0.2"
 
 # Database

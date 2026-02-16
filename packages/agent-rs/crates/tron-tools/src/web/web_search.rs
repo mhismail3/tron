@@ -68,7 +68,17 @@ impl TronTool for WebSearchTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "WebSearch".into(),
-            description: "Search the web using Brave Search API.".into(),
+            description: "Search the web using Brave Search API.\n\n\
+                Endpoints:\n\
+                - **web**: General web search (default)\n\
+                - **news**: Current news articles\n\
+                - **images**: Image search\n\
+                - **videos**: Video search\n\n\
+                Tips:\n\
+                - Use 'news' endpoint for current events\n\
+                - Use 'freshness' to filter by recency: 'pd' (day), 'pw' (week), 'pm' (month), 'py' (year)\n\
+                - Use domain filters (allowedDomains/blockedDomains) for trusted sources\n\
+                - Use WebFetch to read full content of interesting results".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

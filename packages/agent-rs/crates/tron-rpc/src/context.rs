@@ -10,6 +10,7 @@ use tron_guardrails::GuardrailEngine;
 use tron_hooks::engine::HookEngine;
 use tron_llm::provider::Provider;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
+use tron_transcription::TranscriptionEngine;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_skills::registry::SkillRegistry;
 use tron_tools::registry::ToolRegistry;
@@ -46,6 +47,8 @@ pub struct RpcContext {
     pub server_start_time: Instant,
     /// Browser service for CDP-based browser automation (None = browser not available).
     pub browser_service: Option<Arc<tron_browser::service::BrowserService>>,
+    /// Native transcription engine (None = sidecar fallback).
+    pub transcription_engine: Option<Arc<TranscriptionEngine>>,
 }
 
 #[cfg(test)]

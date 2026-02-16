@@ -93,7 +93,24 @@ impl TronTool for RememberTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Remember".into(),
-            description: "Query past sessions, memory, events, and logs.".into(),
+            description: "Your memory and self-analysis tool. Query your internal database to recall past work, \
+review session history, and retrieve stored content.\n\n\
+Available actions:\n\
+- recall (default): Semantic memory search — \"find memories about X\". Uses vector similarity to find \
+the most relevant past work even when exact keywords don't match. ALWAYS provide a query.\n\
+- search: Keyword search via exact term matching in memory ledger entries.\n\
+- sessions: List recent sessions (title, tokens, cost)\n\
+- session: Get details for a specific session\n\
+- events: Get raw events (filter by session_id, type, turn)\n\
+- messages: Get conversation messages for a session\n\
+- tools: Get tool calls and results for a session\n\
+- logs: Get application logs\n\
+- stats: Get database statistics\n\
+- schema: List database tables and columns\n\
+- read_blob: Read stored content from blob storage\n\n\
+Search strategy: Use \"recall\" for finding relevant past work (semantic). Use \"search\" for exact \
+keyword matching. Start narrow (query + small limit), then broaden if needed.\n\
+Use read_blob to retrieve full content when tool results reference a blob_id.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({

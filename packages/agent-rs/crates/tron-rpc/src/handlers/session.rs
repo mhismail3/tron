@@ -41,6 +41,10 @@ impl MethodHandler for CreateSessionHandler {
             working_directory: working_dir.clone(),
         });
 
+        // Optimistically discover rules and memory so iOS can display pills
+        // immediately when a session opens (content is loaded later at prompt time).
+        emit_optimistic_context_events(ctx, &session_id, &working_dir);
+
         Ok(serde_json::json!({
             "sessionId": session_id,
             "model": model,
@@ -54,6 +58,122 @@ impl MethodHandler for CreateSessionHandler {
             "outputTokens": 0,
             "cost": 0.0,
         }))
+    }
+}
+
+/// Discover rules files and memory, then persist + broadcast notification events.
+///
+/// This runs at session.create time so iOS can show "Loaded N rules" / "Loaded memory"
+/// pills immediately. The actual content is loaded later when the first prompt is sent.
+fn emit_optimistic_context_events(ctx: &RpcContext, session_id: &str, working_dir: &str) {
+    use tron_context::loader::{ContextLoader, ContextLoaderConfig, load_global_rules};
+
+    let wd = std::path::Path::new(working_dir);
+
+    // Discover project rules files
+    let mut loader = ContextLoader::new(ContextLoaderConfig {
+        project_root: wd.to_path_buf(),
+        ..ContextLoaderConfig::default()
+    });
+    let loaded_ctx = loader.load(wd).ok();
+
+    // Build files array from project rules
+    let mut files_json = Vec::new();
+    let mut merged_size: usize = 0;
+
+    if let Some(ref ctx_result) = loaded_ctx {
+        for f in &ctx_result.files {
+            let size_bytes = f.content.len();
+            merged_size += size_bytes;
+            let relative_path = f.path.strip_prefix(wd)
+                .unwrap_or(&f.path)
+                .to_string_lossy()
+                .to_string();
+            let level = match f.level {
+                tron_context::loader::ContextLevel::Project => "project",
+                tron_context::loader::ContextLevel::Directory => "directory",
+            };
+            files_json.push(serde_json::json!({
+                "path": f.path.to_string_lossy(),
+                "relativePath": relative_path,
+                "level": level,
+                "depth": f.depth,
+                "sizeBytes": size_bytes,
+            }));
+        }
+    }
+
+    let project_file_count = loaded_ctx.as_ref().map_or(0, |ctx| ctx.files.len());
+
+    // Discover global rules (~/.tron/CLAUDE.md)
+    let home_dir = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+    let global_content = home_dir.as_deref().and_then(load_global_rules);
+
+    if let Some(ref content) = global_content {
+        let size_bytes = content.len();
+        merged_size += size_bytes;
+        let path = home_dir.as_ref()
+            .map(|h| h.join(".tron").join("CLAUDE.md"))
+            .unwrap_or_default();
+        files_json.push(serde_json::json!({
+            "path": path.to_string_lossy(),
+            "relativePath": ".tron/CLAUDE.md",
+            "level": "global",
+            "depth": 0,
+            "sizeBytes": size_bytes,
+        }));
+    }
+
+    let total_files = project_file_count + usize::from(global_content.is_some());
+
+    if total_files > 0 {
+        #[allow(clippy::cast_possible_truncation)]
+        let total = total_files as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let merged_tokens = (merged_size / 4) as u32;
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id,
+            event_type: tron_events::EventType::RulesLoaded,
+            payload: serde_json::json!({
+                "files": files_json,
+                "totalFiles": total,
+                "mergedTokens": merged_tokens,
+                "dynamicRulesCount": 0,
+            }),
+            parent_id: None,
+        });
+        let _ = ctx.orchestrator.broadcast().emit(TronEvent::RulesLoaded {
+            base: BaseEvent::now(session_id),
+            total_files: total,
+            dynamic_rules_count: 0,
+        });
+    }
+
+    // Discover memory (~/.tron/notes/MEMORY.md)
+    let memory_path = home_dir
+        .as_ref()
+        .map(|h| h.join(".tron").join("notes").join("MEMORY.md"));
+    let memory_size = memory_path
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len());
+
+    if let Some(size) = memory_size {
+        let tokens = size / 4;
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id,
+            event_type: tron_events::EventType::MemoryLoaded,
+            payload: serde_json::json!({
+                "count": 1,
+                "tokens": tokens,
+                "workspaceId": "",
+            }),
+            parent_id: None,
+        });
+        let _ = ctx.orchestrator.broadcast().emit(TronEvent::MemoryLoaded {
+            base: BaseEvent::now(session_id),
+            count: 1,
+        });
     }
 }
 
@@ -1185,5 +1305,114 @@ mod tests {
         assert_eq!(messages[2]["role"], "tool");
         assert_eq!(messages[2]["content"]["toolCallId"], "tc1");
         assert_eq!(messages[2]["content"]["content"], "file contents here");
+    }
+
+    // ── Optimistic context event tests ──
+
+    #[tokio::test]
+    async fn create_session_emits_rules_loaded_when_rules_exist() {
+        // Set up a temp dir with a CLAUDE.md file
+        let tmp = std::env::temp_dir().join(format!(
+            "tron-session-test-rules-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(tmp.join(".claude")).unwrap();
+        std::fs::write(tmp.join(".claude").join("CLAUDE.md"), "# Rules").unwrap();
+
+        let ctx = make_test_context();
+        let mut rx = ctx.orchestrator.subscribe();
+
+        let result = CreateSessionHandler
+            .handle(
+                Some(json!({"workingDirectory": tmp.to_string_lossy()})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let sid = result["sessionId"].as_str().unwrap();
+
+        // Check persisted rules.loaded event
+        let rules_events = ctx
+            .event_store
+            .get_events_by_type(sid, &["rules.loaded"], Some(10))
+            .unwrap();
+        assert_eq!(rules_events.len(), 1, "rules.loaded should be persisted once");
+
+        // Check broadcast events: session_created then rules_loaded
+        let e1 = rx.try_recv().unwrap();
+        assert_eq!(e1.event_type(), "session_created");
+        let e2 = rx.try_recv().unwrap();
+        assert_eq!(e2.event_type(), "rules_loaded");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn create_session_no_rules_event_when_no_rules() {
+        let tmp = std::env::temp_dir().join(format!(
+            "tron-session-test-norules-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let ctx = make_test_context();
+
+        let result = CreateSessionHandler
+            .handle(
+                Some(json!({"workingDirectory": tmp.to_string_lossy()})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let sid = result["sessionId"].as_str().unwrap();
+
+        let rules_events = ctx
+            .event_store
+            .get_events_by_type(sid, &["rules.loaded"], Some(10))
+            .unwrap();
+        assert!(
+            rules_events.is_empty(),
+            "no rules.loaded event when no rules files exist"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn create_session_rules_loaded_has_correct_total_files() {
+        let tmp = std::env::temp_dir().join(format!(
+            "tron-session-test-rcount-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(tmp.join(".claude")).unwrap();
+        std::fs::write(tmp.join(".claude").join("CLAUDE.md"), "# Rules").unwrap();
+
+        let ctx = make_test_context();
+
+        let result = CreateSessionHandler
+            .handle(
+                Some(json!({"workingDirectory": tmp.to_string_lossy()})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let sid = result["sessionId"].as_str().unwrap();
+        let rules_events = ctx
+            .event_store
+            .get_events_by_type(sid, &["rules.loaded"], Some(1))
+            .unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_str(&rules_events[0].payload).unwrap();
+        // At least 1 file (the project rules); may also have global rules
+        assert!(
+            payload["totalFiles"].as_u64().unwrap() >= 1,
+            "totalFiles should be >= 1, got: {}",
+            payload["totalFiles"]
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

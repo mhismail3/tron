@@ -319,6 +319,7 @@ struct ToolRegistryConfig {
     task_pool: tron_events::ConnectionPool,
     brave_api_key: Option<String>,
     browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>>,
+    apns_service: Option<Arc<tron_platform::apns::ApnsService>>,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -402,9 +403,16 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
         store_query,
     )));
 
-    // 13: NotifyApp (stub delegate — APNS not wired yet)
+    // 13: NotifyApp — real APNS when available, stub fallback
     let notify_delegate: Arc<dyn tron_tools::traits::NotifyDelegate> =
-        Arc::new(StubNotifyDelegate);
+        if let Some(ref apns) = config.apns_service {
+            Arc::new(providers::ApnsNotifyDelegate::new(
+                apns.clone(),
+                config.task_pool.clone(),
+            ))
+        } else {
+            Arc::new(StubNotifyDelegate)
+        };
     registry.register(Arc::new(tron_tools::ui::notify::NotifyAppTool::new(
         notify_delegate,
     )));
@@ -433,15 +441,8 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
-    // Initialize logging
-    tron_logging::init_subscriber("info");
-
-    // Load settings
-    let settings_path = tron_settings::loader::settings_path();
-    let settings = tron_settings::loader::load_settings_from_path(&settings_path)
-        .unwrap_or_default();
-
-    // Database (events + tasks share one SQLite file)
+    // Database (events + tasks share one SQLite file) — set up before logging
+    // so that tracing events are persisted from the start.
     let db_path = args.db_path.unwrap_or_else(Cli::default_db_path);
     ensure_parent_dir(&db_path)?;
     let db_str = db_path.to_string_lossy();
@@ -453,6 +454,22 @@ async fn main() -> Result<()> {
         tron_tasks::migrations::run_migrations(&conn)
             .context("Failed to run task migrations")?;
     }
+
+    // Initialize logging with SQLite persistence (dedicated connection, separate from pool).
+    // Must set WAL + busy_timeout to match pool connections — without busy_timeout,
+    // concurrent writes from the pool cause immediate SQLITE_BUSY errors.
+    let log_conn = rusqlite::Connection::open(&db_path)
+        .context("Failed to open logging DB connection")?;
+    log_conn
+        .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
+        .context("Failed to set logging connection pragmas")?;
+    let log_handle = tron_logging::init_subscriber_with_sqlite("info", log_conn);
+    let flush_task = tron_logging::spawn_flush_task(log_handle.clone());
+
+    // Load settings
+    let settings_path = tron_settings::loader::settings_path();
+    let settings = tron_settings::loader::load_settings_from_path(&settings_path)
+        .unwrap_or_default();
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
@@ -488,12 +505,31 @@ async fn main() -> Result<()> {
                 as Arc<dyn tron_tools::traits::BrowserDelegate>
         });
 
+    // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
+    let apns_service: Option<Arc<tron_platform::apns::ApnsService>> =
+        tron_platform::apns::load_apns_config().and_then(|apns_config| {
+            match tron_platform::apns::ApnsService::new(apns_config) {
+                Ok(svc) => {
+                    tracing::info!("APNS service initialized — push notifications enabled");
+                    Some(Arc::new(svc))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "APNS init failed — push notifications disabled");
+                    None
+                }
+            }
+        });
+    if apns_service.is_none() {
+        tracing::info!("No APNS config — push notifications disabled");
+    }
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
         task_pool: task_pool.clone(),
         brave_api_key,
         browser_delegate,
+        apns_service,
     });
 
     // Agent dependencies (LLM provider + tool factory)
@@ -546,6 +582,27 @@ async fn main() -> Result<()> {
         tracing::warn!("no auth found — agent execution disabled (sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)");
     }
 
+    // Native transcription engine (load if model files are cached)
+    let transcription_engine = {
+        let model_dir = tron_transcription::model::default_model_dir();
+        if tron_transcription::model::is_model_cached(&model_dir) {
+            tracing::info!("transcription model cached — loading native engine");
+            match tron_transcription::TranscriptionEngine::new(model_dir).await {
+                Ok(engine) => {
+                    tracing::info!("native transcription engine ready");
+                    Some(engine)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to load transcription engine, using sidecar fallback");
+                    None
+                }
+            }
+        } else {
+            tracing::info!("transcription model not cached — sidecar fallback (call transcribe.downloadModel to enable native)");
+            None
+        }
+    };
+
     // RPC context
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
@@ -557,6 +614,7 @@ async fn main() -> Result<()> {
         agent_deps,
         server_start_time: std::time::Instant::now(),
         browser_service: browser_service.clone(),
+        transcription_engine,
     };
 
     // Method registry
@@ -596,6 +654,10 @@ async fn main() -> Result<()> {
     tracing::info!("Shutting down...");
     server.shutdown().shutdown();
     let _ = handle.await;
+
+    // Flush remaining logs to SQLite and stop the periodic flush task
+    flush_task.abort();
+    log_handle.flush();
 
     tracing::info!("Shutdown complete");
     Ok(())
@@ -886,6 +948,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_service: None,
+            transcription_engine: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -961,6 +1024,7 @@ mod tests {
             task_pool: pool,
             brave_api_key: None,
             browser_delegate: None,
+            apns_service: None,
         }
     }
 
@@ -1044,6 +1108,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_service: None,
+            transcription_engine: None,
         };
 
         let mut registry = MethodRegistry::new();

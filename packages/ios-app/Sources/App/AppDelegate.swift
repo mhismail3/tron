@@ -26,7 +26,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         let tokenString = deviceToken.map { String(format: "%02x", $0) }.joined()
         self.deviceToken = tokenString
 
-        TronLogger.shared.info("Registered for remote notifications", category: .notification)
+        TronLogger.shared.info("Registered for remote notifications: token=\(tokenString.prefix(16))... (len=\(tokenString.count), bytes=\(deviceToken.count))", category: .notification)
 
         // Post notification for observers
         NotificationCenter.default.post(
@@ -60,8 +60,12 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let userInfo = notification.request.content.userInfo
-        TronLogger.shared.debug("Received notification in foreground: \(userInfo)", category: .notification)
+        let content = notification.request.content
+        let userInfo = content.userInfo
+        TronLogger.shared.info(
+            "APNS received in foreground: title=\(content.title), body=\(content.body.prefix(50)), userInfo=\(userInfo)",
+            category: .notification
+        )
 
         // Show banner and sound when app is in foreground, but NOT badge
         // (user is already in the app, no need to increment badge)
