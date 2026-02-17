@@ -17,7 +17,7 @@ use tron_core::events::{BaseEvent, TronEvent};
 use tron_events::{EventStore, EventType};
 use tron_guardrails::GuardrailEngine;
 use tron_hooks::engine::HookEngine;
-use tron_llm::provider::Provider;
+use tron_llm::provider::ProviderFactory;
 use tron_tools::errors::ToolError;
 use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::{
@@ -130,7 +130,7 @@ pub struct SubagentManager {
     session_manager: Arc<SessionManager>,
     event_store: Arc<EventStore>,
     broadcast: Arc<EventEmitter>,
-    provider: Arc<dyn Provider>,
+    provider_factory: Arc<dyn ProviderFactory>,
     tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
     guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
@@ -147,7 +147,7 @@ impl SubagentManager {
         session_manager: Arc<SessionManager>,
         event_store: Arc<EventStore>,
         broadcast: Arc<EventEmitter>,
-        provider: Arc<dyn Provider>,
+        provider_factory: Arc<dyn ProviderFactory>,
         guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
         hooks: Option<Arc<HookEngine>>,
     ) -> Self {
@@ -155,7 +155,7 @@ impl SubagentManager {
             session_manager,
             event_store,
             broadcast,
-            provider,
+            provider_factory,
             tool_factory: tokio::sync::OnceCell::new(),
             guardrails,
             hooks,
@@ -209,7 +209,7 @@ impl SubagentManager {
         let model = config
             .model
             .as_deref()
-            .unwrap_or(self.provider.model());
+            .unwrap_or(tron_llm::model_ids::SUBAGENT_MODEL);
         let task = config.task.clone();
 
         // 1. Create child session
@@ -277,7 +277,7 @@ impl SubagentManager {
         let session_mgr = self.session_manager.clone();
         let event_store = self.event_store.clone();
         let broadcast = self.broadcast.clone();
-        let provider = self.provider.clone();
+        let provider_factory = self.provider_factory.clone();
         let hooks = self.hooks.clone();
         let child_sid = child_session_id.clone();
         let max_turns = config.max_turns;
@@ -290,6 +290,22 @@ impl SubagentManager {
         let tracker_clone = tracker.clone();
 
         let _ = tokio::spawn(async move {
+            let provider = match provider_factory.create_for_model(&model_owned).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(model = %model_owned, error = %e, "subsession provider creation failed");
+                    *tracker_clone.result.lock() = Some(SubagentResult {
+                        session_id: child_sid.clone(),
+                        output: format!("Provider creation failed: {e}"),
+                        token_usage: None,
+                        duration_ms: tracker_clone.started_at.elapsed().as_millis() as u64,
+                        status: "failed".into(),
+                    });
+                    tracker_clone.done.notify_waiters();
+                    return;
+                }
+            };
+
             let child_broadcast = Arc::new(EventEmitter::new());
 
             let agent_config = AgentCfg {
@@ -476,7 +492,10 @@ impl SubagentSpawner for SubagentManager {
             message: "SubagentManager tool factory not initialized".into(),
         })?;
 
-        let model = config.model.as_deref().unwrap_or(self.provider.model());
+        let model = config
+            .model
+            .as_deref()
+            .unwrap_or(tron_llm::model_ids::SUBAGENT_MODEL);
         let task = config.task.clone();
         let parent_sid = config.parent_session_id.clone().unwrap_or_default();
 
@@ -530,7 +549,7 @@ impl SubagentSpawner for SubagentManager {
         let session_mgr = self.session_manager.clone();
         let event_store = self.event_store.clone();
         let broadcast = self.broadcast.clone();
-        let provider = self.provider.clone();
+        let provider_factory = self.provider_factory.clone();
         let tools = tool_factory();
         let guardrails = self.guardrails.clone();
         let hooks = self.hooks.clone();
@@ -544,6 +563,22 @@ impl SubagentSpawner for SubagentManager {
         let tracker_clone = tracker.clone();
 
         let _ = tokio::spawn(async move {
+            let provider = match provider_factory.create_for_model(&model_owned).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(model = %model_owned, error = %e, "subagent provider creation failed");
+                    *tracker_clone.result.lock() = Some(SubagentResult {
+                        session_id: child_sid.clone(),
+                        output: format!("Provider creation failed: {e}"),
+                        token_usage: None,
+                        duration_ms: tracker_clone.started_at.elapsed().as_millis() as u64,
+                        status: "failed".into(),
+                    });
+                    tracker_clone.done.notify_waiters();
+                    return;
+                }
+            };
+
             let child_broadcast = Arc::new(EventEmitter::new());
 
             // Build agent
@@ -1026,7 +1061,7 @@ mod tests {
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
     use tron_llm::models::types::ProviderType;
-    use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
+    use tron_llm::provider::{Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream};
 
     struct MockProvider;
     #[async_trait]
@@ -1096,19 +1131,58 @@ mod tests {
         (mgr, store, broadcast)
     }
 
+    struct MockProviderFactoryFor<P: Provider + Default + 'static>(std::marker::PhantomData<P>);
+    impl<P: Provider + Default + 'static> MockProviderFactoryFor<P> {
+        fn new() -> Self {
+            Self(std::marker::PhantomData)
+        }
+    }
+    #[async_trait]
+    impl<P: Provider + Default + 'static> ProviderFactory for MockProviderFactoryFor<P> {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            Ok(Arc::new(P::default()))
+        }
+    }
+
+    impl Default for MockProvider {
+        fn default() -> Self {
+            Self
+        }
+    }
+
+    impl Default for ErrorProvider {
+        fn default() -> Self {
+            Self
+        }
+    }
+
     fn make_subagent_manager(
         provider: Arc<dyn Provider>,
     ) -> (SubagentManager, Arc<SessionManager>, Arc<EventStore>) {
+        // Wrap the provider in a simple factory that always returns it
+        struct FixedProviderFactory(Arc<dyn Provider>);
+        #[async_trait]
+        impl ProviderFactory for FixedProviderFactory {
+            async fn create_for_model(
+                &self,
+                _model: &str,
+            ) -> Result<Arc<dyn Provider>, ProviderError> {
+                Ok(self.0.clone())
+            }
+        }
+
         let (mgr, store, broadcast) = make_manager_and_store();
         let manager = SubagentManager::new(
             mgr.clone(),
             store.clone(),
             broadcast,
-            provider,
+            Arc::new(FixedProviderFactory(provider)),
             None,
             None,
         );
-        // Set tool factory
         manager.set_tool_factory(Arc::new(ToolRegistry::new));
         (manager, mgr, store)
     }
@@ -1297,7 +1371,7 @@ mod tests {
             mgr.clone(),
             store.clone(),
             broadcast.clone(),
-            Arc::new(MockProvider),
+            Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
             None,
             None,
         );
@@ -1469,7 +1543,7 @@ mod tests {
             mgr.clone(),
             store.clone(),
             broadcast.clone(),
-            Arc::new(MockProvider),
+            Arc::new(MockProviderFactoryFor::<MockProvider>::new()),
             None,
             None,
         );

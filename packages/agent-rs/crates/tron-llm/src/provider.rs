@@ -7,6 +7,7 @@
 //! to process tokens incrementally regardless of the underlying API format.
 
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::Stream;
@@ -147,6 +148,20 @@ pub trait Provider: Send + Sync {
         context: &tron_core::messages::Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream>;
+}
+
+/// Factory for creating providers on demand.
+///
+/// Called once per prompt to create a fresh provider matching the session's
+/// current model. This ensures model switches take effect immediately and
+/// OAuth tokens are always current.
+#[async_trait]
+pub trait ProviderFactory: Send + Sync {
+    /// Create a provider for the given model ID.
+    ///
+    /// Returns `ProviderError::Auth` if no credentials are available for the
+    /// model's provider type.
+    async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError>;
 }
 
 /// Options for a provider stream request.
@@ -314,6 +329,20 @@ mod tests {
         assert_eq!(back.enable_thinking, Some(true));
         assert_eq!(back.thinking_budget, Some(10000));
         assert_eq!(back.reasoning_effort, Some("high".into()));
+    }
+
+    // ── ProviderFactory tests ──
+
+    #[test]
+    fn provider_factory_is_object_safe() {
+        fn assert_object_safe(_: &dyn ProviderFactory) {}
+        let _ = assert_object_safe;
+    }
+
+    #[test]
+    fn provider_factory_send_sync() {
+        fn assert_send_sync<T: Send + Sync + ?Sized>() {}
+        assert_send_sync::<dyn ProviderFactory>();
     }
 
     #[test]

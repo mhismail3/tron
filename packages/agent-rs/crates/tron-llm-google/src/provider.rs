@@ -313,32 +313,51 @@ impl GoogleProvider {
     }
 
     /// Build thinking configuration based on model family.
-    fn build_thinking_config(&self, is_gemini3: bool) -> Option<ThinkingConfig> {
+    ///
+    /// Per-request options (`thinking_level`, `gemini_thinking_budget`) override
+    /// provider-level config, allowing the turn runner to pass through the user's
+    /// reasoning level selection.
+    fn build_thinking_config(
+        &self,
+        is_gemini3: bool,
+        options: &ProviderStreamOptions,
+    ) -> Option<ThinkingConfig> {
         let model_info = get_gemini_model(&self.config.model);
         if model_info.is_some_and(|m| !m.supports_thinking) {
             return None;
         }
 
         if is_gemini3 {
-            let level = self
-                .config
-                .thinking_level
-                .as_ref()
-                .map_or_else(
-                    || {
-                        model_info
-                            .and_then(|m| m.default_thinking_level.as_ref())
-                            .map_or_else(|| "HIGH".to_string(), |l| l.to_api_string().to_string())
-                    },
-                    |l| l.to_api_string().to_string(),
-                );
+            // Per-request thinking_level overrides provider config
+            let level = if let Some(ref level_str) = options.thinking_level {
+                level_str.clone()
+            } else {
+                self.config
+                    .thinking_level
+                    .as_ref()
+                    .map_or_else(
+                        || {
+                            model_info
+                                .and_then(|m| m.default_thinking_level.as_ref())
+                                .map_or_else(
+                                    || "HIGH".to_string(),
+                                    |l| l.to_api_string().to_string(),
+                                )
+                        },
+                        |l| l.to_api_string().to_string(),
+                    )
+            };
             Some(ThinkingConfig {
                 include_thoughts: Some(true),
                 thinking_level: Some(level),
                 thinking_budget: None,
             })
         } else {
-            let budget = self.config.thinking_budget.unwrap_or(10_000);
+            // Per-request budget overrides provider config
+            let budget = options
+                .gemini_thinking_budget
+                .or(self.config.thinking_budget)
+                .unwrap_or(10_000);
             Some(ThinkingConfig {
                 include_thoughts: Some(true),
                 thinking_level: None,
@@ -472,7 +491,7 @@ impl GoogleProvider {
     ) -> ProviderResult<StreamEventStream> {
         let gen_config = self.build_generation_config(options);
         let is_gemini3 = is_gemini_3_model(&self.config.model);
-        let thinking_config = self.build_thinking_config(is_gemini3);
+        let thinking_config = self.build_thinking_config(is_gemini3, options);
 
         debug!(
             model = %self.config.model,
@@ -758,7 +777,8 @@ mod tests {
     #[test]
     fn thinking_config_gemini3_uses_level() {
         let provider = GoogleProvider::new(oauth_config());
-        let tc = provider.build_thinking_config(true).unwrap();
+        let opts = ProviderStreamOptions::default();
+        let tc = provider.build_thinking_config(true, &opts).unwrap();
         assert_eq!(tc.include_thoughts, Some(true));
         assert_eq!(tc.thinking_level.as_deref(), Some("HIGH"));
         assert!(tc.thinking_budget.is_none());
@@ -769,14 +789,29 @@ mod tests {
         let mut config = oauth_config();
         config.thinking_level = Some(crate::types::GeminiThinkingLevel::Low);
         let provider = GoogleProvider::new(config);
-        let tc = provider.build_thinking_config(true).unwrap();
+        let opts = ProviderStreamOptions::default();
+        let tc = provider.build_thinking_config(true, &opts).unwrap();
         assert_eq!(tc.thinking_level.as_deref(), Some("LOW"));
+    }
+
+    #[test]
+    fn thinking_config_gemini3_per_request_level_overrides_config() {
+        let mut config = oauth_config();
+        config.thinking_level = Some(crate::types::GeminiThinkingLevel::Low);
+        let provider = GoogleProvider::new(config);
+        let opts = ProviderStreamOptions {
+            thinking_level: Some("THINKING_MEDIUM".into()),
+            ..Default::default()
+        };
+        let tc = provider.build_thinking_config(true, &opts).unwrap();
+        assert_eq!(tc.thinking_level.as_deref(), Some("THINKING_MEDIUM"));
     }
 
     #[test]
     fn thinking_config_gemini25_uses_budget() {
         let provider = GoogleProvider::new(api_key_config());
-        let tc = provider.build_thinking_config(false).unwrap();
+        let opts = ProviderStreamOptions::default();
+        let tc = provider.build_thinking_config(false, &opts).unwrap();
         assert_eq!(tc.include_thoughts, Some(true));
         assert!(tc.thinking_level.is_none());
         assert_eq!(tc.thinking_budget, Some(10_000));
@@ -787,8 +822,22 @@ mod tests {
         let mut config = api_key_config();
         config.thinking_budget = Some(20_000);
         let provider = GoogleProvider::new(config);
-        let tc = provider.build_thinking_config(false).unwrap();
+        let opts = ProviderStreamOptions::default();
+        let tc = provider.build_thinking_config(false, &opts).unwrap();
         assert_eq!(tc.thinking_budget, Some(20_000));
+    }
+
+    #[test]
+    fn thinking_config_gemini25_per_request_budget_overrides_config() {
+        let mut config = api_key_config();
+        config.thinking_budget = Some(20_000);
+        let provider = GoogleProvider::new(config);
+        let opts = ProviderStreamOptions {
+            gemini_thinking_budget: Some(5_000),
+            ..Default::default()
+        };
+        let tc = provider.build_thinking_config(false, &opts).unwrap();
+        assert_eq!(tc.thinking_budget, Some(5_000));
     }
 
     #[test]
@@ -796,7 +845,8 @@ mod tests {
         let mut config = api_key_config();
         config.model = "gemini-2.5-flash-lite".into();
         let provider = GoogleProvider::new(config);
-        let tc = provider.build_thinking_config(false);
+        let opts = ProviderStreamOptions::default();
+        let tc = provider.build_thinking_config(false, &opts);
         assert!(tc.is_none());
     }
 
@@ -856,8 +906,9 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
         };
-        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let tc = provider.build_thinking_config(true);
+        let opts = ProviderStreamOptions::default();
+        let gc = provider.build_generation_config(&opts);
+        let tc = provider.build_thinking_config(true, &opts);
         let body = provider.build_oauth_request_body(&context, &gc, tc.as_ref());
 
         // Cloud Code Assist format: model in body
@@ -888,8 +939,9 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
         };
-        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let tc = provider.build_thinking_config(true);
+        let opts = ProviderStreamOptions::default();
+        let gc = provider.build_generation_config(&opts);
+        let tc = provider.build_thinking_config(true, &opts);
         let body = provider.build_oauth_request_body(&context, &gc, tc.as_ref());
 
         // Antigravity wrapper format
@@ -922,8 +974,9 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
         };
-        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let tc = provider.build_thinking_config(true);
+        let opts = ProviderStreamOptions::default();
+        let gc = provider.build_generation_config(&opts);
+        let tc = provider.build_thinking_config(true, &opts);
         let body = provider.build_oauth_request_body(&context, &gc, tc.as_ref());
 
         // No project ID → empty string (matches TS: `oauthAuth.projectId || ''`)
@@ -945,8 +998,9 @@ mod tests {
             task_context: None,
             dynamic_rules_context: None,
         };
-        let gc = provider.build_generation_config(&ProviderStreamOptions::default());
-        let tc = provider.build_thinking_config(false);
+        let opts = ProviderStreamOptions::default();
+        let gc = provider.build_generation_config(&opts);
+        let tc = provider.build_thinking_config(false, &opts);
         let body = provider.build_api_key_request_body(&context, &gc, tc.as_ref());
 
         assert!(body.get("contents").is_some());

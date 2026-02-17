@@ -141,6 +141,42 @@ fn known_models() -> Vec<Value> {
             "isLegacy": true,
             "releaseDate": "2025-05-14",
         }),
+        serde_json::json!({
+            "id": "claude-3-7-sonnet-20250219",
+            "name": "Sonnet 3.7",
+            "provider": "anthropic",
+            "contextWindow": 200_000,
+            "maxOutput": 64_000,
+            "supportsThinking": true,
+            "supportsImages": true,
+            "inputCostPerMillion": 3.0,
+            "outputCostPerMillion": 15.0,
+            "tier": "sonnet",
+            "family": "Claude 3.7",
+            "description": "Claude 3.7 Sonnet with extended thinking.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": true,
+            "releaseDate": "2025-02-19",
+        }),
+        serde_json::json!({
+            "id": "claude-3-haiku-20240307",
+            "name": "Haiku 3",
+            "provider": "anthropic",
+            "contextWindow": 200_000,
+            "maxOutput": 4_096,
+            "supportsThinking": false,
+            "supportsImages": true,
+            "inputCostPerMillion": 0.25,
+            "outputCostPerMillion": 1.25,
+            "tier": "haiku",
+            "family": "Claude 3",
+            "description": "Claude 3 Haiku — fast and compact.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": true,
+            "releaseDate": "2024-03-07",
+        }),
 
         // ── OpenAI Codex Models ──
         serde_json::json!({
@@ -444,8 +480,10 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-1-20250805"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-20250514"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-20250514"));
+        assert!(models.iter().any(|m| m["id"] == "claude-3-7-sonnet-20250219"));
+        assert!(models.iter().any(|m| m["id"] == "claude-3-haiku-20240307"));
         let anthropic_count = models.iter().filter(|m| m["provider"] == "anthropic").count();
-        assert_eq!(anthropic_count, 7);
+        assert_eq!(anthropic_count, 9);
     }
 
     #[tokio::test]

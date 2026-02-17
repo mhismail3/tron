@@ -22,16 +22,60 @@ pub enum ReasoningLevel {
     Medium,
     /// High reasoning effort.
     High,
+    /// Extra-high reasoning effort (Anthropic only, maps to High for other providers).
+    #[serde(alias = "xhigh", alias = "x_high")]
+    XHigh,
+    /// Maximum reasoning effort (Anthropic only, maps to High for other providers).
+    Max,
 }
 
 impl ReasoningLevel {
-    /// Convert to provider-specific effort string.
+    /// Convert to Anthropic effort string (budget_tokens style).
     pub fn as_effort_str(&self) -> &str {
         match self {
             Self::None => "none",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+
+    /// Convert to OpenAI reasoning_effort string.
+    /// OpenAI supports: "low", "medium", "high" only.
+    /// XHigh/Max clamp to "high".
+    pub fn as_openai_reasoning_effort(&self) -> &str {
+        match self {
+            Self::None => "low",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High | Self::XHigh | Self::Max => "high",
+        }
+    }
+
+    /// Convert to Google Gemini thinking level string.
+    /// Gemini supports: "THINKING_DISABLED", "THINKING_LOW", "THINKING_MEDIUM", "THINKING_HIGH".
+    /// XHigh/Max clamp to "THINKING_HIGH".
+    pub fn as_gemini_thinking_level(&self) -> &str {
+        match self {
+            Self::None => "THINKING_DISABLED",
+            Self::Low => "THINKING_LOW",
+            Self::Medium => "THINKING_MEDIUM",
+            Self::High | Self::XHigh | Self::Max => "THINKING_HIGH",
+        }
+    }
+
+    /// Parse from a string, case-insensitive.
+    pub fn from_str_loose(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "xhigh" | "x_high" | "x-high" => Some(Self::XHigh),
+            "max" => Some(Self::Max),
+            _ => Option::None,
         }
     }
 }
@@ -474,6 +518,24 @@ mod tests {
             serde_json::to_string(&ReasoningLevel::High).unwrap(),
             "\"high\""
         );
+        assert_eq!(
+            serde_json::to_string(&ReasoningLevel::XHigh).unwrap(),
+            "\"x_high\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ReasoningLevel::Max).unwrap(),
+            "\"max\""
+        );
+    }
+
+    #[test]
+    fn reasoning_level_serde_xhigh_aliases() {
+        // "xhigh" alias
+        let level: ReasoningLevel = serde_json::from_str("\"xhigh\"").unwrap();
+        assert_eq!(level, ReasoningLevel::XHigh);
+        // "x_high" canonical
+        let level: ReasoningLevel = serde_json::from_str("\"x_high\"").unwrap();
+        assert_eq!(level, ReasoningLevel::XHigh);
     }
 
     #[test]
@@ -482,6 +544,90 @@ mod tests {
         assert_eq!(ReasoningLevel::Low.as_effort_str(), "low");
         assert_eq!(ReasoningLevel::Medium.as_effort_str(), "medium");
         assert_eq!(ReasoningLevel::High.as_effort_str(), "high");
+        assert_eq!(ReasoningLevel::XHigh.as_effort_str(), "xhigh");
+        assert_eq!(ReasoningLevel::Max.as_effort_str(), "max");
+    }
+
+    #[test]
+    fn reasoning_level_as_openai_reasoning_effort() {
+        assert_eq!(ReasoningLevel::None.as_openai_reasoning_effort(), "low");
+        assert_eq!(ReasoningLevel::Low.as_openai_reasoning_effort(), "low");
+        assert_eq!(ReasoningLevel::Medium.as_openai_reasoning_effort(), "medium");
+        assert_eq!(ReasoningLevel::High.as_openai_reasoning_effort(), "high");
+        // XHigh and Max clamp to high for OpenAI
+        assert_eq!(ReasoningLevel::XHigh.as_openai_reasoning_effort(), "high");
+        assert_eq!(ReasoningLevel::Max.as_openai_reasoning_effort(), "high");
+    }
+
+    #[test]
+    fn reasoning_level_as_gemini_thinking_level() {
+        assert_eq!(
+            ReasoningLevel::None.as_gemini_thinking_level(),
+            "THINKING_DISABLED"
+        );
+        assert_eq!(
+            ReasoningLevel::Low.as_gemini_thinking_level(),
+            "THINKING_LOW"
+        );
+        assert_eq!(
+            ReasoningLevel::Medium.as_gemini_thinking_level(),
+            "THINKING_MEDIUM"
+        );
+        assert_eq!(
+            ReasoningLevel::High.as_gemini_thinking_level(),
+            "THINKING_HIGH"
+        );
+        // XHigh and Max clamp to THINKING_HIGH for Gemini
+        assert_eq!(
+            ReasoningLevel::XHigh.as_gemini_thinking_level(),
+            "THINKING_HIGH"
+        );
+        assert_eq!(
+            ReasoningLevel::Max.as_gemini_thinking_level(),
+            "THINKING_HIGH"
+        );
+    }
+
+    #[test]
+    fn reasoning_level_from_str_loose() {
+        assert_eq!(
+            ReasoningLevel::from_str_loose("none"),
+            Some(ReasoningLevel::None)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("LOW"),
+            Some(ReasoningLevel::Low)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("Medium"),
+            Some(ReasoningLevel::Medium)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("HIGH"),
+            Some(ReasoningLevel::High)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("xhigh"),
+            Some(ReasoningLevel::XHigh)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("x_high"),
+            Some(ReasoningLevel::XHigh)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("x-high"),
+            Some(ReasoningLevel::XHigh)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("max"),
+            Some(ReasoningLevel::Max)
+        );
+        assert_eq!(
+            ReasoningLevel::from_str_loose("MAX"),
+            Some(ReasoningLevel::Max)
+        );
+        assert_eq!(ReasoningLevel::from_str_loose("unknown"), Option::None);
+        assert_eq!(ReasoningLevel::from_str_loose(""), Option::None);
     }
 
     #[test]
@@ -491,6 +637,8 @@ mod tests {
             ReasoningLevel::Low,
             ReasoningLevel::Medium,
             ReasoningLevel::High,
+            ReasoningLevel::XHigh,
+            ReasoningLevel::Max,
         ] {
             let json = serde_json::to_string(level).unwrap();
             let back: ReasoningLevel = serde_json::from_str(&json).unwrap();

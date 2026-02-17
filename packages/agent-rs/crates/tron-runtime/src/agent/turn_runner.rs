@@ -110,6 +110,14 @@ pub async fn execute_turn(
             .reasoning_level
             .as_ref()
             .map(|r| r.as_effort_str().to_owned()),
+        reasoning_effort: run_context
+            .reasoning_level
+            .as_ref()
+            .map(|r| r.as_openai_reasoning_effort().to_owned()),
+        thinking_level: run_context
+            .reasoning_level
+            .as_ref()
+            .map(|r| r.as_gemini_thinking_level().to_owned()),
         ..Default::default()
     };
 

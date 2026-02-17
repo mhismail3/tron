@@ -5,6 +5,7 @@
 
 #![deny(unsafe_code)]
 
+mod provider_factory;
 mod providers;
 
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
 use tron_events::{ConnectionConfig, EventStore};
-use tron_llm::provider::Provider;
+use tron_llm::provider::ProviderFactory;
 use tron_rpc::context::{AgentDeps, RpcContext};
 use tron_rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
@@ -69,245 +70,6 @@ fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 fn auth_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".tron").join("auth.json")
-}
-
-/// Create an LLM provider from settings.
-///
-/// Auth priority (matching the TypeScript server exactly):
-/// - **Anthropic**: env OAuth token → multi-account OAuth → legacy OAuth → API key
-/// - **`OpenAI`**: env OAuth token → OAuth from auth.json → env API key → API key from auth.json
-/// - **Google**: env OAuth token → OAuth from auth.json → env API key → API key from auth.json
-///
-/// Returns `None` if no auth is available (server boots but prompts
-/// require authentication via settings RPC).
-async fn create_provider(settings: &tron_settings::TronSettings) -> Option<Arc<dyn Provider>> {
-    let model = &settings.server.default_model;
-    match settings.server.default_provider.as_str() {
-        "anthropic" => create_anthropic_provider(model, settings).await,
-        "openai" => create_openai_provider(model).await,
-        "google" => create_google_provider(model).await,
-        other => {
-            tracing::warn!(provider = other, "unknown provider in settings, agent execution disabled");
-            None
-        }
-    }
-}
-
-/// Create an Anthropic provider with OAuth-first auth.
-async fn create_anthropic_provider(
-    model: &str,
-    settings: &tron_settings::TronSettings,
-) -> Option<Arc<dyn Provider>> {
-    let path = auth_path();
-    let mut oauth_config = tron_auth::anthropic::default_config();
-    // Honor settings override for client_id
-    if !settings.api.anthropic.client_id.is_empty() {
-        oauth_config.client_id = settings.api.anthropic.client_id.clone();
-    }
-    let env_token = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
-    let preferred_account = settings.server.anthropic_account.as_deref();
-
-    let server_auth = match tron_auth::anthropic::load_server_auth(
-        &path,
-        &oauth_config,
-        env_token.as_deref(),
-        preferred_account,
-    )
-    .await
-    {
-        Ok(Some(auth)) => auth,
-        Ok(None) => {
-            // No OAuth tokens — fall back to ANTHROPIC_API_KEY env var
-            let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
-            tracing::info!("using ANTHROPIC_API_KEY env var (no OAuth tokens found)");
-            tron_auth::ServerAuth::from_api_key(api_key)
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to load Anthropic OAuth auth, trying API key");
-            let api_key = std::env::var("ANTHROPIC_API_KEY").ok()?;
-            tron_auth::ServerAuth::from_api_key(api_key)
-        }
-    };
-
-    let auth = match server_auth {
-        tron_auth::ServerAuth::OAuth {
-            access_token,
-            refresh_token,
-            expires_at,
-            account_label,
-        } => {
-            tracing::info!(
-                account = account_label.as_deref().unwrap_or("default"),
-                "Anthropic OAuth auth loaded"
-            );
-            tron_llm_anthropic::types::AnthropicAuth::OAuth {
-                tokens: tron_auth::OAuthTokens {
-                    access_token,
-                    refresh_token,
-                    expires_at,
-                },
-                account_label,
-            }
-        }
-        tron_auth::ServerAuth::ApiKey { api_key } => {
-            tracing::info!("Anthropic API key auth loaded");
-            tron_llm_anthropic::types::AnthropicAuth::ApiKey { api_key }
-        }
-    };
-
-    let config = tron_llm_anthropic::types::AnthropicConfig {
-        model: model.to_string(),
-        auth,
-        max_tokens: None,
-        base_url: None,
-        retry: None,
-        provider_settings: tron_llm_anthropic::types::AnthropicProviderSettings {
-            system_prompt_prefix: Some(settings.api.anthropic.system_prompt_prefix.clone()),
-            token_expiry_buffer_seconds: Some(settings.api.anthropic.token_expiry_buffer_seconds),
-            oauth_beta_headers: settings.api.anthropic.oauth_beta_headers.clone(),
-        },
-    };
-    Some(Arc::new(
-        tron_llm_anthropic::provider::AnthropicProvider::new(config),
-    ))
-}
-
-/// Create an `OpenAI` provider with OAuth-first auth.
-async fn create_openai_provider(model: &str) -> Option<Arc<dyn Provider>> {
-    let path = auth_path();
-    let env_token = std::env::var("OPENAI_OAUTH_TOKEN").ok();
-    let env_api_key = std::env::var("OPENAI_API_KEY").ok();
-
-    let server_auth = match tron_auth::openai::load_server_auth(
-        &path,
-        env_token.as_deref(),
-        env_api_key.as_deref(),
-    )
-    .await
-    {
-        Ok(Some(auth)) => auth,
-        Ok(None) => {
-            tracing::info!("no OpenAI auth found (set OPENAI_API_KEY or sign in via the app)");
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to load OpenAI auth");
-            return None;
-        }
-    };
-
-    // OpenAI Codex only supports OAuth — convert ApiKey to OAuth-style token
-    let tokens = match server_auth {
-        tron_auth::ServerAuth::OAuth {
-            access_token,
-            refresh_token,
-            expires_at,
-            ..
-        } => {
-            tracing::info!("OpenAI OAuth auth loaded");
-            tron_auth::OAuthTokens {
-                access_token,
-                refresh_token,
-                expires_at,
-            }
-        }
-        tron_auth::ServerAuth::ApiKey { api_key } => {
-            tracing::info!("OpenAI API key auth loaded (wrapped as bearer token)");
-            tron_auth::OAuthTokens {
-                access_token: api_key,
-                refresh_token: String::new(),
-                expires_at: i64::MAX,
-            }
-        }
-    };
-
-    let config = tron_llm_openai::types::OpenAIConfig {
-        model: model.to_string(),
-        auth: tron_llm_openai::types::OpenAIAuth::OAuth { tokens },
-        max_tokens: None,
-        temperature: None,
-        base_url: None,
-        reasoning_effort: None,
-        provider_settings: tron_llm_openai::types::OpenAIApiSettings::default(),
-    };
-    Some(Arc::new(
-        tron_llm_openai::provider::OpenAIProvider::new(config),
-    ))
-}
-
-/// Create a Google provider with OAuth-first auth.
-async fn create_google_provider(model: &str) -> Option<Arc<dyn Provider>> {
-    let path = auth_path();
-    let env_token = std::env::var("GOOGLE_OAUTH_TOKEN").ok();
-    let env_api_key = std::env::var("GOOGLE_API_KEY").ok();
-
-    let google_auth = match tron_auth::google::load_server_auth(
-        &path,
-        env_token.as_deref(),
-        env_api_key.as_deref(),
-    )
-    .await
-    {
-        Ok(Some(auth)) => auth,
-        Ok(None) => {
-            tracing::info!("no Google auth found (set GOOGLE_API_KEY or sign in via the app)");
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "failed to load Google auth");
-            return None;
-        }
-    };
-
-    let auth = match google_auth.auth {
-        tron_auth::ServerAuth::OAuth {
-            access_token,
-            refresh_token,
-            expires_at,
-            ..
-        } => {
-            let endpoint = google_auth
-                .endpoint
-                .map(|e| match e {
-                    tron_auth::GoogleOAuthEndpoint::CloudCodeAssist => {
-                        tron_llm_google::types::GoogleOAuthEndpoint::CloudCodeAssist
-                    }
-                    tron_auth::GoogleOAuthEndpoint::Antigravity => {
-                        tron_llm_google::types::GoogleOAuthEndpoint::Antigravity
-                    }
-                })
-                .unwrap_or_default();
-            tracing::info!(?endpoint, "Google OAuth auth loaded");
-            tron_llm_google::types::GoogleAuth::Oauth {
-                tokens: tron_auth::OAuthTokens {
-                    access_token,
-                    refresh_token,
-                    expires_at,
-                },
-                endpoint,
-                project_id: google_auth.project_id,
-            }
-        }
-        tron_auth::ServerAuth::ApiKey { api_key } => {
-            tracing::info!("Google API key auth loaded");
-            tron_llm_google::types::GoogleAuth::ApiKey { api_key }
-        }
-    };
-
-    let config = tron_llm_google::types::GoogleConfig {
-        model: model.to_string(),
-        auth,
-        max_tokens: None,
-        temperature: None,
-        base_url: None,
-        thinking_level: None,
-        thinking_budget: None,
-        safety_settings: None,
-        provider_settings: tron_llm_google::types::GoogleApiSettings::default(),
-    };
-    Some(Arc::new(
-        tron_llm_google::provider::GoogleProvider::new(config),
-    ))
 }
 
 /// Configuration for tool registry creation.
@@ -580,10 +342,20 @@ async fn main() -> Result<()> {
         embedding_controller: embedding_controller.clone(),
     });
 
-    // Agent dependencies (LLM provider + tool factory)
-    // OAuth is primary auth, API key is fallback — matching the TypeScript server.
-    let mut shared_subagent_manager: Option<Arc<SubagentManager>> = None;
-    let agent_deps = create_provider(&settings).await.map(|provider| {
+    // Agent dependencies (provider factory + tool factory)
+    // The factory creates a fresh provider per request by detecting the provider
+    // type from the model ID and loading auth from disk. This means model switches
+    // take effect immediately — no server restart needed.
+    let provider_factory: Arc<dyn ProviderFactory> =
+        Arc::new(provider_factory::DefaultProviderFactory::new(&settings));
+
+    // Verify auth is available for the default model at startup.
+    let startup_auth_ok = provider_factory
+        .create_for_model(&settings.server.default_model)
+        .await
+        .is_ok();
+
+    let (agent_deps, shared_subagent_manager) = if startup_auth_ok {
         tracing::info!(
             provider = settings.server.default_provider.as_str(),
             model = settings.server.default_model.as_str(),
@@ -595,7 +367,7 @@ async fn main() -> Result<()> {
             session_manager.clone(),
             event_store.clone(),
             orchestrator.broadcast().clone(),
-            provider.clone(),
+            provider_factory.clone(),
             None,
             None,
         ));
@@ -620,19 +392,19 @@ async fn main() -> Result<()> {
         // Break circular dep: SubagentManager needs tool_factory to spawn children
         subagent_manager.set_tool_factory(tool_factory.clone());
 
-        // Store for RpcContext
-        shared_subagent_manager = Some(subagent_manager);
-
-        AgentDeps {
-            provider,
-            tool_factory,
-            guardrails: None,
-            hooks: None,
-        }
-    });
-    if agent_deps.is_none() {
+        (
+            Some(AgentDeps {
+                provider_factory,
+                tool_factory,
+                guardrails: None,
+                hooks: None,
+            }),
+            Some(subagent_manager) as Option<Arc<SubagentManager>>,
+        )
+    } else {
         tracing::warn!("no auth found — agent execution disabled (sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)");
-    }
+        (None, None)
+    };
 
     // Native transcription engine (load if model files are cached)
     let transcription_engine = {
@@ -775,10 +547,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_provider_unknown_provider_returns_none() {
-        let mut settings = TronSettings::default();
-        settings.server.default_provider = "unknown".to_string();
-        assert!(create_provider(&settings).await.is_none());
+    async fn factory_unknown_model_returns_auth_error() {
+        // DefaultProviderFactory defaults unknown models to Anthropic,
+        // which returns an auth error when no credentials are available.
+        let settings = TronSettings::default();
+        let factory = provider_factory::DefaultProviderFactory::new(&settings)
+            .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"));
+        let result = factory.create_for_model("unknown-model").await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

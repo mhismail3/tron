@@ -413,7 +413,7 @@ impl MethodHandler for PromptHandler {
             let orchestrator = ctx.orchestrator.clone();
             let session_manager = ctx.session_manager.clone();
             let broadcast = orchestrator.broadcast().clone();
-            let provider = deps.provider.clone();
+            let provider_factory = deps.provider_factory.clone();
             let tool_factory = deps.tool_factory.clone();
             let guardrails = deps.guardrails.clone();
             let hooks = deps.hooks.clone();
@@ -507,6 +507,36 @@ impl MethodHandler for PromptHandler {
 
                 let working_dir_for_memory = working_dir.clone();
                 let model_for_error = model.clone();
+
+                // Create a fresh provider for the session's current model.
+                // This is the key fix: model switches now take effect because
+                // we create the provider here (not at startup).
+                let provider = match provider_factory.create_for_model(&model).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!(
+                            model = %model,
+                            error = %e,
+                            "failed to create provider for model"
+                        );
+                        let _ = broadcast.emit(tron_core::events::TronEvent::Error {
+                            base: tron_core::events::BaseEvent::now(&session_id_clone),
+                            error: e.to_string(),
+                            context: None,
+                            code: None,
+                            provider: None,
+                            category: Some(e.category().to_owned()),
+                            suggestion: None,
+                            retryable: Some(e.is_retryable()),
+                            status_code: None,
+                            error_type: Some(e.category().to_owned()),
+                            model: Some(model_for_error),
+                        });
+                        orchestrator.complete_run(&session_id_clone);
+                        return;
+                    }
+                };
+
                 let config = AgentConfig {
                     model,
                     working_directory: Some(working_dir),
@@ -637,15 +667,8 @@ impl MethodHandler for PromptHandler {
 
                 // Build RunContext with iOS params
                 let run_context = RunContext {
-                    reasoning_level: reasoning_level_clone.and_then(|s| {
-                        match s.as_str() {
-                            "low" => Some(tron_runtime::types::ReasoningLevel::Low),
-                            "medium" => Some(tron_runtime::types::ReasoningLevel::Medium),
-                            "high" => Some(tron_runtime::types::ReasoningLevel::High),
-                            "none" => Some(tron_runtime::types::ReasoningLevel::None),
-                            _ => None,
-                        }
-                    }),
+                    reasoning_level: reasoning_level_clone
+                        .and_then(|s| tron_runtime::types::ReasoningLevel::from_str_loose(&s)),
                     skill_context: {
                         // Merge skills + spells, deduplicate
                         let mut all_names = skills_clone.unwrap_or_default();
@@ -930,7 +953,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use crate::context::AgentDeps;
-    use crate::handlers::test_helpers::make_test_context;
+    use crate::handlers::test_helpers::{make_test_context, FixedProviderFactory};
     use futures::stream;
     use serde_json::json;
     use tron_core::content::AssistantContent;
@@ -1025,7 +1048,7 @@ mod tests {
     fn make_text_context(text: &str) -> RpcContext {
         let mut ctx = make_test_context();
         ctx.agent_deps = Some(AgentDeps {
-            provider: Arc::new(TextProvider::new(text)),
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(TextProvider::new(text)))),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,
@@ -1555,6 +1578,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prompt_accepts_xhigh_reasoning_level() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+        let result = PromptHandler
+            .handle(
+                Some(json!({"sessionId": sid, "prompt": "hi", "reasoningLevel": "xhigh"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["acknowledged"], true);
+    }
+
+    #[tokio::test]
+    async fn prompt_accepts_max_reasoning_level() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+        let result = PromptHandler
+            .handle(
+                Some(json!({"sessionId": sid, "prompt": "hi", "reasoningLevel": "max"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["acknowledged"], true);
+    }
+
+    #[tokio::test]
+    async fn prompt_with_xhigh_reasoning_runs_successfully() {
+        let ctx = make_text_context("Deep reasoning.");
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let result = PromptHandler
+            .handle(
+                Some(json!({
+                    "sessionId": sid,
+                    "prompt": "Think very hard",
+                    "reasoningLevel": "xhigh"
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["acknowledged"], true);
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(!ctx.orchestrator.has_active_run(&sid));
+    }
+
+    #[tokio::test]
     async fn prompt_with_skills_runs_successfully() {
         let ctx = make_text_context("Using skills.");
         let sid = ctx
@@ -1687,7 +1769,7 @@ mod tests {
 
         let mut ctx = make_test_context();
         ctx.agent_deps = Some(AgentDeps {
-            provider: Arc::new(ErrorProvider),
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(ErrorProvider))),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,
@@ -1728,7 +1810,7 @@ mod tests {
 
         let mut ctx = make_test_context();
         ctx.agent_deps = Some(AgentDeps {
-            provider: Arc::new(ErrorProvider),
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(ErrorProvider))),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,
@@ -1787,7 +1869,7 @@ mod tests {
 
         let mut ctx = make_test_context();
         ctx.agent_deps = Some(AgentDeps {
-            provider: Arc::new(RateLimitProvider),
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(RateLimitProvider))),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,

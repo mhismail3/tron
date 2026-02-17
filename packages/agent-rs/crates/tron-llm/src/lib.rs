@@ -47,7 +47,8 @@ pub use models::types::{
     ModelInfo, ModelTier, ProviderType,
 };
 pub use provider::{
-    Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
+    Provider, ProviderError, ProviderFactory, ProviderResult, ProviderStreamOptions,
+    StreamEventStream,
 };
 pub use retry::{with_provider_retry, StreamFactory, StreamRetryConfig};
 pub use sse::{parse_sse_data, parse_sse_lines, SseParserOptions};

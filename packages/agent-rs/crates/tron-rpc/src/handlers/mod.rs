@@ -235,7 +235,9 @@ pub(crate) mod test_helpers {
     use parking_lot::RwLock;
     use tron_events::EventStore;
     use tron_llm::models::types::ProviderType;
-    use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
+    use tron_llm::provider::{
+        Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+    };
     use tron_runtime::orchestrator::orchestrator::Orchestrator;
     use tron_runtime::orchestrator::session_manager::SessionManager;
     use tron_skills::registry::SkillRegistry;
@@ -264,10 +266,86 @@ pub(crate) mod test_helpers {
         }
     }
 
-    /// Build `AgentDeps` for testing with a mock provider.
+    /// Mock provider factory that creates `MockProvider` for any model.
+    pub struct MockProviderFactory;
+    #[async_trait]
+    impl ProviderFactory for MockProviderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            Ok(Arc::new(MockProvider))
+        }
+    }
+
+    /// Mock factory that returns model-aware providers (for model-switch tests).
+    pub struct ModelAwareMockFactory;
+    #[async_trait]
+    impl ProviderFactory for ModelAwareMockFactory {
+        async fn create_for_model(
+            &self,
+            model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            Ok(Arc::new(ModelAwareMockProvider(model.to_owned())))
+        }
+    }
+
+    /// A mock provider that remembers which model it was created for.
+    pub struct ModelAwareMockProvider(pub String);
+    #[async_trait]
+    impl Provider for ModelAwareMockProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            &self.0
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Other {
+                message: "mock".into(),
+            })
+        }
+    }
+
+    /// Mock factory that fails for unknown providers (auth error).
+    pub struct StrictMockFactory;
+    #[async_trait]
+    impl ProviderFactory for StrictMockFactory {
+        async fn create_for_model(
+            &self,
+            model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            if model.starts_with("mock") || model.starts_with("claude") {
+                Ok(Arc::new(MockProvider))
+            } else {
+                Err(ProviderError::Auth {
+                    message: format!("No auth for model '{model}'"),
+                })
+            }
+        }
+    }
+
+    /// Factory wrapper: always returns the same pre-built provider.
+    /// Useful in tests that need a specific provider instance.
+    pub struct FixedProviderFactory(pub Arc<dyn Provider>);
+    #[async_trait]
+    impl ProviderFactory for FixedProviderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// Build `AgentDeps` for testing with a mock provider factory.
     pub fn make_test_agent_deps() -> AgentDeps {
         AgentDeps {
-            provider: Arc::new(MockProvider),
+            provider_factory: Arc::new(MockProviderFactory),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,

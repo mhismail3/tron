@@ -8,7 +8,7 @@ use parking_lot::RwLock;
 use tron_events::{ConnectionPool, EventStore};
 use tron_guardrails::GuardrailEngine;
 use tron_hooks::engine::HookEngine;
-use tron_llm::provider::Provider;
+use tron_llm::provider::ProviderFactory;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::subagent_manager::SubagentManager;
 use tron_embeddings::EmbeddingController;
@@ -19,8 +19,8 @@ use tron_tools::registry::ToolRegistry;
 
 /// Dependencies needed to create and run agents.
 pub struct AgentDeps {
-    /// LLM provider.
-    pub provider: Arc<dyn Provider>,
+    /// Factory that creates a fresh LLM provider per request (reads current model + auth).
+    pub provider_factory: Arc<dyn ProviderFactory>,
     /// Factory that creates a fresh tool registry per agent.
     pub tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
     /// Guardrail engine (optional).
@@ -60,7 +60,10 @@ pub struct RpcContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handlers::test_helpers::{make_test_context, make_test_context_with_tasks, make_test_agent_deps};
+    use crate::handlers::test_helpers::{
+        make_test_agent_deps, make_test_context, make_test_context_with_tasks,
+        ModelAwareMockFactory, StrictMockFactory,
+    };
 
     #[test]
     fn context_has_server_start_time() {
@@ -194,16 +197,45 @@ mod tests {
     }
 
     #[test]
-    fn agent_deps_provider_accessible() {
+    fn agent_deps_provider_factory_accessible() {
         let deps = make_test_agent_deps();
-        assert_eq!(deps.provider.model(), "mock");
+        assert!(Arc::strong_count(&deps.provider_factory) >= 1);
+    }
+
+    #[tokio::test]
+    async fn agent_deps_factory_creates_provider() {
+        let deps = make_test_agent_deps();
+        let provider = deps
+            .provider_factory
+            .create_for_model("claude-opus-4-6")
+            .await
+            .unwrap();
+        assert_eq!(provider.model(), "mock");
+    }
+
+    #[tokio::test]
+    async fn model_aware_factory_returns_correct_model() {
+        let factory = ModelAwareMockFactory;
+        let p1 = factory.create_for_model("claude-opus-4-6").await.unwrap();
+        let p2 = factory.create_for_model("gpt-5.3-codex").await.unwrap();
+        assert_eq!(p1.model(), "claude-opus-4-6");
+        assert_eq!(p2.model(), "gpt-5.3-codex");
+    }
+
+    #[tokio::test]
+    async fn strict_factory_rejects_unknown_model() {
+        let factory = StrictMockFactory;
+        let result = factory.create_for_model("unknown-model").await;
+        match result {
+            Err(e) => assert_eq!(e.category(), "auth"),
+            Ok(_) => panic!("expected auth error"),
+        }
     }
 
     #[test]
     fn agent_deps_tool_factory_creates_registry() {
         let deps = make_test_agent_deps();
         let registry = (deps.tool_factory)();
-        // Empty registry from factory
         assert!(registry.is_empty());
     }
 

@@ -17,7 +17,9 @@ use tron_core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
 use tron_core::messages::TokenUsage;
 use tron_events::{ConnectionConfig, EventStore};
 use tron_llm::models::types::ProviderType;
-use tron_llm::provider::{Provider, ProviderError, ProviderStreamOptions, StreamEventStream};
+use tron_llm::provider::{
+    Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+};
 use tron_rpc::context::{AgentDeps, RpcContext};
 use tron_rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
@@ -176,6 +178,18 @@ impl Provider for SlowProvider {
     }
 }
 
+/// Factory that always returns the same provider instance.
+struct FixedProviderFactory(Arc<dyn Provider>);
+#[async_trait]
+impl ProviderFactory for FixedProviderFactory {
+    async fn create_for_model(
+        &self,
+        _model: &str,
+    ) -> Result<Arc<dyn Provider>, ProviderError> {
+        Ok(self.0.clone())
+    }
+}
+
 /// Boot a test server with an injected LLM provider.
 async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<TronServer>) {
     let pool = tron_events::new_in_memory(&ConnectionConfig::default()).unwrap();
@@ -199,7 +213,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         task_pool: Some(task_pool),
         settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
         agent_deps: Some(AgentDeps {
-            provider,
+            provider_factory: Arc::new(FixedProviderFactory(provider)),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,

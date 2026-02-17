@@ -199,9 +199,9 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "medium",
-            input_cost_per_million: 2.0,
-            output_cost_per_million: 16.0,
-            cache_read_cost_per_million: 0.2,
+            input_cost_per_million: 1.75,
+            output_cost_per_million: 14.0,
+            cache_read_cost_per_million: 0.175,
         },
     );
 
@@ -218,9 +218,9 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "high",
-            input_cost_per_million: 3.0,
-            output_cost_per_million: 24.0,
-            cache_read_cost_per_million: 0.3,
+            input_cost_per_million: 1.25,
+            output_cost_per_million: 10.0,
+            cache_read_cost_per_million: 0.125,
         },
     );
 
@@ -231,15 +231,15 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             short_name: "GPT-5.1 Mini",
             family: "GPT-5.1",
             tier: "standard",
-            context_window: 200_000,
-            max_output: 64_000,
+            context_window: 400_000,
+            max_output: 128_000,
             supports_tools: true,
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high"],
-            default_reasoning_level: "medium",
-            input_cost_per_million: 1.0,
-            output_cost_per_million: 8.0,
-            cache_read_cost_per_million: 0.1,
+            default_reasoning_level: "low",
+            input_cost_per_million: 0.25,
+            output_cost_per_million: 2.0,
+            cache_read_cost_per_million: 0.025,
         },
     );
 
@@ -526,8 +526,29 @@ mod tests {
     fn model_gpt_51_codex_mini() {
         let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
         assert_eq!(m.tier, "standard");
-        assert_eq!(m.max_output, 64_000);
+        assert_eq!(m.context_window, 400_000);
+        assert_eq!(m.max_output, 128_000);
         assert_eq!(m.reasoning_levels, &["low", "medium", "high"]);
+        assert_eq!(m.default_reasoning_level, "low");
+        assert_eq!(m.input_cost_per_million, 0.25);
+        assert_eq!(m.output_cost_per_million, 2.0);
+        assert_eq!(m.cache_read_cost_per_million, 0.025);
+    }
+
+    #[test]
+    fn model_gpt_52_codex_pricing() {
+        let m = get_openai_model("gpt-5.2-codex").unwrap();
+        assert_eq!(m.input_cost_per_million, 1.75);
+        assert_eq!(m.output_cost_per_million, 14.0);
+        assert_eq!(m.cache_read_cost_per_million, 0.175);
+    }
+
+    #[test]
+    fn model_gpt_51_codex_max_pricing() {
+        let m = get_openai_model("gpt-5.1-codex-max").unwrap();
+        assert_eq!(m.input_cost_per_million, 1.25);
+        assert_eq!(m.output_cost_per_million, 10.0);
+        assert_eq!(m.cache_read_cost_per_million, 0.125);
     }
 
     #[test]
