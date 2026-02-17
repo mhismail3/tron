@@ -34,6 +34,26 @@ fn known_models() -> Vec<Value> {
             "releaseDate": "2026-02-01",
         }),
         serde_json::json!({
+            "id": "claude-sonnet-4-6",
+            "name": "Sonnet 4.6",
+            "provider": "anthropic",
+            "contextWindow": 200_000,
+            "maxOutput": 64_000,
+            "supportsThinking": true,
+            "supportsImages": true,
+            "inputCostPerMillion": 3.0,
+            "outputCostPerMillion": 15.0,
+            "tier": "sonnet",
+            "family": "Claude 4.6",
+            "description": "Best combination of speed and intelligence — adaptive thinking, effort control.",
+            "supportsReasoning": true,
+            "reasoningLevels": ["low", "medium", "high", "max"],
+            "defaultReasoningLevel": "high",
+            "recommended": true,
+            "isLegacy": false,
+            "releaseDate": "2026-02-17",
+        }),
+        serde_json::json!({
             "id": "claude-opus-4-5-20251101",
             "name": "Opus 4.5",
             "provider": "anthropic",
@@ -65,8 +85,8 @@ fn known_models() -> Vec<Value> {
             "family": "Claude 4.5",
             "description": "Smart model for complex agents and coding. Best balance of intelligence, speed, and cost.",
             "supportsReasoning": false,
-            "recommended": true,
-            "isLegacy": false,
+            "recommended": false,
+            "isLegacy": true,
             "releaseDate": "2025-09-29",
         }),
         serde_json::json!({
@@ -491,6 +511,7 @@ mod tests {
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-6"));
+        assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-6"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-5-20251101"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-5-20250929"));
         assert!(models.iter().any(|m| m["id"] == "claude-haiku-4-5-20251001"));
@@ -500,7 +521,7 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "claude-3-7-sonnet-20250219"));
         assert!(models.iter().any(|m| m["id"] == "claude-3-haiku-20240307"));
         let anthropic_count = models.iter().filter(|m| m["provider"] == "anthropic").count();
-        assert_eq!(anthropic_count, 9);
+        assert_eq!(anthropic_count, 10);
     }
 
     #[tokio::test]

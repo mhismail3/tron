@@ -197,10 +197,30 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         supports_adaptive_thinking: true,
         supports_effort: true,
         supports_tools: true,
-        input_cost_per_million: 15.0,
-        output_cost_per_million: 75.0,
-        cache_read_cost_per_million: 1.5,
+        input_cost_per_million: 5.0,
+        output_cost_per_million: 25.0,
+        cache_read_cost_per_million: 0.5,
         description: "Most capable Claude model — adaptive thinking, effort levels",
+        recommended: true,
+        legacy: false,
+    });
+
+    // Claude Sonnet 4.6
+    let _ = m.insert("claude-sonnet-4-6", ClaudeModelInfo {
+        name: "Claude Sonnet 4.6",
+        short_name: "Sonnet 4.6",
+        family: "Claude 4.6",
+        context_window: 200_000,
+        max_output: 64_000,
+        supports_thinking: true,
+        supports_thinking_beta_headers: false,
+        supports_adaptive_thinking: true,
+        supports_effort: true,
+        supports_tools: true,
+        input_cost_per_million: 3.0,
+        output_cost_per_million: 15.0,
+        cache_read_cost_per_million: 0.3,
+        description: "Best combination of speed and intelligence — adaptive thinking",
         recommended: true,
         legacy: false,
     });
@@ -241,7 +261,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         cache_read_cost_per_million: 0.3,
         description: "Best balance of speed and intelligence",
         recommended: false,
-        legacy: false,
+        legacy: true,
     });
 
     let _ = m.insert("claude-haiku-4-5-20251001", ClaudeModelInfo {
@@ -255,9 +275,9 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         supports_adaptive_thinking: false,
         supports_effort: false,
         supports_tools: true,
-        input_cost_per_million: 0.8,
-        output_cost_per_million: 4.0,
-        cache_read_cost_per_million: 0.08,
+        input_cost_per_million: 1.0,
+        output_cost_per_million: 5.0,
+        cache_read_cost_per_million: 0.1,
         description: "Fast and affordable",
         recommended: false,
         legacy: false,
@@ -712,6 +732,24 @@ mod tests {
     }
 
     #[test]
+    fn get_claude_model_sonnet_46() {
+        let info = get_claude_model("claude-sonnet-4-6").unwrap();
+        assert_eq!(info.name, "Claude Sonnet 4.6");
+        assert_eq!(info.context_window, 200_000);
+        assert_eq!(info.max_output, 64_000);
+        assert!(info.supports_thinking);
+        assert!(!info.supports_thinking_beta_headers);
+        assert!(info.supports_adaptive_thinking);
+        assert!(info.supports_effort);
+        assert!(info.supports_tools);
+        assert_eq!(info.input_cost_per_million, 3.0);
+        assert_eq!(info.output_cost_per_million, 15.0);
+        assert_eq!(info.cache_read_cost_per_million, 0.3);
+        assert!(info.recommended);
+        assert!(!info.legacy);
+    }
+
+    #[test]
     fn get_claude_model_opus_45() {
         let info = get_claude_model("claude-opus-4-5-20251101").unwrap();
         assert_eq!(info.short_name, "Opus 4.5");
@@ -759,10 +797,11 @@ mod tests {
     fn all_claude_model_ids_contains_expected() {
         let ids = all_claude_model_ids();
         assert!(ids.contains(&"claude-opus-4-6"));
+        assert!(ids.contains(&"claude-sonnet-4-6"));
         assert!(ids.contains(&"claude-opus-4-5-20251101"));
         assert!(ids.contains(&"claude-sonnet-4-5-20250929"));
         assert!(ids.contains(&"claude-3-haiku-20240307"));
-        assert_eq!(ids.len(), 9); // 9 models total
+        assert_eq!(ids.len(), 10); // 10 models total
     }
 
     // -- SystemPromptBlock --

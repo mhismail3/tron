@@ -152,6 +152,14 @@ mod tests {
     }
 
     #[test]
+    fn detect_registry_lookup_anthropic_sonnet_46() {
+        assert_eq!(
+            detect_provider_from_model(CLAUDE_SONNET_4_6, false),
+            Some(ProviderType::Anthropic)
+        );
+    }
+
+    #[test]
     fn detect_registry_lookup_openai() {
         assert_eq!(
             detect_provider_from_model(GPT_5_3_CODEX, false),
@@ -238,6 +246,11 @@ mod tests {
         assert!(is_model_supported(CLAUDE_OPUS_4_6));
         assert!(is_model_supported(GPT_5_3_CODEX));
         assert!(is_model_supported(GEMINI_2_5_FLASH));
+    }
+
+    #[test]
+    fn supported_model_sonnet_46() {
+        assert!(is_model_supported("claude-sonnet-4-6"));
     }
 
     #[test]

@@ -13,6 +13,9 @@ pub const CLAUDE_OPUS_4_6: &str = "claude-opus-4-6";
 /// Claude Opus 4.5 (November 2025).
 pub const CLAUDE_OPUS_4_5: &str = "claude-opus-4-5-20251101";
 
+/// Claude Sonnet 4.6.
+pub const CLAUDE_SONNET_4_6: &str = "claude-sonnet-4-6";
+
 /// Claude Sonnet 4.5.
 pub const CLAUDE_SONNET_4_5: &str = "claude-sonnet-4-5-20250929";
 
@@ -91,6 +94,7 @@ pub const DEFAULT_GOOGLE_MODEL: &str = GEMINI_2_5_FLASH;
 /// All Anthropic model IDs.
 pub const ALL_ANTHROPIC_MODEL_IDS: &[&str] = &[
     CLAUDE_OPUS_4_6,
+    CLAUDE_SONNET_4_6,
     CLAUDE_OPUS_4_5,
     CLAUDE_SONNET_4_5,
     CLAUDE_HAIKU_4_5,
@@ -131,6 +135,7 @@ mod tests {
     fn anthropic_ids_not_empty() {
         assert!(!ALL_ANTHROPIC_MODEL_IDS.is_empty());
         assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&CLAUDE_OPUS_4_6));
+        assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&CLAUDE_SONNET_4_6));
         assert!(ALL_ANTHROPIC_MODEL_IDS.contains(&CLAUDE_HAIKU_4_5));
     }
 

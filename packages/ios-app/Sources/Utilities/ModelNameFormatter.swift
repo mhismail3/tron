@@ -299,6 +299,7 @@ extension String {
 private let modelDisplayNames: [String: String] = [
     // Claude 4.6 family
     "claude-opus-4-6": "Opus 4.6",
+    "claude-sonnet-4-6": "Sonnet 4.6",
 
     // Claude 4.5 family
     "claude-opus-4-5-20251101": "Opus 4.5",
