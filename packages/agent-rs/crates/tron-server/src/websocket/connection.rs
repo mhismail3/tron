@@ -1,5 +1,6 @@
 //! WebSocket client connection state.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -13,7 +14,7 @@ pub struct ClientConnection {
     /// Bound session ID (set after `session.create` / `session.resume`).
     session_id: Mutex<Option<String>>,
     /// Send channel to the client's WebSocket write task.
-    tx: mpsc::Sender<String>,
+    tx: mpsc::Sender<Arc<String>>,
     /// When this connection was established.
     pub connected_at: Instant,
     /// Whether the client has responded to the last ping.
@@ -26,7 +27,7 @@ pub struct ClientConnection {
 
 impl ClientConnection {
     /// Create a new connection.
-    pub fn new(id: String, tx: mpsc::Sender<String>) -> Self {
+    pub fn new(id: String, tx: mpsc::Sender<Arc<String>>) -> Self {
         let now = Instant::now();
         Self {
             id,
@@ -53,7 +54,7 @@ impl ClientConnection {
     ///
     /// Returns `false` if the channel is full or closed, and increments
     /// the dropped message counter.
-    pub fn send(&self, message: String) -> bool {
+    pub fn send(&self, message: Arc<String>) -> bool {
         if self.tx.try_send(message).is_ok() {
             true
         } else {
@@ -70,7 +71,7 @@ impl ClientConnection {
     /// Serialize a JSON value and send it to the client.
     pub fn send_json(&self, value: &serde_json::Value) -> bool {
         match serde_json::to_string(value) {
-            Ok(json) => self.send(json),
+            Ok(json) => self.send(Arc::new(json)),
             Err(_) => false,
         }
     }
@@ -103,7 +104,7 @@ impl ClientConnection {
 mod tests {
     use super::*;
 
-    fn make_connection() -> (ClientConnection, mpsc::Receiver<String>) {
+    fn make_connection() -> (ClientConnection, mpsc::Receiver<Arc<String>>) {
         let (tx, rx) = mpsc::channel(32);
         let conn = ClientConnection::new("conn_1".into(), tx);
         (conn, rx)
@@ -120,10 +121,10 @@ mod tests {
     #[tokio::test]
     async fn send_message_success() {
         let (conn, mut rx) = make_connection();
-        let sent = conn.send("hello".into());
+        let sent = conn.send(Arc::new("hello".into()));
         assert!(sent);
         let msg = rx.recv().await.unwrap();
-        assert_eq!(msg, "hello");
+        assert_eq!(&*msg, "hello");
     }
 
     #[tokio::test]
@@ -131,7 +132,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(32);
         let conn = ClientConnection::new("conn_2".into(), tx);
         drop(rx);
-        let sent = conn.send("hello".into());
+        let sent = conn.send(Arc::new("hello".into()));
         assert!(!sent);
     }
 
@@ -140,10 +141,10 @@ mod tests {
         let (tx, _rx) = mpsc::channel(1);
         let conn = ClientConnection::new("conn_3".into(), tx);
         // Fill the channel
-        let first = conn.send("msg1".into());
+        let first = conn.send(Arc::new("msg1".into()));
         assert!(first);
         // Channel is now full
-        let second = conn.send("msg2".into());
+        let second = conn.send(Arc::new("msg2".into()));
         assert!(!second);
     }
 
@@ -183,7 +184,7 @@ mod tests {
         let sent = conn.send_json(&value);
         assert!(sent);
         let msg = rx.recv().await.unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&*msg).unwrap();
         assert_eq!(parsed["key"], "value");
     }
 
@@ -219,12 +220,12 @@ mod tests {
     async fn send_multiple_messages() {
         let (conn, mut rx) = make_connection();
         for i in 0..5 {
-            let sent = conn.send(format!("msg_{i}"));
+            let sent = conn.send(Arc::new(format!("msg_{i}")));
             assert!(sent);
         }
         for i in 0..5 {
             let msg = rx.recv().await.unwrap();
-            assert_eq!(msg, format!("msg_{i}"));
+            assert_eq!(&*msg, &format!("msg_{i}"));
         }
     }
 
@@ -238,7 +239,7 @@ mod tests {
     #[tokio::test]
     async fn send_empty_string() {
         let (conn, mut rx) = make_connection();
-        let sent = conn.send(String::new());
+        let sent = conn.send(Arc::new(String::new()));
         assert!(sent);
         let msg = rx.recv().await.unwrap();
         assert!(msg.is_empty());

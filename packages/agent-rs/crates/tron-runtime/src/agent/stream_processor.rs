@@ -23,12 +23,12 @@ pub async fn process_stream(
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
 ) -> Result<StreamResult, RuntimeError> {
-    let mut text_acc = String::new();
-    let mut thinking_acc = String::new();
-    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut text_acc = String::with_capacity(4096);
+    let mut thinking_acc = String::with_capacity(2048);
+    let mut tool_calls: Vec<ToolCall> = Vec::with_capacity(4);
     let mut current_tool_id: Option<String> = None;
     let mut current_tool_name: Option<String> = None;
-    let mut current_tool_args = String::new();
+    let mut current_tool_args = String::with_capacity(512);
     let mut token_usage: Option<TokenUsage> = None;
     #[allow(unused_assignments)]
     let mut stop_reason = String::new();
@@ -263,7 +263,7 @@ fn build_message(
     _thinking_signature: Option<&str>,
     tool_calls: &[ToolCall],
 ) -> AssistantMessage {
-    let mut content: Vec<AssistantContent> = Vec::new();
+    let mut content: Vec<AssistantContent> = Vec::with_capacity(3);
 
     if !thinking.is_empty() {
         content.push(AssistantContent::Thinking {

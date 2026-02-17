@@ -135,8 +135,9 @@ pub async fn execute_turn(
     };
 
     // 5. Stream from Provider (with retry if configured)
-    let provider_name = provider.provider_type().as_str().to_owned();
-    counter!("provider_requests_total", "provider" => provider_name.clone()).increment(1);
+    let provider_name: &'static str = provider.provider_type().as_str();
+    let model_name: String = provider.model().to_owned();
+    counter!("provider_requests_total", "provider" => provider_name).increment(1);
     let request_start = Instant::now();
 
     let stream = if let Some(retry) = retry_config {
@@ -161,13 +162,13 @@ pub async fn execute_turn(
             Ok(s) => s,
             Err(e) => {
                 if let Some(ht) = health_tracker {
-                    ht.record_failure(&provider_name);
+                    ht.record_failure(provider_name);
                 }
                 let error_msg = e.to_string();
                 let category = e.category().to_owned();
                 let recoverable = e.is_retryable();
-                counter!("provider_errors_total", "provider" => provider_name.clone(), "status" => category.clone()).increment(1);
-                histogram!("provider_request_duration_seconds", "provider" => provider_name.clone())
+                counter!("provider_errors_total", "provider" => provider_name, "status" => category.clone()).increment(1);
+                histogram!("provider_request_duration_seconds", "provider" => provider_name)
                     .record(request_start.elapsed().as_secs_f64());
                 warn!(
                     provider = %provider_name,
@@ -202,15 +203,15 @@ pub async fn execute_turn(
         match stream_processor::process_stream(stream, session_id, emitter, cancel).await {
             Ok(r) => {
                 if let Some(ht) = health_tracker {
-                    ht.record_success(&provider_name);
+                    ht.record_success(provider_name);
                 }
                 r
             }
             Err(e) => {
                 if let Some(ht) = health_tracker {
-                    ht.record_failure(&provider_name);
+                    ht.record_failure(provider_name);
                 }
-                histogram!("provider_request_duration_seconds", "provider" => provider_name.clone())
+                histogram!("provider_request_duration_seconds", "provider" => provider_name)
                     .record(request_start.elapsed().as_secs_f64());
                 let error_msg = e.to_string();
                 error!(session_id, turn, error = %error_msg, "stream failed");
@@ -233,20 +234,20 @@ pub async fn execute_turn(
         };
 
     // Record provider request duration (covers full stream consumption)
-    histogram!("provider_request_duration_seconds", "provider" => provider_name.clone())
+    histogram!("provider_request_duration_seconds", "provider" => provider_name)
         .record(request_start.elapsed().as_secs_f64());
 
     // Record time-to-first-token if available
     if let Some(ttft) = stream_result.ttft_ms {
-        histogram!("provider_ttft_seconds", "provider" => provider_name.clone())
+        histogram!("provider_ttft_seconds", "provider" => provider_name)
             .record(ttft as f64 / 1000.0);
     }
 
     // Record LLM token counts
     if let Some(ref usage) = stream_result.token_usage {
-        counter!("llm_tokens_total", "provider" => provider_name.clone(), "direction" => "input")
+        counter!("llm_tokens_total", "provider" => provider_name, "direction" => "input")
             .increment(usage.input_tokens);
-        counter!("llm_tokens_total", "provider" => provider_name.clone(), "direction" => "output")
+        counter!("llm_tokens_total", "provider" => provider_name, "direction" => "output")
             .increment(usage.output_tokens);
     }
 
@@ -316,7 +317,7 @@ pub async fn execute_turn(
         has_tool_calls: !stream_result.tool_calls.is_empty(),
         tool_call_count: stream_result.tool_calls.len() as u32,
         token_record: token_record_json.clone(),
-        model: Some(provider.model().to_owned()),
+        model: Some(model_name.clone()),
     });
 
     // 8. Add assistant message to context — preserve metadata (fix: was None/None)
@@ -385,7 +386,7 @@ pub async fn execute_turn(
     // 9. Execute tool calls if present
     let mut tool_calls_executed = 0;
     let mut stop_turn_requested = false;
-    let mut all_activations: Vec<ActivatedRuleInfo> = Vec::new();
+    let mut all_activations: Vec<ActivatedRuleInfo> = Vec::with_capacity(8);
 
     if !stream_result.tool_calls.is_empty() {
         // Emit ToolUseBatch
@@ -549,7 +550,7 @@ pub async fn execute_turn(
         cost,
         stop_reason: Some(stream_result.stop_reason.clone()),
         context_limit: Some(context_manager.get_context_limit()),
-        model: Some(provider.model().to_owned()),
+        model: Some(model_name.clone()),
     });
 
     // Persist stream.turn_end for iOS reconstruction (turn tracking + tokenRecord)
@@ -593,8 +594,8 @@ pub async fn execute_turn(
     );
 
     // Record turn metrics
-    counter!("agent_turns_total", "model" => provider.model().to_owned()).increment(1);
-    histogram!("agent_turn_duration_seconds", "model" => provider.model().to_owned())
+    counter!("agent_turns_total", "model" => model_name.clone()).increment(1);
+    histogram!("agent_turn_duration_seconds", "model" => model_name.clone())
         .record(turn_start.elapsed().as_secs_f64());
 
     // Determine stop reason for this turn
@@ -622,7 +623,7 @@ pub async fn execute_turn(
         token_usage: stream_result.token_usage,
         stop_reason,
         stop_turn_requested,
-        model: Some(provider.model().to_owned()),
+        model: Some(model_name),
         latency_ms: duration,
         has_thinking,
         llm_stop_reason: Some(stream_result.stop_reason.clone()),
@@ -657,7 +658,8 @@ fn build_execution_waves(
         return vec![(0..tool_calls.len()).collect()];
     }
 
-    let mut waves: Vec<Vec<usize>> = vec![vec![]];
+    let mut waves: Vec<Vec<usize>> = Vec::with_capacity(4);
+    waves.push(Vec::new());
     let mut group_wave: HashMap<String, usize> = HashMap::new();
 
     for (i, mode) in modes.iter().enumerate() {

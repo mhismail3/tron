@@ -41,7 +41,7 @@ pub async fn run_ws_session(
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Create the client connection and send channel
-    let (send_tx, mut send_rx) = mpsc::channel::<String>(1024);
+    let (send_tx, mut send_rx) = mpsc::channel::<Arc<String>>(1024);
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
     let connection_start = std::time::Instant::now();
@@ -77,7 +77,8 @@ pub async fn run_ws_session(
                 msg = send_rx.recv() => {
                     match msg {
                         Some(text) => {
-                            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                            let s = Arc::unwrap_or_clone(text);
+                            if ws_tx.send(Message::Text(s.into())).await.is_err() {
                                 break;
                             }
                         }
@@ -104,12 +105,13 @@ pub async fn run_ws_session(
 
     // Process incoming messages
     while let Some(Ok(msg)) = ws_rx.next().await {
-        // Extract text from either Text or Binary frames (iOS sends binary)
-        let text = match msg {
-            Message::Text(ref t) => Some(t.to_string()),
-            Message::Binary(ref data) => {
+        // Extract text from either Text or Binary frames (iOS sends binary).
+        // Borrow from `msg` instead of allocating — the borrow outlives `handle_message`.
+        let text: Option<&str> = match &msg {
+            Message::Text(t) => Some(t.as_str()),
+            Message::Binary(data) => {
                 if let Ok(s) = std::str::from_utf8(data) {
-                    Some(s.to_string())
+                    Some(s)
                 } else {
                     info!(client_id, len = data.len(), "received non-UTF8 binary frame");
                     None
@@ -127,7 +129,7 @@ pub async fn run_ws_session(
 
         let Some(text) = text else { continue };
 
-        let result = handle_message(&text, &registry, &ctx).await;
+        let result = handle_message(text, &registry, &ctx).await;
 
         // Bind session on create/resume
         if (result.method == "session.create" || result.method == "session.resume")
@@ -145,7 +147,7 @@ pub async fn run_ws_session(
             }
         }
 
-        if !connection.send(result.response_json) {
+        if !connection.send(Arc::new(result.response_json)) {
             info!(client_id, "failed to enqueue response (channel full or closed)");
         }
     }

@@ -39,56 +39,54 @@ impl BroadcastManager {
     /// Broadcast an event to all connections bound to the given session.
     pub async fn broadcast_to_session(&self, session_id: &str, event: &RpcEvent) {
         let json = match serde_json::to_string(event) {
-            Ok(j) => j,
+            Ok(j) => Arc::new(j),
             Err(e) => {
                 warn!(event_type = event.event_type, error = %e, "failed to serialize event");
                 return;
             }
         };
         let conns = self.connections.read().await;
-        let recipients = conns
-            .values()
-            .filter(|c| c.session_id().as_deref() == Some(session_id))
-            .count();
+        let mut recipients = 0u32;
+        for conn in conns.values() {
+            if conn.session_id().as_deref() == Some(session_id) {
+                recipients += 1;
+                if !conn.send(Arc::clone(&json)) {
+                    counter!("ws_broadcast_drops_total").increment(1);
+                    let drops = conn.drop_count();
+                    warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
+                }
+            }
+        }
         debug!(
             event_type = event.event_type,
             session_id,
             recipients,
             "broadcast event to session"
         );
-        for conn in conns.values() {
-            if conn.session_id().as_deref() == Some(session_id)
-                && !conn.send(json.clone())
-            {
-                counter!("ws_broadcast_drops_total").increment(1);
-                let drops = conn.drop_count();
-                warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
-            }
-        }
     }
 
     /// Broadcast an event to all connections.
     pub async fn broadcast_all(&self, event: &RpcEvent) {
         let json = match serde_json::to_string(event) {
-            Ok(j) => j,
+            Ok(j) => Arc::new(j),
             Err(e) => {
                 warn!(event_type = event.event_type, error = %e, "failed to serialize event");
                 return;
             }
         };
         let conns = self.connections.read().await;
-        let recipients = conns.len();
-        debug!(
-            event_type = event.event_type,
-            recipients, "broadcast event to all"
-        );
         for conn in conns.values() {
-            if !conn.send(json.clone()) {
+            if !conn.send(Arc::clone(&json)) {
                 counter!("ws_broadcast_drops_total").increment(1);
                 let drops = conn.drop_count();
                 warn!(conn_id = %conn.id, total_drops = drops, "failed to send event to client (channel full)");
             }
         }
+        debug!(
+            event_type = event.event_type,
+            recipients = conns.len(),
+            "broadcast event to all"
+        );
     }
 
     /// Number of active connections.
@@ -121,7 +119,7 @@ mod tests {
     fn make_connection_with_rx(
         id: &str,
         session: Option<&str>,
-    ) -> (Arc<ClientConnection>, mpsc::Receiver<String>) {
+    ) -> (Arc<ClientConnection>, mpsc::Receiver<Arc<String>>) {
         let (tx, rx) = mpsc::channel(32);
         let conn = ClientConnection::new(id.into(), tx);
         if let Some(sid) = session {
@@ -275,7 +273,7 @@ mod tests {
         bm.broadcast_to_session("sess_a", &event).await;
 
         let msg = rx.recv().await.unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&*msg).unwrap();
         assert_eq!(parsed["type"], "agent.text_delta");
         assert_eq!(parsed["sessionId"], "sess_a");
         assert_eq!(parsed["data"]["text"], "hello");
@@ -328,5 +326,28 @@ mod tests {
         bm.broadcast_all(&event).await;
 
         assert!(rx1.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn broadcast_arc_shared_not_cloned() {
+        let bm = BroadcastManager::new();
+        let (c1, mut rx1) = make_connection_with_rx("c1", Some("s"));
+        let (c2, mut rx2) = make_connection_with_rx("c2", Some("s"));
+        bm.add(c1).await;
+        bm.add(c2).await;
+
+        let event = make_event("test.arc", Some("s"));
+        bm.broadcast_to_session("s", &event).await;
+
+        let msg1 = rx1.recv().await.unwrap();
+        let msg2 = rx2.recv().await.unwrap();
+        // Both receivers share the same Arc — same pointer, refcount == 2
+        assert!(Arc::ptr_eq(&msg1, &msg2));
+        assert_eq!(Arc::strong_count(&msg1), 2);
+        // Content is identical
+        assert_eq!(&*msg1, &*msg2);
+        // After dropping one, the other becomes sole owner
+        drop(msg2);
+        assert_eq!(Arc::strong_count(&msg1), 1);
     }
 }
