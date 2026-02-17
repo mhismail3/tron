@@ -434,4 +434,332 @@ struct EntityDetailParserTests {
         let chipData = ToolResultParser.parseTaskManager(from: tool)
         #expect(chipData?.entityDetail == nil)
     }
+
+    // MARK: - JSON Entity Parsing (Rust agent format)
+
+    @Test("Parses full task from JSON")
+    func testParseTaskFromJSON() {
+        let result = """
+        {
+          "id": "task_abc",
+          "title": "Add 2FA",
+          "status": "pending",
+          "priority": "high",
+          "description": "Implement two-factor auth",
+          "tags": ["security", "auth"],
+          "createdAt": "2026-02-11T10:00:00Z",
+          "updatedAt": "2026-02-11T10:00:00Z",
+          "blockedBy": ["task_dep1"],
+          "blocks": ["task_dep2"]
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create")
+
+        #expect(entity != nil)
+        #expect(entity?.entityType == .task)
+        #expect(entity?.title == "Add 2FA")
+        #expect(entity?.id == "task_abc")
+        #expect(entity?.status == "pending")
+        #expect(entity?.priority == "high")
+        #expect(entity?.description == "Implement two-factor auth")
+        #expect(entity?.tags == ["security", "auth"])
+        #expect(entity?.blockedBy == ["task_dep1"])
+        #expect(entity?.blocks == ["task_dep2"])
+    }
+
+    @Test("Parses delete confirmation from JSON")
+    func testParseDeleteConfirmationFromJSON() {
+        let result = """
+        {
+          "success": true,
+          "taskId": "task_abc"
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "delete")
+
+        #expect(entity != nil)
+        #expect(entity?.entityType == .task)
+        #expect(entity?.id == "task_abc")
+        #expect(entity?.status == "confirmed")
+    }
+
+    @Test("Parses delete project confirmation from JSON")
+    func testParseDeleteProjectConfirmationFromJSON() {
+        let result = """
+        {
+          "success": true,
+          "projectId": "proj_abc"
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "delete_project")
+
+        #expect(entity != nil)
+        #expect(entity?.entityType == .project)
+        #expect(entity?.id == "proj_abc")
+        #expect(entity?.status == "confirmed")
+    }
+
+    @Test("Parses log_time confirmation from JSON")
+    func testParseLogTimeConfirmationFromJSON() {
+        let result = """
+        {
+          "success": true,
+          "taskId": "task_abc",
+          "minutesLogged": 30
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "log_time")
+
+        #expect(entity != nil)
+        #expect(entity?.entityType == .task)
+        #expect(entity?.id == "task_abc")
+        #expect(entity?.status == "confirmed")
+    }
+
+    @Test("Parses project from JSON")
+    func testParseProjectFromJSON() {
+        let result = """
+        {
+          "id": "proj_abc",
+          "title": "Auth Overhaul",
+          "status": "active",
+          "description": "Rewrite the auth system",
+          "taskCount": 5,
+          "completedTaskCount": 2,
+          "createdAt": "2026-02-11T10:00:00Z"
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create_project")
+
+        #expect(entity != nil)
+        #expect(entity?.entityType == .project)
+        #expect(entity?.title == "Auth Overhaul")
+        #expect(entity?.id == "proj_abc")
+        #expect(entity?.status == "active")
+        #expect(entity?.description == "Rewrite the auth system")
+        #expect(entity?.taskCount == 5)
+        #expect(entity?.completedTaskCount == 2)
+    }
+
+    @Test("Parses area from JSON")
+    func testParseAreaFromJSON() {
+        let result = """
+        {
+          "id": "area_abc",
+          "title": "Security",
+          "status": "active",
+          "projectCount": 2,
+          "taskCount": 10,
+          "activeTaskCount": 4
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "create_area")
+
+        #expect(entity != nil)
+        #expect(entity?.entityType == .area)
+        #expect(entity?.title == "Security")
+        #expect(entity?.id == "area_abc")
+        #expect(entity?.status == "active")
+        #expect(entity?.projectCount == 2)
+        #expect(entity?.taskCount == 10)
+        #expect(entity?.activeTaskCount == 4)
+    }
+
+    @Test("Returns nil for JSON with no id or success")
+    func testReturnsNilForEmptyJSON() {
+        let result = """
+        {
+          "random": "stuff"
+        }
+        """
+
+        let entity = ToolResultParser.parseEntityDetail(from: result, action: "get")
+        #expect(entity == nil)
+    }
+
+    // MARK: - JSON List Parsing (Rust agent format)
+
+    @Test("Parses task list from JSON")
+    func testParseTaskListFromJSON() {
+        let result = """
+        {
+          "tasks": [
+            {"id": "task_1", "title": "Fix bug", "status": "pending", "priority": "high"},
+            {"id": "task_2", "title": "Add tests", "status": "in_progress", "priority": "medium"},
+            {"id": "task_3", "title": "Done task", "status": "completed"}
+          ],
+          "count": 3
+        }
+        """
+
+        let listResult = ToolResultParser.parseListResult(from: result, action: "list")
+
+        if case .tasks(let items) = listResult {
+            #expect(items.count == 3)
+            #expect(items[0].taskId == "task_1")
+            #expect(items[0].title == "Fix bug")
+            #expect(items[0].mark == " ")
+            #expect(items[0].priority == "high")
+            #expect(items[1].mark == ">")
+            #expect(items[1].priority == nil) // medium is suppressed
+            #expect(items[2].mark == "x")
+        } else {
+            Issue.record("Expected .tasks but got \(String(describing: listResult))")
+        }
+    }
+
+    @Test("Parses search results from JSON")
+    func testParseSearchResultsFromJSON() {
+        let result = """
+        {
+          "tasks": [
+            {"id": "task_1", "title": "Fix auth bug", "status": "pending"},
+            {"id": "task_2", "title": "Auth tests", "status": "completed"}
+          ],
+          "count": 2
+        }
+        """
+
+        let listResult = ToolResultParser.parseListResult(from: result, action: "search")
+
+        if case .searchResults(let items) = listResult {
+            #expect(items.count == 2)
+            #expect(items[0].itemId == "task_1")
+            #expect(items[0].title == "Fix auth bug")
+            #expect(items[0].status == "pending")
+        } else {
+            Issue.record("Expected .searchResults but got \(String(describing: listResult))")
+        }
+    }
+
+    @Test("Parses project list from JSON")
+    func testParseProjectListFromJSON() {
+        let result = """
+        {
+          "projects": [
+            {"id": "proj_1", "title": "Auth", "status": "active"},
+            {"id": "proj_2", "title": "UI", "status": "completed", "completedTaskCount": 5, "taskCount": 5}
+          ],
+          "count": 2
+        }
+        """
+
+        let listResult = ToolResultParser.parseListResult(from: result, action: "list_projects")
+
+        if case .projects(let items) = listResult {
+            #expect(items.count == 2)
+            #expect(items[0].projectId == "proj_1")
+            #expect(items[0].title == "Auth")
+            #expect(items[0].status == "active")
+            #expect(items[1].completedTasks == 5)
+            #expect(items[1].totalTasks == 5)
+        } else {
+            Issue.record("Expected .projects but got \(String(describing: listResult))")
+        }
+    }
+
+    @Test("Parses area list from JSON")
+    func testParseAreaListFromJSON() {
+        let result = """
+        {
+          "areas": [
+            {"id": "area_1", "title": "Security", "status": "active", "projectCount": 2, "taskCount": 10, "activeTaskCount": 3}
+          ],
+          "count": 1
+        }
+        """
+
+        let listResult = ToolResultParser.parseListResult(from: result, action: "list_areas")
+
+        if case .areas(let items) = listResult {
+            #expect(items.count == 1)
+            #expect(items[0].areaId == "area_1")
+            #expect(items[0].title == "Security")
+            #expect(items[0].projectCount == 2)
+            #expect(items[0].taskCount == 10)
+            #expect(items[0].activeTaskCount == 3)
+        } else {
+            Issue.record("Expected .areas but got \(String(describing: listResult))")
+        }
+    }
+
+    @Test("Parses empty task list from JSON")
+    func testParseEmptyTaskListFromJSON() {
+        let result = """
+        {
+          "tasks": [],
+          "count": 0
+        }
+        """
+
+        let listResult = ToolResultParser.parseListResult(from: result, action: "list")
+
+        if case .empty(let msg) = listResult {
+            #expect(msg == "No tasks found.")
+        } else {
+            Issue.record("Expected .empty but got \(String(describing: listResult))")
+        }
+    }
+
+    @Test("parseTaskManager attaches listResult for list action with JSON")
+    func testParseTaskManagerAttachesListResultForJSON() {
+        let result = """
+        {
+          "tasks": [
+            {"id": "task_1", "title": "Fix bug", "status": "pending"}
+          ],
+          "count": 1
+        }
+        """
+
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_json_list",
+            arguments: "{\"action\":\"list\"}",
+            status: .success,
+            result: result
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.listResult != nil)
+        #expect(chipData?.entityDetail == nil)
+        if case .tasks(let items) = chipData?.listResult {
+            #expect(items.count == 1)
+            #expect(items[0].taskId == "task_1")
+        } else {
+            Issue.record("Expected .tasks list result")
+        }
+    }
+
+    @Test("parseTaskManager attaches entityDetail for create action with JSON")
+    func testParseTaskManagerAttachesEntityDetailForJSON() {
+        let result = """
+        {
+          "id": "task_abc",
+          "title": "New task",
+          "status": "pending",
+          "priority": "medium"
+        }
+        """
+
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_json_create",
+            arguments: "{\"action\":\"create\",\"title\":\"New task\"}",
+            status: .success,
+            result: result
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.entityDetail != nil)
+        #expect(chipData?.entityDetail?.title == "New task")
+        #expect(chipData?.entityDetail?.id == "task_abc")
+        #expect(chipData?.listResult == nil)
+    }
 }

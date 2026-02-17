@@ -1827,12 +1827,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(messages[0].latencyMs, 2500)
     }
 
-    // MARK: - Metadata Stripping Tests
+    // MARK: - Turn Metadata Tests
 
-    func testMetadataStrippedFromIntermediateTurns() {
-        // Multi-turn session: metadata should only appear on the last assistant
-        // message before each user prompt and at the end of the conversation.
-        // This prevents noisy stats badges after every tool call on session resume.
+    func testMetadataOnLastMessageOfEveryTurn() {
+        // Reconstruction must match live streaming: every turn gets stats on its
+        // last message, regardless of content type (text, tool, or mixed).
         let tokenRecord1: [String: Any] = [
             "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
                         "rawInputTokens": 100, "rawOutputTokens": 50,
@@ -1866,7 +1865,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             sessionEvent(type: "message.user", payload: [
                 "content": AnyCodable("Do something")
             ], timestamp: timestamp(0), sequence: 1),
-            // Turn 1: text + tool (intermediate)
+            // Turn 1: text + tool (metadata goes on tool — the last item)
             sessionEvent(type: "tool.call", payload: [
                 "name": AnyCodable("Read"), "toolCallId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(1)
@@ -1882,7 +1881,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "turn": AnyCodable(1), "model": AnyCodable("claude-opus-4-6"),
                 "latency": AnyCodable(1000), "tokenRecord": AnyCodable(tokenRecord1)
             ], timestamp: timestamp(3), sequence: 4),
-            // Turn 2: tool only (intermediate)
+            // Turn 2: tool only (metadata goes on tool — the only item)
             sessionEvent(type: "tool.call", payload: [
                 "name": AnyCodable("Edit"), "toolCallId": AnyCodable("tc_2"),
                 "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(2)
@@ -1897,7 +1896,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "turn": AnyCodable(2), "model": AnyCodable("claude-opus-4-6"),
                 "latency": AnyCodable(2000), "tokenRecord": AnyCodable(tokenRecord2)
             ], timestamp: timestamp(6), sequence: 7),
-            // Turn 3: final text response
+            // Turn 3: text only (metadata goes on text — the only item)
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([
                     ["type": "text", "text": "All done!"]
@@ -1912,30 +1911,33 @@ final class UnifiedEventTransformerTests: XCTestCase {
         // user + text1 + tool1 + tool2 + text2 = 5 messages
         XCTAssertEqual(messages.count, 5)
 
-        // User message
+        // User message — no metadata
         if case .text(let t) = messages[0].content { XCTAssertEqual(t, "Do something") }
+        XCTAssertNil(messages[0].tokenRecord)
 
-        // Turn 1 text: metadata stripped (intermediate turn)
-        XCTAssertNil(messages[1].tokenRecord, "Intermediate turn text should not have metadata")
+        // Turn 1 text (not last in turn): no metadata
+        XCTAssertNil(messages[1].tokenRecord, "Non-last message in turn should not have metadata")
         XCTAssertNil(messages[1].model)
 
-        // Turn 1 tool: metadata stripped (intermediate turn)
-        XCTAssertNil(messages[2].tokenRecord, "Intermediate turn tool should not have metadata")
-        XCTAssertNil(messages[2].model)
+        // Turn 1 tool (LAST in turn): has metadata
+        XCTAssertNotNil(messages[2].tokenRecord, "Last message in turn should have metadata")
+        XCTAssertEqual(messages[2].model, "claude-opus-4-6")
+        XCTAssertEqual(messages[2].latencyMs, 1000)
 
-        // Turn 2 tool: metadata stripped (intermediate turn)
-        XCTAssertNil(messages[3].tokenRecord, "Intermediate turn tool should not have metadata")
-        XCTAssertNil(messages[3].model)
+        // Turn 2 tool (LAST and only in turn): has metadata
+        XCTAssertNotNil(messages[3].tokenRecord, "Last message in turn should have metadata")
+        XCTAssertEqual(messages[3].model, "claude-opus-4-6")
+        XCTAssertEqual(messages[3].latencyMs, 2000)
 
-        // Turn 3 text (last assistant message): metadata preserved
-        XCTAssertNotNil(messages[4].tokenRecord, "Last assistant message should keep metadata")
+        // Turn 3 text (LAST and only in turn): has metadata
+        XCTAssertNotNil(messages[4].tokenRecord, "Last message in turn should have metadata")
         XCTAssertEqual(messages[4].model, "claude-opus-4-6")
         XCTAssertEqual(messages[4].latencyMs, 500)
     }
 
-    func testMetadataPreservedBeforeUserMessage() {
-        // When a user sends a follow-up, the last assistant message before
-        // that user message should retain its metadata.
+    func testMetadataPreservedAcrossUserMessages() {
+        // Multi-exchange: metadata persists on assistant messages even when
+        // followed by another user message.
         let tokenRecord: [String: Any] = [
             "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
                         "rawInputTokens": 100, "rawOutputTokens": 50,
@@ -1962,11 +1964,10 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
 
-        // user + assistant + user = 3 messages
         XCTAssertEqual(messages.count, 3)
 
-        // Assistant message (last before user) should have metadata
-        XCTAssertNotNil(messages[1].tokenRecord, "Last assistant before user should keep metadata")
+        // Assistant message keeps metadata regardless of following user message
+        XCTAssertNotNil(messages[1].tokenRecord)
         XCTAssertEqual(messages[1].model, "claude-opus-4-6")
     }
 

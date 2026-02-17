@@ -167,6 +167,7 @@ struct ToolResultParser {
 
     /// Parse enriched tool result text into a structured EntityDetail snapshot.
     /// Returns nil for list/search actions or malformed input.
+    /// Supports both text format (`# Title\nID: ... | Status: ...`) and JSON format.
     static func parseEntityDetail(from result: String, action: String) -> EntityDetail? {
         // Skip list/search actions — no entity to parse
         let entityActions = Set(["create", "update", "get", "delete", "log_time",
@@ -182,6 +183,14 @@ struct ToolResultParser {
             entityType = .area
         } else {
             entityType = .task
+        }
+
+        // Try JSON parsing first (server may return raw JSON objects)
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{"),
+           let data = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return parseEntityDetailFromJSON(json, entityType: entityType)
         }
 
         let lines = result.components(separatedBy: "\n")
@@ -440,6 +449,103 @@ struct ToolResultParser {
         )
     }
 
+    /// Parse an EntityDetail from a JSON dictionary (raw server response).
+    /// Handles both full entity JSON and success-confirmation JSON (delete/log_time).
+    private static func parseEntityDetailFromJSON(_ json: [String: Any], entityType: EntityDetail.EntityType) -> EntityDetail? {
+        let title = json["title"] as? String ?? ""
+        var id = json["id"] as? String ?? ""
+        var status = json["status"] as? String ?? ""
+
+        // Handle success-confirmation responses: { "success": true, "taskId": "..." }
+        if id.isEmpty, json["success"] != nil {
+            id = (json["taskId"] as? String)
+                ?? (json["projectId"] as? String)
+                ?? (json["areaId"] as? String)
+                ?? ""
+            if status.isEmpty {
+                let success = json["success"] as? Bool ?? false
+                status = success ? "confirmed" : "failed"
+            }
+        }
+
+        guard !id.isEmpty, !status.isEmpty else { return nil }
+
+        let priority = json["priority"] as? String
+        let source = json["source"] as? String
+        let activeForm = json["activeForm"] as? String
+        let description = json["description"] as? String
+        let notes = json["notes"] as? String
+        let projectName = json["projectName"] as? String
+        let areaName = json["areaName"] as? String
+        let parentId = json["parentId"] as? String
+        let dueDate = json["dueDate"] as? String
+        let deferredUntil = json["deferredUntil"] as? String
+        let estimatedMinutes = json["estimatedMinutes"] as? Int
+        let actualMinutes = json["actualMinutes"] as? Int
+        let createdAt = json["createdAt"] as? String
+        let updatedAt = json["updatedAt"] as? String
+        let startedAt = json["startedAt"] as? String
+        let completedAt = json["completedAt"] as? String
+        let taskCount = json["taskCount"] as? Int
+        let completedTaskCount = json["completedTaskCount"] as? Int
+        let projectCount = json["projectCount"] as? Int
+        let activeTaskCount = json["activeTaskCount"] as? Int
+
+        let tags: [String]
+        if let tagArray = json["tags"] as? [String] {
+            tags = tagArray
+        } else {
+            tags = []
+        }
+
+        let blockedBy: [String]
+        if let arr = json["blockedBy"] as? [String] {
+            blockedBy = arr
+        } else {
+            blockedBy = []
+        }
+
+        let blocks: [String]
+        if let arr = json["blocks"] as? [String] {
+            blocks = arr
+        } else {
+            blocks = []
+        }
+
+        return EntityDetail(
+            entityType: entityType,
+            title: title,
+            id: id,
+            status: status,
+            priority: priority,
+            source: source,
+            activeForm: activeForm,
+            description: description.flatMap { $0.isEmpty ? nil : $0 },
+            notes: notes.flatMap { $0.isEmpty ? nil : $0 },
+            tags: tags,
+            projectName: projectName,
+            areaName: areaName,
+            parentId: parentId,
+            dueDate: dueDate,
+            deferredUntil: deferredUntil,
+            estimatedMinutes: estimatedMinutes,
+            actualMinutes: actualMinutes,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            startedAt: startedAt,
+            completedAt: completedAt,
+            taskCount: taskCount,
+            completedTaskCount: completedTaskCount,
+            projectCount: projectCount,
+            activeTaskCount: activeTaskCount,
+            subtasks: [],
+            tasks: [],
+            blockedBy: blockedBy,
+            blocks: blocks,
+            activity: []
+        )
+    }
+
     /// Parse a list item like "  [x] task_abc: Title [high]"
     private static func parseListItem(from line: String) -> EntityDetail.ListItem? {
         guard let match = line.firstMatch(of: /\[([x> b\-])\]\s+([\w_]+):\s+(.+)/) else { return nil }
@@ -480,6 +586,7 @@ struct ToolResultParser {
 
     /// Parse list/search result text into structured ListResult.
     /// Returns nil for entity actions or malformed input.
+    /// Supports both text format and JSON format (from Rust agent).
     static func parseListResult(from result: String, action: String) -> ListResult? {
         let listActions = Set(["list", "search", "list_projects", "list_areas"])
         guard listActions.contains(action) else { return nil }
@@ -487,6 +594,14 @@ struct ToolResultParser {
         // Handle empty results
         if result.hasPrefix("No ") && result.hasSuffix(" found.") {
             return .empty(result)
+        }
+
+        // Try JSON parsing first (Rust agent returns JSON arrays)
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{"),
+           let data = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return parseListResultFromJSON(json, action: action)
         }
 
         let lines = result.components(separatedBy: "\n")
@@ -500,6 +615,78 @@ struct ToolResultParser {
             return parseProjectList(lines: lines)
         case "list_areas":
             return parseAreaList(lines: lines)
+        default:
+            return nil
+        }
+    }
+
+    /// Parse a list result from a JSON dictionary (Rust agent response).
+    /// Handles: { "tasks": [...], "count": N }, { "projects": [...] }, { "areas": [...] }
+    private static func parseListResultFromJSON(_ json: [String: Any], action: String) -> ListResult? {
+        switch action {
+        case "list", "search":
+            guard let tasksArray = json["tasks"] as? [[String: Any]] else { return nil }
+            if tasksArray.isEmpty { return .empty("No tasks found.") }
+            if action == "search" {
+                let items = tasksArray.compactMap { task -> SearchResultItem? in
+                    guard let id = task["id"] as? String,
+                          let title = task["title"] as? String else { return nil }
+                    let status = task["status"] as? String ?? "pending"
+                    return SearchResultItem(itemId: id, title: title, status: status)
+                }
+                return items.isEmpty ? .empty("No tasks found.") : .searchResults(items)
+            } else {
+                let items = tasksArray.compactMap { task -> TaskListItem? in
+                    guard let id = task["id"] as? String,
+                          let title = task["title"] as? String else { return nil }
+                    let status = task["status"] as? String ?? "pending"
+                    let priority = task["priority"] as? String
+                    let dueDate = task["dueDate"] as? String
+                    let mark: String
+                    switch status {
+                    case "completed": mark = "x"
+                    case "in_progress": mark = ">"
+                    case "cancelled": mark = "-"
+                    case "backlog": mark = "b"
+                    default: mark = " "
+                    }
+                    return TaskListItem(taskId: id, title: title, mark: mark,
+                                        priority: priority == "medium" ? nil : priority,
+                                        dueDate: dueDate)
+                }
+                return items.isEmpty ? .empty("No tasks found.") : .tasks(items)
+            }
+
+        case "list_projects":
+            guard let projectsArray = json["projects"] as? [[String: Any]] else { return nil }
+            if projectsArray.isEmpty { return .empty("No projects found.") }
+            let items = projectsArray.compactMap { proj -> ProjectListItem? in
+                guard let id = proj["id"] as? String,
+                      let title = proj["title"] as? String else { return nil }
+                let status = proj["status"] as? String ?? "active"
+                let completed = proj["completedTasks"] as? Int ?? proj["completedTaskCount"] as? Int
+                let total = proj["totalTasks"] as? Int ?? proj["taskCount"] as? Int
+                return ProjectListItem(projectId: id, title: title, status: status,
+                                       completedTasks: completed, totalTasks: total)
+            }
+            return items.isEmpty ? .empty("No projects found.") : .projects(items)
+
+        case "list_areas":
+            guard let areasArray = json["areas"] as? [[String: Any]] else { return nil }
+            if areasArray.isEmpty { return .empty("No areas found.") }
+            let items = areasArray.compactMap { area -> AreaListItem? in
+                guard let id = area["id"] as? String,
+                      let title = area["title"] as? String else { return nil }
+                let status = area["status"] as? String ?? "active"
+                let projectCount = area["projectCount"] as? Int
+                let taskCount = area["taskCount"] as? Int
+                let activeCount = area["activeTaskCount"] as? Int
+                return AreaListItem(areaId: id, title: title, status: status,
+                                    projectCount: projectCount, taskCount: taskCount,
+                                    activeTaskCount: activeCount)
+            }
+            return items.isEmpty ? .empty("No areas found.") : .areas(items)
+
         default:
             return nil
         }
