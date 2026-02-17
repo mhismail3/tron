@@ -103,8 +103,8 @@ extension ChatMessage {
     }
 
     /// In-chat notification for memory ledger update
-    static func memoryUpdated(title: String, entryType: String) -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryUpdated(title: title, entryType: entryType))
+    static func memoryUpdated(title: String, entryType: String, eventId: String? = nil) -> ChatMessage {
+        ChatMessage(role: .system, content: .memoryUpdated(title: title, entryType: entryType, eventId: eventId))
     }
 
     /// Thinking block message (appears before the text response)

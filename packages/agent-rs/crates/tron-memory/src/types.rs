@@ -118,6 +118,19 @@ impl LedgerWriteResult {
         }
     }
 
+    /// Create a result indicating an error (not a normal skip).
+    #[must_use]
+    pub fn failed(reason: impl Into<String>) -> Self {
+        Self {
+            written: false,
+            reason: Some(reason.into()),
+            title: None,
+            entry_type: Some("error".to_string()),
+            event_id: None,
+            payload: None,
+        }
+    }
+
     /// Create a result indicating a successful write.
     #[must_use]
     pub fn written(
@@ -202,6 +215,25 @@ mod tests {
         };
         let json = serde_json::to_string(&opts).unwrap();
         assert!(json.contains("workingDirectory"));
+    }
+
+    #[test]
+    fn test_ledger_write_result_failed() {
+        let result = LedgerWriteResult::failed("database temporarily busy");
+        assert!(!result.written);
+        assert_eq!(result.entry_type.as_deref(), Some("error"));
+        assert_eq!(result.reason.as_deref(), Some("database temporarily busy"));
+        assert!(result.title.is_none());
+        assert!(result.event_id.is_none());
+        assert!(result.payload.is_none());
+    }
+
+    #[test]
+    fn test_ledger_write_result_failed_serde_includes_entry_type() {
+        let result = LedgerWriteResult::failed("db error");
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"entryType\":\"error\""));
+        assert!(json.contains("\"reason\":\"db error\""));
     }
 
     #[test]

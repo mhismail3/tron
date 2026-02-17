@@ -16,7 +16,7 @@ struct MessageBubble: View {
     var onCommandToolTap: ((CommandToolChipData) -> Void)?
     var onQueryAgentTap: ((QueryAgentChipData) -> Void)?
     var onWaitForAgentsTap: ((WaitForAgentsChipData) -> Void)?
-    var onMemoryUpdatedTap: ((String, String) -> Void)?
+    var onMemoryUpdatedTap: ((String, String, String?) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
     var onProviderErrorTap: ((ProviderErrorDetailData) -> Void)?
 
@@ -28,8 +28,7 @@ struct MessageBubble: View {
     private var hasMetadata: Bool {
         message.tokenRecord != nil ||
         message.shortModelName != nil ||
-        message.formattedLatency != nil ||
-        message.hasThinking == true
+        message.formattedLatency != nil
     }
 
     var body: some View {
@@ -82,8 +81,7 @@ struct MessageBubble: View {
                 MessageMetadataBadge(
                     tokenRecord: message.tokenRecord,
                     model: message.shortModelName,
-                    latency: message.formattedLatency,
-                    hasThinking: message.hasThinking
+                    latency: message.formattedLatency
                 )
             } else if let record = message.tokenRecord {
                 // Fallback to simple token badge for user messages

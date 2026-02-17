@@ -37,6 +37,8 @@ pub struct SessionFilter {
     pub workspace_path: Option<String>,
     /// Include archived sessions.
     pub include_archived: bool,
+    /// Exclude subagent sessions (spawning_session_id IS NULL).
+    pub exclude_subagents: bool,
     /// Maximum number of results.
     pub limit: Option<usize>,
 }
@@ -216,7 +218,7 @@ impl SessionManager {
         let opts = ListSessionsOptions {
             workspace_id: None,
             ended: if filter.include_archived { None } else { Some(false) },
-            exclude_subagents: None,
+            exclude_subagents: if filter.exclude_subagents { Some(true) } else { None },
             #[allow(clippy::cast_possible_wrap)]
             limit: filter.limit.map(|l| l as i64),
             offset: None,

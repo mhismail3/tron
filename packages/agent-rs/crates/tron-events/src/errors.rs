@@ -47,6 +47,10 @@ pub enum EventStoreError {
     /// Invalid operation on the event store.
     #[error("invalid operation: {0}")]
     InvalidOperation(String),
+
+    /// Internal error (e.g. poisoned lock).
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 /// Convenience type alias for event store results.

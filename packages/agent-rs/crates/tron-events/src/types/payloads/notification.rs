@@ -39,4 +39,17 @@ pub struct NotificationSubagentResultPayload {
     /// Warning message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+    /// Full output from the subagent (truncated for context injection).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+}
+
+/// Payload for `subagent.results_consumed` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentResultsConsumedPayload {
+    /// IDs of the notification.subagent_result events that were consumed.
+    pub consumed_event_ids: Vec<String>,
+    /// Number of results consumed.
+    pub count: usize,
 }

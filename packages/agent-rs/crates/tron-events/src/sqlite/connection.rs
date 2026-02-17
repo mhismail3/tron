@@ -19,9 +19,9 @@ pub type PooledConnection = r2d2::PooledConnection<SqliteConnectionManager>;
 /// Configuration for the connection pool.
 #[derive(Clone, Debug)]
 pub struct ConnectionConfig {
-    /// Maximum pool size (default: 4).
+    /// Maximum pool size (default: 16).
     pub pool_size: u32,
-    /// Busy timeout in milliseconds (default: 5000).
+    /// Busy timeout in milliseconds (default: 30000).
     pub busy_timeout_ms: u32,
     /// Cache size in KiB (default: 8192 = 8 MB).
     pub cache_size_kib: i64,
@@ -30,8 +30,8 @@ pub struct ConnectionConfig {
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
-            pool_size: 4,
-            busy_timeout_ms: 5000,
+            pool_size: 16,
+            busy_timeout_ms: 30_000,
             cache_size_kib: 8192,
         }
     }
@@ -144,14 +144,14 @@ mod tests {
     #[test]
     fn concurrent_connections() {
         let config = ConnectionConfig {
-            pool_size: 4,
+            pool_size: 16,
             ..Default::default()
         };
         let pool = new_in_memory(&config).unwrap();
 
         // Get multiple connections concurrently
-        let conns: Vec<_> = (0..4).map(|_| pool.get().unwrap()).collect();
-        assert_eq!(conns.len(), 4);
+        let conns: Vec<_> = (0..16).map(|_| pool.get().unwrap()).collect();
+        assert_eq!(conns.len(), 16);
     }
 
     #[test]
@@ -168,8 +168,8 @@ mod tests {
     #[test]
     fn default_config_values() {
         let config = ConnectionConfig::default();
-        assert_eq!(config.pool_size, 4);
-        assert_eq!(config.busy_timeout_ms, 5000);
+        assert_eq!(config.pool_size, 16);
+        assert_eq!(config.busy_timeout_ms, 30_000);
         assert_eq!(config.cache_size_kib, 8192);
     }
 }

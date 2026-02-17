@@ -144,6 +144,9 @@ final class ChatViewModel: ChatEventContext {
     /// Defensive timeout: if agent.ready never arrives after agent.complete, recover after 10s
     @ObservationIgnored
     var postProcessingTimeoutTask: Task<Void, Never>?
+    /// Defensive timeout: if memory_updated never arrives after memory_updating, remove spinner
+    @ObservationIgnored
+    var memoryUpdatingTimeoutTask: Task<Void, Never>?
 
     // MARK: - Sub-Managers
 

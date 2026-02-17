@@ -266,10 +266,53 @@ extension ChatViewModel {
         let inProgressMessage = ChatMessage.memoryUpdating()
         messages.append(inProgressMessage)
         memoryUpdatingInProgressMessageId = inProgressMessage.id
+
+        // Defensive timeout: if memory_updated never arrives, remove the spinner
+        memoryUpdatingTimeoutTask?.cancel()
+        let messageId = inProgressMessage.id
+        memoryUpdatingTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            guard let self, !Task.isCancelled else { return }
+            guard self.memoryUpdatingInProgressMessageId == messageId else { return }
+            self.logWarning("Memory updating timeout — memory_updated never arrived, removing spinner")
+            if let idx = MessageFinder.indexById(messageId, in: self.messages) {
+                _ = withAnimation(.smooth(duration: 0.3)) {
+                    self.messages.remove(at: idx)
+                }
+            }
+            self.memoryUpdatingInProgressMessageId = nil
+        }
     }
 
     func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
         logger.info("Memory updated: \(pluginResult.title) (type: \(pluginResult.entryType))", category: .events)
+
+        memoryUpdatingTimeoutTask?.cancel()
+        memoryUpdatingTimeoutTask = nil
+
+        // Error case: database or server error — show briefly, then auto-dismiss
+        if pluginResult.entryType == "error" {
+            if let inProgressId = memoryUpdatingInProgressMessageId,
+               let index = MessageFinder.indexById(inProgressId, in: messages) {
+                withAnimation(.smooth(duration: 0.35)) {
+                    messages[index].content = .memoryUpdated(
+                        title: pluginResult.title.isEmpty ? "Memory update failed" : pluginResult.title,
+                        entryType: "error"
+                    )
+                }
+                let messageId = inProgressId
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(5))
+                    if let idx = MessageFinder.indexById(messageId, in: messages) {
+                        _ = withAnimation(.smooth(duration: 0.3)) {
+                            messages.remove(at: idx)
+                        }
+                    }
+                }
+            }
+            memoryUpdatingInProgressMessageId = nil
+            return
+        }
 
         // "skipped" means ledger write determined nothing worth retaining
         // Transition spinner → "Nothing new to retain" briefly, then auto-remove
@@ -297,14 +340,15 @@ extension ChatViewModel {
         if let inProgressId = memoryUpdatingInProgressMessageId,
            let index = MessageFinder.indexById(inProgressId, in: messages) {
             withAnimation(.smooth(duration: 0.35)) {
-                messages[index].content = .memoryUpdated(title: pluginResult.title, entryType: pluginResult.entryType)
+                messages[index].content = .memoryUpdated(title: pluginResult.title, entryType: pluginResult.entryType, eventId: pluginResult.eventId)
             }
             memoryUpdatingInProgressMessageId = nil
         } else {
             // No in-progress pill (e.g. reconstruction) — just append
             let message = ChatMessage.memoryUpdated(
                 title: pluginResult.title,
-                entryType: pluginResult.entryType
+                entryType: pluginResult.entryType,
+                eventId: pluginResult.eventId
             )
             messages.append(message)
         }
@@ -374,6 +418,8 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
+        memoryUpdatingTimeoutTask?.cancel()
+        memoryUpdatingTimeoutTask = nil
         memoryUpdatingInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
@@ -418,6 +464,8 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
+        memoryUpdatingTimeoutTask?.cancel()
+        memoryUpdatingTimeoutTask = nil
         memoryUpdatingInProgressMessageId = nil
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(

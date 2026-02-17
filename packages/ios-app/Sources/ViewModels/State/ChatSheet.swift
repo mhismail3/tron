@@ -13,6 +13,7 @@ struct MemoryDetailData: Equatable {
     let title: String
     let entryType: String
     let sessionId: String
+    let eventId: String?
 }
 
 /// Data for provider error detail sheet

@@ -229,6 +229,7 @@ mod tests {
             mode: crate::traits::SubagentMode::InProcess,
             blocking: false,
             model: None,
+            parent_session_id: None,
             system_prompt: None,
             working_directory: "/tmp".into(),
             max_turns: 5,

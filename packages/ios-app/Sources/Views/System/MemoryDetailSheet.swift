@@ -8,6 +8,7 @@ struct MemoryDetailSheet: View {
     let title: String
     let entryType: String
     let sessionId: String
+    let eventId: String?
     let rpcClient: RPCClient
     @Environment(\.dismiss) private var dismiss
 
@@ -61,8 +62,10 @@ struct MemoryDetailSheet: View {
                 types: ["memory.ledger"],
                 limit: 10
             )
-            // Find the matching entry by title (most recent first)
-            if let match = result.events.last(where: {
+            // Match by eventId first (precise), then fall back to title match
+            if let eventId, let match = result.events.first(where: { $0.id == eventId }) {
+                ledgerPayload = match.payload
+            } else if let match = result.events.last(where: {
                 ($0.payload["title"]?.value as? String) == title
             }) {
                 ledgerPayload = match.payload

@@ -459,15 +459,22 @@ struct MemoryNotificationView: View {
 
     private let iconSize: CGFloat = TronTypography.sizeBody2
     private var isSkipped: Bool { entryType == "skipped" }
+    private var isError: Bool { entryType == "error" }
+    private var tintColor: Color { isError ? .orange : .purple }
 
     var body: some View {
-        NotificationPill(tint: .purple, interactive: true, onTap: isInProgress || isSkipped ? nil : onTap) {
+        NotificationPill(tint: tintColor, interactive: !isError, onTap: isInProgress || isSkipped || isError ? nil : onTap) {
             HStack(spacing: 8) {
                 ZStack {
                     if isInProgress {
                         ProgressView()
                             .scaleEffect(0.6)
                             .tint(.purple)
+                            .transition(.blurReplace)
+                    } else if isError {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(TronTypography.codeSM)
+                            .foregroundStyle(.orange)
                             .transition(.blurReplace)
                     } else {
                         Image(systemName: isSkipped ? "brain" : "brain.fill")
@@ -478,12 +485,19 @@ struct MemoryNotificationView: View {
                 }
                 .frame(width: iconSize, height: iconSize)
 
-                Text(isInProgress ? "Retaining memory..." : isSkipped ? "Nothing new to retain" : "Memory updated")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.purple.opacity(isSkipped ? 0.5 : 0.9))
-                    .contentTransition(.interpolate)
+                if isError {
+                    Text(title.isEmpty ? "Memory update failed" : title)
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(.orange.opacity(0.9))
+                        .contentTransition(.interpolate)
+                } else {
+                    Text(isInProgress ? "Retaining memory..." : isSkipped ? "Nothing new to retain" : "Memory updated")
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(.purple.opacity(isSkipped ? 0.5 : 0.9))
+                        .contentTransition(.interpolate)
+                }
 
-                if !isInProgress && !isSkipped && !title.isEmpty {
+                if !isInProgress && !isSkipped && !isError && !title.isEmpty {
                     Text("\u{2022}")
                         .font(TronTypography.badge)
                         .foregroundStyle(.purple.opacity(0.5))
@@ -498,6 +512,7 @@ struct MemoryNotificationView: View {
             }
             .animation(.smooth(duration: 0.35), value: isInProgress)
             .animation(.smooth(duration: 0.35), value: isSkipped)
+            .animation(.smooth(duration: 0.35), value: isError)
         }
     }
 }

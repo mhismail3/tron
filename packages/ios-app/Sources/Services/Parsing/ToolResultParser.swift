@@ -143,12 +143,14 @@ struct ToolResultParser {
                 fullResult: nil,
                 arguments: tool.arguments,
                 entityDetail: nil,
+                listResult: nil,
                 status: .running
             )
         }
 
         let chipSummary = taskManagerChipSummary(action: action, title: taskTitle, result: tool.result)
         let entityDetail = tool.result.flatMap { parseEntityDetail(from: $0, action: action) }
+        let listResult = tool.result.flatMap { parseListResult(from: $0, action: action) }
 
         return TaskManagerChipData(
             toolCallId: tool.toolCallId,
@@ -158,6 +160,7 @@ struct ToolResultParser {
             fullResult: tool.result,
             arguments: tool.arguments,
             entityDetail: entityDetail,
+            listResult: listResult,
             status: .completed
         )
     }
@@ -471,6 +474,142 @@ struct ToolResultParser {
                      "Time:", "Tags:", "Source:", "Created:", "Updated:", "Started:", "Completed:",
                      "Blocked by:", "Blocks:", "ID:"]
         return keys.contains(where: { line.hasPrefix($0) })
+    }
+
+    // MARK: - List Result Parsing
+
+    /// Parse list/search result text into structured ListResult.
+    /// Returns nil for entity actions or malformed input.
+    static func parseListResult(from result: String, action: String) -> ListResult? {
+        let listActions = Set(["list", "search", "list_projects", "list_areas"])
+        guard listActions.contains(action) else { return nil }
+
+        // Handle empty results
+        if result.hasPrefix("No ") && result.hasSuffix(" found.") {
+            return .empty(result)
+        }
+
+        let lines = result.components(separatedBy: "\n")
+
+        switch action {
+        case "list":
+            return parseTaskList(lines: lines)
+        case "search":
+            return parseSearchResults(lines: lines)
+        case "list_projects":
+            return parseProjectList(lines: lines)
+        case "list_areas":
+            return parseAreaList(lines: lines)
+        default:
+            return nil
+        }
+    }
+
+    /// Parse task list: "Tasks (N):\n[mark] id: title (P:priority, due:date)"
+    private static func parseTaskList(lines: [String]) -> ListResult? {
+        var items: [TaskListItem] = []
+        for line in lines.dropFirst() {  // Skip "Tasks (N):" header
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            // Match: [mark] id: title (metadata)
+            guard let match = trimmed.firstMatch(of: /\[([x> b\-])\]\s+(.+?):\s+(.+)/) else { continue }
+            let mark = String(match.1)
+            let id = String(match.2)
+            var titleAndMeta = String(match.3).trimmingCharacters(in: .whitespaces)
+
+            // Extract trailing (P:priority, due:date) metadata
+            var priority: String?
+            var dueDate: String?
+            if let metaMatch = titleAndMeta.firstMatch(of: /\s+\((.+)\)$/) {
+                let metaStr = String(metaMatch.1)
+                titleAndMeta = String(titleAndMeta[titleAndMeta.startIndex..<metaMatch.range.lowerBound])
+                    .trimmingCharacters(in: .whitespaces)
+                for part in metaStr.components(separatedBy: ", ") {
+                    let trimmedPart = part.trimmingCharacters(in: .whitespaces)
+                    if trimmedPart.hasPrefix("P:") {
+                        priority = String(trimmedPart.dropFirst(2))
+                    } else if trimmedPart.hasPrefix("due:") {
+                        dueDate = String(trimmedPart.dropFirst(4))
+                    }
+                }
+            }
+
+            items.append(TaskListItem(taskId: id, title: titleAndMeta, mark: mark, priority: priority, dueDate: dueDate))
+        }
+        return items.isEmpty ? .empty("No tasks found.") : .tasks(items)
+    }
+
+    /// Parse search results: "Search results (N):\n  id: title [status]"
+    private static func parseSearchResults(lines: [String]) -> ListResult? {
+        var items: [SearchResultItem] = []
+        for line in lines.dropFirst() {  // Skip "Search results (N):" header
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            // Match: id: title [status]
+            guard let match = trimmed.firstMatch(of: /(.+?):\s+(.+?)\s+\[(\w+)\]/) else { continue }
+            items.append(SearchResultItem(
+                itemId: String(match.1),
+                title: String(match.2),
+                status: String(match.3)
+            ))
+        }
+        return items.isEmpty ? .empty("No tasks found.") : .searchResults(items)
+    }
+
+    /// Parse project list: "Projects (N):\n  id: title [status] (M/K tasks)"
+    private static func parseProjectList(lines: [String]) -> ListResult? {
+        var items: [ProjectListItem] = []
+        for line in lines.dropFirst() {  // Skip "Projects (N):" header
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            // Match: id: title [status] (M/K tasks)
+            guard let match = trimmed.firstMatch(of: /(.+?):\s+(.+?)\s+\[(\w+)\](.*)/) else { continue }
+            let id = String(match.1)
+            let title = String(match.2)
+            let status = String(match.3)
+            let rest = String(match.4)
+
+            var completed: Int?
+            var total: Int?
+            if let progressMatch = rest.firstMatch(of: /\((\d+)\/(\d+) tasks\)/) {
+                completed = Int(progressMatch.1)
+                total = Int(progressMatch.2)
+            }
+
+            items.append(ProjectListItem(projectId: id, title: title, status: status, completedTasks: completed, totalTasks: total))
+        }
+        return items.isEmpty ? .empty("No projects found.") : .projects(items)
+    }
+
+    /// Parse area list: "Areas (N):\n  id: title [status] Np/Mt (K active)"
+    private static func parseAreaList(lines: [String]) -> ListResult? {
+        var items: [AreaListItem] = []
+        for line in lines.dropFirst() {  // Skip "Areas (N):" header
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+
+            // Match: id: title [status] Np/Mt (K active)
+            guard let match = trimmed.firstMatch(of: /(.+?):\s+(.+?)\s+\[(\w+)\](.*)/) else { continue }
+            let id = String(match.1)
+            let title = String(match.2)
+            let status = String(match.3)
+            let rest = String(match.4)
+
+            var projectCount: Int?
+            var taskCount: Int?
+            var activeCount: Int?
+            if let countsMatch = rest.firstMatch(of: /(\d+)p\/(\d+)t\s+\((\d+) active\)/) {
+                projectCount = Int(countsMatch.1)
+                taskCount = Int(countsMatch.2)
+                activeCount = Int(countsMatch.3)
+            }
+
+            items.append(AreaListItem(areaId: id, title: title, status: status, projectCount: projectCount, taskCount: taskCount, activeTaskCount: activeCount))
+        }
+        return items.isEmpty ? .empty("No areas found.") : .areas(items)
     }
 
     /// Running state summary for chip

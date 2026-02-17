@@ -147,6 +147,7 @@ Returns (when mode=inProcess and blocking=true):\n\
             mode: mode.clone(),
             blocking,
             model,
+            parent_session_id: Some(ctx.session_id.clone()),
             system_prompt,
             working_directory,
             max_turns,
@@ -517,5 +518,19 @@ mod tests {
             .unwrap();
         let config = spawner.captured_config();
         assert_eq!(config.max_depth, 1, "capped to remaining depth (2-1=1)");
+    }
+
+    #[tokio::test]
+    async fn spawn_sets_parent_session_id_from_context() {
+        let spawner = Arc::new(CapturingSpawner::new());
+        let tool = SpawnSubagentTool::new(spawner.clone());
+        let ctx = make_ctx(); // session_id = "sess-1"
+        let _ = tool.execute(json!({"task": "t"}), &ctx).await.unwrap();
+        let config = spawner.captured_config();
+        assert_eq!(
+            config.parent_session_id,
+            Some("sess-1".to_string()),
+            "parent_session_id should come from ToolContext.session_id"
+        );
     }
 }

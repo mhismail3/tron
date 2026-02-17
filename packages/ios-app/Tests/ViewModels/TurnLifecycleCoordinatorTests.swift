@@ -352,14 +352,14 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
         coordinator.handleTurnEnd(event, result: result, context: mockContext)
 
-        // Then - should find the toolUse message via brute-force fallback
+        // Then - should find the toolUse message via last-message search
         XCTAssertNotNil(mockContext.messages[0].tokenRecord)
         XCTAssertEqual(mockContext.messages[0].tokenRecord?.source.rawInputTokens, 100)
         XCTAssertEqual(mockContext.messages[0].turnNumber, 1)
     }
 
-    func testTurnEndPrefersTextOverToolUseInBruteForceFallback() {
-        // Given - turn has both .toolUse and .text messages
+    func testTurnEndAssignsMetadataToLastMessageInTurn() {
+        // Given - turn has [toolUse, text] — last message is text
         mockContext.streamingMessageId = nil
         mockContext.firstTextMessageIdForTurn = nil
         mockContext.turnStartMessageIndex = 0
@@ -390,9 +390,85 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
         )
         coordinator.handleTurnEnd(event, result: result, context: mockContext)
 
-        // Then - should prefer the .text message (index 1) over .toolUse (index 0)
-        XCTAssertNil(mockContext.messages[0].tokenRecord) // toolUse message
-        XCTAssertNotNil(mockContext.messages[1].tokenRecord) // text message gets the stats
+        // Then - stats go on the last message (text at index 1)
+        XCTAssertNil(mockContext.messages[0].tokenRecord)
+        XCTAssertNotNil(mockContext.messages[1].tokenRecord)
+    }
+
+    func testTurnEndAssignsMetadataToLastToolInParallelTools() {
+        // Given - turn with [text, tool1, tool2, tool3] — parallel tool calls
+        // This is the bug case: stats must go on the LAST tool, not the text or first tool
+        mockContext.streamingMessageId = nil
+        mockContext.firstTextMessageIdForTurn = nil
+        mockContext.turnStartMessageIndex = 0
+        mockContext.currentModel = "claude-opus-4-6"
+
+        let textMessage = ChatMessage(role: .assistant, content: .text("Let me search for that."))
+        let tool1 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
+            toolName: "Search", toolCallId: "tc-1", arguments: "{}", status: .success
+        )))
+        let tool2 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
+            toolName: "Search", toolCallId: "tc-2", arguments: "{}", status: .success
+        )))
+        let tool3 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
+            toolName: "Search", toolCallId: "tc-3", arguments: "{}", status: .success
+        )))
+        mockContext.messages = [textMessage, tool1, tool2, tool3]
+
+        // When
+        let event = makeTurnEndResult(turnNumber: 1)
+        let tokenRecord = makeTokenRecord(inputTokens: 500, outputTokens: 200)
+        let result = TurnEndResult(
+            turnNumber: 1,
+            stopReason: "tool_use",
+            tokenRecord: tokenRecord,
+            contextLimit: nil,
+            cost: nil,
+            durationMs: 1200
+        )
+        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+
+        // Then - stats must go on the LAST tool (index 3), not text or first tool
+        XCTAssertNil(mockContext.messages[0].tokenRecord)  // text — no stats
+        XCTAssertNil(mockContext.messages[1].tokenRecord)  // tool1 — no stats
+        XCTAssertNil(mockContext.messages[2].tokenRecord)  // tool2 — no stats
+        XCTAssertNotNil(mockContext.messages[3].tokenRecord)  // tool3 — stats here
+        XCTAssertEqual(mockContext.messages[3].model, "claude-opus-4-6")
+        XCTAssertEqual(mockContext.messages[3].latencyMs, 1200)
+    }
+
+    func testTurnEndAssignsMetadataToLastToolInToolOnlyTurn() {
+        // Given - tool-only turn: [tool1, tool2] — no text at all
+        mockContext.streamingMessageId = nil
+        mockContext.firstTextMessageIdForTurn = nil
+        mockContext.turnStartMessageIndex = 0
+        mockContext.currentModel = "claude-opus-4-6"
+
+        let tool1 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
+            toolName: "Bash", toolCallId: "tc-1", arguments: "{}", status: .success
+        )))
+        let tool2 = ChatMessage(role: .assistant, content: .toolUse(ToolUseData(
+            toolName: "Read", toolCallId: "tc-2", arguments: "{}", status: .success
+        )))
+        mockContext.messages = [tool1, tool2]
+
+        // When
+        let event = makeTurnEndResult(turnNumber: 2)
+        let tokenRecord = makeTokenRecord(inputTokens: 300, outputTokens: 100)
+        let result = TurnEndResult(
+            turnNumber: 2,
+            stopReason: "tool_use",
+            tokenRecord: tokenRecord,
+            contextLimit: nil,
+            cost: nil,
+            durationMs: 600
+        )
+        coordinator.handleTurnEnd(event, result: result, context: mockContext)
+
+        // Then - stats go on the last tool (index 1)
+        XCTAssertNil(mockContext.messages[0].tokenRecord)
+        XCTAssertNotNil(mockContext.messages[1].tokenRecord)
+        XCTAssertEqual(mockContext.messages[1].tokenRecord?.source.rawInputTokens, 300)
     }
 
     func testTurnEndClearsTurnTracking() {

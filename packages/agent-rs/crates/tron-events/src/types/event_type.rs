@@ -1,4 +1,4 @@
-//! The [`EventType`] enum — all 57 session event type discriminators.
+//! The [`EventType`] enum — all 59 session event type discriminators.
 //!
 //! Every variant has an exact `#[serde(rename)]` matching the TypeScript
 //! string literal (e.g., `"session.start"`). This ensures wire-format
@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 /// All session event types.
 ///
-/// The 57 variants cover every persisted event in the Tron event sourcing
+/// The 59 variants cover every persisted event in the Tron event sourcing
 /// system. Each variant serializes to the exact dot-separated string that
 /// iOS and the WebSocket protocol expect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -170,6 +170,9 @@ pub enum EventType {
     /// Subagent failed.
     #[serde(rename = "subagent.failed")]
     SubagentFailed,
+    /// Subagent results consumed by parent agent.
+    #[serde(rename = "subagent.results_consumed")]
+    SubagentResultsConsumed,
 
     // -- Todo --
     /// Todo list written.
@@ -240,7 +243,7 @@ pub enum EventType {
 /// All event type variants in definition order.
 ///
 /// Useful for iteration in tests and manifest generation.
-pub const ALL_EVENT_TYPES: [EventType; 58] = [
+pub const ALL_EVENT_TYPES: [EventType; 59] = [
     EventType::SessionStart,
     EventType::SessionEnd,
     EventType::SessionFork,
@@ -282,6 +285,7 @@ pub const ALL_EVENT_TYPES: [EventType; 58] = [
     EventType::SubagentStatusUpdate,
     EventType::SubagentCompleted,
     EventType::SubagentFailed,
+    EventType::SubagentResultsConsumed,
     EventType::TodoWrite,
     EventType::TaskCreated,
     EventType::TaskUpdated,
@@ -347,6 +351,7 @@ impl EventType {
             Self::SubagentStatusUpdate => "subagent.status_update",
             Self::SubagentCompleted => "subagent.completed",
             Self::SubagentFailed => "subagent.failed",
+            Self::SubagentResultsConsumed => "subagent.results_consumed",
             Self::TodoWrite => "todo.write",
             Self::TaskCreated => "task.created",
             Self::TaskUpdated => "task.updated",
@@ -424,6 +429,7 @@ impl EventType {
                 | Self::SubagentStatusUpdate
                 | Self::SubagentCompleted
                 | Self::SubagentFailed
+                | Self::SubagentResultsConsumed
         )
     }
 
@@ -522,7 +528,7 @@ mod tests {
     use super::*;
 
     /// Canonical mapping: (variant, expected string).
-    const EXPECTED: [(EventType, &str); 58] = [
+    const EXPECTED: [(EventType, &str); 59] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -564,6 +570,7 @@ mod tests {
         (EventType::SubagentStatusUpdate, "subagent.status_update"),
         (EventType::SubagentCompleted, "subagent.completed"),
         (EventType::SubagentFailed, "subagent.failed"),
+        (EventType::SubagentResultsConsumed, "subagent.results_consumed"),
         (EventType::TodoWrite, "todo.write"),
         (EventType::TaskCreated, "task.created"),
         (EventType::TaskUpdated, "task.updated"),
@@ -584,8 +591,8 @@ mod tests {
     ];
 
     #[test]
-    fn all_event_types_constant_has_58_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 58);
+    fn all_event_types_constant_has_59_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 59);
     }
 
     #[test]
@@ -693,6 +700,7 @@ mod tests {
         assert!(EventType::SubagentStatusUpdate.is_subagent_type());
         assert!(EventType::SubagentCompleted.is_subagent_type());
         assert!(EventType::SubagentFailed.is_subagent_type());
+        assert!(EventType::SubagentResultsConsumed.is_subagent_type());
         assert!(!EventType::SessionStart.is_subagent_type());
     }
 

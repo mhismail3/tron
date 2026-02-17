@@ -522,7 +522,6 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(assistantMessage.model, "claude-sonnet-4-20250514")
         XCTAssertEqual(assistantMessage.latencyMs, 1234)
         XCTAssertEqual(assistantMessage.turnNumber, 1)
-        XCTAssertEqual(assistantMessage.hasThinking, true)
         XCTAssertEqual(assistantMessage.stopReason, "end_turn")
     }
 

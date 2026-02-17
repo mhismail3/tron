@@ -97,6 +97,83 @@ pub fn adapt_ask_user_options(options: &mut Value) {
 // TaskManager result formatting
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// ADAPTER(ios-compat): Format TaskManager JSON results as text for iOS parsing,
+/// auto-detecting the action from JSON structure.
+///
+/// Used during session reconstruction where the action is not available.
+/// If the input is already adapted text (not valid JSON), passes through unchanged.
+///
+/// REMOVE: When iOS is updated to parse JSON natively instead of text.
+pub fn adapt_task_manager_result_auto(result_text: &str) -> String {
+    let json: Value = match serde_json::from_str(result_text) {
+        Ok(v) => v,
+        Err(_) => return result_text.to_string(), // Already adapted text
+    };
+
+    let action = detect_task_manager_action(&json);
+    adapt_task_manager_result(action, result_text)
+}
+
+/// Detect the TaskManager action from JSON result structure.
+fn detect_task_manager_action(json: &Value) -> &str {
+    // List results: arrays with count/total metadata
+    if json.get("tasks").and_then(Value::as_array).is_some() {
+        if json.get("total").is_some() || json.get("count").is_some() {
+            return "list";
+        }
+        return "search";
+    }
+    if json.get("projects").and_then(Value::as_array).is_some() {
+        return "list_projects";
+    }
+    if json.get("areas").and_then(Value::as_array).is_some() {
+        return "list_areas";
+    }
+
+    // Delete/log_time results: {"success": true, "<id-key>": "..."}
+    if json.get("success").is_some() {
+        if json.get("minutesLogged").is_some() {
+            return "log_time";
+        }
+        if json.get("taskId").is_some() {
+            return "delete";
+        }
+        if json.get("projectId").is_some() {
+            return "delete_project";
+        }
+        if json.get("areaId").is_some() {
+            return "delete_area";
+        }
+    }
+
+    // Entity results: single object with "id" field
+    if let Some(id) = json.get("id").and_then(Value::as_str) {
+        if id.starts_with("task-") || id.starts_with("task_") {
+            // get returns TaskWithDetails (has subtasks/recentActivity)
+            if json.get("subtasks").is_some() || json.get("recentActivity").is_some() {
+                return "get";
+            }
+            return "create"; // create/update use same format
+        }
+        if id.starts_with("proj-") || id.starts_with("proj_") {
+            return if json.get("taskCount").is_some() {
+                "get_project"
+            } else {
+                "create_project"
+            };
+        }
+        if id.starts_with("area-") || id.starts_with("area_") {
+            return if json.get("projectCount").is_some() {
+                "get_area"
+            } else {
+                "create_area"
+            };
+        }
+    }
+
+    "unknown"
+}
+
 /// ADAPTER(ios-compat): Format TaskManager JSON results as text for iOS parsing.
 ///
 /// The Rust TaskManager tool returns raw JSON objects via `serde_json::to_string_pretty`,
@@ -921,6 +998,97 @@ mod tests {
     fn invalid_json_passthrough() {
         let result = adapt_task_manager_result("create", "not json at all");
         assert_eq!(result, "not json at all");
+    }
+
+    // --- adapt_task_manager_result_auto (auto-detection) ---
+
+    #[test]
+    fn auto_detect_task_list() {
+        let list = json!({"tasks": [{"id": "t1", "title": "A", "status": "pending", "priority": "medium"}], "count": 1});
+        let input = serde_json::to_string_pretty(&list).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert!(result.starts_with("Tasks (1):"));
+        assert!(result.contains("[ ] t1: A"));
+    }
+
+    #[test]
+    fn auto_detect_search() {
+        let search = json!({"tasks": [{"id": "t1", "title": "Bug", "status": "pending"}]});
+        let input = serde_json::to_string_pretty(&search).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert!(result.starts_with("Search results (1):"));
+    }
+
+    #[test]
+    fn auto_detect_project_list() {
+        let list = json!({"projects": [{"id": "p1", "title": "Alpha", "status": "active"}], "total": 1});
+        let input = serde_json::to_string_pretty(&list).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert!(result.starts_with("Projects (1):"));
+    }
+
+    #[test]
+    fn auto_detect_area_list() {
+        let list = json!({"areas": [{"id": "a1", "title": "Dev", "status": "active", "projectCount": 2, "taskCount": 10, "activeTaskCount": 5}], "total": 1});
+        let input = serde_json::to_string_pretty(&list).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert!(result.starts_with("Areas (1):"));
+    }
+
+    #[test]
+    fn auto_detect_delete() {
+        let resp = json!({"success": true, "taskId": "task-99"});
+        let input = serde_json::to_string_pretty(&resp).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert_eq!(result, "Deleted task task-99");
+    }
+
+    #[test]
+    fn auto_detect_log_time() {
+        let resp = json!({"success": true, "taskId": "task-5", "minutesLogged": 30});
+        let input = serde_json::to_string_pretty(&resp).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert_eq!(result, "Logged 30min on task-5");
+    }
+
+    #[test]
+    fn auto_detect_task_entity() {
+        let task = json!({"id": "task-abc", "title": "Fix", "status": "pending", "priority": "high", "tags": [], "source": "agent", "createdAt": "2026-01-01", "updatedAt": "2026-01-01", "actualMinutes": 0, "sortOrder": 0});
+        let input = serde_json::to_string_pretty(&task).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert!(result.contains("# Fix"));
+        assert!(result.contains("ID: task-abc"));
+    }
+
+    #[test]
+    fn auto_detect_task_with_details() {
+        let task = json!({"id": "task-1", "title": "Test", "status": "pending", "priority": "medium", "subtasks": [], "recentActivity": [], "blockedBy": [], "blocks": [], "tags": [], "source": "agent", "createdAt": "2026-01-01", "updatedAt": "2026-01-01", "actualMinutes": 0, "sortOrder": 0});
+        let input = serde_json::to_string_pretty(&task).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert!(result.starts_with("# Test"));
+    }
+
+    #[test]
+    fn auto_detect_already_adapted_passthrough() {
+        let adapted = "Tasks (2):\n[>] t1: Active task\n[ ] t2: Pending task";
+        let result = adapt_task_manager_result_auto(adapted);
+        assert_eq!(result, adapted);
+    }
+
+    #[test]
+    fn auto_detect_delete_project() {
+        let resp = json!({"success": true, "projectId": "proj-5"});
+        let input = serde_json::to_string_pretty(&resp).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert_eq!(result, "Deleted project proj-5");
+    }
+
+    #[test]
+    fn auto_detect_delete_area() {
+        let resp = json!({"success": true, "areaId": "area-3"});
+        let input = serde_json::to_string_pretty(&resp).unwrap();
+        let result = adapt_task_manager_result_auto(&input);
+        assert_eq!(result, "Deleted area area-3");
     }
 
     #[test]

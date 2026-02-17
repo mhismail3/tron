@@ -1683,24 +1683,24 @@ final class UnifiedEventTransformerTests: XCTestCase {
         // thinking + tool_use + tool_use = 3 messages
         XCTAssertEqual(messages.count, 3)
 
-        // First tool should have tokenRecord
+        // First tool should NOT have tokenRecord (metadata goes on last message)
         if case .toolUse = messages[1].content {
-            XCTAssertNotNil(messages[1].tokenRecord, "First toolUse should get tokenRecord")
-            XCTAssertEqual(messages[1].tokenRecord?.computed.newInputTokens, 13)
+            XCTAssertNil(messages[1].tokenRecord, "First toolUse should NOT get tokenRecord")
         } else {
             XCTFail("Expected toolUse at index 1")
         }
 
-        // Second tool should NOT have tokenRecord
+        // Last tool (last message in turn) should have tokenRecord
         if case .toolUse = messages[2].content {
-            XCTAssertNil(messages[2].tokenRecord, "Second toolUse should NOT get tokenRecord")
+            XCTAssertNotNil(messages[2].tokenRecord, "Last toolUse should get tokenRecord")
+            XCTAssertEqual(messages[2].tokenRecord?.computed.newInputTokens, 13)
         } else {
             XCTFail("Expected toolUse at index 2")
         }
     }
 
     func testTokenRecordOnTextBlockNotOverriddenByFallback() {
-        // Turn with [thinking, text, tool_use] — text keeps tokenRecord, tool stays nil
+        // Turn with [thinking, text, tool_use] — last message (tool) gets tokenRecord
         let tokenRecordPayload: [String: Any] = [
             "source": [
                 "provider": "anthropic",
@@ -1753,18 +1753,18 @@ final class UnifiedEventTransformerTests: XCTestCase {
         // thinking + text + tool = 3 messages
         XCTAssertEqual(messages.count, 3)
 
-        // Text message should have tokenRecord
+        // Text message should NOT have tokenRecord (metadata goes on last message)
         if case .text(let text) = messages[1].content {
             XCTAssertEqual(text, "Here's the result")
-            XCTAssertNotNil(messages[1].tokenRecord, "Text block should keep tokenRecord")
-            XCTAssertEqual(messages[1].tokenRecord?.source.rawOutputTokens, 787)
+            XCTAssertNil(messages[1].tokenRecord, "Text block should NOT get tokenRecord (last message does)")
         } else {
             XCTFail("Expected text at index 1")
         }
 
-        // Tool message should NOT have tokenRecord (text consumed it)
+        // Last message (tool) should have tokenRecord so stats render after all content
         if case .toolUse = messages[2].content {
-            XCTAssertNil(messages[2].tokenRecord, "toolUse should NOT get tokenRecord when text block exists")
+            XCTAssertNotNil(messages[2].tokenRecord, "Last message should get tokenRecord")
+            XCTAssertEqual(messages[2].tokenRecord?.source.rawOutputTokens, 787)
         } else {
             XCTFail("Expected toolUse at index 2")
         }

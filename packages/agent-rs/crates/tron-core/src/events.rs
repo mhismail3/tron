@@ -903,6 +903,9 @@ pub enum TronEvent {
         /// Memory entry type.
         #[serde(rename = "entryType", skip_serializing_if = "Option::is_none")]
         entry_type: Option<String>,
+        /// Event ID of the persisted memory.ledger event (for iOS detail sheet lookup).
+        #[serde(rename = "eventId", skip_serializing_if = "Option::is_none")]
+        event_id: Option<String>,
     },
 
     /// Context cleared.
@@ -1829,6 +1832,7 @@ mod tests {
                 base: base.clone(),
                 title: None,
                 entry_type: None,
+                event_id: None,
             },
             TronEvent::ContextCleared {
                 base: base.clone(),
@@ -1930,6 +1934,7 @@ mod tests {
             base: BaseEvent::now("s1"),
             title: Some("entry".into()),
             entry_type: Some("feature".into()),
+            event_id: Some("evt_123".into()),
         };
         assert_eq!(e.event_type(), "memory_updated");
     }

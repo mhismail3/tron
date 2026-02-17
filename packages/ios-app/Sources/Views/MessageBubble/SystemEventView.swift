@@ -6,7 +6,7 @@ import SwiftUI
 struct SystemEventView: View {
     let event: SystemEvent
     var onCompactionTap: ((Int, Int, String, String?) -> Void)?
-    var onMemoryUpdatedTap: ((String, String) -> Void)?
+    var onMemoryUpdatedTap: ((String, String, String?) -> Void)?
     var onSubagentResultTap: ((String) -> Void)?
     var onProviderErrorTap: ((ProviderErrorDetailData) -> Void)?
 
@@ -24,12 +24,13 @@ struct SystemEventView: View {
         let isInProgress = event.memoryIsInProgress
         let title = event.memoryTitle
         let entryType = event.memoryEntryType
+        let eventId = event.memoryEventId
         MemoryNotificationView(
             isInProgress: isInProgress,
             title: title,
             entryType: entryType,
             onTap: isInProgress ? nil : {
-                onMemoryUpdatedTap?(title, entryType)
+                onMemoryUpdatedTap?(title, entryType, eventId)
             }
         )
     }

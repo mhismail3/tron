@@ -98,6 +98,9 @@ pub struct SubagentConfig {
     /// Optional model override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Parent session ID (for event persistence to parent's linearized chain).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
     /// Optional system prompt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,

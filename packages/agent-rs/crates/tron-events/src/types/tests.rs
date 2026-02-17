@@ -398,6 +398,7 @@ mod session_event_tests {
             (EventType::SubagentStatusUpdate, json!({"subagentSessionId": "s", "status": "running", "currentTurn": 1})),
             (EventType::SubagentCompleted, json!({"subagentSessionId": "s", "resultSummary": "r", "totalTurns": 1, "totalTokenUsage": {"inputTokens": 0, "outputTokens": 0}, "duration": 100})),
             (EventType::SubagentFailed, json!({"subagentSessionId": "s", "error": "e", "recoverable": false})),
+            (EventType::SubagentResultsConsumed, json!({"consumedEventIds": ["evt-1"], "count": 1})),
             (EventType::TodoWrite, json!({"todos": [], "trigger": "tool"})),
             (EventType::TaskCreated, json!({"taskId": "t", "title": "t", "status": "pending", "projectId": null})),
             (EventType::TaskUpdated, json!({"taskId": "t", "title": "t", "status": "done", "changedFields": ["status"]})),
@@ -417,7 +418,7 @@ mod session_event_tests {
             (EventType::MemoryLoaded, json!({})),
         ];
 
-        assert_eq!(cases.len(), 58, "must cover all 58 event types");
+        assert_eq!(cases.len(), 59, "must cover all 59 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());

@@ -10,6 +10,7 @@ use tracing::{debug, instrument};
 use uuid::Uuid;
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::errors::{EventStoreError, Result};
 use crate::reconstruct::{reconstruct_from_events, ReconstructionResult};
@@ -73,12 +74,16 @@ pub struct ForkOptions<'a> {
 /// blocks so callers never see partial state.
 pub struct EventStore {
     pool: ConnectionPool,
+    write_lock: Mutex<()>,
 }
 
 impl EventStore {
     /// Create a new `EventStore` with the given connection pool.
     pub fn new(pool: ConnectionPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            write_lock: Mutex::new(()),
+        }
     }
 
     /// Get a connection from the pool.
@@ -102,6 +107,8 @@ impl EventStore {
         workspace_path: &str,
         title: Option<&str>,
     ) -> Result<CreateSessionResult> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
 
@@ -193,6 +200,15 @@ impl EventStore {
     /// increments all happen in a single transaction.
     #[instrument(skip(self, opts), fields(session_id = opts.session_id, event_type = %opts.event_type))]
     pub fn append(&self, opts: &AppendOptions<'_>) -> Result<EventRow> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
+        self.append_inner(opts)
+    }
+
+    /// Inner append without acquiring the write lock.
+    /// Called by `append` (which holds the lock) and by `delete_message`
+    /// (which acquires the lock once at its own level).
+    fn append_inner(&self, opts: &AppendOptions<'_>) -> Result<EventRow> {
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
 
@@ -297,6 +313,8 @@ impl EventStore {
         from_event_id: &str,
         opts: &ForkOptions<'_>,
     ) -> Result<ForkResult> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
 
@@ -393,6 +411,9 @@ impl EventStore {
         target_event_id: &str,
         reason: Option<&str>,
     ) -> Result<EventRow> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
+
         // Validate target exists and is a message type
         let conn = self.conn()?;
         let target = EventRepo::get_by_id(&conn, target_event_id)?
@@ -413,8 +434,8 @@ impl EventStore {
             )));
         }
 
-        // Append message.deleted event
-        self.append(&AppendOptions {
+        // Append message.deleted event (uses append_inner to avoid re-acquiring lock)
+        self.append_inner(&AppendOptions {
             session_id,
             event_type: EventType::MessageDeleted,
             payload: serde_json::json!({
@@ -646,24 +667,32 @@ impl EventStore {
 
     /// Mark a session as ended.
     pub fn end_session(&self, session_id: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         SessionRepo::mark_ended(&conn, session_id)
     }
 
     /// Reactivate an ended session.
     pub fn clear_session_ended(&self, session_id: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         SessionRepo::clear_ended(&conn, session_id)
     }
 
     /// Update the latest model for a session.
     pub fn update_latest_model(&self, session_id: &str, model: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         SessionRepo::update_latest_model(&conn, session_id, model)
     }
 
     /// Update session title.
     pub fn update_session_title(&self, session_id: &str, title: Option<&str>) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         SessionRepo::update_title(&conn, session_id, title)
     }
@@ -671,6 +700,8 @@ impl EventStore {
     /// Delete a session and all its events.
     #[instrument(skip(self), fields(session_id))]
     pub fn delete_session(&self, session_id: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
 
@@ -719,6 +750,8 @@ impl EventStore {
         spawn_type: &str,
         spawn_task: &str,
     ) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         let changed = conn.execute(
             "UPDATE sessions SET spawning_session_id = ?1, spawn_type = ?2, spawn_task = ?3 WHERE id = ?4",
@@ -743,6 +776,8 @@ impl EventStore {
         path: &str,
         name: Option<&str>,
     ) -> Result<WorkspaceRow> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         WorkspaceRepo::get_or_create(&conn, path, name)
     }
@@ -759,6 +794,8 @@ impl EventStore {
 
     /// Store blob content (SHA-256 deduplicated).
     pub fn store_blob(&self, content: &[u8], mime_type: &str) -> Result<String> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         BlobRepo::store(&conn, content, mime_type)
     }
@@ -826,12 +863,16 @@ impl EventStore {
         workspace_id: Option<&str>,
         environment: &str,
     ) -> Result<RegisterTokenResult> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         DeviceTokenRepo::register(&conn, device_token, session_id, workspace_id, environment)
     }
 
     /// Unregister (deactivate) a device token.
     pub fn unregister_device_token(&self, device_token: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         DeviceTokenRepo::unregister(&conn, device_token)
     }
@@ -844,6 +885,8 @@ impl EventStore {
 
     /// Mark a device token as invalid (e.g., after APNS 410 response).
     pub fn mark_device_token_invalid(&self, device_token: &str) -> Result<bool> {
+        let _guard = self.write_lock.lock()
+            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
         let conn = self.conn()?;
         DeviceTokenRepo::mark_invalid(&conn, device_token)
     }
@@ -2302,5 +2345,181 @@ mod tests {
         let events = super::rows_to_session_events(&[row]);
         assert_eq!(events.len(), 1);
         assert!(events[0].payload.is_null());
+    }
+
+    // ── Concurrency (write serialization) ───────────────────────────
+
+    fn setup_file_backed() -> (EventStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool =
+            connection::new_file(db_path.to_str().unwrap(), &ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        (EventStore::new(pool), dir)
+    }
+
+    #[test]
+    fn concurrent_appends_produce_unique_sequences() {
+        use std::sync::Arc;
+
+        let (store, _dir) = setup_file_backed();
+        let store = Arc::new(store);
+
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        let threads: Vec<_> = (0..20)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                let sid = session_id.clone();
+                std::thread::spawn(move || {
+                    let mut ids = Vec::new();
+                    for _ in 0..10 {
+                        let event = store
+                            .append(&AppendOptions {
+                                session_id: &sid,
+                                event_type: EventType::MessageUser,
+                                payload: serde_json::json!({"content": "concurrent"}),
+                                parent_id: None,
+                            })
+                            .unwrap();
+                        ids.push((event.id, event.sequence));
+                    }
+                    ids
+                })
+            })
+            .collect();
+
+        let mut all_sequences = std::collections::HashSet::new();
+        for handle in threads {
+            let ids = handle.join().unwrap();
+            for (_id, seq) in ids {
+                assert!(
+                    all_sequences.insert(seq),
+                    "duplicate sequence: {seq}"
+                );
+            }
+        }
+
+        // root (seq 0) + 200 appended events = 201 unique sequences
+        assert_eq!(all_sequences.len(), 200);
+    }
+
+    #[test]
+    fn concurrent_appends_to_different_sessions() {
+        use std::sync::Arc;
+
+        let (store, _dir) = setup_file_backed();
+        let store = Arc::new(store);
+
+        let threads: Vec<_> = (0..10)
+            .map(|i| {
+                let store = Arc::clone(&store);
+                std::thread::spawn(move || {
+                    let cr = store
+                        .create_session(
+                            "claude-opus-4-6",
+                            &format!("/tmp/project-{i}"),
+                            None,
+                        )
+                        .unwrap();
+                    for _ in 0..5 {
+                        store
+                            .append(&AppendOptions {
+                                session_id: &cr.session.id,
+                                event_type: EventType::MessageUser,
+                                payload: serde_json::json!({"content": "msg"}),
+                                parent_id: None,
+                            })
+                            .unwrap();
+                    }
+                    cr.session.id
+                })
+            })
+            .collect();
+
+        for handle in threads {
+            let sid = handle.join().unwrap();
+            let count = store.count_events(&sid).unwrap();
+            assert_eq!(count, 6); // 1 root + 5 appended
+        }
+    }
+
+    #[test]
+    fn concurrent_reads_during_writes() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (store, _dir) = setup_file_backed();
+        let store = Arc::new(store);
+
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .unwrap();
+        let session_id = cr.session.id.clone();
+
+        let done = Arc::new(AtomicBool::new(false));
+
+        // Writer thread: append 50 events
+        let writer_store = Arc::clone(&store);
+        let writer_sid = session_id.clone();
+        let writer_done = Arc::clone(&done);
+        let writer = std::thread::spawn(move || {
+            for _ in 0..50 {
+                writer_store
+                    .append(&AppendOptions {
+                        session_id: &writer_sid,
+                        event_type: EventType::MessageUser,
+                        payload: serde_json::json!({"content": "write"}),
+                        parent_id: None,
+                    })
+                    .unwrap();
+            }
+            writer_done.store(true, Ordering::SeqCst);
+        });
+
+        // Reader threads: query continuously until writer is done
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                let sid = session_id.clone();
+                let done = Arc::clone(&done);
+                std::thread::spawn(move || {
+                    let mut read_count = 0u64;
+                    while !done.load(Ordering::SeqCst) {
+                        let events = store
+                            .get_events_by_session(
+                                &sid,
+                                &ListEventsOptions::default(),
+                            )
+                            .unwrap();
+                        // Events should always be ordered by sequence
+                        for pair in events.windows(2) {
+                            assert!(
+                                pair[0].sequence < pair[1].sequence,
+                                "events not ordered"
+                            );
+                        }
+                        read_count += 1;
+                    }
+                    read_count
+                })
+            })
+            .collect();
+
+        writer.join().unwrap();
+        for handle in readers {
+            let reads = handle.join().unwrap();
+            assert!(reads > 0, "reader should have performed at least one read");
+        }
+
+        // Final check: all 51 events present (root + 50)
+        let final_count = store.count_events(&session_id).unwrap();
+        assert_eq!(final_count, 51);
     }
 }

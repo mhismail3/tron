@@ -478,6 +478,7 @@ impl SubagentSpawner for SubagentManager {
 
         let model = config.model.as_deref().unwrap_or(self.provider.model());
         let task = config.task.clone();
+        let parent_sid = config.parent_session_id.clone().unwrap_or_default();
 
         // 1. Create child session
         let title = format!("Subagent: {}", truncate(&task, 60));
@@ -488,7 +489,7 @@ impl SubagentSpawner for SubagentManager {
                 model,
                 workspace,
                 Some(&title),
-                "parent-placeholder", // will be set by caller context
+                if parent_sid.is_empty() { "parent-placeholder" } else { &parent_sid },
                 "inProcess",
                 &task,
             )
@@ -500,7 +501,7 @@ impl SubagentSpawner for SubagentManager {
         let cancel = CancellationToken::new();
         let tracker = Arc::new(TrackedSubagent {
             session_id: child_session_id.clone(),
-            parent_session_id: String::new(), // set below
+            parent_session_id: parent_sid.clone(),
             task: task.clone(),
             model: model.to_owned(),
             depth: config.current_depth,
@@ -694,7 +695,10 @@ impl SubagentSpawner for SubagentManager {
 
             let token_usage = serde_json::to_value(&result.total_token_usage).ok();
 
-            if result.error.is_some() {
+            let success = result.error.is_none();
+            let result_output;
+
+            if !success {
                 let error = result.error.unwrap_or_else(|| "Unknown error".into());
                 // Emit SubagentFailed
                 let _ = broadcast.emit(TronEvent::SubagentFailed {
@@ -704,10 +708,11 @@ impl SubagentSpawner for SubagentManager {
                     duration_ms,
                 });
 
+                result_output = error.clone();
                 *tracker_clone.result.lock() = Some(SubagentResult {
                     session_id: child_sid.clone(),
                     output: error,
-                    token_usage,
+                    token_usage: token_usage.clone(),
                     duration_ms,
                     status: "failed".into(),
                 });
@@ -722,12 +727,36 @@ impl SubagentSpawner for SubagentManager {
                     token_usage: token_usage.clone(),
                 });
 
+                result_output = output.clone();
                 *tracker_clone.result.lock() = Some(SubagentResult {
                     session_id: child_sid.clone(),
                     output,
-                    token_usage,
+                    token_usage: token_usage.clone(),
                     duration_ms,
                     status: "completed".into(),
+                });
+            }
+
+            // Persist notification.subagent_result to parent session's event store
+            // (enables session resume to reconstruct pending results)
+            if !tracker_clone.parent_session_id.is_empty() {
+                let payload = json!({
+                    "parentSessionId": tracker_clone.parent_session_id,
+                    "subagentSessionId": child_sid,
+                    "task": tracker_clone.task,
+                    "resultSummary": truncate(&result_output, 200),
+                    "success": success,
+                    "totalTurns": result.turns_executed as i64,
+                    "duration": duration_ms as i64,
+                    "tokenUsage": token_usage.unwrap_or(json!({})),
+                    "completedAt": chrono::Utc::now().to_rfc3339(),
+                    "output": truncate(&result_output, 4000),
+                });
+                let _ = event_store.append(&tron_events::AppendOptions {
+                    session_id: &tracker_clone.parent_session_id,
+                    event_type: EventType::NotificationSubagentResult,
+                    payload,
+                    parent_id: None,
                 });
             }
 
@@ -1090,6 +1119,7 @@ mod tests {
             mode: SubagentMode::InProcess,
             blocking: true,
             model: None,
+            parent_session_id: None,
             system_prompt: None,
             working_directory: "/tmp".into(),
             max_turns: 5,
@@ -1486,5 +1516,87 @@ mod tests {
         let result = manager.spawn_subsession(config).await.unwrap();
         // Should still complete (blocking) — output may contain error info
         assert!(!result.session_id.is_empty());
+    }
+
+    // ── notification.subagent_result persistence tests ──
+
+    #[tokio::test]
+    async fn spawn_persists_notification_to_parent_session() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+
+        // Create a parent session so the event store can persist to it
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+
+        let mut config = make_config("research task");
+        config.parent_session_id = Some(parent_sid.clone());
+        let _handle = manager.spawn(config).await.unwrap();
+
+        // Check the parent session for notification.subagent_result events
+        let events = store
+            .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1, "expected one notification event in parent session");
+
+        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["parentSessionId"], parent_sid);
+        assert_eq!(payload["task"], "research task");
+        assert_eq!(payload["success"], true);
+        assert!(payload["output"].is_string());
+    }
+
+    #[tokio::test]
+    async fn spawn_no_parent_session_id_skips_notification() {
+        let (manager, _, store) = make_subagent_manager(Arc::new(MockProvider));
+
+        // No parent_session_id set (None → empty string)
+        let config = make_config("test task");
+        let handle = manager.spawn(config).await.unwrap();
+
+        // No notification events anywhere (parent_session_id was empty)
+        let events = store
+            .get_events_by_type(&handle.session_id, &["notification.subagent_result"], None)
+            .unwrap();
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_failed_persists_notification_with_success_false() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(ErrorProvider));
+
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+
+        let mut config = make_config("failing task");
+        config.parent_session_id = Some(parent_sid.clone());
+        let _handle = manager.spawn(config).await.unwrap();
+
+        let events = store
+            .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1);
+
+        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["success"], false);
+    }
+
+    #[tokio::test]
+    async fn subsession_does_not_persist_notification() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+
+        let config = make_subsession_config("summarize", &parent_sid);
+        let _result = manager.spawn_subsession(config).await.unwrap();
+
+        // Subsessions should NOT persist notification.subagent_result
+        let events = store
+            .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+            .unwrap();
+        assert!(events.is_empty(), "subsessions should not persist notification events");
     }
 }

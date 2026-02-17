@@ -16,6 +16,7 @@ enum MemoryUpdatedPlugin: DispatchableEventPlugin {
         struct DataPayload: Decodable, Sendable {
             let title: String?
             let entryType: String?
+            let eventId: String?
         }
     }
 
@@ -24,6 +25,8 @@ enum MemoryUpdatedPlugin: DispatchableEventPlugin {
     struct Result: EventResult {
         let title: String
         let entryType: String
+        /// Event ID of the persisted memory.ledger event (for detail sheet lookup).
+        let eventId: String?
     }
 
     // MARK: - Protocol Implementation
@@ -31,7 +34,8 @@ enum MemoryUpdatedPlugin: DispatchableEventPlugin {
     static func transform(_ event: EventData) -> (any EventResult)? {
         Result(
             title: event.data.title ?? "Memory updated",
-            entryType: event.data.entryType ?? "conversation"
+            entryType: event.data.entryType ?? "conversation",
+            eventId: event.data.eventId
         )
     }
 

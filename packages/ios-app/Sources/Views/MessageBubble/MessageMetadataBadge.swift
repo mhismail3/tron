@@ -53,11 +53,10 @@ struct MessageMetadataBadge: View {
     let tokenRecord: TokenRecord?
     let model: String?
     let latency: String?
-    let hasThinking: Bool?
 
     /// Check if we need a separator before additional metadata
     private var needsSeparator: Bool {
-        tokenRecord != nil && (model != nil || latency != nil || hasThinking == true)
+        tokenRecord != nil && (model != nil || latency != nil)
     }
 
     /// Check if we need a separator between model and latency
@@ -98,13 +97,6 @@ struct MessageMetadataBadge: View {
                 Text(latency)
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
-            }
-
-            // Thinking indicator (text, not emoji)
-            if hasThinking == true {
-                Text("Thinking")
-                    .font(TronTypography.pillValue)
-                    .foregroundStyle(.tronAmber)
             }
         }
     }

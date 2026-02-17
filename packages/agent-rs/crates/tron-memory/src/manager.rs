@@ -39,19 +39,15 @@ pub trait MemoryManagerDeps: Send + Sync {
     fn emit_memory_updating(&self, session_id: &str);
 
     /// Emit `memory.updated` event (after ledger write completes or skips).
+    ///
+    /// `event_id` is the persisted `memory.ledger` event ID, passed through to iOS
+    /// so the detail sheet can look up the exact entry instead of matching by title.
     fn emit_memory_updated(
         &self,
         session_id: &str,
         title: Option<&str>,
         entry_type: Option<&str>,
-    );
-
-    /// Fire-and-forget embedding for semantic search.
-    async fn embed_memory(
-        &self,
-        event_id: &str,
-        workspace_id: &str,
-        payload: &serde_json::Value,
+        event_id: Option<&str>,
     );
 
     /// Called after a successful ledger write with the payload and title.
@@ -144,6 +140,7 @@ impl<D: MemoryManagerDeps> MemoryManager<D> {
                 &session_id,
                 ledger_result.title.as_deref(),
                 ledger_result.entry_type.as_deref(),
+                ledger_result.event_id.as_deref(),
             );
 
             if let Some(payload) = &ledger_result.payload {
@@ -151,21 +148,11 @@ impl<D: MemoryManagerDeps> MemoryManager<D> {
                     payload,
                     ledger_result.title.as_deref().unwrap_or("Untitled"),
                 );
-
-                // Fire-and-forget embedding
-                if let Some(event_id) = &ledger_result.event_id {
-                    let workspace_id = self
-                        .deps
-                        .workspace_id()
-                        .unwrap_or("")
-                        .to_string();
-                    self.deps
-                        .embed_memory(event_id, &workspace_id, payload)
-                        .await;
-                }
             }
         } else {
-            self.deps.emit_memory_updated(&session_id, None, Some("skipped"));
+            let entry_type = ledger_result.entry_type.as_deref().unwrap_or("skipped");
+            let title = if entry_type == "error" { ledger_result.reason.as_deref() } else { None };
+            self.deps.emit_memory_updated(&session_id, title, Some(entry_type), None);
         }
     }
 
@@ -209,9 +196,10 @@ mod tests {
         updating_emitted: AtomicBool,
         updated_emitted: AtomicBool,
         updated_entry_type: Mutex<Option<String>>,
+        updated_title: Mutex<Option<String>>,
         memory_written_called: AtomicBool,
-        embed_called: AtomicBool,
         updated_count: AtomicUsize,
+        updated_event_id: Mutex<Option<String>>,
     }
 
     impl MockDeps {
@@ -227,9 +215,10 @@ mod tests {
                 updating_emitted: AtomicBool::new(false),
                 updated_emitted: AtomicBool::new(false),
                 updated_entry_type: Mutex::new(None),
+                updated_title: Mutex::new(None),
                 memory_written_called: AtomicBool::new(false),
-                embed_called: AtomicBool::new(false),
                 updated_count: AtomicUsize::new(0),
+                updated_event_id: Mutex::new(None),
             }
         }
 
@@ -276,23 +265,21 @@ mod tests {
         fn emit_memory_updated(
             &self,
             _session_id: &str,
-            _title: Option<&str>,
+            title: Option<&str>,
             entry_type: Option<&str>,
+            event_id: Option<&str>,
         ) {
             self.updated_emitted.store(true, Ordering::SeqCst);
             let _ = self.updated_count.fetch_add(1, Ordering::SeqCst);
+            if let Some(t) = title {
+                *self.updated_title.lock().unwrap() = Some(t.to_string());
+            }
             if let Some(et) = entry_type {
                 *self.updated_entry_type.lock().unwrap() = Some(et.to_string());
             }
-        }
-
-        async fn embed_memory(
-            &self,
-            _event_id: &str,
-            _workspace_id: &str,
-            _payload: &serde_json::Value,
-        ) {
-            self.embed_called.store(true, Ordering::SeqCst);
+            if let Some(eid) = event_id {
+                *self.updated_event_id.lock().unwrap() = Some(eid.to_string());
+            }
         }
 
         fn on_memory_written(&self, _payload: &serde_json::Value, _title: &str) {
@@ -364,7 +351,6 @@ mod tests {
         assert!(deps.updating_emitted.load(Ordering::SeqCst));
         assert!(deps.updated_emitted.load(Ordering::SeqCst));
         assert!(deps.memory_written_called.load(Ordering::SeqCst));
-        assert!(deps.embed_called.load(Ordering::SeqCst));
     }
 
     // --- Compaction triggered, then ledger ---
@@ -428,6 +414,27 @@ mod tests {
         assert_eq!(entry_type.as_deref(), Some("skipped"));
     }
 
+    // --- Ledger failed → "error" with reason as title ---
+
+    #[tokio::test]
+    async fn test_ledger_failed_emits_error_with_title() {
+        let deps = Arc::new(MockDeps::new().with_ledger_result(
+            LedgerWriteResult::failed("database temporarily busy"),
+        ));
+        let mut manager = MemoryManager::new(
+            Arc::clone(&deps),
+            CompactionTrigger::new(CompactionTriggerConfig::default()),
+        );
+
+        manager.on_cycle_complete(default_cycle_info(0.3)).await;
+
+        assert!(deps.updated_emitted.load(Ordering::SeqCst));
+        let entry_type = deps.updated_entry_type.lock().unwrap();
+        assert_eq!(entry_type.as_deref(), Some("error"));
+        let title = deps.updated_title.lock().unwrap();
+        assert_eq!(title.as_deref(), Some("database temporarily busy"));
+    }
+
     // --- Ledger written → on_memory_written called ---
 
     #[tokio::test]
@@ -450,10 +457,10 @@ mod tests {
         assert!(deps.memory_written_called.load(Ordering::SeqCst));
     }
 
-    // --- Ledger written → embed_memory called ---
+    // --- Ledger written → event_id passed through emit_memory_updated ---
 
     #[tokio::test]
-    async fn test_ledger_written_calls_embed() {
+    async fn test_ledger_written_passes_event_id() {
         let deps = Arc::new(MockDeps::new().with_ledger_result(
             LedgerWriteResult::written(
                 "Title".to_string(),
@@ -469,7 +476,8 @@ mod tests {
 
         manager.on_cycle_complete(default_cycle_info(0.3)).await;
 
-        assert!(deps.embed_called.load(Ordering::SeqCst));
+        let event_id = deps.updated_event_id.lock().unwrap();
+        assert_eq!(event_id.as_deref(), Some("evt-2"));
     }
 
     // --- Compaction resets trigger ---
@@ -541,11 +549,8 @@ where
     fn emit_memory_updating(&self, session_id: &str) {
         (**self).emit_memory_updating(session_id);
     }
-    fn emit_memory_updated(&self, session_id: &str, title: Option<&str>, entry_type: Option<&str>) {
-        (**self).emit_memory_updated(session_id, title, entry_type);
-    }
-    async fn embed_memory(&self, event_id: &str, workspace_id: &str, payload: &serde_json::Value) {
-        (**self).embed_memory(event_id, workspace_id, payload).await;
+    fn emit_memory_updated(&self, session_id: &str, title: Option<&str>, entry_type: Option<&str>, event_id: Option<&str>) {
+        (**self).emit_memory_updated(session_id, title, entry_type, event_id);
     }
     fn on_memory_written(&self, payload: &serde_json::Value, title: &str) {
         (**self).on_memory_written(payload, title);

@@ -36,7 +36,7 @@ enum SystemEvent: Equatable {
     /// Memory ledger write in progress (spinner)
     case memoryUpdating
     /// Memory ledger entry was written after a response cycle
-    case memoryUpdated(title: String, entryType: String)
+    case memoryUpdated(title: String, entryType: String, eventId: String?)
     /// Memories were auto-injected at session start
     case memoriesLoaded(count: Int)
     /// Provider API error (auth, rate limit, network, etc.)
@@ -80,7 +80,7 @@ enum SystemEvent: Equatable {
             return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
         case .memoryUpdating:
             return "Retaining memory..."
-        case .memoryUpdated(let title, _):
+        case .memoryUpdated(let title, _, _):
             return "Memory updated: \(title)"
         case .memoriesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "memory" : "memories")"
@@ -106,14 +106,20 @@ enum SystemEvent: Equatable {
 
     /// Title from a memoryUpdated event (empty for in-progress)
     var memoryTitle: String {
-        if case .memoryUpdated(let title, _) = self { return title }
+        if case .memoryUpdated(let title, _, _) = self { return title }
         return ""
     }
 
     /// Entry type from a memoryUpdated event (empty for in-progress)
     var memoryEntryType: String {
-        if case .memoryUpdated(_, let entryType) = self { return entryType }
+        if case .memoryUpdated(_, let entryType, _) = self { return entryType }
         return ""
+    }
+
+    /// Event ID of the persisted memory.ledger event (for detail sheet lookup)
+    var memoryEventId: String? {
+        if case .memoryUpdated(_, _, let eventId) = self { return eventId }
+        return nil
     }
 
     private static func reasoningLabel(_ level: String) -> String {

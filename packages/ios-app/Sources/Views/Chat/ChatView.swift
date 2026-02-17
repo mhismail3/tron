@@ -452,8 +452,8 @@ struct ChatView: View {
                                         isResultTruncated: false
                                     ))
                                 },
-                                onMemoryUpdatedTap: { [sheetCoordinator, sessionId] title, entryType in
-                                    sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId)
+                                onMemoryUpdatedTap: { [sheetCoordinator, sessionId] title, entryType, eventId in
+                                    sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId, eventId: eventId)
                                 },
                                 onSubagentResultTap: { sessionId in
                                     viewModel.subagentState.showDetails(for: sessionId)

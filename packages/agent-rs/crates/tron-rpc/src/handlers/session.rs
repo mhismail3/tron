@@ -149,31 +149,51 @@ fn emit_optimistic_context_events(ctx: &RpcContext, session_id: &str, working_di
         });
     }
 
-    // Discover memory (~/.tron/notes/MEMORY.md)
-    let memory_path = home_dir
-        .as_ref()
-        .map(|h| h.join(".tron").join("notes").join("MEMORY.md"));
-    let memory_size = memory_path
-        .as_ref()
-        .and_then(|p| std::fs::metadata(p).ok())
-        .map(|m| m.len());
+    // Discover workspace memory from ledger entries (auto-inject setting must be enabled)
+    let settings = tron_settings::get_settings();
+    let auto_inject = &settings.context.memory.auto_inject;
 
-    if let Some(size) = memory_size {
-        let tokens = size / 4;
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id,
-            event_type: tron_events::EventType::MemoryLoaded,
-            payload: serde_json::json!({
-                "count": 1,
-                "tokens": tokens,
-                "workspaceId": "",
-            }),
-            parent_id: None,
-        });
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::MemoryLoaded {
-            base: BaseEvent::now(session_id),
-            count: 1,
-        });
+    if auto_inject.enabled {
+        let workspace = ctx
+            .event_store
+            .get_workspace_by_path(working_dir)
+            .ok()
+            .flatten();
+
+        if let Some(ws) = workspace {
+            #[allow(clippy::cast_possible_wrap)]
+            let count_limit = auto_inject.count.clamp(1, 10) as i64;
+            let entries = ctx
+                .event_store
+                .get_events_by_workspace_and_types(
+                    &ws.id,
+                    &["memory.ledger"],
+                    Some(count_limit),
+                    None,
+                )
+                .unwrap_or_default();
+
+            if !entries.is_empty() {
+                #[allow(clippy::cast_possible_truncation)]
+                let count = entries.len() as u32;
+                let tokens: u64 = entries.iter().map(|e| e.payload.len() as u64 / 4).sum();
+
+                let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                    session_id,
+                    event_type: tron_events::EventType::MemoryLoaded,
+                    payload: serde_json::json!({
+                        "count": count,
+                        "tokens": tokens,
+                        "workspaceId": ws.id,
+                    }),
+                    parent_id: None,
+                });
+                let _ = ctx.orchestrator.broadcast().emit(TronEvent::MemoryLoaded {
+                    base: BaseEvent::now(session_id),
+                    count,
+                });
+            }
+        }
     }
 }
 
@@ -227,6 +247,7 @@ impl MethodHandler for ListSessionsHandler {
 
         let filter = tron_runtime::SessionFilter {
             include_archived,
+            exclude_subagents: true,
             limit,
             ..Default::default()
         };
@@ -514,8 +535,27 @@ impl MethodHandler for GetHistoryHandler {
                     "tool.result" => "tool",
                     _ => "unknown",
                 };
-                let content = serde_json::from_str::<Value>(&e.payload)
+                let mut content = serde_json::from_str::<Value>(&e.payload)
                     .unwrap_or(Value::Null);
+
+                // ADAPTER(ios-compat): Apply TaskManager adapter during reconstruction.
+                // tool.result events store raw JSON content, but iOS expects adapted text.
+                // During live streaming, event_bridge.rs applies the adapter; here we do
+                // the same for reconstruction using auto-detection since the action isn't stored.
+                if e.event_type == "tool.result" {
+                    if let Some(ref tn) = e.tool_name {
+                        if tn == "TaskManager" {
+                            if let Some(raw) =
+                                content.get("content").and_then(Value::as_str).map(String::from)
+                            {
+                                let adapted =
+                                    crate::adapters::adapt_task_manager_result_auto(&raw);
+                                content["content"] = Value::String(adapted);
+                            }
+                        }
+                    }
+                }
+
                 let mut msg = serde_json::json!({
                     "id": e.id,
                     "role": role,

@@ -111,14 +111,15 @@ struct UnifiedEventTransformer {
     /// - Parameter event: An event conforming to EventTransformable
     /// - Returns: ChatMessage if this event should be displayed, nil otherwise
     static func transformPersistedEvent<E: EventTransformable>(_ event: E) -> ChatMessage? {
-        transformPersistedEvent(type: event.type, timestamp: event.timestamp, payload: event.payload)
+        transformPersistedEvent(type: event.type, timestamp: event.timestamp, payload: event.payload, eventId: event.id)
     }
 
     /// Internal helper: transform by extracting common fields.
     private static func transformPersistedEvent(
         type: String,
         timestamp: String,
-        payload: [String: AnyCodable]
+        payload: [String: AnyCodable],
+        eventId: String? = nil
     ) -> ChatMessage? {
         guard let eventType = PersistedEventType(rawValue: type) else {
             logger.warning("Unknown persisted event type: \(type)", category: .events)
@@ -160,7 +161,7 @@ struct UnifiedEventTransformer {
         case .contextCleared:
             return SystemEventHandlers.transformContextCleared(payload, timestamp: ts)
         case .memoryLedger:
-            return SystemEventHandlers.transformMemoryLedger(payload, timestamp: ts)
+            return SystemEventHandlers.transformMemoryLedger(payload, timestamp: ts, eventId: eventId)
         case .memoryLoaded:
             return SystemEventHandlers.transformMemoryLoaded(payload, timestamp: ts)
         case .compactBoundary:

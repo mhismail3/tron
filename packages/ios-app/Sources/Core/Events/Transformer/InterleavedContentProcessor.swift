@@ -63,7 +63,6 @@ enum InterleavedContentProcessor {
 
         var messages: [ChatMessage] = []
         var sawAskUserQuestion = false  // Track if AskUserQuestion was seen
-        var tokenRecordConsumed = false  // Track if a text block consumed the tokenRecord
 
         for block in blocks {
             guard let blockType = block["type"] as? String else { continue }
@@ -82,12 +81,9 @@ enum InterleavedContentProcessor {
                 if let message = processTextBlock(
                     block,
                     timestamp: timestamp,
-                    tokenRecord: effectiveTokenRecord,
-                    parsed: parsed,
-                    isFirstMessage: messages.isEmpty
+                    parsed: parsed
                 ) {
                     messages.append(message)
-                    tokenRecordConsumed = true
                 }
             } else if blockType == "tool_use", let toolUseId = block["id"] as? String {
                 let toolCall = toolCalls[toolUseId]
@@ -128,18 +124,15 @@ enum InterleavedContentProcessor {
             // Other block types (redacted, etc.) are skipped
         }
 
-        // Fallback: if no text block consumed the tokenRecord (tool-only turns like
-        // [thinking, tool_use]), attach it to the first toolUse message so stats
-        // survive reconstruction. Mirrors TurnLifecycleCoordinator.handleTurnEnd().
-        if !tokenRecordConsumed, let record = effectiveTokenRecord {
-            if let idx = messages.firstIndex(where: {
-                if case .toolUse = $0.content { return true }
-                return false
-            }) {
-                messages[idx].tokenRecord = record
-                messages[idx].model = parsed.model
-                messages[idx].latencyMs = parsed.latencyMs
-            }
+        // Attach turn metadata (tokenRecord, model, latency, thinking) to the LAST
+        // message so the stats line renders after all content in the turn — not
+        // between text and first tool, or between parallel tool calls.
+        if !messages.isEmpty {
+            let lastIdx = messages.count - 1
+            messages[lastIdx].tokenRecord = effectiveTokenRecord
+            messages[lastIdx].model = parsed.model
+            messages[lastIdx].latencyMs = parsed.latencyMs
+            messages[lastIdx].stopReason = parsed.stopReason?.rawValue
         }
 
         return messages
@@ -164,12 +157,14 @@ enum InterleavedContentProcessor {
     }
 
     /// Process a text content block.
+    ///
+    /// Metadata (tokenRecord, model, latency, etc.) is NOT set here — it's
+    /// attached to the last message after all blocks are processed so the
+    /// stats line renders after all tool chips, not in the middle.
     private static func processTextBlock(
         _ block: [String: Any],
         timestamp: Date,
-        tokenRecord: TokenRecord?,
-        parsed: AssistantMessagePayload,
-        isFirstMessage: Bool
+        parsed: AssistantMessagePayload
     ) -> ChatMessage? {
         guard let rawText = block["text"] as? String, !rawText.isEmpty else {
             return nil
@@ -182,12 +177,7 @@ enum InterleavedContentProcessor {
             role: .assistant,
             content: .text(text),
             timestamp: timestamp,
-            tokenRecord: tokenRecord,
-            model: parsed.model,
-            latencyMs: isFirstMessage ? parsed.latencyMs : nil,
-            turnNumber: parsed.turn,
-            hasThinking: isFirstMessage ? parsed.hasThinking : nil,
-            stopReason: isFirstMessage ? parsed.stopReason?.rawValue : nil
+            turnNumber: parsed.turn
         )
     }
 
@@ -231,7 +221,7 @@ enum InterleavedContentProcessor {
             arguments = "{}"
         }
 
-        // Tool messages don't show stats - only text responses do
+        // Metadata is set after the loop on the last message (see transform())
         return ChatMessage(
             role: .assistant,
             content: .toolUse(ToolUseData(

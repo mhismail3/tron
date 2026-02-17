@@ -134,6 +134,8 @@ pub enum SessionEventPayload {
     SubagentCompleted(payloads::subagent::SubagentCompletedPayload),
     /// `subagent.failed`
     SubagentFailed(payloads::subagent::SubagentFailedPayload),
+    /// `subagent.results_consumed`
+    SubagentResultsConsumed(payloads::notification::SubagentResultsConsumedPayload),
     /// `todo.write`
     TodoWrite(payloads::todo::TodoWritePayload),
     /// `task.created`
@@ -217,6 +219,7 @@ impl SessionEvent {
             EventType::SubagentStatusUpdate => Ok(SessionEventPayload::SubagentStatusUpdate(serde_json::from_value(self.payload.clone())?)),
             EventType::SubagentCompleted => Ok(SessionEventPayload::SubagentCompleted(serde_json::from_value(self.payload.clone())?)),
             EventType::SubagentFailed => Ok(SessionEventPayload::SubagentFailed(serde_json::from_value(self.payload.clone())?)),
+            EventType::SubagentResultsConsumed => Ok(SessionEventPayload::SubagentResultsConsumed(serde_json::from_value(self.payload.clone())?)),
             EventType::TodoWrite => Ok(SessionEventPayload::TodoWrite(serde_json::from_value(self.payload.clone())?)),
             EventType::TaskCreated => Ok(SessionEventPayload::TaskCreated(serde_json::from_value(self.payload.clone())?)),
             EventType::TaskUpdated => Ok(SessionEventPayload::TaskUpdated(serde_json::from_value(self.payload.clone())?)),

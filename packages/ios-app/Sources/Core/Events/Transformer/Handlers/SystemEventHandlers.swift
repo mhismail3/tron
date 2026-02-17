@@ -126,14 +126,15 @@ enum SystemEventHandlers {
     /// Memory ledger events indicate when a ledger entry was written after a response cycle.
     static func transformMemoryLedger(
         _ payload: [String: AnyCodable],
-        timestamp: Date
+        timestamp: Date,
+        eventId: String? = nil
     ) -> ChatMessage? {
         let title = payload["title"]?.value as? String ?? "Memory updated"
         let entryType = payload["entryType"]?.value as? String ?? "conversation"
 
         return ChatMessage(
             role: .system,
-            content: .memoryUpdated(title: title, entryType: entryType),
+            content: .memoryUpdated(title: title, entryType: entryType, eventId: eventId),
             timestamp: timestamp
         )
     }

@@ -113,40 +113,41 @@ final class TurnLifecycleCoordinator {
         }
 
         // Find the message to update with metadata.
-        // Three-layer strategy:
-        //   1. Streaming message ID (normal path — message is actively streaming)
-        //   2. First text message of turn (streaming finalized before turn_end, e.g. before tool call)
-        //   3. Brute-force search from turn start (both IDs lost — should not happen in normal flow)
+        // The stats line renders BELOW the target message, so we must pick the
+        // LAST message in the turn to ensure stats appear after all tool chips.
+        //
+        // Strategy:
+        //   1. Active streaming message (text-only turns ending mid-stream)
+        //   2. Last assistant message in turn range (text+tools, tool-only, or text-only)
+        //   3. Tracked first text ID fallback (rare: turnStartMessageIndex lost)
         var targetIndex: Int?
 
         if let id = context.streamingMessageId,
            let index = MessageFinder.indexById(id, in: context.messages) {
             targetIndex = index
             context.logDebug("Using streaming message for turn metadata at index \(index)")
-        } else if let firstTextId = context.firstTextMessageIdForTurn,
-                  let index = MessageFinder.indexById(firstTextId, in: context.messages) {
-            targetIndex = index
-            context.logDebug("Using tracked first text message for turn metadata at index \(index)")
         } else if let startIndex = context.turnStartMessageIndex,
                   startIndex < context.messages.count {
-            // Fallback: both streamingMessageId and firstTextMessageIdForTurn unavailable.
-            // Common for intermediate turns where the LLM produces [thinking, tool_use]
-            // with no visible text. Prefer .text messages, fall back to .toolUse.
+            // Find the LAST assistant message (.text or .toolUse) in this turn.
+            // This ensures the stats line appears after all parallel tool chips,
+            // not between the first and second tool call.
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant {
                     switch context.messages[i].content {
-                    case .text:
+                    case .text, .toolUse:
                         targetIndex = i
-                    case .toolUse:
-                        if targetIndex == nil { targetIndex = i }
                     default:
                         break
                     }
                 }
             }
             if let idx = targetIndex {
-                context.logInfo("Turn metadata: fell through to brute-force search, found at index \(idx) (turn=\(result.turnNumber))")
+                context.logDebug("Using last assistant message for turn metadata at index \(idx) (turn=\(result.turnNumber))")
             }
+        } else if let firstTextId = context.firstTextMessageIdForTurn,
+                  let index = MessageFinder.indexById(firstTextId, in: context.messages) {
+            targetIndex = index
+            context.logDebug("Using tracked text message as fallback for turn metadata at index \(index)")
         }
 
         // Update the target message with metadata
