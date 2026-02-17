@@ -2,12 +2,15 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio::time::{timeout, Duration};
 use tracing::instrument;
 
 use crate::context::RpcContext;
 use crate::errors::{self, RpcError};
 use crate::handlers::require_string_param;
 use crate::registry::MethodHandler;
+
+const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Validate a GitHub/GitLab URL.
 fn is_valid_git_url(url: &str) -> bool {
@@ -31,10 +34,7 @@ impl MethodHandler for CloneHandler {
     #[instrument(skip(self, _ctx), fields(method = "git.clone"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let url = require_string_param(params.as_ref(), "url")?;
-        let target = params
-            .as_ref()
-            .and_then(|p| p.get("targetDirectory"))
-            .and_then(Value::as_str);
+        let target_path = require_string_param(params.as_ref(), "targetPath")?;
 
         if !is_valid_git_url(&url) {
             return Err(RpcError::InvalidParams {
@@ -42,24 +42,19 @@ impl MethodHandler for CloneHandler {
             });
         }
 
-        // Determine target directory
+        if has_path_traversal(&target_path) {
+            return Err(RpcError::InvalidParams {
+                message: "Target directory contains path traversal".into(),
+            });
+        }
+
         let repo_name = url
             .rsplit('/')
             .next()
             .unwrap_or("repo")
             .trim_end_matches(".git");
 
-        let target_dir = if let Some(t) = target {
-            if has_path_traversal(t) {
-                return Err(RpcError::InvalidParams {
-                    message: "Target directory contains path traversal".into(),
-                });
-            }
-            std::path::PathBuf::from(t)
-        } else {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            std::path::PathBuf::from(home).join("Workspace").join(repo_name)
-        };
+        let target_dir = std::path::PathBuf::from(&target_path);
 
         // Check if target already exists
         if target_dir.exists() {
@@ -77,29 +72,45 @@ impl MethodHandler for CloneHandler {
             })?;
         }
 
-        // Execute git clone
-        let output = tokio::process::Command::new("git")
-            .args(["clone", "--depth", "1", &url, &target_dir.to_string_lossy()])
-            .output()
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to execute git clone: {e}"),
-            })?;
+        // Execute git clone with timeout
+        let output = timeout(
+            CLONE_TIMEOUT,
+            tokio::process::Command::new("git")
+                .args(["clone", "--depth", "1", &url, &target_dir.to_string_lossy()])
+                .output(),
+        )
+        .await
+        .map_err(|_| RpcError::Custom {
+            code: errors::GIT_ERROR.into(),
+            message: "Clone timed out. Try again or use a smaller repository.".into(),
+            details: None,
+        })?
+        .map_err(|e| RpcError::Internal {
+            message: format!("Failed to execute git clone: {e}"),
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let message = if stderr.contains("Repository not found") {
+                "Repository not found. Check the URL and ensure the repo is public.".into()
+            } else if stderr.contains("Could not resolve host") {
+                "Network error. Check your connection.".into()
+            } else if stderr.contains("Authentication failed") {
+                "Authentication failed. This may be a private repository.".into()
+            } else {
+                format!("git clone failed: {stderr}")
+            };
             return Err(RpcError::Custom {
                 code: errors::GIT_ERROR.into(),
-                message: format!("git clone failed: {stderr}"),
+                message,
                 details: None,
             });
         }
 
         Ok(serde_json::json!({
             "success": true,
-            "cloned": true,
             "path": target_dir.to_string_lossy(),
-            "url": url,
+            "repoName": repo_name,
         }))
     }
 }
@@ -138,7 +149,20 @@ mod tests {
     async fn clone_missing_url() {
         let ctx = make_test_context();
         let err = CloneHandler
-            .handle(Some(json!({})), &ctx)
+            .handle(Some(json!({"targetPath": "/tmp/repo"})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn clone_missing_target_path() {
+        let ctx = make_test_context();
+        let err = CloneHandler
+            .handle(
+                Some(json!({"url": "https://github.com/user/repo"})),
+                &ctx,
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -148,7 +172,13 @@ mod tests {
     async fn clone_invalid_url() {
         let ctx = make_test_context();
         let err = CloneHandler
-            .handle(Some(json!({"url": "not-a-valid-url"})), &ctx)
+            .handle(
+                Some(json!({
+                    "url": "not-a-valid-url",
+                    "targetPath": "/tmp/repo"
+                })),
+                &ctx,
+            )
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -161,7 +191,7 @@ mod tests {
             .handle(
                 Some(json!({
                     "url": "https://github.com/user/repo",
-                    "targetDirectory": "/tmp/../../etc/evil"
+                    "targetPath": "/tmp/../../etc/evil"
                 })),
                 &ctx,
             )
@@ -177,7 +207,7 @@ mod tests {
             .handle(
                 Some(json!({
                     "url": "https://github.com/user/repo",
-                    "targetDirectory": "/tmp"
+                    "targetPath": "/tmp"
                 })),
                 &ctx,
             )
