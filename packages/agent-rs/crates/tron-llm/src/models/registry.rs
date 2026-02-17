@@ -160,6 +160,14 @@ mod tests {
     }
 
     #[test]
+    fn detect_registry_lookup_openai_spark() {
+        assert_eq!(
+            detect_provider_from_model("gpt-5.3-codex-spark", false),
+            Some(ProviderType::OpenAi)
+        );
+    }
+
+    #[test]
     fn detect_registry_lookup_google() {
         assert_eq!(
             detect_provider_from_model(GEMINI_2_5_FLASH, false),
@@ -230,6 +238,11 @@ mod tests {
         assert!(is_model_supported(CLAUDE_OPUS_4_6));
         assert!(is_model_supported(GPT_5_3_CODEX));
         assert!(is_model_supported(GEMINI_2_5_FLASH));
+    }
+
+    #[test]
+    fn supported_model_spark() {
+        assert!(is_model_supported("gpt-5.3-codex-spark"));
     }
 
     #[test]

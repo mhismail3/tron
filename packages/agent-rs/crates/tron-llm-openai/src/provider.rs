@@ -427,6 +427,7 @@ impl OpenAIProvider {
             error!(
                 status = status.as_u16(),
                 code = code.as_deref().unwrap_or("unknown"),
+                body = %body_text,
                 retryable,
                 "OpenAI API error"
             );
@@ -461,16 +462,29 @@ impl OpenAIProvider {
 }
 
 /// Parse an API error response body.
+///
+/// Handles multiple error formats:
+/// - Standard: `{"error": {"message": "...", "type": "..."}}`
+/// - Detail:   `{"detail": "..."}`
+/// - Flat:     `{"message": "..."}`
 fn parse_api_error(body: &str, status: u16) -> (String, Option<String>, bool) {
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-        let error = &json["error"];
-        let message = error["message"]
-            .as_str()
-            .unwrap_or("Unknown error")
-            .to_string();
-        let code = error["type"].as_str().map(String::from);
         let retryable = status == 429 || status >= 500;
-        (message, code, retryable)
+
+        // Standard OpenAI error envelope
+        if let Some(msg) = json["error"]["message"].as_str() {
+            let code = json["error"]["type"].as_str().map(String::from);
+            return (msg.to_string(), code, retryable);
+        }
+
+        // Alternative formats: {"detail": "..."} or {"message": "..."}
+        if let Some(msg) = json["detail"].as_str().or_else(|| json["message"].as_str()) {
+            let code = json["code"].as_str().or_else(|| json["type"].as_str()).map(String::from);
+            return (msg.to_string(), code, retryable);
+        }
+
+        // JSON but unrecognized structure — include raw body
+        (format!("HTTP {status}: {body}"), None, retryable)
     } else {
         (
             format!("HTTP {status}: {body}"),
@@ -772,6 +786,15 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_effort_spark_defaults_to_low() {
+        let mut config = test_config();
+        config.model = "gpt-5.3-codex-spark".into();
+        let provider = OpenAIProvider::new(config);
+        let options = ProviderStreamOptions::default();
+        assert_eq!(provider.resolve_reasoning_effort(&options), "low");
+    }
+
+    #[test]
     fn reasoning_effort_unknown_model_defaults_to_medium() {
         let mut config = test_config();
         config.model = "unknown-model".into();
@@ -847,8 +870,26 @@ mod tests {
     fn parse_api_error_missing_fields() {
         let body = r#"{"error":{}}"#;
         let (msg, code, _) = parse_api_error(body, 400);
-        assert_eq!(msg, "Unknown error");
+        assert!(msg.contains("400"));
+        assert!(msg.contains(r#"{"error":{}}"#));
         assert!(code.is_none());
+    }
+
+    #[test]
+    fn parse_api_error_detail_format() {
+        let body = r#"{"detail":"Model not found"}"#;
+        let (msg, code, retryable) = parse_api_error(body, 404);
+        assert_eq!(msg, "Model not found");
+        assert!(code.is_none());
+        assert!(!retryable);
+    }
+
+    #[test]
+    fn parse_api_error_flat_message_format() {
+        let body = r#"{"message":"Invalid model","code":"model_not_found"}"#;
+        let (msg, code, _) = parse_api_error(body, 400);
+        assert_eq!(msg, "Invalid model");
+        assert_eq!(code.as_deref(), Some("model_not_found"));
     }
 
     // ── to_standard_base64 ──────────────────────────────────────────

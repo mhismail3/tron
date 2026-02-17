@@ -106,12 +106,14 @@ enum ModelNameFormatter {
             version = "5"
         }
 
-        // Extract suffix (max, mini, etc.)
+        // Extract suffix (max, mini, spark, etc.)
         var suffix = ""
         if lowered.contains("codex-max") {
             suffix = " Max"
         } else if lowered.contains("codex-mini") {
             suffix = " Mini"
+        } else if lowered.contains("codex-spark") {
+            suffix = " Spark"
         }
 
         switch style {

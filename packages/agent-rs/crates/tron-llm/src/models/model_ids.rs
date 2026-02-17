@@ -41,6 +41,9 @@ pub const CLAUDE_3_HAIKU: &str = "claude-3-haiku-20240307";
 /// GPT 5.3 Codex — latest `OpenAI` flagship.
 pub const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
 
+/// GPT 5.3 Codex Spark — fast distilled model (research preview).
+pub const GPT_5_3_CODEX_SPARK: &str = "gpt-5.3-codex-spark";
+
 /// GPT 5.2 Codex.
 pub const GPT_5_2_CODEX: &str = "gpt-5.2-codex";
 
@@ -101,6 +104,7 @@ pub const ALL_ANTHROPIC_MODEL_IDS: &[&str] = &[
 /// All `OpenAI` model IDs.
 pub const ALL_OPENAI_MODEL_IDS: &[&str] = &[
     GPT_5_3_CODEX,
+    GPT_5_3_CODEX_SPARK,
     GPT_5_2_CODEX,
     GPT_5_1_CODEX_MAX,
     GPT_5_1_CODEX_MINI,
@@ -134,6 +138,11 @@ mod tests {
     fn openai_ids_not_empty() {
         assert!(!ALL_OPENAI_MODEL_IDS.is_empty());
         assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_3_CODEX));
+    }
+
+    #[test]
+    fn openai_ids_contains_spark() {
+        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_3_CODEX_SPARK));
     }
 
     #[test]

@@ -199,6 +199,25 @@ fn known_models() -> Vec<Value> {
             "isLegacy": false,
         }),
         serde_json::json!({
+            "id": "gpt-5.3-codex-spark",
+            "name": "GPT-5.3 Codex Spark",
+            "provider": "openai-codex",
+            "contextWindow": 128_000,
+            "maxOutput": 32_000,
+            "supportsThinking": false,
+            "supportsImages": false,
+            "inputCostPerMillion": 1.75,
+            "outputCostPerMillion": 14.0,
+            "tier": "standard",
+            "family": "GPT-5.3",
+            "description": "GPT-5.3 Codex Spark — fast distilled model optimized for ultra-fast inference",
+            "supportsReasoning": true,
+            "reasoningLevels": ["low", "medium", "high"],
+            "defaultReasoningLevel": "low",
+            "recommended": false,
+            "isLegacy": false,
+        }),
+        serde_json::json!({
             "id": "gpt-5.2-codex",
             "name": "GPT-5.2 Codex",
             "provider": "openai-codex",
@@ -490,11 +509,12 @@ mod tests {
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
         assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.1-codex-max"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
         let openai_count = models.iter().filter(|m| m["provider"] == "openai-codex").count();
-        assert_eq!(openai_count, 4);
+        assert_eq!(openai_count, 5);
     }
 
     #[tokio::test]

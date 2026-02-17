@@ -187,6 +187,26 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
     );
 
     m.insert(
+        "gpt-5.3-codex-spark",
+        OpenAIModelInfo {
+            name: "GPT-5.3 Codex Spark",
+            short_name: "GPT-5.3 Spark",
+            family: "GPT-5.3",
+            tier: "standard",
+            context_window: 128_000,
+            max_output: 32_000,
+            supports_tools: true,
+            supports_reasoning: true,
+            reasoning_levels: &["low", "medium", "high"],
+            default_reasoning_level: "low",
+            // Estimated pricing — matches gpt-5.3-codex until official pricing announced.
+            input_cost_per_million: 1.75,
+            output_cost_per_million: 14.0,
+            cache_read_cost_per_million: 0.175,
+        },
+    );
+
+    m.insert(
         "gpt-5.2-codex",
         OpenAIModelInfo {
             name: "GPT-5.2 Codex",
@@ -533,6 +553,21 @@ mod tests {
         assert_eq!(m.input_cost_per_million, 0.25);
         assert_eq!(m.output_cost_per_million, 2.0);
         assert_eq!(m.cache_read_cost_per_million, 0.025);
+    }
+
+    #[test]
+    fn model_gpt_53_codex_spark() {
+        let m = get_openai_model("gpt-5.3-codex-spark").unwrap();
+        assert_eq!(m.context_window, 128_000);
+        assert_eq!(m.max_output, 32_000);
+        assert_eq!(m.tier, "standard");
+        assert!(m.supports_reasoning);
+        assert!(m.supports_tools);
+        assert_eq!(m.reasoning_levels, &["low", "medium", "high"]);
+        assert_eq!(m.default_reasoning_level, "low");
+        assert_eq!(m.input_cost_per_million, 1.75);
+        assert_eq!(m.output_cost_per_million, 14.0);
+        assert_eq!(m.cache_read_cost_per_million, 0.175);
     }
 
     #[test]
