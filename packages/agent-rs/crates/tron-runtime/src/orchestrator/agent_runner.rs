@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::{BaseEvent, TronEvent};
-use tron_hooks::engine::HookEngine;
+use crate::hooks::engine::HookEngine;
 
 use tracing::{debug, info, instrument, warn};
 
@@ -105,8 +105,8 @@ mod tests {
     use async_trait::async_trait;
     use crate::errors::StopReason;
     use futures::stream;
-    use tron_context::context_manager::ContextManager;
-    use tron_context::types::ContextManagerConfig;
+    use crate::context::context_manager::ContextManager;
+    use crate::context::types::ContextManagerConfig;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
@@ -151,7 +151,7 @@ mod tests {
                 working_directory: None,
                 tools: vec![],
                 rules_content: None,
-                compaction: tron_context::types::CompactionConfig::default(),
+                compaction: crate::context::types::CompactionConfig::default(),
             }),
             "test-session".into(),
         )
@@ -274,7 +274,7 @@ mod tests {
                 working_directory: None,
                 tools: vec![],
                 rules_content: None,
-                compaction: tron_context::types::CompactionConfig::default(),
+                compaction: crate::context::types::CompactionConfig::default(),
             }),
             "test-session".into(),
         );
@@ -336,7 +336,7 @@ mod tests {
                 working_directory: None,
                 tools: vec![],
                 rules_content: None,
-                compaction: tron_context::types::CompactionConfig::default(),
+                compaction: crate::context::types::CompactionConfig::default(),
             }),
             "test-session".into(),
         );

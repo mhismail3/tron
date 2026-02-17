@@ -21,6 +21,11 @@ impl ReqwestHttpClient {
                 .unwrap_or_default(),
         }
     }
+
+    /// Create from an existing `reqwest::Client` (shared connection pool).
+    pub fn from_client(client: reqwest::Client) -> Self {
+        Self { client }
+    }
 }
 
 impl Default for ReqwestHttpClient {

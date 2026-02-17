@@ -11,6 +11,9 @@
 
 pub mod config;
 pub mod health;
+pub mod metrics;
+pub mod platform;
+pub mod rpc;
 pub mod server;
 pub mod shutdown;
 pub mod websocket;

@@ -4,12 +4,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tron_context::context_manager::ContextManager;
-use tron_context::summarizer::KeywordSummarizer;
+use crate::context::context_manager::ContextManager;
+use crate::context::summarizer::KeywordSummarizer;
 use tron_core::events::{BaseEvent, CompactionReason, TronEvent};
 use tron_core::events::HookResult as EventHookResult;
-use tron_hooks::engine::HookEngine;
-use tron_hooks::types::{HookAction, HookContext};
+use crate::hooks::engine::HookEngine;
+use crate::hooks::types::{HookAction, HookContext};
 
 use tracing::{debug, info};
 
@@ -22,7 +22,7 @@ use crate::types::ReasoningLevel;
 // SubagentManagerSpawner — the single SubsessionSpawner implementation
 // =============================================================================
 
-/// [`SubsessionSpawner`](tron_context::llm_summarizer::SubsessionSpawner) that
+/// [`SubsessionSpawner`](crate::context::llm_summarizer::SubsessionSpawner) that
 /// wraps `SubagentManager::spawn_subsession()` for full audit trail.
 ///
 /// Every LLM call (compaction, ledger) goes through a real child session with
@@ -41,11 +41,11 @@ pub struct SubagentManagerSpawner {
 }
 
 #[async_trait]
-impl tron_context::llm_summarizer::SubsessionSpawner for SubagentManagerSpawner {
+impl crate::context::llm_summarizer::SubsessionSpawner for SubagentManagerSpawner {
     async fn spawn_summarizer(
         &self,
         task: &str,
-    ) -> tron_context::llm_summarizer::SubsessionResult {
+    ) -> crate::context::llm_summarizer::SubsessionResult {
         match self
             .manager
             .spawn_subsession(SubsessionConfig {
@@ -62,12 +62,12 @@ impl tron_context::llm_summarizer::SubsessionSpawner for SubagentManagerSpawner 
             })
             .await
         {
-            Ok(result) => tron_context::llm_summarizer::SubsessionResult {
+            Ok(result) => crate::context::llm_summarizer::SubsessionResult {
                 success: true,
                 output: Some(result.output),
                 error: None,
             },
-            Err(e) => tron_context::llm_summarizer::SubsessionResult {
+            Err(e) => crate::context::llm_summarizer::SubsessionResult {
                 success: false,
                 output: None,
                 error: Some(e.to_string()),
@@ -244,11 +244,11 @@ impl CompactionHandler {
                 manager: manager.clone(),
                 parent_session_id: session_id.to_owned(),
                 working_directory: context_manager.get_working_directory().to_owned(),
-                system_prompt: tron_context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
+                system_prompt: crate::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
                     .to_string(),
                 model: None, // Use session's model
             };
-            let summarizer = tron_context::llm_summarizer::LlmSummarizer::new(spawner);
+            let summarizer = crate::context::llm_summarizer::LlmSummarizer::new(spawner);
             context_manager
                 .execute_compaction(&summarizer, None)
                 .await

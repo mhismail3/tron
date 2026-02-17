@@ -6,18 +6,20 @@ use std::time::Instant;
 
 use serde_json::json;
 use tron_tools::traits::ExecutionMode;
-use tron_context::context_manager::ContextManager;
+use crate::context::context_manager::ContextManager;
 use tron_core::content::AssistantContent;
 use tron_core::events::{
     ActivatedRuleInfo, BaseEvent, CompactionReason, ResponseTokenUsage, ToolCallSummary,
     TronEvent, TurnTokenUsage,
 };
 use tron_core::messages::{Message, ToolResultMessageContent};
-use tron_guardrails::GuardrailEngine;
-use tron_hooks::engine::HookEngine;
+use crate::guardrails::GuardrailEngine;
+use crate::hooks::engine::HookEngine;
 use tron_llm::provider::{Provider, ProviderStreamOptions};
+use tron_llm::{ProviderHealthTracker, StreamFactory, StreamRetryConfig, with_provider_retry};
 use tron_tools::registry::ToolRegistry;
 
+use metrics::{counter, histogram};
 use tracing::{debug, error, info, instrument};
 
 use crate::agent::compaction_handler::CompactionHandler;
@@ -50,6 +52,8 @@ pub async fn execute_turn(
     previous_context_baseline: u64,
     subagent_depth: u32,
     subagent_max_depth: u32,
+    retry_config: Option<&tron_core::retry::RetryConfig>,
+    health_tracker: Option<&Arc<ProviderHealthTracker>>,
 ) -> TurnResult {
     let turn_start = Instant::now();
 
@@ -130,38 +134,72 @@ pub async fn execute_turn(
         ..Default::default()
     };
 
-    // 5. Stream from Provider
-    let stream = match provider.stream(&context, &stream_options).await {
-        Ok(s) => s,
-        Err(e) => {
-            let error_msg = e.to_string();
-            let category = e.category().to_owned();
-            let recoverable = e.is_retryable();
+    // 5. Stream from Provider (with retry if configured)
+    let provider_name = provider.provider_type().as_str().to_owned();
+    counter!("provider_requests_total", "provider" => provider_name.clone()).increment(1);
 
-            let _ = emitter.emit(TronEvent::TurnFailed {
-                base: BaseEvent::now(session_id),
-                turn,
-                error: error_msg.clone(),
-                code: None,
-                category: Some(category),
-                recoverable,
-                partial_content: None,
-            });
+    let stream = if let Some(retry) = retry_config {
+        // Wrap with retry — factory creates a new stream on each attempt
+        let p = provider.clone();
+        let ctx = context.clone();
+        let opts = stream_options.clone();
+        let factory: StreamFactory = Box::new(move || {
+            let p = p.clone();
+            let ctx = ctx.clone();
+            let opts = opts.clone();
+            Box::pin(async move { p.stream(&ctx, &opts).await })
+        });
+        let retry_cfg = StreamRetryConfig {
+            retry: retry.clone(),
+            emit_retry_events: true,
+            cancel_token: Some(cancel.clone()),
+        };
+        with_provider_retry(factory, retry_cfg)
+    } else {
+        match provider.stream(&context, &stream_options).await {
+            Ok(s) => s,
+            Err(e) => {
+                if let Some(ht) = health_tracker {
+                    ht.record_failure(&provider_name);
+                }
+                let error_msg = e.to_string();
+                let category = e.category().to_owned();
+                let recoverable = e.is_retryable();
+                counter!("provider_errors_total", "provider" => provider_name.clone(), "status" => category.clone()).increment(1);
 
-            return TurnResult {
-                success: false,
-                error: Some(error_msg),
-                stop_reason: Some(StopReason::Error),
-                ..Default::default()
-            };
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: BaseEvent::now(session_id),
+                    turn,
+                    error: error_msg.clone(),
+                    code: None,
+                    category: Some(category),
+                    recoverable,
+                    partial_content: None,
+                });
+
+                return TurnResult {
+                    success: false,
+                    error: Some(error_msg),
+                    stop_reason: Some(StopReason::Error),
+                    ..Default::default()
+                };
+            }
         }
     };
 
     // 6. Process stream
     let stream_result =
         match stream_processor::process_stream(stream, session_id, emitter, cancel).await {
-            Ok(r) => r,
+            Ok(r) => {
+                if let Some(ht) = health_tracker {
+                    ht.record_success(&provider_name);
+                }
+                r
+            }
             Err(e) => {
+                if let Some(ht) = health_tracker {
+                    ht.record_failure(&provider_name);
+                }
                 let error_msg = e.to_string();
                 error!(session_id, turn, error = %error_msg, "stream failed");
                 let _ = emitter.emit(TronEvent::TurnFailed {
@@ -423,7 +461,7 @@ pub async fn execute_turn(
             });
 
             // Extract file paths from tool call and activate matching scoped rules
-            let touched = tron_context::path_extractor::extract_touched_paths(
+            let touched = crate::context::path_extractor::extract_touched_paths(
                 &tc.name,
                 &tc.arguments,
                 std::path::Path::new(&working_dir),
@@ -523,6 +561,10 @@ pub async fn execute_turn(
         has_thinking,
         "turn completed"
     );
+
+    // Record turn metrics
+    counter!("agent_turns_total", "model" => provider.model().to_owned()).increment(1);
+    histogram!("agent_turn_duration_seconds").record(turn_start.elapsed().as_secs_f64());
 
     // Determine stop reason for this turn
     let stop_reason = if stop_turn_requested {

@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use tron_core::content::AssistantContent;
 use tron_core::messages::TokenUsage;
 use tron_llm::models::types::ProviderType;
-use tron_tokens::normalization::normalize_tokens;
-use tron_tokens::types::{TokenMeta, TokenSource};
+use tron_llm::tokens::normalization::normalize_tokens;
+use tron_llm::tokens::types::{TokenMeta, TokenSource};
 
 /// Build a JSON content array from assistant content blocks.
 ///
@@ -25,7 +25,7 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
         "inputTokens": usage.input_tokens,
         "outputTokens": usage.output_tokens,
     });
-    let m = obj.as_object_mut().unwrap();
+    let m = obj.as_object_mut().expect("just created as object");
     if let Some(cr) = usage.cache_read_tokens {
         let _ = m.insert("cacheReadTokens".into(), json!(cr));
     }
@@ -37,7 +37,7 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
 
 /// Build the nested `tokenRecord` structure for iOS compatibility.
 ///
-/// Delegates to `tron_tokens::normalize_tokens()` for correct per-turn
+/// Delegates to `tron_llm::tokens::normalize_tokens()` for correct per-turn
 /// delta calculation using cross-turn baseline tracking.
 pub fn build_token_record(
     usage: &TokenUsage,

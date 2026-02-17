@@ -16,8 +16,8 @@ use clap::Parser;
 use parking_lot::RwLock;
 use tron_events::{ConnectionConfig, EventStore};
 use tron_llm::provider::ProviderFactory;
-use tron_rpc::context::{AgentDeps, RpcContext};
-use tron_rpc::registry::MethodRegistry;
+use tron_server::rpc::context::{AgentDeps, RpcContext};
+use tron_server::rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_runtime::orchestrator::subagent_manager::SubagentManager;
@@ -81,8 +81,10 @@ struct ToolRegistryConfig {
     task_pool: tron_events::ConnectionPool,
     brave_api_key: Option<String>,
     browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>>,
-    apns_service: Option<Arc<tron_platform::apns::ApnsService>>,
+    apns_service: Option<Arc<tron_server::platform::apns::ApnsService>>,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    /// Shared HTTP client (connection pool reused across tools).
+    http_client: reqwest::Client,
 }
 
 /// Create a populated tool registry with built-in tools.
@@ -101,7 +103,9 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     let fs: Arc<dyn tron_tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
     let runner: Arc<dyn tron_tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
-    let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(ReqwestHttpClient::new());
+    let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(
+        ReqwestHttpClient::from_client(config.http_client.clone()),
+    );
 
     // Real providers backed by SQLite
     let mut store_query_builder =
@@ -218,7 +222,7 @@ async fn main() -> Result<()> {
     {
         let conn = pool.get().context("Failed to get DB connection")?;
         let _ = tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
-        tron_tasks::migrations::run_migrations(&conn)
+        tron_runtime::tasks::migrations::run_migrations(&conn)
             .context("Failed to run task migrations")?;
     }
 
@@ -235,11 +239,11 @@ async fn main() -> Result<()> {
     log_conn
         .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
         .context("Failed to set logging connection pragmas")?;
-    let log_handle = tron_logging::init_subscriber_with_sqlite(
+    let log_handle = tron_core::logging::init_subscriber_with_sqlite(
         settings.logging.db_log_level.as_filter_str(),
         log_conn,
     );
-    let flush_task = tron_logging::spawn_flush_task(log_handle.clone());
+    let flush_task = tron_core::logging::spawn_flush_task(log_handle.clone());
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
@@ -255,7 +259,7 @@ async fn main() -> Result<()> {
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     // Load Brave API key for web search (matches TS server conditional registration)
-    let brave_api_key = tron_auth::storage::get_service_api_keys(&auth_path(), "brave")
+    let brave_api_key = tron_llm::auth::storage::get_service_api_keys(&auth_path(), "brave")
         .into_iter()
         .next();
     if brave_api_key.is_some() {
@@ -263,9 +267,9 @@ async fn main() -> Result<()> {
     }
 
     // Browser service (optional — only if Chrome is found)
-    let browser_service = tron_browser::chrome::find_chrome().map(|chrome_path| {
+    let browser_service = tron_tools::cdp::chrome::find_chrome().map(|chrome_path| {
         tracing::info!(path = %chrome_path.display(), "Chrome found — browser streaming enabled");
-        Arc::new(tron_browser::service::BrowserService::new(chrome_path))
+        Arc::new(tron_tools::cdp::service::BrowserService::new(chrome_path))
     });
     if browser_service.is_none() {
         tracing::info!("Chrome not found — browser streaming disabled");
@@ -274,14 +278,14 @@ async fn main() -> Result<()> {
     // Browser delegate for tool registry (real CDP if Chrome found)
     let browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>> =
         browser_service.as_ref().map(|svc| {
-            Arc::new(tron_browser::delegate::CdpBrowserDelegate::new(svc.clone()))
+            Arc::new(tron_tools::cdp::delegate::CdpBrowserDelegate::new(svc.clone()))
                 as Arc<dyn tron_tools::traits::BrowserDelegate>
         });
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
-    let apns_service: Option<Arc<tron_platform::apns::ApnsService>> =
-        tron_platform::apns::load_apns_config().and_then(|apns_config| {
-            match tron_platform::apns::ApnsService::new(apns_config) {
+    let apns_service: Option<Arc<tron_server::platform::apns::ApnsService>> =
+        tron_server::platform::apns::load_apns_config().and_then(|apns_config| {
+            match tron_server::platform::apns::ApnsService::new(apns_config) {
                 Ok(svc) => {
                     tracing::info!("APNS service initialized — push notifications enabled");
                     Some(Arc::new(svc))
@@ -338,6 +342,14 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Agent dependencies (provider factory + tool factory)
+    // The factory creates a fresh provider per request by detecting the provider
+    // type from the model ID and loading auth from disk. This means model switches
+    // take effect immediately — no server restart needed.
+    let default_factory = provider_factory::DefaultProviderFactory::new(&settings);
+    let shared_http_client = default_factory.http_client();
+    let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
+
     // Tool registry config (shared resources for per-session tool factories)
     let tool_config = Arc::new(ToolRegistryConfig {
         event_store: event_store.clone(),
@@ -346,14 +358,8 @@ async fn main() -> Result<()> {
         browser_delegate,
         apns_service,
         embedding_controller: embedding_controller.clone(),
+        http_client: shared_http_client,
     });
-
-    // Agent dependencies (provider factory + tool factory)
-    // The factory creates a fresh provider per request by detecting the provider
-    // type from the model ID and loading auth from disk. This means model switches
-    // take effect immediately — no server restart needed.
-    let provider_factory: Arc<dyn ProviderFactory> =
-        Arc::new(provider_factory::DefaultProviderFactory::new(&settings));
 
     // Verify auth is available for the default model at startup.
     let startup_auth_ok = provider_factory
@@ -461,11 +467,12 @@ async fn main() -> Result<()> {
         transcription_engine,
         embedding_controller,
         subagent_manager: shared_subagent_manager,
+        health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
     };
 
     // Method registry
     let mut registry = MethodRegistry::new();
-    tron_rpc::handlers::register_all(&mut registry);
+    tron_server::rpc::handlers::register_all(&mut registry);
     let method_count = registry.methods().len();
 
     // Server config
@@ -475,15 +482,18 @@ async fn main() -> Result<()> {
         ..ServerConfig::default()
     };
 
+    // Install Prometheus metrics recorder (must be before any metrics are recorded)
+    let metrics_handle = tron_server::metrics::install_recorder();
+
     // Build and start server
-    let server = TronServer::new(config, registry, rpc_context);
+    let server = TronServer::new(config, registry, rpc_context, metrics_handle);
 
     // Event bridge: orchestrator events + browser frames → WebSocket clients
     let browser_rx = browser_service.as_ref().map(|svc| svc.subscribe());
     let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), browser_rx);
-    let _bridge_handle = tokio::spawn(bridge.run());
+    let bridge_handle = tokio::spawn(bridge.run());
 
-    let (addr, handle) = server
+    let (addr, server_handle) = server
         .listen()
         .await
         .context("Failed to bind server")?;
@@ -498,8 +508,15 @@ async fn main() -> Result<()> {
         .context("Failed to listen for ctrl-c")?;
 
     tracing::info!("Shutting down...");
-    server.shutdown().shutdown();
-    let _ = handle.await;
+
+    // Collect tracked task handles for coordinated shutdown
+    let shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![server_handle, bridge_handle];
+
+    // Graceful shutdown with 30s timeout
+    server
+        .shutdown()
+        .graceful_shutdown(shutdown_handles, None)
+        .await;
 
     // Flush remaining logs to SQLite and stop the periodic flush task
     flush_task.abort();
@@ -588,7 +605,7 @@ mod tests {
         // With no env vars and no auth.json, OpenAI returns None
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
-        let result = tron_auth::openai::load_server_auth(&path, None, None)
+        let result = tron_llm::auth::openai::load_server_auth(&path, None, None)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -598,7 +615,7 @@ mod tests {
     async fn google_returns_none_without_auth() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
-        let result = tron_auth::google::load_server_auth(&path, None, None)
+        let result = tron_llm::auth::google::load_server_auth(&path, None, None)
             .await
             .unwrap();
         assert!(result.is_none());
@@ -617,16 +634,16 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save fresh OAuth tokens
-        let tokens = tron_auth::OAuthTokens {
+        let tokens = tron_llm::auth::OAuthTokens {
             access_token: "sk-ant-oat-test".to_string(),
             refresh_token: "ref".to_string(),
-            expires_at: tron_auth::now_ms() + 3_600_000,
+            expires_at: tron_llm::auth::now_ms() + 3_600_000,
         };
-        tron_auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        tron_llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         // load_server_auth should find the OAuth tokens
-        let config = tron_auth::anthropic::default_config();
-        let result = tron_auth::anthropic::load_server_auth(&path, &config, None, None)
+        let config = tron_llm::auth::anthropic::default_config();
+        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -640,17 +657,17 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save both OAuth and API key
-        tron_auth::storage::save_provider_api_key(&path, "anthropic", "sk-api-key").unwrap();
-        let tokens = tron_auth::OAuthTokens {
+        tron_llm::auth::storage::save_provider_api_key(&path, "anthropic", "sk-api-key").unwrap();
+        let tokens = tron_llm::auth::OAuthTokens {
             access_token: "sk-ant-oat-primary".to_string(),
             refresh_token: "ref".to_string(),
-            expires_at: tron_auth::now_ms() + 3_600_000,
+            expires_at: tron_llm::auth::now_ms() + 3_600_000,
         };
-        tron_auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
+        tron_llm::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         // OAuth takes priority
-        let config = tron_auth::anthropic::default_config();
-        let result = tron_auth::anthropic::load_server_auth(&path, &config, None, None)
+        let config = tron_llm::auth::anthropic::default_config();
+        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -664,19 +681,19 @@ mod tests {
         let path = dir.path().join("auth.json");
 
         // Save two accounts
-        let work_tokens = tron_auth::OAuthTokens {
+        let work_tokens = tron_llm::auth::OAuthTokens {
             access_token: "work-tok".to_string(),
             refresh_token: "ref1".to_string(),
-            expires_at: tron_auth::now_ms() + 3_600_000,
+            expires_at: tron_llm::auth::now_ms() + 3_600_000,
         };
-        let personal_tokens = tron_auth::OAuthTokens {
+        let personal_tokens = tron_llm::auth::OAuthTokens {
             access_token: "personal-tok".to_string(),
             refresh_token: "ref2".to_string(),
-            expires_at: tron_auth::now_ms() + 3_600_000,
+            expires_at: tron_llm::auth::now_ms() + 3_600_000,
         };
-        tron_auth::storage::save_account_oauth_tokens(&path, "anthropic", "work", &work_tokens)
+        tron_llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "work", &work_tokens)
             .unwrap();
-        tron_auth::storage::save_account_oauth_tokens(
+        tron_llm::auth::storage::save_account_oauth_tokens(
             &path,
             "anthropic",
             "personal",
@@ -684,16 +701,16 @@ mod tests {
         )
         .unwrap();
 
-        let config = tron_auth::anthropic::default_config();
+        let config = tron_llm::auth::anthropic::default_config();
 
         // Select "personal" account
-        let result = tron_auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
+        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
             .await
             .unwrap();
         assert_eq!(result.unwrap().token(), "personal-tok");
 
         // No preference → first account
-        let result = tron_auth::anthropic::load_server_auth(&path, &config, None, None)
+        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, None)
             .await
             .unwrap();
         assert_eq!(result.unwrap().token(), "work-tok");
@@ -704,19 +721,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        let tokens = tron_auth::OAuthTokens {
+        let tokens = tron_llm::auth::OAuthTokens {
             access_token: "openai-oauth-tok".to_string(),
             refresh_token: "ref".to_string(),
-            expires_at: tron_auth::now_ms() + 3_600_000,
+            expires_at: tron_llm::auth::now_ms() + 3_600_000,
         };
-        tron_auth::storage::save_provider_oauth_tokens(
+        tron_llm::auth::storage::save_provider_oauth_tokens(
             &path,
-            tron_auth::openai::PROVIDER_KEY,
+            tron_llm::auth::openai::PROVIDER_KEY,
             &tokens,
         )
         .unwrap();
 
-        let result = tron_auth::openai::load_server_auth(&path, None, None)
+        let result = tron_llm::auth::openai::load_server_auth(&path, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
@@ -729,34 +746,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("auth.json");
 
-        let gpa = tron_auth::GoogleProviderAuth {
-            base: tron_auth::ProviderAuth {
-                oauth: Some(tron_auth::OAuthTokens {
+        let gpa = tron_llm::auth::GoogleProviderAuth {
+            base: tron_llm::auth::ProviderAuth {
+                oauth: Some(tron_llm::auth::OAuthTokens {
                     access_token: "ya29.google-tok".to_string(),
                     refresh_token: "ref".to_string(),
-                    expires_at: tron_auth::now_ms() + 3_600_000,
+                    expires_at: tron_llm::auth::now_ms() + 3_600_000,
                 }),
                 ..Default::default()
             },
-            endpoint: Some(tron_auth::GoogleOAuthEndpoint::Antigravity),
+            endpoint: Some(tron_llm::auth::GoogleOAuthEndpoint::Antigravity),
             ..Default::default()
         };
-        tron_auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
+        tron_llm::auth::storage::save_google_provider_auth(&path, &gpa).unwrap();
 
-        let result = tron_auth::google::load_server_auth(&path, None, None)
+        let result = tron_llm::auth::google::load_server_auth(&path, None, None)
             .await
             .unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.auth.token(), "ya29.google-tok");
         assert_eq!(
             auth.endpoint,
-            Some(tron_auth::GoogleOAuthEndpoint::Antigravity)
+            Some(tron_llm::auth::GoogleOAuthEndpoint::Antigravity)
         );
     }
 
     #[tokio::test]
     async fn server_auth_maps_to_anthropic_oauth_auth() {
-        let server_auth = tron_auth::ServerAuth::OAuth {
+        let server_auth = tron_llm::auth::ServerAuth::OAuth {
             access_token: "tok".to_string(),
             refresh_token: "ref".to_string(),
             expires_at: 999,
@@ -768,7 +785,7 @@ mod tests {
 
     #[tokio::test]
     async fn server_auth_maps_to_api_key_auth() {
-        let server_auth = tron_auth::ServerAuth::from_api_key("sk-123");
+        let server_auth = tron_llm::auth::ServerAuth::from_api_key("sk-123");
         assert!(!server_auth.is_oauth());
         assert_eq!(server_auth.token(), "sk-123");
     }
@@ -785,7 +802,7 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
-            tron_tasks::migrations::run_migrations(&conn).unwrap();
+            tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let task_pool = pool.clone();
         let event_store = Arc::new(EventStore::new(pool));
@@ -807,13 +824,16 @@ mod tests {
             transcription_engine: None,
             embedding_controller: None,
             subagent_manager: None,
+            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         };
 
         let mut registry = MethodRegistry::new();
-        tron_rpc::handlers::register_all(&mut registry);
+        tron_server::rpc::handlers::register_all(&mut registry);
 
         let config = ServerConfig::default();
-        let server = TronServer::new(config, registry, rpc_context);
+        let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder().handle();
+        let server = TronServer::new(config, registry, rpc_context, metrics_handle);
 
         let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
         let _bridge = tokio::spawn(bridge.run());
@@ -874,7 +894,7 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
-            tron_tasks::migrations::run_migrations(&conn).unwrap();
+            tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         let event_store = Arc::new(EventStore::new(pool.clone()));
         ToolRegistryConfig {
@@ -884,6 +904,7 @@ mod tests {
             browser_delegate: None,
             apns_service: None,
             embedding_controller: None,
+            http_client: reqwest::Client::new(),
         }
     }
 
@@ -938,7 +959,7 @@ mod tests {
     #[test]
     fn server_registers_all_rpc_methods() {
         let mut registry = MethodRegistry::new();
-        tron_rpc::handlers::register_all(&mut registry);
+        tron_server::rpc::handlers::register_all(&mut registry);
         // Should have a substantial number of methods registered
         assert!(registry.methods().len() >= 50);
     }
@@ -970,12 +991,15 @@ mod tests {
             transcription_engine: None,
             embedding_controller: None,
             subagent_manager: None,
+            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         };
 
         let mut registry = MethodRegistry::new();
-        tron_rpc::handlers::register_all(&mut registry);
+        tron_server::rpc::handlers::register_all(&mut registry);
 
-        let server = TronServer::new(ServerConfig::default(), registry, rpc_context);
+        let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder().handle();
+        let server = TronServer::new(ServerConfig::default(), registry, rpc_context, metrics_handle);
         let (_, handle) = server.listen().await.unwrap();
 
         server.shutdown().shutdown();

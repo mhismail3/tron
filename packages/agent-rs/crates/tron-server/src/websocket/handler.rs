@@ -2,47 +2,67 @@
 //! routes through the `MethodRegistry`.
 
 use tracing::{debug, instrument, warn};
-use tron_rpc::context::RpcContext;
-use tron_rpc::registry::MethodRegistry;
-use tron_rpc::types::{RpcRequest, RpcResponse};
+use crate::rpc::context::RpcContext;
+use crate::rpc::registry::MethodRegistry;
+use crate::rpc::types::{RpcRequest, RpcResponse};
+
+/// Result of handling a WebSocket message.
+pub struct HandleResult {
+    /// Serialized JSON response to send back.
+    pub response_json: String,
+    /// The RPC method that was called (empty if parse failed).
+    pub method: String,
+    /// Typed response (for extracting structured data without re-parsing).
+    pub response: RpcResponse,
+}
 
 /// Handle an incoming WebSocket text message.
 ///
 /// Parses the message as an `RpcRequest`, dispatches to the registry, and
-/// returns the serialized `RpcResponse` as a JSON string.
+/// returns the serialized `RpcResponse` along with the method name.
 #[instrument(skip_all, fields(method))]
 pub async fn handle_message(
     message: &str,
     registry: &MethodRegistry,
     ctx: &RpcContext,
-) -> String {
+) -> HandleResult {
     let request: RpcRequest = match serde_json::from_str(message) {
         Ok(r) => r,
         Err(e) => {
             warn!("invalid JSON received");
             let resp =
                 RpcResponse::error("unknown", "INVALID_PARAMS", format!("Invalid JSON: {e}"));
-            return serde_json::to_string(&resp).unwrap_or_else(|e| {
+            let json = serde_json::to_string(&resp).unwrap_or_else(|e| {
                 tracing::error!(error = %e, "Failed to serialize error response");
                 String::new()
             });
+            return HandleResult {
+                response_json: json,
+                method: String::new(),
+                response: resp,
+            };
         }
     };
 
-    let method = &request.method;
+    let method = request.method.clone();
     let id = &request.id;
     let _ = tracing::Span::current().record("method", method.as_str());
     debug!(method, id, "dispatching RPC");
 
-    if !registry.has_method(method) {
+    if !registry.has_method(&method) {
         warn!(method, "unknown RPC method");
     }
 
     let response = registry.dispatch(request, ctx).await;
-    serde_json::to_string(&response).unwrap_or_else(|e| {
+    let json = serde_json::to_string(&response).unwrap_or_else(|e| {
         tracing::error!(error = %e, "Failed to serialize response");
         String::new()
-    })
+    });
+    HandleResult {
+        response_json: json,
+        method,
+        response,
+    }
 }
 
 #[cfg(test)]
@@ -53,8 +73,8 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::{json, Value};
     use tron_events::EventStore;
-    use tron_rpc::errors::RpcError;
-    use tron_rpc::registry::MethodHandler;
+    use crate::rpc::errors::RpcError;
+    use crate::rpc::registry::MethodHandler;
     use tron_runtime::orchestrator::orchestrator::Orchestrator;
     use tron_runtime::orchestrator::session_manager::SessionManager;
 
@@ -83,6 +103,7 @@ mod tests {
             transcription_engine: None,
             subagent_manager: None,
             embedding_controller: None,
+            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         }
     }
 
@@ -110,8 +131,8 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"id":"r1","method":"test.echo","params":{"x":1}}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert!(resp.success);
         assert_eq!(resp.id, "r1");
         assert_eq!(resp.result.unwrap()["x"], 1);
@@ -121,8 +142,8 @@ mod tests {
     async fn invalid_json_returns_error() {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let resp_str = handle_message("not json at all", &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message("not json at all", &reg, &ctx).await;
+        let resp = result.response;
         assert!(!resp.success);
         assert_eq!(resp.id, "unknown");
         let err = resp.error.unwrap();
@@ -134,8 +155,8 @@ mod tests {
     async fn empty_message_returns_error() {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let resp_str = handle_message("", &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message("", &reg, &ctx).await;
+        let resp = result.response;
         assert!(!resp.success);
         assert_eq!(resp.error.unwrap().code, "INVALID_PARAMS");
     }
@@ -145,8 +166,8 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"id":"r2","method":"no.such"}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert!(!resp.success);
         assert_eq!(resp.error.unwrap().code, "METHOD_NOT_FOUND");
     }
@@ -156,8 +177,8 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"id":"unique_42","method":"test.echo"}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert_eq!(resp.id, "unique_42");
     }
 
@@ -165,8 +186,8 @@ mod tests {
     async fn non_object_json_returns_error() {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
-        let resp_str = handle_message("[1,2,3]", &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message("[1,2,3]", &reg, &ctx).await;
+        let resp = result.response;
         assert!(!resp.success);
         assert_eq!(resp.error.unwrap().code, "INVALID_PARAMS");
     }
@@ -176,8 +197,8 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"method":"test.echo"}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert!(!resp.success);
         assert_eq!(resp.id, "unknown");
     }
@@ -187,8 +208,8 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"id":"r3"}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         // Missing "method" → parse error since method is required
         assert!(!resp.success);
     }
@@ -198,12 +219,11 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"id":"r4","method":"test.echo","params":null}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert!(resp.success);
-        // null params → EchoHandler returns null → serde roundtrip drops Some(Null) to None
-        let v: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-        assert!(v["result"].is_null());
+        // null params → EchoHandler returns Value::Null → Some(Null)
+        assert_eq!(resp.result, Some(serde_json::Value::Null));
     }
 
     #[tokio::test]
@@ -211,12 +231,11 @@ mod tests {
         let reg = registry_with_echo();
         let ctx = make_test_ctx();
         let msg = r#"{"id":"r5","method":"test.echo"}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert!(resp.success);
-        // No params → EchoHandler returns null → serde roundtrip drops to None
-        let v: serde_json::Value = serde_json::from_str(&resp_str).unwrap();
-        assert!(v["result"].is_null());
+        // No params → EchoHandler returns Value::Null → Some(Null)
+        assert_eq!(resp.result, Some(serde_json::Value::Null));
     }
 
     #[tokio::test]
@@ -241,8 +260,8 @@ mod tests {
         let ctx = make_test_ctx();
 
         let msg = r#"{"id":"r6","method":"test.fail"}"#;
-        let resp_str = handle_message(msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let result = handle_message(msg, &reg, &ctx).await;
+        let resp = result.response;
         assert!(!resp.success);
         assert_eq!(resp.error.unwrap().code, "INTERNAL_ERROR");
     }
@@ -253,8 +272,8 @@ mod tests {
         let ctx = make_test_ctx();
         let large_val = "x".repeat(10_000);
         let msg = format!(r#"{{"id":"r7","method":"test.echo","params":{{"big":"{large_val}"}}}}"#);
-        let resp_str = handle_message(&msg, &reg, &ctx).await;
-        let resp: RpcResponse = serde_json::from_str(&resp_str).unwrap();
+        let handle_result = handle_message(&msg, &reg, &ctx).await;
+        let resp = handle_result.response;
         assert!(resp.success);
         let result = resp.result.unwrap();
         assert_eq!(result["big"].as_str().unwrap().len(), 10_000);

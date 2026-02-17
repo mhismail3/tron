@@ -1,4 +1,4 @@
-//! Real `TaskManagerDelegate` backed by `tron_tasks::TaskService`.
+//! Real `TaskManagerDelegate` backed by `tron_runtime::tasks::TaskService`.
 //!
 //! Provides the `TaskManager` tool with actual database access for CRUD
 //! operations on tasks, projects, and areas.
@@ -6,8 +6,8 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tron_events::ConnectionPool;
-use tron_tasks::service::TaskService;
-use tron_tasks::types::{
+use tron_runtime::tasks::service::TaskService;
+use tron_runtime::tasks::types::{
     AreaCreateParams, ProjectCreateParams, ProjectStatus, ProjectUpdateParams, TaskCreateParams,
     TaskPriority, TaskStatus, TaskUpdateParams,
 };
@@ -386,7 +386,7 @@ mod tests {
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
-            let _ = tron_tasks::migrations::run_migrations(&conn).unwrap();
+            let _ = tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
         }
         pool
     }

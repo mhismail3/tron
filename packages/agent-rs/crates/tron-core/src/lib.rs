@@ -22,6 +22,7 @@ pub mod content;
 pub mod errors;
 pub mod events;
 pub mod ids;
+pub mod logging;
 pub mod memory;
 pub mod messages;
 pub mod retry;

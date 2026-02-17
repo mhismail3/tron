@@ -18,6 +18,7 @@
 pub mod envelope;
 pub mod errors;
 pub mod factory;
+pub mod memory;
 pub mod reconstruct;
 pub mod sqlite;
 pub mod store;

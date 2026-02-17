@@ -7,9 +7,9 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use tron_core::messages::ToolCall;
-use tron_guardrails::{EvaluationContext, GuardrailEngine};
-use tron_hooks::engine::HookEngine;
-use tron_hooks::types::{HookAction, HookContext};
+use crate::guardrails::{EvaluationContext, GuardrailEngine};
+use crate::hooks::engine::HookEngine;
+use crate::hooks::types::{HookAction, HookContext};
 use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::ToolContext;
 
@@ -385,17 +385,17 @@ mod tests {
         let cancel = CancellationToken::new();
 
         // Set up guardrails that block "echo" with dangerous args
-        let mut engine = GuardrailEngine::new(tron_guardrails::GuardrailEngineOptions::default());
-        use tron_guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
-        use tron_guardrails::types::Severity;
+        let mut engine = GuardrailEngine::new(crate::guardrails::GuardrailEngineOptions::default());
+        use crate::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
+        use crate::guardrails::types::Severity;
         engine.register_rule(GuardrailRule::Pattern(PatternRule {
             base: RuleBase {
                 id: "test-block".into(),
                 name: "Block rm".into(),
                 description: "Block rm commands".into(),
                 severity: Severity::Block,
-                scope: tron_guardrails::types::Scope::Tool,
-                tier: tron_guardrails::types::RuleTier::Custom,
+                scope: crate::guardrails::types::Scope::Tool,
+                tier: crate::guardrails::types::RuleTier::Custom,
                 tools: vec!["echo".into()],
                 priority: 100,
                 enabled: true,
@@ -488,10 +488,10 @@ mod tests {
 
     #[tokio::test]
     async fn pre_tool_use_hook_emits_triggered_and_completed() {
-        use tron_hooks::registry::HookRegistry;
-        use tron_hooks::handler::HookHandler;
-        use tron_hooks::types::{HookType, HookResult as HookExecResult};
-        use tron_hooks::errors::HookError;
+        use crate::hooks::registry::HookRegistry;
+        use crate::hooks::handler::HookHandler;
+        use crate::hooks::types::{HookType, HookResult as HookExecResult};
+        use crate::hooks::errors::HookError;
 
         struct ContinueHandler;
 
@@ -541,10 +541,10 @@ mod tests {
 
     #[tokio::test]
     async fn post_tool_use_hook_emits_triggered() {
-        use tron_hooks::registry::HookRegistry;
-        use tron_hooks::handler::HookHandler;
-        use tron_hooks::types::{HookType, HookExecutionMode, HookResult as HookExecResult};
-        use tron_hooks::errors::HookError;
+        use crate::hooks::registry::HookRegistry;
+        use crate::hooks::handler::HookHandler;
+        use crate::hooks::types::{HookType, HookExecutionMode, HookResult as HookExecResult};
+        use crate::hooks::errors::HookError;
 
         struct BgHandler;
 

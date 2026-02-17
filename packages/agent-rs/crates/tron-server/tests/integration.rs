@@ -20,8 +20,8 @@ use tron_llm::models::types::ProviderType;
 use tron_llm::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
-use tron_rpc::context::{AgentDeps, RpcContext};
-use tron_rpc::registry::MethodRegistry;
+use tron_server::rpc::context::{AgentDeps, RpcContext};
+use tron_server::rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_server::config::ServerConfig;
@@ -42,7 +42,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
     {
         let conn = pool.get().unwrap();
         let _ = tron_events::run_migrations(&conn).unwrap();
-        tron_tasks::migrations::run_migrations(&conn).unwrap();
+        tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
     }
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
@@ -64,13 +64,16 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         transcription_engine: None,
         subagent_manager: None,
         embedding_controller: None,
+        health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
     };
 
     let mut registry = MethodRegistry::new();
-    tron_rpc::handlers::register_all(&mut registry);
+    tron_server::rpc::handlers::register_all(&mut registry);
 
     let config = ServerConfig::default(); // port 0 = auto-assign
-    let server = Arc::new(TronServer::new(config, registry, rpc_context));
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder().handle();
+    let server = Arc::new(TronServer::new(config, registry, rpc_context, metrics_handle));
 
     let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
     let _bridge_handle = tokio::spawn(bridge.run());
@@ -196,7 +199,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
     {
         let conn = pool.get().unwrap();
         let _ = tron_events::run_migrations(&conn).unwrap();
-        tron_tasks::migrations::run_migrations(&conn).unwrap();
+        tron_runtime::tasks::migrations::run_migrations(&conn).unwrap();
     }
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
@@ -223,13 +226,16 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         transcription_engine: None,
         subagent_manager: None,
         embedding_controller: None,
+        health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
     };
 
     let mut registry = MethodRegistry::new();
-    tron_rpc::handlers::register_all(&mut registry);
+    tron_server::rpc::handlers::register_all(&mut registry);
 
     let config = ServerConfig::default();
-    let server = Arc::new(TronServer::new(config, registry, rpc_context));
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder().handle();
+    let server = Arc::new(TronServer::new(config, registry, rpc_context, metrics_handle));
 
     let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
     drop(tokio::spawn(bridge.run()));
@@ -2805,7 +2811,7 @@ async fn e2e_context_snapshot_has_real_tokens() {
     // Context limit should match model
     assert_eq!(
         result["contextLimit"].as_u64().unwrap(),
-        tron_tokens::get_context_limit("claude-opus-4-6")
+        tron_llm::tokens::get_context_limit("claude-opus-4-6")
     );
     assert_eq!(result["thresholdLevel"], "normal");
 

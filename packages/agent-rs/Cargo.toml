@@ -4,27 +4,13 @@ members = [
     "crates/tron-core",
     "crates/tron-events",
     "crates/tron-settings",
-    "crates/tron-logging",
-    "crates/tron-auth",
-    "crates/tron-tokens",
     "crates/tron-embeddings",
     "crates/tron-llm",
-    "crates/tron-llm-anthropic",
-    "crates/tron-llm-google",
-    "crates/tron-llm-openai",
-    "crates/tron-context",
     "crates/tron-runtime",
     "crates/tron-tools",
-    "crates/tron-hooks",
     "crates/tron-skills",
-    "crates/tron-guardrails",
-    "crates/tron-memory",
-    "crates/tron-tasks",
     "crates/tron-transcription",
-    "crates/tron-rpc",
     "crates/tron-server",
-    "crates/tron-browser",
-    "crates/tron-platform",
     "crates/tron-agent",
 ]
 
@@ -43,7 +29,7 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
 axum-extra = "0.10"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit", "timeout", "request-id", "catch-panic", "compression-gzip"] }
 tokio-tungstenite = "0.26"
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "http2"], default-features = false }
 eventsource-stream = "0.2"
@@ -63,6 +49,10 @@ figment = { version = "0.10", features = ["json", "env"] }
 # Logging / Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.16", default-features = false }
 
 # Error handling
 thiserror = "2"
@@ -131,27 +121,13 @@ tokio-stream = "0.1"
 tron-core = { path = "crates/tron-core" }
 tron-events = { path = "crates/tron-events" }
 tron-settings = { path = "crates/tron-settings" }
-tron-logging = { path = "crates/tron-logging" }
-tron-auth = { path = "crates/tron-auth" }
-tron-tokens = { path = "crates/tron-tokens" }
 tron-embeddings = { path = "crates/tron-embeddings" }
 tron-llm = { path = "crates/tron-llm" }
-tron-llm-anthropic = { path = "crates/tron-llm-anthropic" }
-tron-llm-google = { path = "crates/tron-llm-google" }
-tron-llm-openai = { path = "crates/tron-llm-openai" }
-tron-context = { path = "crates/tron-context" }
 tron-runtime = { path = "crates/tron-runtime" }
 tron-tools = { path = "crates/tron-tools" }
-tron-hooks = { path = "crates/tron-hooks" }
 tron-skills = { path = "crates/tron-skills" }
-tron-guardrails = { path = "crates/tron-guardrails" }
-tron-memory = { path = "crates/tron-memory" }
-tron-tasks = { path = "crates/tron-tasks" }
 tron-transcription = { path = "crates/tron-transcription" }
-tron-rpc = { path = "crates/tron-rpc" }
-tron-browser = { path = "crates/tron-browser" }
 tron-server = { path = "crates/tron-server" }
-tron-platform = { path = "crates/tron-platform" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

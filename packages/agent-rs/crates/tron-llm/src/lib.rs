@@ -22,13 +22,19 @@
 
 #![deny(unsafe_code)]
 
+pub mod anthropic;
+pub mod auth;
 pub mod context_composition;
+pub mod google;
+pub mod health;
 pub mod id_remapping;
 pub mod models;
+pub mod openai;
 pub mod provider;
 pub mod retry;
 pub mod sse;
 pub mod stop_reason;
+pub mod tokens;
 pub mod tool_parsing;
 
 pub use context_composition::{
@@ -50,6 +56,7 @@ pub use provider::{
     Provider, ProviderError, ProviderFactory, ProviderResult, ProviderStreamOptions,
     StreamEventStream,
 };
+pub use health::ProviderHealthTracker;
 pub use retry::{with_provider_retry, StreamFactory, StreamRetryConfig};
 pub use sse::{parse_sse_data, parse_sse_lines, SseParserOptions};
 pub use stop_reason::{map_google_stop_reason, map_openai_stop_reason};

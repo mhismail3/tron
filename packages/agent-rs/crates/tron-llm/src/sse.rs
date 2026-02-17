@@ -9,7 +9,7 @@
 //! - `[DONE]` marker filtering
 //! - Remaining buffer processing (configurable per provider)
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::Stream;
 use tokio_stream::StreamExt;
 use tracing::warn;
@@ -48,28 +48,40 @@ where
     let process_remaining = options.process_remaining_buffer;
 
     futures::stream::unfold(
-        (byte_stream, String::new(), false),
+        (byte_stream, BytesMut::with_capacity(8192), false),
         move |(mut stream, mut buffer, done)| async move {
             if done {
                 return None;
             }
 
             loop {
-                // Check buffer for complete lines
-                if let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].trim_end_matches('\r').to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
+                // Check buffer for a complete line (\n)
+                if let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                    // Split the line bytes out of the buffer (zero-copy split)
+                    let mut line_bytes = buffer.split_to(newline_pos + 1);
+                    // Remove trailing \n
+                    line_bytes.truncate(line_bytes.len() - 1);
+                    // Remove trailing \r if present
+                    if line_bytes.last() == Some(&b'\r') {
+                        line_bytes.truncate(line_bytes.len() - 1);
+                    }
 
-                    if let Some(data) = extract_sse_data(&line) {
+                    // Convert to &str only for the final line
+                    let line = match std::str::from_utf8(&line_bytes) {
+                        Ok(s) => s,
+                        Err(_) => continue, // skip invalid UTF-8 lines
+                    };
+
+                    if let Some(data) = extract_sse_data(line) {
                         return Some((data, (stream, buffer, false)));
                     }
                     continue;
                 }
 
-                // Read next chunk
+                // Read next chunk — append raw bytes, no conversion
                 match stream.next().await {
                     Some(Ok(chunk)) => {
-                        buffer.push_str(&String::from_utf8_lossy(&chunk));
+                        buffer.extend_from_slice(&chunk);
                     }
                     Some(Err(e)) => {
                         warn!("SSE stream read error: {e}");
@@ -78,9 +90,12 @@ where
                     None => {
                         // Stream ended — process remaining buffer if configured
                         if process_remaining && !buffer.is_empty() {
-                            let line = buffer.trim().to_string();
-                            buffer.clear();
-                            if let Some(data) = extract_sse_data(&line) {
+                            let line = match std::str::from_utf8(&buffer) {
+                                Ok(s) => s.trim(),
+                                Err(_) => return None,
+                            };
+                            if let Some(data) = extract_sse_data(line) {
+                                buffer.clear();
                                 return Some((data, (stream, buffer, true)));
                             }
                         }

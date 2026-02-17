@@ -1,6 +1,6 @@
 //! WebSocket client connection state.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -18,17 +18,24 @@ pub struct ClientConnection {
     pub connected_at: Instant,
     /// Whether the client has responded to the last ping.
     pub is_alive: AtomicBool,
+    /// When the last Pong (or any activity) was received.
+    last_pong: Mutex<Instant>,
+    /// Count of messages dropped due to full channel.
+    pub dropped_messages: AtomicU64,
 }
 
 impl ClientConnection {
     /// Create a new connection.
     pub fn new(id: String, tx: mpsc::Sender<String>) -> Self {
+        let now = Instant::now();
         Self {
             id,
             session_id: Mutex::new(None),
             tx,
-            connected_at: Instant::now(),
+            connected_at: now,
             is_alive: AtomicBool::new(true),
+            last_pong: Mutex::new(now),
+            dropped_messages: AtomicU64::new(0),
         }
     }
 
@@ -44,9 +51,20 @@ impl ClientConnection {
 
     /// Send a text message to the client.
     ///
-    /// Returns `false` if the channel is full or closed.
+    /// Returns `false` if the channel is full or closed, and increments
+    /// the dropped message counter.
     pub fn send(&self, message: String) -> bool {
-        self.tx.try_send(message).is_ok()
+        if self.tx.try_send(message).is_ok() {
+            true
+        } else {
+            let _ = self.dropped_messages.fetch_add(1, Ordering::Relaxed);
+            false
+        }
+    }
+
+    /// Total messages dropped for this connection.
+    pub fn drop_count(&self) -> u64 {
+        self.dropped_messages.load(Ordering::Relaxed)
     }
 
     /// Serialize a JSON value and send it to the client.
@@ -60,6 +78,12 @@ impl ClientConnection {
     /// Mark the connection as alive (pong received).
     pub fn mark_alive(&self) {
         self.is_alive.store(true, Ordering::Relaxed);
+        *self.last_pong.lock() = Instant::now();
+    }
+
+    /// Duration since the last pong (or connection establishment).
+    pub fn last_pong_elapsed(&self) -> Duration {
+        self.last_pong.lock().elapsed()
     }
 
     /// Check and reset the alive flag for heartbeat.

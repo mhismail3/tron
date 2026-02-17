@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
-use tron_rpc::types::RpcEvent;
+use crate::rpc::types::RpcEvent;
 
 use super::connection::ClientConnection;
 
@@ -59,7 +59,8 @@ impl BroadcastManager {
             if conn.session_id().as_deref() == Some(session_id)
                 && !conn.send(json.clone())
             {
-                warn!(conn_id = %conn.id, session_id, "failed to send event to client");
+                let drops = conn.drop_count();
+                warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
             }
         }
     }
@@ -81,7 +82,8 @@ impl BroadcastManager {
         );
         for conn in conns.values() {
             if !conn.send(json.clone()) {
-                warn!(conn_id = %conn.id, "failed to send event to client");
+                let drops = conn.drop_count();
+                warn!(conn_id = %conn.id, total_drops = drops, "failed to send event to client (channel full)");
             }
         }
     }

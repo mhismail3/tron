@@ -17,26 +17,12 @@ path = "src/main.rs"
 tron-core.workspace = true
 tron-events.workspace = true
 tron-settings.workspace = true
-tron-logging.workspace = true
-tron-auth.workspace = true
-tron-tokens.workspace = true
 tron-embeddings = { workspace = true, features = ["ort"] }
 tron-llm.workspace = true
-tron-llm-anthropic.workspace = true
-tron-llm-google.workspace = true
-tron-llm-openai.workspace = true
-tron-context.workspace = true
 tron-runtime.workspace = true
 tron-tools.workspace = true
-tron-hooks.workspace = true
 tron-skills.workspace = true
-tron-guardrails.workspace = true
-tron-memory.workspace = true
-tron-tasks.workspace = true
-tron-rpc.workspace = true
-tron-server.workspace = true
-tron-browser.workspace = true
-tron-platform = { workspace = true, features = ["apns"] }
+tron-server = { workspace = true, features = ["apns"] }
 tron-transcription.workspace = true
 async-trait.workspace = true
 clap.workspace = true
@@ -46,7 +32,8 @@ tracing.workspace = true
 anyhow.workspace = true
 parking_lot.workspace = true
 serde_json.workspace = true
+reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-reqwest.workspace = true
+metrics-exporter-prometheus.workspace = true

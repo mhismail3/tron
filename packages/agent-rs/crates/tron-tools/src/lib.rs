@@ -20,6 +20,7 @@
 // fires on every impl but the trait signature dictates the return type.
 #![allow(clippy::unnecessary_literal_bound)]
 
+pub mod cdp;
 pub mod errors;
 pub mod providers;
 pub mod registry;

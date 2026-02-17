@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use tron_context::context_manager::ContextManager;
+use crate::context::context_manager::ContextManager;
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_core::messages::{Message, TokenUsage, UserMessageContent};
-use tron_guardrails::GuardrailEngine;
-use tron_hooks::engine::HookEngine;
+use crate::guardrails::GuardrailEngine;
+use crate::hooks::engine::HookEngine;
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
@@ -159,6 +159,8 @@ impl TronAgent {
                 previous_context_baseline,
                 self.config.subagent_depth,
                 self.config.subagent_max_depth,
+                self.config.retry.as_ref(),
+                self.config.health_tracker.as_ref(),
             )
             .await;
 
@@ -315,7 +317,7 @@ mod tests {
     use async_trait::async_trait;
     use futures::stream;
     use serde_json::Map;
-    use tron_context::types::ContextManagerConfig;
+    use crate::context::types::ContextManagerConfig;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::ToolResultMessageContent;
@@ -392,7 +394,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         TronAgent::new(
             config,
@@ -611,7 +613,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
@@ -674,7 +676,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
@@ -736,7 +738,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
@@ -811,7 +813,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
@@ -874,7 +876,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let mut agent = TronAgent::new(
             AgentConfig::default(),
@@ -952,7 +954,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let agent = TronAgent::new(
             config,
@@ -1356,7 +1358,7 @@ mod tests {
             working_directory: None,
             tools: vec![],
             rules_content: None,
-            compaction: tron_context::types::CompactionConfig::default(),
+            compaction: crate::context::types::CompactionConfig::default(),
         };
         let mut agent = TronAgent::new(
             config,

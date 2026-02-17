@@ -121,12 +121,17 @@ pub fn with_provider_retry(
                     }
 
                     attempt += 1;
-                    let delay_ms = tron_core::retry::calculate_backoff_delay(
+                    let backoff_ms = tron_core::retry::calculate_backoff_delay(
                         attempt,
                         config.retry.base_delay_ms,
                         config.retry.max_delay_ms,
                         config.retry.jitter_factor,
                     );
+                    // Respect Retry-After header if available (use the larger value)
+                    let delay_ms = err.retry_after_ms().map_or(backoff_ms, |ra| backoff_ms.max(ra));
+
+                    // Record retry metric
+                    metrics::counter!("provider_retries_total", "category" => err.category().to_string()).increment(1);
 
                     // Emit retry event
                     if config.emit_retry_events {
@@ -417,5 +422,78 @@ mod tests {
         } else {
             panic!("Expected retry event");
         }
+    }
+
+    #[tokio::test]
+    async fn retry_respects_retry_after_ms() {
+        // Factory that fails once with RateLimited (retry_after_ms = 50ms)
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_clone = counter.clone();
+        let factory: StreamFactory = Box::new(move || {
+            let counter = counter_clone.clone();
+            Box::pin(async move {
+                let current = counter.fetch_add(1, Ordering::SeqCst);
+                if current == 0 {
+                    Err(ProviderError::RateLimited {
+                        retry_after_ms: 50,
+                        message: "Rate limited".into(),
+                    })
+                } else {
+                    let stream = futures::stream::iter(vec![
+                        Ok(StreamEvent::Start),
+                        Ok(StreamEvent::Done {
+                            message: AssistantMessage {
+                                content: vec![],
+                                token_usage: None,
+                            },
+                            stop_reason: "end_turn".to_string(),
+                        }),
+                    ]);
+                    Ok(
+                        Box::pin(stream)
+                            as Pin<
+                                Box<
+                                    dyn Stream<Item = Result<StreamEvent, ProviderError>>
+                                        + Send,
+                                >,
+                            >,
+                    )
+                }
+            })
+        });
+
+        let config = StreamRetryConfig {
+            retry: RetryConfig {
+                max_retries: 3,
+                base_delay_ms: 1, // 1ms base — retry_after_ms (50) should dominate
+                max_delay_ms: 100,
+                jitter_factor: 0.0,
+            },
+            emit_retry_events: true,
+            cancel_token: None,
+        };
+
+        let start = tokio::time::Instant::now();
+        let stream = with_provider_retry(factory, config);
+        let events: Vec<_> = stream.collect().await;
+        let elapsed = start.elapsed();
+
+        // Should have retried once, then succeeded
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+        // Delay should be at least 50ms (from retry_after_ms)
+        assert!(elapsed.as_millis() >= 50, "expected >=50ms, got {}ms", elapsed.as_millis());
+
+        // Verify retry event has rate_limit category
+        let retry_event = events.iter().find(|e| matches!(e, Ok(StreamEvent::Retry { .. })));
+        if let Some(Ok(StreamEvent::Retry { delay_ms, error, .. })) = retry_event {
+            assert!(*delay_ms >= 50);
+            assert_eq!(error.category, "rate_limit");
+        } else {
+            panic!("Expected retry event");
+        }
+
+        // Should have Start + Done
+        let done_count = events.iter().filter(|e| matches!(e, Ok(StreamEvent::Done { .. }))).count();
+        assert_eq!(done_count, 1);
     }
 }

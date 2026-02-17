@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tron_core::events::TronEvent;
 
+use metrics::gauge;
 use tracing::{debug, info, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
@@ -19,6 +20,8 @@ use crate::orchestrator::tool_call_tracker::ToolCallTracker;
 struct ActiveRun {
     run_id: String,
     cancel: CancellationToken,
+    /// RAII guard — released when the run is removed from `active_runs`.
+    _permit: OwnedSemaphorePermit,
 }
 
 /// Multi-session orchestrator.
@@ -26,6 +29,8 @@ pub struct Orchestrator {
     session_manager: Arc<SessionManager>,
     broadcast: Arc<EventEmitter>,
     max_concurrent_sessions: usize,
+    /// Semaphore limiting total concurrent agent runs.
+    run_semaphore: Arc<Semaphore>,
     /// Active runs keyed by `session_id`.
     active_runs: Mutex<HashMap<String, ActiveRun>>,
     /// Tool call tracker shared with RPC handlers.
@@ -39,6 +44,7 @@ impl Orchestrator {
             session_manager,
             broadcast: Arc::new(EventEmitter::new()),
             max_concurrent_sessions: max_concurrent,
+            run_semaphore: Arc::new(Semaphore::new(max_concurrent)),
             active_runs: Mutex::new(HashMap::new()),
             tool_tracker: Mutex::new(ToolCallTracker::new()),
         }
@@ -60,7 +66,10 @@ impl Orchestrator {
     }
 
     /// Start tracking a run for a session. Returns the `CancellationToken`.
-    /// Errors if the session already has an active run.
+    ///
+    /// Errors if:
+    /// - The session already has an active run (`SessionBusy`)
+    /// - The server is at max concurrent runs (`ServerBusy`)
     #[instrument(skip(self), fields(session_id, run_id))]
     pub fn start_run(
         &self,
@@ -71,14 +80,23 @@ impl Orchestrator {
         if runs.contains_key(session_id) {
             return Err(RuntimeError::SessionBusy(session_id.to_string()));
         }
+        // Acquire a concurrency permit (non-blocking).
+        let permit = Arc::clone(&self.run_semaphore)
+            .try_acquire_owned()
+            .map_err(|_| RuntimeError::ServerBusy {
+                current: runs.len(),
+                max: self.max_concurrent_sessions,
+            })?;
         let cancel = CancellationToken::new();
         let _ = runs.insert(
             session_id.to_string(),
             ActiveRun {
                 run_id: run_id.to_string(),
                 cancel: cancel.clone(),
+                _permit: permit,
             },
         );
+        gauge!("agent_runs_active").set(runs.len() as f64);
         info!(session_id, run_id, "run started");
         Ok(cancel)
     }
@@ -87,7 +105,9 @@ impl Orchestrator {
     #[instrument(skip(self), fields(session_id))]
     pub fn complete_run(&self, session_id: &str) {
         debug!(session_id, "run completed");
-        let _ = self.active_runs.lock().remove(session_id);
+        let mut runs = self.active_runs.lock();
+        let _ = runs.remove(session_id);
+        gauge!("agent_runs_active").set(runs.len() as f64);
     }
 
     /// Get the run ID for an active session (if any).
@@ -369,6 +389,44 @@ mod tests {
     fn tool_call_resolve_unknown_returns_false() {
         let orch = make_orchestrator();
         assert!(!orch.resolve_tool_call("unknown", json!(null)));
+    }
+
+    // --- Concurrency limit tests ---
+
+    #[test]
+    fn start_run_rejects_at_capacity() {
+        let orch = make_orchestrator(); // max_concurrent = 10
+
+        // Fill to capacity
+        for i in 0..10 {
+            let _t = orch.start_run(&format!("s{i}"), &format!("run_{i}")).unwrap();
+        }
+        assert_eq!(orch.active_run_count(), 10);
+
+        // 11th run should fail with ServerBusy
+        let err = orch.start_run("s10", "run_10").unwrap_err();
+        assert!(err.to_string().contains("Server busy"));
+    }
+
+    #[test]
+    fn permit_released_on_complete() {
+        let orch = make_orchestrator(); // max_concurrent = 10
+
+        // Fill to capacity
+        for i in 0..10 {
+            let _t = orch.start_run(&format!("s{i}"), &format!("run_{i}")).unwrap();
+        }
+
+        // At capacity — can't start another
+        assert!(orch.start_run("s10", "run_10").is_err());
+
+        // Complete one run — frees a permit
+        orch.complete_run("s0");
+        assert_eq!(orch.active_run_count(), 9);
+
+        // Now we can start a new run
+        let _t = orch.start_run("s10", "run_10").unwrap();
+        assert_eq!(orch.active_run_count(), 10);
     }
 
     // --- Shutdown ---

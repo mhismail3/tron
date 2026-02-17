@@ -40,6 +40,15 @@ pub enum RuntimeError {
     #[error("Session busy: {0}")]
     SessionBusy(String),
 
+    /// Server is at capacity (too many concurrent runs).
+    #[error("Server busy: {current}/{max} concurrent runs")]
+    ServerBusy {
+        /// Current number of active runs.
+        current: usize,
+        /// Maximum allowed concurrent runs.
+        max: usize,
+    },
+
     /// Event persistence error.
     #[error("Persistence error: {0}")]
     Persistence(String),
@@ -54,7 +63,10 @@ impl RuntimeError {
     pub fn is_recoverable(&self) -> bool {
         match self {
             Self::Provider(e) => e.is_retryable(),
-            Self::Cancelled | Self::MaxTurns(_) | Self::SessionBusy(_) => true,
+            Self::Cancelled
+            | Self::MaxTurns(_)
+            | Self::SessionBusy(_)
+            | Self::ServerBusy { .. } => true,
             Self::Tool { .. }
             | Self::Context(_)
             | Self::SessionNotFound(_)
@@ -73,6 +85,7 @@ impl RuntimeError {
             Self::MaxTurns(_) => "max_turns",
             Self::SessionNotFound(_) => "session_not_found",
             Self::SessionBusy(_) => "session_busy",
+            Self::ServerBusy { .. } => "server_busy",
             Self::Persistence(_) => "persistence",
             Self::Internal(_) => "internal",
         }
@@ -168,9 +181,18 @@ mod tests {
         assert!(RuntimeError::Cancelled.is_recoverable());
         assert!(RuntimeError::MaxTurns(5).is_recoverable());
         assert!(RuntimeError::SessionBusy("s".into()).is_recoverable());
+        assert!(RuntimeError::ServerBusy { current: 50, max: 50 }.is_recoverable());
         assert!(!RuntimeError::Internal("x".into()).is_recoverable());
         assert!(!RuntimeError::Context("x".into()).is_recoverable());
         assert!(!RuntimeError::SessionNotFound("s".into()).is_recoverable());
+    }
+
+    #[test]
+    fn server_busy_error() {
+        let err = RuntimeError::ServerBusy { current: 50, max: 50 };
+        assert_eq!(err.to_string(), "Server busy: 50/50 concurrent runs");
+        assert_eq!(err.category(), "server_busy");
+        assert!(err.is_recoverable());
     }
 
     #[test]

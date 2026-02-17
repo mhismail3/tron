@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
-use tron_browser::types::BrowserEvent;
+use tron_tools::cdp::types::BrowserEvent;
 use tron_core::events::TronEvent;
-use tron_rpc::types::RpcEvent;
+use crate::rpc::types::RpcEvent;
 
 use super::broadcast::BroadcastManager;
 
@@ -256,7 +256,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                         .and_then(serde_json::Value::as_str)
                     {
                         result_text =
-                            tron_rpc::adapters::adapt_task_manager_result(action, &result_text);
+                            crate::rpc::adapters::adapt_task_manager_result(action, &result_text);
                     }
                 }
                 if success {

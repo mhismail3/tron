@@ -41,11 +41,20 @@ pub struct DefaultProviderFactory {
     auth_path: PathBuf,
     anthropic: AnthropicSettings,
     retry: CapturedRetrySettings,
+    /// Shared HTTP client — connection pool reused across all providers.
+    http_client: reqwest::Client,
 }
 
 impl DefaultProviderFactory {
     /// Create a new factory from the current server settings.
     pub fn new(settings: &tron_settings::TronSettings) -> Self {
+        let http_client = reqwest::Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .timeout(std::time::Duration::from_secs(300))
+            .user_agent("tron-agent/1.0")
+            .build()
+            .unwrap_or_default();
+
         Self {
             auth_path: auth_path(),
             anthropic: AnthropicSettings {
@@ -61,6 +70,7 @@ impl DefaultProviderFactory {
                 max_delay_ms: settings.retry.max_delay_ms,
                 jitter_factor: settings.retry.jitter_factor,
             },
+            http_client,
         }
     }
 
@@ -71,21 +81,27 @@ impl DefaultProviderFactory {
         self
     }
 
+    /// Get a clone of the shared HTTP client.
+    pub fn http_client(&self) -> reqwest::Client {
+        self.http_client.clone()
+    }
+
     // ── Per-provider construction ────────────────────────────────────
 
     async fn create_anthropic(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let mut oauth_config = tron_auth::anthropic::default_config();
+        let mut oauth_config = tron_llm::auth::anthropic::default_config();
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
         let env_token = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
         let preferred = self.anthropic.preferred_account.as_deref();
 
-        let server_auth = match tron_auth::anthropic::load_server_auth(
+        let server_auth = match tron_llm::auth::anthropic::load_server_auth_with_client(
             &self.auth_path,
             &oauth_config,
             env_token.as_deref(),
             preferred,
+            &self.http_client,
         )
         .await
         {
@@ -93,7 +109,7 @@ impl DefaultProviderFactory {
             Ok(None) => match std::env::var("ANTHROPIC_API_KEY") {
                 Ok(key) => {
                     info!("using ANTHROPIC_API_KEY env var (no OAuth tokens found)");
-                    tron_auth::ServerAuth::from_api_key(key)
+                    tron_llm::auth::ServerAuth::from_api_key(key)
                 }
                 Err(_) => {
                     return Err(ProviderError::Auth {
@@ -104,7 +120,7 @@ impl DefaultProviderFactory {
             Err(e) => match std::env::var("ANTHROPIC_API_KEY") {
                 Ok(key) => {
                     warn!(error = %e, "Anthropic OAuth failed, falling back to API key");
-                    tron_auth::ServerAuth::from_api_key(key)
+                    tron_llm::auth::ServerAuth::from_api_key(key)
                 }
                 Err(_) => {
                     return Err(ProviderError::Auth {
@@ -115,25 +131,25 @@ impl DefaultProviderFactory {
         };
 
         let auth = match server_auth {
-            tron_auth::ServerAuth::OAuth {
+            tron_llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 account_label,
-            } => tron_llm_anthropic::types::AnthropicAuth::OAuth {
-                tokens: tron_auth::OAuthTokens {
+            } => tron_llm::anthropic::types::AnthropicAuth::OAuth {
+                tokens: tron_llm::auth::OAuthTokens {
                     access_token,
                     refresh_token,
                     expires_at,
                 },
                 account_label,
             },
-            tron_auth::ServerAuth::ApiKey { api_key } => {
-                tron_llm_anthropic::types::AnthropicAuth::ApiKey { api_key }
+            tron_llm::auth::ServerAuth::ApiKey { api_key } => {
+                tron_llm::anthropic::types::AnthropicAuth::ApiKey { api_key }
             }
         };
 
-        let config = tron_llm_anthropic::types::AnthropicConfig {
+        let config = tron_llm::anthropic::types::AnthropicConfig {
             model: model.to_string(),
             auth,
             max_tokens: None,
@@ -148,14 +164,14 @@ impl DefaultProviderFactory {
                 emit_retry_events: true,
                 cancel_token: None,
             }),
-            provider_settings: tron_llm_anthropic::types::AnthropicProviderSettings {
+            provider_settings: tron_llm::anthropic::types::AnthropicProviderSettings {
                 system_prompt_prefix: Some(self.anthropic.system_prompt_prefix.clone()),
                 token_expiry_buffer_seconds: Some(self.anthropic.token_expiry_buffer_seconds),
                 oauth_beta_headers: self.anthropic.oauth_beta_headers.clone(),
             },
         };
         Ok(Arc::new(
-            tron_llm_anthropic::provider::AnthropicProvider::new(config),
+            tron_llm::anthropic::provider::AnthropicProvider::with_client(config, self.http_client.clone()),
         ))
     }
 
@@ -163,10 +179,11 @@ impl DefaultProviderFactory {
         let env_token = std::env::var("OPENAI_OAUTH_TOKEN").ok();
         let env_api_key = std::env::var("OPENAI_API_KEY").ok();
 
-        let server_auth = match tron_auth::openai::load_server_auth(
+        let server_auth = match tron_llm::auth::openai::load_server_auth_with_client(
             &self.auth_path,
             env_token.as_deref(),
             env_api_key.as_deref(),
+            &self.http_client,
         )
         .await
         {
@@ -184,34 +201,34 @@ impl DefaultProviderFactory {
         };
 
         let tokens = match server_auth {
-            tron_auth::ServerAuth::OAuth {
+            tron_llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
-            } => tron_auth::OAuthTokens {
+            } => tron_llm::auth::OAuthTokens {
                 access_token,
                 refresh_token,
                 expires_at,
             },
-            tron_auth::ServerAuth::ApiKey { api_key } => tron_auth::OAuthTokens {
+            tron_llm::auth::ServerAuth::ApiKey { api_key } => tron_llm::auth::OAuthTokens {
                 access_token: api_key,
                 refresh_token: String::new(),
                 expires_at: i64::MAX,
             },
         };
 
-        let config = tron_llm_openai::types::OpenAIConfig {
+        let config = tron_llm::openai::types::OpenAIConfig {
             model: model.to_string(),
-            auth: tron_llm_openai::types::OpenAIAuth::OAuth { tokens },
+            auth: tron_llm::openai::types::OpenAIAuth::OAuth { tokens },
             max_tokens: None,
             temperature: None,
             base_url: None,
             reasoning_effort: None,
-            provider_settings: tron_llm_openai::types::OpenAIApiSettings::default(),
+            provider_settings: tron_llm::openai::types::OpenAIApiSettings::default(),
         };
         Ok(Arc::new(
-            tron_llm_openai::provider::OpenAIProvider::new(config),
+            tron_llm::openai::provider::OpenAIProvider::with_client(config, self.http_client.clone()),
         ))
     }
 
@@ -219,10 +236,11 @@ impl DefaultProviderFactory {
         let env_token = std::env::var("GOOGLE_OAUTH_TOKEN").ok();
         let env_api_key = std::env::var("GOOGLE_API_KEY").ok();
 
-        let google_auth = match tron_auth::google::load_server_auth(
+        let google_auth = match tron_llm::auth::google::load_server_auth_with_client(
             &self.auth_path,
             env_token.as_deref(),
             env_api_key.as_deref(),
+            &self.http_client,
         )
         .await
         {
@@ -240,7 +258,7 @@ impl DefaultProviderFactory {
         };
 
         let auth = match google_auth.auth {
-            tron_auth::ServerAuth::OAuth {
+            tron_llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
@@ -249,16 +267,16 @@ impl DefaultProviderFactory {
                 let endpoint = google_auth
                     .endpoint
                     .map(|e| match e {
-                        tron_auth::GoogleOAuthEndpoint::CloudCodeAssist => {
-                            tron_llm_google::types::GoogleOAuthEndpoint::CloudCodeAssist
+                        tron_llm::auth::GoogleOAuthEndpoint::CloudCodeAssist => {
+                            tron_llm::google::types::GoogleOAuthEndpoint::CloudCodeAssist
                         }
-                        tron_auth::GoogleOAuthEndpoint::Antigravity => {
-                            tron_llm_google::types::GoogleOAuthEndpoint::Antigravity
+                        tron_llm::auth::GoogleOAuthEndpoint::Antigravity => {
+                            tron_llm::google::types::GoogleOAuthEndpoint::Antigravity
                         }
                     })
                     .unwrap_or_default();
-                tron_llm_google::types::GoogleAuth::Oauth {
-                    tokens: tron_auth::OAuthTokens {
+                tron_llm::google::types::GoogleAuth::Oauth {
+                    tokens: tron_llm::auth::OAuthTokens {
                         access_token,
                         refresh_token,
                         expires_at,
@@ -267,12 +285,12 @@ impl DefaultProviderFactory {
                     project_id: google_auth.project_id,
                 }
             }
-            tron_auth::ServerAuth::ApiKey { api_key } => {
-                tron_llm_google::types::GoogleAuth::ApiKey { api_key }
+            tron_llm::auth::ServerAuth::ApiKey { api_key } => {
+                tron_llm::google::types::GoogleAuth::ApiKey { api_key }
             }
         };
 
-        let config = tron_llm_google::types::GoogleConfig {
+        let config = tron_llm::google::types::GoogleConfig {
             model: model.to_string(),
             auth,
             max_tokens: None,
@@ -281,10 +299,10 @@ impl DefaultProviderFactory {
             thinking_level: None,
             thinking_budget: None,
             safety_settings: None,
-            provider_settings: tron_llm_google::types::GoogleApiSettings::default(),
+            provider_settings: tron_llm::google::types::GoogleApiSettings::default(),
         };
         Ok(Arc::new(
-            tron_llm_google::provider::GoogleProvider::new(config),
+            tron_llm::google::provider::GoogleProvider::with_client(config, self.http_client.clone()),
         ))
     }
 }

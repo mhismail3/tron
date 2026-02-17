@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use tracing::{debug, info};
 use tron_events::sqlite::repositories::device_token::DeviceTokenRepo;
 use tron_events::ConnectionPool;
-use tron_platform::apns::{ApnsNotification, ApnsService};
+use tron_server::platform::apns::{ApnsNotification, ApnsService};
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{Notification, NotifyDelegate, NotifyResult};
 

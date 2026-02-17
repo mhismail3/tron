@@ -2,25 +2,34 @@
 //! upgrade through disconnect.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
-use tron_rpc::context::RpcContext;
-use tron_rpc::registry::MethodRegistry;
+use crate::rpc::context::RpcContext;
+use crate::rpc::registry::MethodRegistry;
 
-use tracing::{debug, info, instrument};
+use metrics::{counter, gauge};
+use tracing::{debug, info, instrument, warn};
 
 use super::broadcast::BroadcastManager;
 use super::connection::ClientConnection;
 use super::handler::handle_message;
 
+/// Interval between server-initiated Ping frames.
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How long to wait for a Pong before considering the client dead.
+const PONG_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Run a WebSocket session for a connected client.
 ///
-/// 1. Sends a `system.connected` event with the client ID
+/// 1. Sends a `connection.established` event with the client ID
 /// 2. Dispatches incoming text frames as RPC requests
 /// 3. Forwards outbound events/responses via the send channel
-/// 4. Cleans up on disconnect
+/// 4. Sends periodic Ping frames and disconnects unresponsive clients
+/// 5. Cleans up on disconnect
 #[instrument(skip_all, fields(client_id = %client_id))]
 pub async fn run_ws_session(
     ws: WebSocket,
@@ -32,10 +41,12 @@ pub async fn run_ws_session(
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Create the client connection and send channel
-    let (send_tx, mut send_rx) = mpsc::channel::<String>(256);
+    let (send_tx, mut send_rx) = mpsc::channel::<String>(1024);
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
     info!(client_id, "client connected");
+    counter!("ws_connections_total").increment(1);
+    gauge!("ws_connections_active").increment(1.0);
 
     // Register with broadcast manager
     broadcast.add(connection.clone()).await;
@@ -52,11 +63,39 @@ pub async fn run_ws_session(
         let _ = ws_tx.send(Message::Text(json.into())).await;
     }
 
-    // Spawn outbound forwarder (send_rx → WebSocket)
+    // Spawn outbound forwarder with periodic Ping frames.
+    let outbound_conn = connection.clone();
     let outbound = tokio::spawn(async move {
-        while let Some(msg) = send_rx.recv().await {
-            if ws_tx.send(Message::Text(msg.into())).await.is_err() {
-                break;
+        let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+        // Skip the immediate first tick
+        let _ = ping_interval.tick().await;
+
+        loop {
+            tokio::select! {
+                msg = send_rx.recv() => {
+                    match msg {
+                        Some(text) => {
+                            if ws_tx.send(Message::Text(text.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    // Check if client responded to previous ping
+                    if !outbound_conn.check_alive() {
+                        // Client missed a ping cycle — check if it's been too long
+                        if outbound_conn.last_pong_elapsed() > PONG_TIMEOUT {
+                            warn!("client unresponsive for {:?}, disconnecting", PONG_TIMEOUT);
+                            break;
+                        }
+                    }
+                    // Send ping
+                    if ws_tx.send(Message::Ping(vec![].into())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
@@ -86,33 +125,33 @@ pub async fn run_ws_session(
 
         let Some(text) = text else { continue };
 
-        let response = handle_message(&text, &registry, &ctx).await;
+        let result = handle_message(&text, &registry, &ctx).await;
 
         // Bind session on create/resume
-        if let Ok(req) = serde_json::from_str::<serde_json::Value>(&text) {
-            let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
-            if method == "session.create" || method == "session.resume" {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&response) {
-                    if parsed["success"] == true {
-                        if let Some(sid) = parsed["result"]
-                            .get("sessionId")
-                            .and_then(|v| v.as_str())
-                        {
-                            connection.bind_session(sid.to_string());
-                            debug!(client_id, session_id = sid, "session bound to client");
-                        }
-                    }
-                }
+        if (result.method == "session.create" || result.method == "session.resume")
+            && result.response.success
+        {
+            if let Some(sid) = result
+                .response
+                .result
+                .as_ref()
+                .and_then(|r| r.get("sessionId"))
+                .and_then(|v| v.as_str())
+            {
+                connection.bind_session(sid.to_string());
+                debug!(client_id, session_id = sid, "session bound to client");
             }
         }
 
-        if !connection.send(response) {
+        if !connection.send(result.response_json) {
             info!(client_id, "failed to enqueue response (channel full or closed)");
         }
     }
 
     // Clean up
     info!(client_id, "client disconnected");
+    counter!("ws_disconnections_total").increment(1);
+    gauge!("ws_connections_active").decrement(1.0);
     outbound.abort();
     broadcast.remove(&client_id).await;
 }

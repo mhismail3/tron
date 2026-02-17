@@ -1,8 +1,11 @@
 //! Runtime configuration and result types.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use tron_core::messages::TokenUsage;
-use tron_context::types::CompactionConfig;
+use crate::context::types::CompactionConfig;
+use tron_llm::ProviderHealthTracker;
 
 use crate::errors::StopReason;
 
@@ -122,6 +125,12 @@ pub struct AgentConfig {
     /// Maximum nesting depth allowed for spawning children.
     #[serde(default)]
     pub subagent_max_depth: u32,
+    /// Retry configuration for provider stream failures.
+    #[serde(skip)]
+    pub retry: Option<tron_core::retry::RetryConfig>,
+    /// Shared provider health tracker for recording success/failure outcomes.
+    #[serde(skip)]
+    pub health_tracker: Option<Arc<ProviderHealthTracker>>,
 }
 
 const fn default_max_turns() -> u32 {
@@ -144,6 +153,8 @@ impl Default for AgentConfig {
             working_directory: None,
             subagent_depth: 0,
             subagent_max_depth: 0,
+            retry: None,
+            health_tracker: None,
         }
     }
 }

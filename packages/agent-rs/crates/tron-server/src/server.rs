@@ -2,24 +2,48 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use axum::Router;
 use tokio::net::TcpListener;
-use tron_rpc::context::RpcContext;
-use tron_rpc::registry::MethodRegistry;
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::CompressionLayer;
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::request_id::{MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer};
+use tower_http::timeout::TimeoutLayer;
+use crate::rpc::context::RpcContext;
+use crate::rpc::registry::MethodRegistry;
 
 use tracing::{info, instrument};
+
+use metrics_exporter_prometheus::PrometheusHandle;
 
 use crate::config::ServerConfig;
 use crate::health::{self, HealthResponse};
 use crate::shutdown::ShutdownCoordinator;
 use crate::websocket::broadcast::BroadcastManager;
 use crate::websocket::session::run_ws_session;
+
+/// Generates UUIDv7 request IDs.
+#[derive(Clone)]
+struct UuidV7RequestId;
+
+impl MakeRequestId for UuidV7RequestId {
+    fn make_request_id<B>(
+        &mut self,
+        _request: &axum::http::Request<B>,
+    ) -> Option<RequestId> {
+        let id = uuid::Uuid::now_v7().to_string();
+        axum::http::HeaderValue::from_str(&id)
+            .ok()
+            .map(RequestId::new)
+    }
+}
 
 /// Shared state accessible from Axum handlers.
 #[derive(Clone)]
@@ -34,6 +58,10 @@ pub struct AppState {
     pub registry: Arc<MethodRegistry>,
     /// RPC context shared across handlers.
     pub rpc_context: Arc<RpcContext>,
+    /// Server configuration.
+    pub config: ServerConfig,
+    /// Prometheus metrics handle for rendering.
+    pub metrics_handle: Arc<PrometheusHandle>,
 }
 
 /// The main Tron server.
@@ -43,23 +71,30 @@ pub struct TronServer {
     broadcast: Arc<BroadcastManager>,
     shutdown: Arc<ShutdownCoordinator>,
     rpc_context: Arc<RpcContext>,
+    metrics_handle: Arc<PrometheusHandle>,
     start_time: Instant,
 }
 
 impl TronServer {
     /// Create a new server.
-    pub fn new(config: ServerConfig, registry: MethodRegistry, rpc_context: RpcContext) -> Self {
+    pub fn new(
+        config: ServerConfig,
+        registry: MethodRegistry,
+        rpc_context: RpcContext,
+        metrics_handle: PrometheusHandle,
+    ) -> Self {
         Self {
             config,
             registry: Arc::new(registry),
             broadcast: Arc::new(BroadcastManager::new()),
             shutdown: Arc::new(ShutdownCoordinator::new()),
             rpc_context: Arc::new(rpc_context),
+            metrics_handle: Arc::new(metrics_handle),
             start_time: Instant::now(),
         }
     }
 
-    /// Build the Axum router with all routes.
+    /// Build the Axum router with all routes and middleware.
     pub fn router(&self) -> Router {
         let state = AppState {
             broadcast: self.broadcast.clone(),
@@ -67,12 +102,22 @@ impl TronServer {
             start_time: self.start_time,
             registry: self.registry.clone(),
             rpc_context: self.rpc_context.clone(),
+            config: self.config.clone(),
+            metrics_handle: self.metrics_handle.clone(),
         };
 
         Router::new()
             .route("/health", get(health_handler))
+            .route("/metrics", get(metrics_handler))
             .route("/ws", get(ws_upgrade_handler))
             .with_state(state)
+            // Outermost layers execute first on request, last on response.
+            .layer(CatchPanicLayer::new())
+            .layer(CompressionLayer::new())
+            .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MB
+            .layer(TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(30)))
+            .layer(SetRequestIdLayer::x_request_id(UuidV7RequestId))
+            .layer(PropagateRequestIdLayer::x_request_id())
     }
 
     /// Bind to a TCP port and start serving. Returns the bound address and a
@@ -137,17 +182,36 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(resp)
 }
 
+/// GET /metrics — Prometheus text format.
+async fn metrics_handler(State(state): State<AppState>) -> String {
+    state.metrics_handle.render()
+}
+
 /// GET /ws — WebSocket upgrade handler.
 async fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, StatusCode> {
+    // Enforce max_connections
+    let current = state.broadcast.connection_count().await;
+    if current >= state.config.max_connections {
+        tracing::warn!(
+            current,
+            max = state.config.max_connections,
+            "connection limit reached, rejecting WebSocket upgrade"
+        );
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
     let client_id = uuid::Uuid::now_v7().to_string();
     let registry = state.registry;
     let ctx = state.rpc_context;
     let broadcast = state.broadcast;
+    let max_message_size = state.config.max_message_size;
 
-    ws.on_upgrade(move |socket| run_ws_session(socket, client_id, registry, ctx, broadcast))
+    Ok(ws
+        .max_message_size(max_message_size)
+        .on_upgrade(move |socket| run_ws_session(socket, client_id, registry, ctx, broadcast)))
 }
 
 #[cfg(test)]
@@ -188,12 +252,18 @@ mod tests {
             transcription_engine: None,
             subagent_manager: None,
             embedding_controller: None,
+            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         }
+    }
+
+    fn make_metrics_handle() -> PrometheusHandle {
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder().handle()
     }
 
     fn make_server() -> TronServer {
         let ctx = make_test_rpc_context();
-        TronServer::new(ServerConfig::default(), MethodRegistry::new(), ctx)
+        TronServer::new(ServerConfig::default(), MethodRegistry::new(), ctx, make_metrics_handle())
     }
 
     #[tokio::test]
@@ -289,7 +359,7 @@ mod tests {
             ..ServerConfig::default()
         };
         let ctx = make_test_rpc_context();
-        let server = TronServer::new(config, MethodRegistry::new(), ctx);
+        let server = TronServer::new(config, MethodRegistry::new(), ctx, make_metrics_handle());
         assert_eq!(server.config().host, "0.0.0.0");
         assert_eq!(server.config().port, 9090);
         assert_eq!(server.config().max_connections, 10);

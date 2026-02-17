@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
-use tron_context::context_manager::ContextManager;
-use tron_context::rules_index::RulesIndex;
-use tron_context::types::ContextManagerConfig;
+use crate::context::context_manager::ContextManager;
+use crate::context::rules_index::RulesIndex;
+use crate::context::types::ContextManagerConfig;
 use tron_core::messages::Message;
-use tron_guardrails::GuardrailEngine;
-use tron_hooks::engine::HookEngine;
+use crate::guardrails::GuardrailEngine;
+use crate::hooks::engine::HookEngine;
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
@@ -82,7 +82,7 @@ impl AgentFactory {
             }
         }
 
-        let context_limit = tron_tokens::get_context_limit(&config.model);
+        let context_limit = tron_llm::tokens::get_context_limit(&config.model);
         let mut compaction = config.compaction.clone();
         compaction.context_limit = context_limit;
 
@@ -294,7 +294,7 @@ mod tests {
         let agent = AgentFactory::create_agent(config, "s1".into(), opts);
         assert_eq!(
             agent.context_manager().get_context_limit(),
-            tron_tokens::get_context_limit("claude-opus-4-6")
+            tron_llm::tokens::get_context_limit("claude-opus-4-6")
         );
     }
 
@@ -308,7 +308,7 @@ mod tests {
         let agent = AgentFactory::create_agent(config, "s1".into(), opts);
         assert_eq!(
             agent.context_manager().get_context_limit(),
-            tron_tokens::get_context_limit("gemini-2.5-pro")
+            tron_llm::tokens::get_context_limit("gemini-2.5-pro")
         );
     }
 
