@@ -43,9 +43,9 @@ struct Cli {
     #[arg(long)]
     db_path: Option<PathBuf>,
 
-    /// Maximum concurrent sessions.
-    #[arg(long, default_value = "10")]
-    max_sessions: usize,
+    /// Maximum concurrent sessions (overrides settings if specified).
+    #[arg(long)]
+    max_sessions: Option<usize>,
 }
 
 impl Cli {
@@ -222,6 +222,11 @@ async fn main() -> Result<()> {
             .context("Failed to run task migrations")?;
     }
 
+    // Load settings early (needed for log level before logging init)
+    let settings_path = tron_settings::loader::settings_path();
+    let settings = tron_settings::loader::load_settings_from_path(&settings_path)
+        .unwrap_or_default();
+
     // Initialize logging with SQLite persistence (dedicated connection, separate from pool).
     // Must set WAL + busy_timeout to match pool connections — without busy_timeout,
     // concurrent writes from the pool cause immediate SQLITE_BUSY errors.
@@ -230,21 +235,22 @@ async fn main() -> Result<()> {
     log_conn
         .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
         .context("Failed to set logging connection pragmas")?;
-    let log_handle = tron_logging::init_subscriber_with_sqlite("info", log_conn);
+    let log_handle = tron_logging::init_subscriber_with_sqlite(
+        settings.logging.db_log_level.as_filter_str(),
+        log_conn,
+    );
     let flush_task = tron_logging::spawn_flush_task(log_handle.clone());
-
-    // Load settings
-    let settings_path = tron_settings::loader::settings_path();
-    let settings = tron_settings::loader::load_settings_from_path(&settings_path)
-        .unwrap_or_default();
     let task_pool = pool.clone();
     let event_store = Arc::new(EventStore::new(pool));
 
     // Core services
+    let max_sessions = args
+        .max_sessions
+        .unwrap_or(settings.server.max_concurrent_sessions);
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(
         session_manager.clone(),
-        args.max_sessions,
+        max_sessions,
     ));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
@@ -528,7 +534,13 @@ mod tests {
     #[test]
     fn cli_max_sessions() {
         let cli = Cli::parse_from(["tron-agent", "--max-sessions", "20"]);
-        assert_eq!(cli.max_sessions, 20);
+        assert_eq!(cli.max_sessions, Some(20));
+    }
+
+    #[test]
+    fn cli_max_sessions_defaults_to_none() {
+        let cli = Cli::parse_from(["tron-agent"]);
+        assert_eq!(cli.max_sessions, None);
     }
 
     #[test]

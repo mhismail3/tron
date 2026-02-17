@@ -145,6 +145,19 @@ pub enum LogLevel {
     Fatal,
 }
 
+impl LogLevel {
+    /// Convert to a tracing filter string.
+    pub fn as_filter_str(&self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error | Self::Fatal => "error",
+        }
+    }
+}
+
 /// Logging configuration.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -305,6 +318,16 @@ mod tests {
             let back: LogLevel = serde_json::from_str(&json).unwrap();
             assert_eq!(back, level);
         }
+    }
+
+    #[test]
+    fn log_level_as_filter_str() {
+        assert_eq!(LogLevel::Trace.as_filter_str(), "trace");
+        assert_eq!(LogLevel::Debug.as_filter_str(), "debug");
+        assert_eq!(LogLevel::Info.as_filter_str(), "info");
+        assert_eq!(LogLevel::Warn.as_filter_str(), "warn");
+        assert_eq!(LogLevel::Error.as_filter_str(), "error");
+        assert_eq!(LogLevel::Fatal.as_filter_str(), "error");
     }
 
     #[test]

@@ -4917,6 +4917,7 @@ dependencies = [
  "tracing",
  "tron-core",
  "tron-events",
+ "tron-settings",
 ]
 
 [[package]]

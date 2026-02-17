@@ -15,6 +15,7 @@ doctest = false
 [dependencies]
 tron-core.workspace = true
 tron-events.workspace = true
+tron-settings.workspace = true
 async-trait.workspace = true
 regex.workspace = true
 serde.workspace = true

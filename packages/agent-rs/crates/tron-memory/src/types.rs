@@ -30,6 +30,28 @@ impl Default for CompactionTriggerConfig {
     }
 }
 
+impl From<&tron_settings::CompactorSettings> for CompactionTriggerConfig {
+    fn from(cs: &tron_settings::CompactorSettings) -> Self {
+        let defaults = Self::default();
+        Self {
+            trigger_token_threshold: cs
+                .trigger_token_threshold
+                .unwrap_or(defaults.trigger_token_threshold),
+            alert_zone_threshold: cs
+                .alert_zone_threshold
+                .unwrap_or(defaults.alert_zone_threshold),
+            #[allow(clippy::cast_possible_truncation)]
+            default_turn_fallback: cs
+                .default_turn_fallback
+                .map_or(defaults.default_turn_fallback, |v| v as u32),
+            #[allow(clippy::cast_possible_truncation)]
+            alert_turn_fallback: cs
+                .alert_turn_fallback
+                .map_or(defaults.alert_turn_fallback, |v| v as u32),
+        }
+    }
+}
+
 /// Input to the compaction trigger decision engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +175,50 @@ impl LedgerWriteResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tron_settings::CompactorSettings;
+
+    #[test]
+    fn trigger_config_from_compactor_settings_defaults() {
+        let cs = CompactorSettings::default();
+        let tc = CompactionTriggerConfig::from(&cs);
+        assert!((tc.trigger_token_threshold - 0.70).abs() < f64::EPSILON);
+        assert!((tc.alert_zone_threshold - 0.50).abs() < f64::EPSILON);
+        assert_eq!(tc.default_turn_fallback, 8);
+        assert_eq!(tc.alert_turn_fallback, 5);
+    }
+
+    #[test]
+    fn trigger_config_from_compactor_settings_custom() {
+        let cs = CompactorSettings {
+            trigger_token_threshold: Some(0.80),
+            alert_zone_threshold: Some(0.60),
+            default_turn_fallback: Some(10),
+            alert_turn_fallback: Some(3),
+            ..Default::default()
+        };
+        let tc = CompactionTriggerConfig::from(&cs);
+        assert!((tc.trigger_token_threshold - 0.80).abs() < f64::EPSILON);
+        assert!((tc.alert_zone_threshold - 0.60).abs() < f64::EPSILON);
+        assert_eq!(tc.default_turn_fallback, 10);
+        assert_eq!(tc.alert_turn_fallback, 3);
+    }
+
+    #[test]
+    fn trigger_config_from_compactor_settings_none_uses_defaults() {
+        let cs = CompactorSettings {
+            trigger_token_threshold: None,
+            alert_zone_threshold: None,
+            default_turn_fallback: None,
+            alert_turn_fallback: None,
+            ..Default::default()
+        };
+        let tc = CompactionTriggerConfig::from(&cs);
+        let defaults = CompactionTriggerConfig::default();
+        assert!((tc.trigger_token_threshold - defaults.trigger_token_threshold).abs() < f64::EPSILON);
+        assert!((tc.alert_zone_threshold - defaults.alert_zone_threshold).abs() < f64::EPSILON);
+        assert_eq!(tc.default_turn_fallback, defaults.default_turn_fallback);
+        assert_eq!(tc.alert_turn_fallback, defaults.alert_turn_fallback);
+    }
 
     #[test]
     fn test_compaction_trigger_config_defaults() {

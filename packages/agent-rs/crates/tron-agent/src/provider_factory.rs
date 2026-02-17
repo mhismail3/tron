@@ -24,6 +24,15 @@ struct AnthropicSettings {
     preferred_account: Option<String>,
 }
 
+/// Retry settings captured at startup.
+#[derive(Clone, Debug)]
+struct CapturedRetrySettings {
+    max_retries: u32,
+    base_delay_ms: u64,
+    max_delay_ms: u64,
+    jitter_factor: f64,
+}
+
 /// Default factory that creates a fresh `Provider` for any supported model.
 ///
 /// The factory captures config at startup but re-reads auth on every call
@@ -31,6 +40,7 @@ struct AnthropicSettings {
 pub struct DefaultProviderFactory {
     auth_path: PathBuf,
     anthropic: AnthropicSettings,
+    retry: CapturedRetrySettings,
 }
 
 impl DefaultProviderFactory {
@@ -44,6 +54,12 @@ impl DefaultProviderFactory {
                 token_expiry_buffer_seconds: settings.api.anthropic.token_expiry_buffer_seconds,
                 oauth_beta_headers: settings.api.anthropic.oauth_beta_headers.clone(),
                 preferred_account: settings.server.anthropic_account.clone(),
+            },
+            retry: CapturedRetrySettings {
+                max_retries: settings.retry.max_retries,
+                base_delay_ms: settings.retry.base_delay_ms,
+                max_delay_ms: settings.retry.max_delay_ms,
+                jitter_factor: settings.retry.jitter_factor,
             },
         }
     }
@@ -122,7 +138,16 @@ impl DefaultProviderFactory {
             auth,
             max_tokens: None,
             base_url: None,
-            retry: None,
+            retry: Some(tron_llm::StreamRetryConfig {
+                retry: tron_core::retry::RetryConfig {
+                    max_retries: self.retry.max_retries,
+                    base_delay_ms: self.retry.base_delay_ms,
+                    max_delay_ms: self.retry.max_delay_ms,
+                    jitter_factor: self.retry.jitter_factor,
+                },
+                emit_retry_events: true,
+                cancel_token: None,
+            }),
             provider_settings: tron_llm_anthropic::types::AnthropicProviderSettings {
                 system_prompt_prefix: Some(self.anthropic.system_prompt_prefix.clone()),
                 token_expiry_buffer_seconds: Some(self.anthropic.token_expiry_buffer_seconds),
@@ -317,6 +342,21 @@ mod tests {
         let settings = tron_settings::TronSettings::default();
         let factory = DefaultProviderFactory::new(&settings);
         assert!(factory.anthropic.preferred_account.is_none());
+    }
+
+    #[test]
+    fn factory_captures_retry_settings() {
+        let mut settings = tron_settings::TronSettings::default();
+        settings.retry.max_retries = 5;
+        settings.retry.base_delay_ms = 2000;
+        settings.retry.max_delay_ms = 30_000;
+        settings.retry.jitter_factor = 0.3;
+
+        let factory = DefaultProviderFactory::new(&settings);
+        assert_eq!(factory.retry.max_retries, 5);
+        assert_eq!(factory.retry.base_delay_ms, 2000);
+        assert_eq!(factory.retry.max_delay_ms, 30_000);
+        assert!((factory.retry.jitter_factor - 0.3).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -53,6 +53,10 @@ pub struct ContextLoaderConfig {
     pub agent_dirs: Vec<String>,
     /// Maximum directory traversal depth.
     pub max_depth: usize,
+    /// Whether to discover standalone files (AGENTS.md, CLAUDE.md) at the
+    /// project root and directory level. When false, only files inside agent
+    /// directories (`.claude/`, `.tron/`, `.agent/`) are loaded.
+    pub discover_standalone_files: bool,
 }
 
 impl Default for ContextLoaderConfig {
@@ -67,6 +71,7 @@ impl Default for ContextLoaderConfig {
             ],
             agent_dirs: vec![".claude".into(), ".tron".into(), ".agent".into()],
             max_depth: 5,
+            discover_standalone_files: true,
         }
     }
 }
@@ -182,17 +187,19 @@ impl ContextLoader {
             }
         }
 
-        // Check project root directly
-        for file_name in &self.config.file_names {
-            let file_path = root.join(file_name);
-            if file_path.is_file() {
-                let content = std::fs::read_to_string(&file_path)?;
-                return Ok(Some(ContextFile {
-                    path: file_path,
-                    content,
-                    level: ContextLevel::Project,
-                    depth: 0,
-                }));
+        // Check project root directly (only if standalone discovery is enabled)
+        if self.config.discover_standalone_files {
+            for file_name in &self.config.file_names {
+                let file_path = root.join(file_name);
+                if file_path.is_file() {
+                    let content = std::fs::read_to_string(&file_path)?;
+                    return Ok(Some(ContextFile {
+                        path: file_path,
+                        content,
+                        level: ContextLevel::Project,
+                        depth: 0,
+                    }));
+                }
             }
         }
 
@@ -255,17 +262,19 @@ impl ContextLoader {
             }
         }
 
-        // Check directory root
-        for file_name in &self.config.file_names {
-            let file_path = dir.join(file_name);
-            if file_path.is_file() {
-                let content = std::fs::read_to_string(&file_path)?;
-                return Ok(Some(ContextFile {
-                    path: file_path,
-                    content,
-                    level: ContextLevel::Directory,
-                    depth,
-                }));
+        // Check directory root (only if standalone discovery is enabled)
+        if self.config.discover_standalone_files {
+            for file_name in &self.config.file_names {
+                let file_path = dir.join(file_name);
+                if file_path.is_file() {
+                    let content = std::fs::read_to_string(&file_path)?;
+                    return Ok(Some(ContextFile {
+                        path: file_path,
+                        content,
+                        level: ContextLevel::Directory,
+                        depth,
+                    }));
+                }
             }
         }
 
@@ -756,5 +765,98 @@ mod tests {
     #[test]
     fn merge_rules_both_none() {
         assert!(merge_rules(None, None).is_none());
+    }
+
+    // -- discover_standalone_files --
+
+    #[test]
+    fn discover_standalone_false_skips_root_standalone() {
+        let root = create_temp_project();
+        fs::write(root.join("CLAUDE.md"), "standalone rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&root).unwrap();
+        assert!(result.merged.is_empty(), "standalone file should be skipped");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_false_still_finds_agent_dir() {
+        let root = create_temp_project();
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        fs::write(root.join(".claude").join("CLAUDE.md"), "agent dir rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&root).unwrap();
+        assert!(!result.merged.is_empty(), "agent dir file should still be found");
+        assert!(result.merged.contains("agent dir rules"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_true_finds_both() {
+        let root = create_temp_project();
+        let subdir = root.join("src");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        fs::write(root.join(".claude").join("AGENTS.md"), "agent dir rules").unwrap();
+        fs::write(subdir.join("AGENTS.md"), "standalone dir rules").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: true,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert!(result.merged.contains("agent dir rules"));
+        assert!(result.merged.contains("standalone dir rules"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_false_skips_nested_standalone() {
+        let root = create_temp_project();
+        let subdir = root.join("src");
+        fs::create_dir_all(&subdir).unwrap();
+        fs::write(subdir.join("AGENTS.md"), "nested standalone").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert!(result.merged.is_empty(), "nested standalone file should be skipped");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_standalone_false_finds_nested_agent_dir() {
+        let root = create_temp_project();
+        let subdir = root.join("src");
+        fs::create_dir_all(subdir.join(".claude")).unwrap();
+        fs::write(subdir.join(".claude").join("AGENTS.md"), "nested agent dir").unwrap();
+
+        let mut loader = ContextLoader::new(ContextLoaderConfig {
+            project_root: root.clone(),
+            discover_standalone_files: false,
+            ..ContextLoaderConfig::default()
+        });
+        let result = loader.load(&subdir).unwrap();
+        assert!(result.merged.contains("nested agent dir"));
+
+        cleanup(&root);
     }
 }

@@ -51,10 +51,12 @@ fn build_context_manager_for_session(
 
     // 3. Load project rules from working directory
     let wd = &session.working_directory;
+    let rules_settings = tron_settings::get_settings();
     let project_rules = {
         let wd_path = Path::new(wd);
         let mut ld = ContextLoader::new(ContextLoaderConfig {
             project_root: wd_path.to_path_buf(),
+            discover_standalone_files: rules_settings.context.rules.discover_standalone_files,
             ..Default::default()
         });
         ld.load(wd_path)
@@ -111,6 +113,7 @@ fn build_context_manager_for_session(
 
     // 7. Build ContextManager
     let context_limit = tron_tokens::get_context_limit(&state.model);
+    let compactor_settings = &tron_settings::get_settings().context.compactor;
     let mut cm = ContextManager::new(ContextManagerConfig {
         model: state.model.clone(),
         system_prompt: None,
@@ -118,8 +121,9 @@ fn build_context_manager_for_session(
         tools,
         rules_content: rules,
         compaction: CompactionConfig {
+            threshold: compactor_settings.compaction_threshold,
+            preserve_recent_turns: compactor_settings.preserve_recent_count,
             context_limit,
-            ..CompactionConfig::default()
         },
     });
 
@@ -287,8 +291,10 @@ impl MethodHandler for GetDetailedSnapshotHandler {
         // Build rules matching iOS LoadedRules shape: { files, totalFiles, tokens }
         let rules_info: Option<Value> = {
             let wd_path = Path::new(&session.working_directory);
+            let ds_settings = tron_settings::get_settings();
             let mut ld = ContextLoader::new(ContextLoaderConfig {
                 project_root: wd_path.to_path_buf(),
+                discover_standalone_files: ds_settings.context.rules.discover_standalone_files,
                 ..Default::default()
             });
             let project_files = ld.load(wd_path).ok();
@@ -990,7 +996,7 @@ mod tests {
             payload: json!({
                 "content": [{"type": "text", "text": "response"}],
                 "turn": 1,
-                "tokenUsage": {"inputTokens": 160_000, "outputTokens": 10_000}
+                "tokenUsage": {"inputTokens": 175_000, "outputTokens": 5_000}
             }),
             parent_id: None,
         });
@@ -1001,7 +1007,7 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        // 170k / 200k = 0.85 which is >= 0.70 threshold
+        // last_turn_input_tokens = 175k, context_limit = 200k → ratio 0.875 >= 0.85 threshold
         assert_eq!(result["shouldCompact"], true);
     }
 

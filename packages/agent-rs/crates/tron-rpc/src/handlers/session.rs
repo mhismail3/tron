@@ -71,8 +71,10 @@ fn emit_optimistic_context_events(ctx: &RpcContext, session_id: &str, working_di
     let wd = std::path::Path::new(working_dir);
 
     // Discover project rules files
+    let rules_settings = tron_settings::get_settings();
     let mut loader = ContextLoader::new(ContextLoaderConfig {
         project_root: wd.to_path_buf(),
+        discover_standalone_files: rules_settings.context.rules.discover_standalone_files,
         ..ContextLoaderConfig::default()
     });
     let loaded_ctx = loader.load(wd).ok();

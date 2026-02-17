@@ -454,9 +454,14 @@ impl MethodHandler for PromptHandler {
                 // 2. Load project rules via ContextLoader
                 let project_rules = {
                     let wd = std::path::Path::new(&working_dir);
+                    let rules_settings = tron_settings::get_settings();
                     let mut loader = tron_context::loader::ContextLoader::new(
                         tron_context::loader::ContextLoaderConfig {
                             project_root: wd.to_path_buf(),
+                            discover_standalone_files: rules_settings
+                                .context
+                                .rules
+                                .discover_standalone_files,
                             ..Default::default()
                         },
                     );
@@ -537,10 +542,19 @@ impl MethodHandler for PromptHandler {
                     }
                 };
 
+                let settings = tron_settings::get_settings();
+                let cs = &settings.context.compactor;
+
                 let config = AgentConfig {
                     model,
                     working_directory: Some(working_dir),
                     enable_thinking: true,
+                    max_turns: settings.agent.max_turns,
+                    compaction: tron_context::types::CompactionConfig {
+                        threshold: cs.compaction_threshold,
+                        preserve_recent_turns: cs.preserve_recent_count,
+                        ..Default::default()
+                    },
                     ..AgentConfig::default()
                 };
 
@@ -792,9 +806,15 @@ impl MethodHandler for PromptHandler {
                     let (recent_event_types, recent_tool_calls) =
                         gather_recent_events(&event_store, &session_id_clone);
 
-                    let trigger = tron_memory::trigger::CompactionTrigger::new(
-                        tron_memory::types::CompactionTriggerConfig::default(),
-                    );
+                    let settings_for_trigger = tron_settings::get_settings();
+                    let cs_for_trigger = &settings_for_trigger.context.compactor;
+                    let trigger_config =
+                        tron_memory::types::CompactionTriggerConfig::from(cs_for_trigger);
+                    let mut trigger =
+                        tron_memory::trigger::CompactionTrigger::new(trigger_config);
+                    if cs_for_trigger.force_always.unwrap_or(false) {
+                        trigger.set_force_always(true);
+                    }
                     let mut memory_manager =
                         tron_memory::manager::MemoryManager::new(memory_deps, trigger);
 
