@@ -57,7 +57,7 @@ struct WebFetchToolDetailSheet: View {
                         Image(systemName: "arrow.down.doc")
                             .font(.system(size: 14))
                             .foregroundStyle(.tronInfo)
-                        Text("Fetch")
+                        Text("Web Fetch")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.tronInfo)
                     }
@@ -437,7 +437,7 @@ extension WebFetchParsedResult {
             normalizedName: "webfetch",
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             summary: "docs.anthropic.com",
             status: .success,
             durationMs: 2500,
@@ -468,7 +468,7 @@ extension WebFetchParsedResult {
             normalizedName: "webfetch",
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             summary: "example.com",
             status: .error,
             durationMs: 350,
@@ -488,7 +488,7 @@ extension WebFetchParsedResult {
             normalizedName: "webfetch",
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             summary: "slow-site.com",
             status: .error,
             durationMs: 30000,
@@ -508,7 +508,7 @@ extension WebFetchParsedResult {
             normalizedName: "webfetch",
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             summary: "github.com",
             status: .running,
             durationMs: nil,
@@ -528,7 +528,7 @@ extension WebFetchParsedResult {
             normalizedName: "webfetch",
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             summary: "api.example.com",
             status: .error,
             durationMs: 120,
@@ -548,7 +548,7 @@ extension WebFetchParsedResult {
             normalizedName: "webfetch",
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             summary: "news.ycombinator.com",
             status: .success,
             durationMs: 1800,

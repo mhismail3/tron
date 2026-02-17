@@ -124,7 +124,7 @@ enum ToolRegistry {
         "search": ToolDescriptor(
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             completedDisplayName: "Searched",
             summaryExtractor: { args in
                 let pattern = ToolArgumentParser.pattern(from: args)
@@ -222,7 +222,7 @@ enum ToolRegistry {
         "webfetch": ToolDescriptor(
             icon: "arrow.down.doc",
             iconColor: .tronInfo,
-            displayName: "Fetch",
+            displayName: "Web Fetch",
             completedDisplayName: "Fetched",
             summaryExtractor: { args in
                 let url = ToolArgumentParser.url(from: args)
@@ -248,7 +248,7 @@ enum ToolRegistry {
         "websearch": ToolDescriptor(
             icon: "magnifyingglass.circle",
             iconColor: .tronInfo,
-            displayName: "Search",
+            displayName: "Web Search",
             completedDisplayName: "Searched",
             summaryExtractor: { args in
                 let query = ToolArgumentParser.query(from: args)

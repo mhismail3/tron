@@ -76,7 +76,7 @@ struct SearchToolDetailSheet: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 14))
                             .foregroundStyle(.purple)
-                        Text("Search")
+                        Text("File Search")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
                             .foregroundStyle(.purple)
                     }
@@ -610,7 +610,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"TODO\" in src",
             status: .success,
             durationMs: 120,
@@ -630,7 +630,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"import\"",
             status: .success,
             durationMs: 45,
@@ -650,7 +650,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"nonexistent\"",
             status: .success,
             durationMs: 30,
@@ -670,7 +670,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"class\" in src",
             status: .success,
             durationMs: 85,
@@ -690,7 +690,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"TODO\"",
             status: .success,
             durationMs: 60,
@@ -710,7 +710,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"pattern\"",
             status: .running,
             durationMs: nil,
@@ -730,7 +730,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"[invalid\"",
             status: .error,
             durationMs: 5,
@@ -750,7 +750,7 @@ struct SearchMatch: Equatable {
             normalizedName: "search",
             icon: "magnifyingglass",
             iconColor: .purple,
-            displayName: "Search",
+            displayName: "File Search",
             summary: "\"const\"",
             status: .success,
             durationMs: 200,
