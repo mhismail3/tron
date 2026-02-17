@@ -1940,6 +1940,119 @@ mod tests {
         assert_eq!(msgs[7].is_error, Some(true));
     }
 
+    // ── Interrupted session persistence scenarios ─────────────────
+
+    #[test]
+    fn interrupted_assistant_with_tool_use_gets_synthetic_results() {
+        // Server persists partial message.assistant with interrupted=true + tool_use.
+        // Reconstruction should inject synthetic tool results.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Do something"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "text", "text": "I'll help with"},
+                        {"type": "tool_use", "id": "tc_1", "name": "bash", "input": {"command": "ls"}}
+                    ],
+                    "turn": 1,
+                    "stopReason": "interrupted",
+                    "interrupted": true,
+                }),
+            ),
+        ];
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(text + tool_use), synthetic toolResult
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("tc_1"));
+        assert_eq!(msgs[2].is_error, Some(true));
+    }
+
+    #[test]
+    fn interrupted_text_only_assistant_reconstructs() {
+        // Interrupted mid-text, no tool calls — simpler case.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Tell me a story"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "text", "text": "Once upon a time"}],
+                    "turn": 1,
+                    "stopReason": "interrupted",
+                    "interrupted": true,
+                }),
+            ),
+        ];
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(text only) — no synthetic results needed
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].content[0]["text"], "Once upon a time");
+    }
+
+    #[test]
+    fn interrupted_session_resume_reconstructs_full_history() {
+        // Session interrupted, notification persisted, then user resumes.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Run tool"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "tool_use", "id": "tc_1", "name": "bash", "input": {}}
+                    ],
+                    "turn": 1,
+                    "stopReason": "interrupted",
+                    "interrupted": true,
+                }),
+            ),
+            ev(
+                EventType::NotificationInterrupted,
+                serde_json::json!({
+                    "timestamp": "2026-02-17T00:00:00Z",
+                    "turn": 1,
+                }),
+            ),
+            // User resumes
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Try again"}),
+            ),
+        ];
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(tool_use), synthetic toolResult, user
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].is_error, Some(true));
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("tc_1"));
+        assert_eq!(msgs[3].role, "user");
+        assert_eq!(msgs[3].content, "Try again");
+    }
+
     #[test]
     fn extract_tool_use_ids_from_content() {
         let content = serde_json::json!([

@@ -183,6 +183,27 @@ pub async fn execute_turn(
         };
 
     if stream_result.interrupted {
+        // Persist partial message.assistant so reconstruction shows streamed content
+        if let Some(p) = persister {
+            let content_json = persistence::build_content_json(&stream_result.message.content);
+            if !content_json.is_empty() {
+                let mut payload = json!({
+                    "content": content_json,
+                    "turn": turn,
+                    "model": provider.model(),
+                    "stopReason": "interrupted",
+                    "interrupted": true,
+                    "providerType": provider.provider_type().as_str(),
+                });
+                if let Some(ref usage) = stream_result.token_usage {
+                    payload["tokenUsage"] = persistence::build_token_usage_json(usage);
+                }
+                if let Err(e) = p.append(session_id, EventType::MessageAssistant, payload).await {
+                    tracing::error!(session_id, error = %e, "failed to persist interrupted message.assistant");
+                }
+            }
+        }
+
         return TurnResult {
             success: true,
             interrupted: true,

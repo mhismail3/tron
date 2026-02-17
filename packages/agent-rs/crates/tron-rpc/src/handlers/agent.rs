@@ -808,6 +808,22 @@ impl MethodHandler for PromptHandler {
                 // 8. Flush persister to ensure all inline-persisted events are written
                 let _ = persister.flush().await;
 
+                // 8a. Persist notification.interrupted if the run was interrupted
+                if result.interrupted {
+                    if let Err(e) = persister.append(
+                        &session_id_clone,
+                        tron_events::EventType::NotificationInterrupted,
+                        serde_json::json!({
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                            "turn": result.turns_executed,
+                        }),
+                    ).await {
+                        tracing::error!(session_id = %session_id_clone, error = %e,
+                            "failed to persist notification.interrupted");
+                    }
+                    let _ = persister.flush().await;
+                }
+
                 // 8b. Emit agent.error if the run failed (iOS ErrorPlugin listens for this)
                 if let Some(ref error_msg) = result.error {
                     let parsed = tron_core::errors::parse::parse_error(error_msg);
@@ -1127,6 +1143,52 @@ mod tests {
         let mut ctx = make_test_context();
         ctx.agent_deps = Some(AgentDeps {
             provider_factory: Arc::new(FixedProviderFactory(Arc::new(TextProvider::new(text)))),
+            tool_factory: Arc::new(ToolRegistry::new),
+            guardrails: None,
+            hooks: None,
+        });
+        ctx
+    }
+
+    /// A mock provider that yields partial text then sleeps, allowing cancellation.
+    struct SlowProvider;
+    #[async_trait]
+    impl Provider for SlowProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let s = async_stream::stream! {
+                yield Ok(StreamEvent::Start);
+                yield Ok(StreamEvent::TextDelta { delta: "partial text".into() });
+                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                yield Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text("partial text")],
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 3,
+                            ..Default::default()
+                        }),
+                    },
+                    stop_reason: "end_turn".into(),
+                });
+            };
+            Ok(Box::pin(s))
+        }
+    }
+
+    fn make_slow_context() -> RpcContext {
+        let mut ctx = make_test_context();
+        ctx.agent_deps = Some(AgentDeps {
+            provider_factory: Arc::new(FixedProviderFactory(Arc::new(SlowProvider))),
             tool_factory: Arc::new(ToolRegistry::new),
             guardrails: None,
             hooks: None,
@@ -2639,6 +2701,105 @@ mod tests {
             payload["tokenRecord"]["source"]["rawInputTokens"].is_number(),
             "tokenRecord.source.rawInputTokens should be a number, got: {}",
             payload["tokenRecord"]
+        );
+    }
+
+    // ── Interrupted session persistence tests ──
+
+    #[tokio::test]
+    async fn interrupted_run_persists_notification_event() {
+        let ctx = make_slow_context();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hello"})), &ctx)
+            .await
+            .unwrap();
+
+        // Wait for the stream to start yielding
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Abort the session
+        let _ = AbortHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        // Wait for the background task to finish
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["notification.interrupted"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1, "expected one notification.interrupted event");
+
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert!(payload.get("timestamp").is_some());
+        assert!(payload.get("turn").is_some());
+    }
+
+    #[tokio::test]
+    async fn interrupted_run_persists_partial_assistant_message() {
+        let ctx = make_slow_context();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hello"})), &ctx)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let _ = AbortHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["message.assistant"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1, "expected one message.assistant event");
+
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["stopReason"], "interrupted");
+        assert_eq!(payload["interrupted"], true);
+        let content = payload["content"].as_array().unwrap();
+        assert!(!content.is_empty(), "content should contain partial text");
+    }
+
+    #[tokio::test]
+    async fn normal_run_does_not_persist_interrupted_notification() {
+        let ctx = make_text_context("hello world");
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hi"})), &ctx)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["notification.interrupted"], None)
+            .unwrap();
+        assert_eq!(
+            events.len(),
+            0,
+            "normal run should not have notification.interrupted"
         );
     }
 
