@@ -77,6 +77,50 @@ impl tron_context::llm_summarizer::SubsessionSpawner for SubagentManagerSpawner 
 }
 
 // =============================================================================
+// SubagentContentSummarizer — ContentSummarizer for WebFetch
+// =============================================================================
+
+/// [`ContentSummarizer`](tron_tools::traits::ContentSummarizer) that wraps
+/// `SubagentManager::spawn_subsession()` to summarize web page content via Haiku.
+pub struct SubagentContentSummarizer {
+    /// The subagent manager to spawn through.
+    pub manager: Arc<SubagentManager>,
+}
+
+#[async_trait]
+impl tron_tools::traits::ContentSummarizer for SubagentContentSummarizer {
+    async fn summarize(
+        &self,
+        task: &str,
+        parent_session_id: &str,
+    ) -> Result<tron_tools::traits::SummarizerResult, tron_tools::errors::ToolError> {
+        let result = self
+            .manager
+            .spawn_subsession(SubsessionConfig {
+                parent_session_id: parent_session_id.to_owned(),
+                task: task.to_owned(),
+                model: None, // defaults to SUBAGENT_MODEL (Haiku 4.5)
+                system_prompt: "You are a web content summarizer. Answer questions concisely based on the provided content.".into(),
+                working_directory: "/tmp".into(),
+                inherit_tools: false,
+                max_turns: 1,
+                max_depth: 0,
+                reasoning_level: None,
+                ..SubsessionConfig::default()
+            })
+            .await
+            .map_err(|e| tron_tools::errors::ToolError::Internal {
+                message: format!("Summarizer subsession failed: {e}"),
+            })?;
+
+        Ok(tron_tools::traits::SummarizerResult {
+            answer: result.output,
+            session_id: result.session_id,
+        })
+    }
+}
+
+// =============================================================================
 // CompactionHandler
 // =============================================================================
 

@@ -122,6 +122,9 @@ pub struct SubagentConfig {
     /// Current nesting depth (set by SubagentManager, not user).
     #[serde(default)]
     pub current_depth: u32,
+    /// Tool call ID that triggered the spawn (for iOS event correlation).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 /// Subagent execution mode.
@@ -413,6 +416,27 @@ pub trait ProcessRunner: Send + Sync {
         command: &str,
         opts: &ProcessOptions,
     ) -> Result<ProcessOutput, ToolError>;
+}
+
+/// Result from content summarization.
+#[derive(Clone, Debug)]
+pub struct SummarizerResult {
+    /// The summarized answer.
+    pub answer: String,
+    /// Session ID of the subagent that produced the summary.
+    pub session_id: String,
+}
+
+/// Content summarizer for `WebFetch` — sends fetched content to a Haiku
+/// subagent and returns a concise answer to the user's question.
+#[async_trait]
+pub trait ContentSummarizer: Send + Sync {
+    /// Summarize content by answering a task prompt via a subagent.
+    async fn summarize(
+        &self,
+        task: &str,
+        parent_session_id: &str,
+    ) -> Result<SummarizerResult, ToolError>;
 }
 
 /// Subagent spawning (`SpawnSubagent`, `WebFetch` summarizer).

@@ -378,9 +378,10 @@ async fn main() -> Result<()> {
             None,
         ));
 
-        // Build tool factory that includes subagent tools
+        // Build tool factory that includes subagent tools + summarizer-backed WebFetch
         let config = tool_config.clone();
         let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = subagent_manager.clone();
+        let sm_for_summarizer = subagent_manager.clone();
         let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
             let mut registry = create_tool_registry(&config);
             registry.register(Arc::new(
@@ -392,6 +393,19 @@ async fn main() -> Result<()> {
             registry.register(Arc::new(
                 tron_tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
             ));
+
+            // Re-register WebFetch with LLM summarizer (overrides the basic version)
+            let summarizer: Arc<dyn tron_tools::traits::ContentSummarizer> = Arc::new(
+                tron_runtime::agent::compaction_handler::SubagentContentSummarizer {
+                    manager: sm_for_summarizer.clone(),
+                },
+            );
+            let http: Arc<dyn tron_tools::traits::HttpClient> =
+                Arc::new(tron_tools::providers::ReqwestHttpClient::new());
+            registry.register(Arc::new(
+                tron_tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
+            ));
+
             registry
         });
 

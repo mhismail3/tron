@@ -27,6 +27,7 @@ reqwest.workspace = true
 scraper.workspace = true
 html2text.workspace = true
 tracing.workspace = true
+parking_lot.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 indexmap = "2"
