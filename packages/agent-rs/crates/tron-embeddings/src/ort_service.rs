@@ -132,9 +132,10 @@ fn run_inference(
 
     let batch_size = texts.len();
 
-    // Build padded input_ids and attention_mask as flat Vec<i64>
+    // Build padded input_ids, attention_mask, and position_ids as flat Vec<i64>
     let mut input_ids = vec![0i64; batch_size * max_len];
     let mut attention_mask = vec![0i64; batch_size * max_len];
+    let mut position_ids = vec![0i64; batch_size * max_len];
 
     for (i, enc) in encodings.iter().enumerate() {
         let ids = enc.get_ids();
@@ -145,6 +146,10 @@ fn run_inference(
         }
         for (j, &m) in mask.iter().enumerate() {
             attention_mask[offset + j] = i64::from(m);
+            // position_ids: sequential positions for non-padded tokens, 0 for padding
+            if m != 0 {
+                position_ids[offset + j] = j as i64;
+            }
         }
     }
 
@@ -155,12 +160,14 @@ fn run_inference(
     let input_ids_tensor = ort::value::Tensor::from_array((shape.clone(), input_ids))
         .map_err(|e| EmbeddingError::Inference(format!("input_ids tensor: {e}")))?;
     let attention_mask_tensor =
-        ort::value::Tensor::from_array((shape, attention_mask.clone()))
+        ort::value::Tensor::from_array((shape.clone(), attention_mask.clone()))
             .map_err(|e| EmbeddingError::Inference(format!("attention_mask tensor: {e}")))?;
+    let position_ids_tensor = ort::value::Tensor::from_array((shape, position_ids))
+        .map_err(|e| EmbeddingError::Inference(format!("position_ids tensor: {e}")))?;
 
     // Run ONNX session
     let outputs = session
-        .run(ort::inputs![input_ids_tensor, attention_mask_tensor])
+        .run(ort::inputs![input_ids_tensor, attention_mask_tensor, position_ids_tensor])
         .map_err(|e| EmbeddingError::Inference(format!("inference: {e}")))?;
 
     // Extract output tensor (shape: [batch_size, seq_len, hidden_dim])

@@ -12,7 +12,7 @@ struct RememberToolDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .purple, colorScheme: colorScheme)
     }
 
     private var action: String {
@@ -51,7 +51,7 @@ struct RememberToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.purple.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -61,7 +61,7 @@ struct RememberToolDetailSheet: View {
                             .foregroundStyle(accentColor)
                         Text("Remember")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.purple)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -69,13 +69,13 @@ struct RememberToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.purple)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.purple)
     }
 
     // MARK: - Content Body
@@ -296,7 +296,7 @@ struct RememberToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.purple.opacity(0.6))
                 }
             }
 
@@ -307,13 +307,13 @@ struct RememberToolDetailSheet: View {
                     ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                         if index > 0 {
                             Divider()
-                                .background(Color.tronSlate.opacity(0.08))
+                                .background(Color.purple.opacity(0.08))
                                 .padding(.horizontal, 8)
                         }
                         memoryEntryRow(entry)
                     }
                 }
-                .sectionFill(.tronSlate)
+                .sectionFill(.purple)
             }
         }
     }
@@ -351,7 +351,7 @@ struct RememberToolDetailSheet: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.tronSlate.opacity(0.1))
+                    .fill(Color.purple.opacity(0.1))
                 Capsule()
                     .fill(relevanceColor(score))
                     .frame(width: geo.size.width * CGFloat(score) / 100)
@@ -363,7 +363,7 @@ struct RememberToolDetailSheet: View {
     private func relevanceColor(_ score: Int) -> Color {
         if score >= 75 { return .tronEmerald }
         if score >= 50 { return .tronAmber }
-        return .tronSlate
+        return .purple
     }
 
     // MARK: - Session List (sessions)
@@ -383,13 +383,13 @@ struct RememberToolDetailSheet: View {
                     ForEach(Array(sessions.enumerated()), id: \.offset) { index, session in
                         if index > 0 {
                             Divider()
-                                .background(Color.tronSlate.opacity(0.08))
+                                .background(Color.purple.opacity(0.08))
                                 .padding(.horizontal, 8)
                         }
                         sessionRow(session)
                     }
                 }
-                .sectionFill(.tronSlate)
+                .sectionFill(.purple)
             }
         }
     }
@@ -456,7 +456,7 @@ struct RememberToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.purple.opacity(0.6))
                 }
             }
 
@@ -472,7 +472,7 @@ struct RememberToolDetailSheet: View {
                         ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                             if index > 0 {
                                 Divider()
-                                    .background(Color.tronSlate.opacity(0.12))
+                                    .background(Color.purple.opacity(0.12))
                                     .padding(.horizontal, 4)
                             }
                             Text(entry)
@@ -487,7 +487,7 @@ struct RememberToolDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 6)
                 }
-                .sectionFill(.tronSlate)
+                .sectionFill(.purple)
             }
         }
     }
@@ -555,7 +555,7 @@ struct RememberToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.purple.opacity(0.6))
                 }
             }
 
@@ -574,7 +574,7 @@ struct RememberToolDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
             }
-            .sectionFill(.tronSlate)
+            .sectionFill(.purple)
         }
     }
 
@@ -594,13 +594,13 @@ struct RememberToolDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
         }
-        .sectionFill(.tronSlate)
+        .sectionFill(.purple)
     }
 
     // MARK: - No Results
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "brain.fill")
                     .font(.system(size: 28))
@@ -651,7 +651,7 @@ struct RememberToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
                     .tint(accentColor)

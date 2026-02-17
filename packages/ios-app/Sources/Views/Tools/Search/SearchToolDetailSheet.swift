@@ -13,7 +13,7 @@ struct SearchToolDetailSheet: View {
     @State private var expandedFiles: Set<String> = []
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .purple, colorScheme: colorScheme)
     }
 
     private var pattern: String {
@@ -68,7 +68,7 @@ struct SearchToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.purple.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -78,7 +78,7 @@ struct SearchToolDetailSheet: View {
                             .foregroundStyle(.purple)
                         Text("Search")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.purple)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -86,13 +86,13 @@ struct SearchToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.purple)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.purple)
     }
 
     // MARK: - Content Body
@@ -144,7 +144,7 @@ struct SearchToolDetailSheet: View {
     // MARK: - Query Section
 
     private var querySection: some View {
-        ToolDetailSection(title: "Query", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Query", accent: .purple, tint: tint) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(pattern)
@@ -224,7 +224,7 @@ struct SearchToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.purple.opacity(0.6))
                 }
             }
 
@@ -232,7 +232,7 @@ struct SearchToolDetailSheet: View {
                 ForEach(Array(parsedResults.enumerated()), id: \.offset) { groupIdx, group in
                     if groupIdx > 0 {
                         Divider()
-                            .background(Color.tronSlate.opacity(0.1))
+                            .background(Color.purple.opacity(0.1))
                     }
                     fileGroupView(group)
                 }
@@ -244,7 +244,7 @@ struct SearchToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.purple)
         }
     }
 
@@ -328,7 +328,7 @@ struct SearchToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.purple.opacity(0.6))
                 }
             }
 
@@ -344,7 +344,7 @@ struct SearchToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.purple)
         }
     }
 
@@ -385,7 +385,7 @@ struct SearchToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.purple.opacity(0.6))
                 }
             }
 
@@ -408,14 +408,14 @@ struct SearchToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.purple)
         }
     }
 
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 28))
@@ -475,7 +475,7 @@ struct SearchToolDetailSheet: View {
     }
 
     private var searchingSpinner: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
                     .tint(.purple)
@@ -507,7 +507,7 @@ struct SearchToolDetailSheet: View {
                 ForEach(Array(groups.enumerated()), id: \.offset) { groupIdx, group in
                     if groupIdx > 0 {
                         Divider()
-                            .background(Color.tronSlate.opacity(0.1))
+                            .background(Color.purple.opacity(0.1))
                     }
                     fileGroupView(group)
                 }
@@ -519,7 +519,7 @@ struct SearchToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.purple)
         }
     }
 }

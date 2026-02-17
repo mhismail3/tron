@@ -6,7 +6,8 @@
 //! - `response.output_text.delta` → `TextStart` + `TextDelta`
 //! - `response.output_item.added` (`function_call`) → `ToolCallStart`
 //! - `response.function_call_arguments.delta` → `ToolCallDelta`
-//! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta`
+//! - `response.reasoning_text.delta` → `ThinkingStart` + `ThinkingDelta` (full reasoning)
+//! - `response.reasoning_summary_text.delta` → `ThinkingStart` + `ThinkingDelta` (summary fallback)
 //! - `response.completed` → `ThinkingEnd`, `TextEnd`, `ToolCallEnd`, `Done`
 
 use std::collections::{HashMap, HashSet};
@@ -37,6 +38,8 @@ pub struct StreamState {
     pub thinking_started: bool,
     /// Deduplication set for reasoning text.
     pub seen_thinking_texts: HashSet<String>,
+    /// Whether we received full reasoning text (vs only summary).
+    pub has_reasoning_text: bool,
 }
 
 /// State for an individual tool call being accumulated.
@@ -62,6 +65,7 @@ pub fn create_stream_state() -> StreamState {
         text_started: false,
         thinking_started: false,
         seen_thinking_texts: HashSet::new(),
+        has_reasoning_text: false,
     }
 }
 
@@ -124,7 +128,32 @@ pub fn process_stream_event(
             }
         }
 
+        "response.reasoning_text.delta" => {
+            // Full reasoning content — preferred over summary when available.
+            if let Some(delta) = &event.delta {
+                if !state.has_reasoning_text {
+                    // First reasoning_text delta: replace any summary-only content.
+                    state.has_reasoning_text = true;
+                    if !state.accumulated_thinking.is_empty() {
+                        state.accumulated_thinking.clear();
+                    }
+                }
+                if !state.thinking_started {
+                    state.thinking_started = true;
+                    events.push(StreamEvent::ThinkingStart);
+                }
+                state.accumulated_thinking.push_str(delta);
+                events.push(StreamEvent::ThinkingDelta {
+                    delta: delta.clone(),
+                });
+            }
+        }
+
         "response.reasoning_summary_text.delta" => {
+            // Skip summary deltas when we have full reasoning text.
+            if state.has_reasoning_text {
+                return events;
+            }
             if let Some(delta) = &event.delta {
                 if !state.seen_thinking_texts.contains(delta.as_str()) {
                     let _ = state.seen_thinking_texts.insert(delta.clone());
@@ -172,6 +201,7 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     if item.item_type != "reasoning"
         || item.summary.is_none()
         || !state.accumulated_thinking.is_empty()
+        || state.has_reasoning_text
     {
         return events;
     }
@@ -295,7 +325,7 @@ fn merge_reasoning_item(
     state: &mut StreamState,
     events: &mut Vec<StreamEvent>,
 ) {
-    if !state.accumulated_thinking.is_empty() {
+    if !state.accumulated_thinking.is_empty() || state.has_reasoning_text {
         return;
     }
     if let Some(summary) = &item.summary {
@@ -902,5 +932,96 @@ mod tests {
                 Some(tron_core::messages::ProviderType::OpenAi)
             );
         }
+    }
+
+    // ── Full reasoning text (response.reasoning_text.delta) ───────
+
+    fn reasoning_text_delta_event(delta: &str) -> ResponsesSseEvent {
+        ResponsesSseEvent {
+            event_type: "response.reasoning_text.delta".into(),
+            delta: Some(delta.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn reasoning_text_delta_emits_thinking_events() {
+        let mut state = create_stream_state();
+        let events = process_stream_event(
+            &reasoning_text_delta_event("Let me think about this..."),
+            &mut state,
+        );
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], StreamEvent::ThinkingStart);
+        assert_eq!(
+            events[1],
+            StreamEvent::ThinkingDelta {
+                delta: "Let me think about this...".into()
+            }
+        );
+        assert!(state.has_reasoning_text);
+        assert!(state.thinking_started);
+        assert_eq!(state.accumulated_thinking, "Let me think about this...");
+    }
+
+    #[test]
+    fn reasoning_text_replaces_prior_summary() {
+        let mut state = create_stream_state();
+        // First, receive a summary delta
+        let _ = process_stream_event(
+            &reasoning_summary_delta_event("**Short summary**"),
+            &mut state,
+        );
+        assert_eq!(state.accumulated_thinking, "**Short summary**");
+
+        // Then receive full reasoning text — should replace summary
+        let events = process_stream_event(
+            &reasoning_text_delta_event("Full reasoning content here..."),
+            &mut state,
+        );
+
+        assert!(state.has_reasoning_text);
+        assert_eq!(state.accumulated_thinking, "Full reasoning content here...");
+        // Should emit ThinkingDelta (ThinkingStart already emitted by summary)
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            StreamEvent::ThinkingDelta {
+                delta: "Full reasoning content here...".into()
+            }
+        );
+    }
+
+    #[test]
+    fn summary_skipped_when_reasoning_text_active() {
+        let mut state = create_stream_state();
+        // Receive full reasoning text first
+        let _ = process_stream_event(
+            &reasoning_text_delta_event("Full reasoning..."),
+            &mut state,
+        );
+
+        // Summary delta should be ignored
+        let events = process_stream_event(
+            &reasoning_summary_delta_event("**Summary**"),
+            &mut state,
+        );
+        assert!(events.is_empty());
+        assert_eq!(state.accumulated_thinking, "Full reasoning...");
+    }
+
+    #[test]
+    fn reasoning_text_accumulates_multiple_deltas() {
+        let mut state = create_stream_state();
+        let _ = process_stream_event(
+            &reasoning_text_delta_event("First part. "),
+            &mut state,
+        );
+        let _ = process_stream_event(
+            &reasoning_text_delta_event("Second part."),
+            &mut state,
+        );
+        assert_eq!(state.accumulated_thinking, "First part. Second part.");
     }
 }

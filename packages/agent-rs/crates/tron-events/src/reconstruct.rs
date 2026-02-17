@@ -176,6 +176,13 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         }
     }
 
+    // Inject synthetic error results for any unmatched tool calls.
+    // This happens when: (a) a user interrupt discards pending tool results,
+    // or (b) the session ended mid-tool-execution before results arrived.
+    // Without this, providers like OpenAI reject the history because every
+    // function_call must have a corresponding function_call_output.
+    inject_missing_tool_results(&mut st.combined);
+
     ReconstructionResult {
         messages_with_event_ids: st.combined,
         token_usage: st.tokens,
@@ -330,6 +337,75 @@ fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Inject synthetic error `toolResult` messages for any assistant `tool_use`
+/// blocks that lack a corresponding `toolResult` in the following messages.
+///
+/// Scans through the reconstructed message list and, for each assistant message
+/// containing `tool_use` blocks, checks whether matching `toolResult` messages
+/// exist before the next non-toolResult message. Any unmatched tool calls get
+/// a synthetic error result injected immediately after the assistant message.
+fn inject_missing_tool_results(combined: &mut Vec<MessageWithEventId>) {
+    let mut insertions: Vec<(usize, Vec<MessageWithEventId>)> = Vec::new();
+
+    let mut i = 0;
+    while i < combined.len() {
+        if combined[i].message.role == "assistant" {
+            let tool_use_ids = extract_tool_use_ids(&combined[i].message.content);
+            if !tool_use_ids.is_empty() {
+                // Collect tool_call_ids from following toolResult messages
+                let mut matched_ids = std::collections::HashSet::new();
+                let mut j = i + 1;
+                while j < combined.len() && combined[j].message.role == "toolResult" {
+                    if let Some(ref tc_id) = combined[j].message.tool_call_id {
+                        let _ = matched_ids.insert(tc_id.clone());
+                    }
+                    j += 1;
+                }
+
+                // Find unmatched tool calls
+                let mut synthetic = Vec::new();
+                for tc_id in &tool_use_ids {
+                    if !matched_ids.contains(tc_id.as_str()) {
+                        synthetic.push(MessageWithEventId {
+                            message: Message {
+                                role: "toolResult".to_string(),
+                                content: Value::String(
+                                    "Tool execution was interrupted.".to_string(),
+                                ),
+                                tool_call_id: Some(tc_id.clone()),
+                                is_error: Some(true),
+                            },
+                            event_ids: vec![None],
+                        });
+                    }
+                }
+
+                if !synthetic.is_empty() {
+                    insertions.push((i + 1, synthetic));
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // Apply insertions in reverse order to preserve indices
+    for (idx, msgs) in insertions.into_iter().rev() {
+        let _ = combined.splice(idx..idx, msgs.into_iter());
+    }
+}
+
+/// Extract all `tool_use` block IDs from a message's content.
+fn extract_tool_use_ids(content: &Value) -> Vec<String> {
+    match content {
+        Value::Array(arr) => arr
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+            .filter_map(|block| block.get("id").and_then(Value::as_str).map(String::from))
+            .collect(),
+        _ => vec![],
+    }
+}
 
 /// Flush pending tool results as `toolResult` messages.
 fn flush_tool_results(
@@ -837,7 +913,9 @@ mod tests {
     }
 
     #[test]
-    fn discard_pending_tool_results_on_user_interrupt() {
+    fn user_interrupt_injects_synthetic_tool_result() {
+        // When user interrupts after tool calls, pending results are discarded
+        // but synthetic error results are injected to maintain provider compatibility.
         let events = vec![
             session_start(),
             ev(
@@ -856,7 +934,8 @@ mod tests {
                 EventType::ToolResult,
                 serde_json::json!({"toolCallId": "call_1", "content": "Result", "isError": false}),
             ),
-            // User interrupts
+            // User interrupts — pending tool results are discarded, but
+            // synthetic error results are injected for provider compatibility.
             ev(
                 EventType::MessageUser,
                 serde_json::json!({"content": "Actually, never mind"}),
@@ -866,11 +945,15 @@ mod tests {
         let result = reconstruct_from_events(&events);
         let msgs = get_messages(&result);
 
-        // user, assistant, user (tool result discarded)
-        assert_eq!(msgs.len(), 3);
+        // user, assistant(tool_use), toolResult(synthetic), user
+        assert_eq!(msgs.len(), 4);
         assert_eq!(msgs[0].role, "user");
         assert_eq!(msgs[1].role, "assistant");
-        assert_eq!(msgs[2].role, "user");
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].is_error, Some(true));
+        assert_eq!(msgs[2].content, "Tool execution was interrupted.");
+        assert_eq!(msgs[3].role, "user");
     }
 
     // ── Compaction ───────────────────────────────────────────────────
@@ -1605,5 +1688,279 @@ mod tests {
         let result = restore_truncated_inputs(&content, &map);
         // Should leave as-is when not in map
         assert_eq!(result[0]["input"]["_truncated"], true);
+    }
+
+    // ── Synthetic tool results for interrupted sessions ──────────────
+
+    #[test]
+    fn inject_synthetic_results_on_user_interrupt() {
+        // Simulates: assistant makes tool calls, results arrive, user interrupts.
+        // The user interrupt discards pending tool results, leaving unmatched
+        // tool_use blocks. Synthetic error results should be injected.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Use tool"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "input": {}},
+                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "input": {}}
+                    ],
+                    "turn": 1,
+                }),
+            ),
+            // Tool results arrive but will be discarded by user interrupt
+            ev(
+                EventType::ToolResult,
+                serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
+            ),
+            ev(
+                EventType::ToolResult,
+                serde_json::json!({"toolCallId": "call_2", "content": "Result 2", "isError": false}),
+            ),
+            // User interrupt discards pending tool results
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Never mind"}),
+            ),
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(tool_use x2), toolResult(call_1), toolResult(call_2), user
+        assert_eq!(msgs.len(), 5);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].is_error, Some(true));
+        assert_eq!(msgs[2].content, "Tool execution was interrupted.");
+        assert_eq!(msgs[3].role, "toolResult");
+        assert_eq!(msgs[3].tool_call_id.as_deref(), Some("call_2"));
+        assert_eq!(msgs[3].is_error, Some(true));
+        assert_eq!(msgs[4].role, "user");
+        assert_eq!(msgs[4].content, "Never mind");
+    }
+
+    #[test]
+    fn inject_synthetic_results_mid_execution() {
+        // Session ends after assistant emits tool calls but before any results arrive.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Run tool"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}
+                    ],
+                    "turn": 1,
+                }),
+            ),
+            // No tool result events — session interrupted mid-execution
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(tool_use), toolResult(synthetic error)
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[2].is_error, Some(true));
+        assert_eq!(msgs[2].content, "Tool execution was interrupted.");
+    }
+
+    #[test]
+    fn no_synthetic_results_when_all_matched() {
+        // Normal flow: all tool calls have matching results. No synthetics needed.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Use tool"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}],
+                    "turn": 1,
+                }),
+            ),
+            ev(
+                EventType::ToolResult,
+                serde_json::json!({"toolCallId": "call_1", "content": "Done", "isError": false}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "text", "text": "All done"}],
+                    "turn": 2,
+                }),
+            ),
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant, toolResult, assistant — no synthetics
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].content, "Done");
+        assert_eq!(msgs[2].is_error, Some(false));
+    }
+
+    #[test]
+    fn partial_tool_results_injects_only_missing() {
+        // One of two tool calls gets a result, the other doesn't.
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Use tools"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "input": {}},
+                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "input": {}}
+                    ],
+                    "turn": 1,
+                }),
+            ),
+            // Only call_1 gets a result
+            ev(
+                EventType::ToolResult,
+                serde_json::json!({"toolCallId": "call_1", "content": "Result 1", "isError": false}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "text", "text": "Continuing"}],
+                    "turn": 2,
+                }),
+            ),
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(tool_use x2), synthetic(call_2), toolResult(call_1), assistant
+        // The synthetic is injected right after assistant, before existing toolResults
+        assert_eq!(msgs.len(), 5);
+        assert_eq!(msgs[1].role, "assistant");
+        // Synthetic injected first (for unmatched call_2)
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_2"));
+        assert_eq!(msgs[2].is_error, Some(true));
+        // Real result for call_1
+        assert_eq!(msgs[3].role, "toolResult");
+        assert_eq!(msgs[3].tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(msgs[3].is_error, Some(false));
+        assert_eq!(msgs[4].role, "assistant");
+    }
+
+    #[test]
+    fn cross_provider_resume_with_interrupted_tool_calls() {
+        // Realistic scenario: Anthropic tool calls completed, then GPT tool calls interrupted.
+        let events = vec![
+            session_start(),
+            // User prompt
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Help me with files"}),
+            ),
+            // Anthropic assistant uses tool (completed)
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "tool_use", "id": "toolu_abc", "name": "Read", "input": {"path": "file.txt"}}],
+                    "turn": 1,
+                }),
+            ),
+            ev(
+                EventType::ToolResult,
+                serde_json::json!({"toolCallId": "toolu_abc", "content": "file contents", "isError": false}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "text", "text": "Here are the contents."}],
+                    "turn": 2,
+                }),
+            ),
+            // User switches model, sends new prompt
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Now use GPT to do more"}),
+            ),
+            // GPT assistant uses tools (interrupted before results)
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "tool_use", "id": "call_gpt_1", "name": "Write", "input": {"path": "out.txt"}},
+                        {"type": "tool_use", "id": "call_gpt_2", "name": "Bash", "input": {"command": "echo hi"}}
+                    ],
+                    "turn": 3,
+                }),
+            ),
+            // Session interrupted — no tool.result events for GPT calls
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        // user, assistant(toolu_abc), toolResult(toolu_abc), assistant(text),
+        // user, assistant(call_gpt_1, call_gpt_2), toolResult(call_gpt_1), toolResult(call_gpt_2)
+        assert_eq!(msgs.len(), 8);
+
+        // Anthropic calls properly matched
+        assert_eq!(msgs[2].role, "toolResult");
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("toolu_abc"));
+        assert_eq!(msgs[2].is_error, Some(false));
+
+        // GPT calls get synthetic error results
+        assert_eq!(msgs[6].role, "toolResult");
+        assert_eq!(msgs[6].tool_call_id.as_deref(), Some("call_gpt_1"));
+        assert_eq!(msgs[6].is_error, Some(true));
+        assert_eq!(msgs[6].content, "Tool execution was interrupted.");
+
+        assert_eq!(msgs[7].role, "toolResult");
+        assert_eq!(msgs[7].tool_call_id.as_deref(), Some("call_gpt_2"));
+        assert_eq!(msgs[7].is_error, Some(true));
+    }
+
+    #[test]
+    fn extract_tool_use_ids_from_content() {
+        let content = serde_json::json!([
+            {"type": "text", "text": "hello"},
+            {"type": "tool_use", "id": "call_1", "name": "T", "input": {}},
+            {"type": "tool_use", "id": "call_2", "name": "T2", "input": {}}
+        ]);
+        let ids = extract_tool_use_ids(&content);
+        assert_eq!(ids, vec!["call_1", "call_2"]);
+    }
+
+    #[test]
+    fn extract_tool_use_ids_no_tools() {
+        let content = serde_json::json!([{"type": "text", "text": "hello"}]);
+        let ids = extract_tool_use_ids(&content);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn extract_tool_use_ids_non_array() {
+        let ids = extract_tool_use_ids(&Value::String("hello".to_string()));
+        assert!(ids.is_empty());
     }
 }

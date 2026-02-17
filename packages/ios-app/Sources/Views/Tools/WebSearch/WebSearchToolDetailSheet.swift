@@ -13,7 +13,7 @@ struct WebSearchToolDetailSheet: View {
     @Environment(\.openURL) private var openURL
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .tronInfo, colorScheme: colorScheme)
     }
 
     private var query: String {
@@ -55,7 +55,7 @@ struct WebSearchToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.tronInfo.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -65,7 +65,7 @@ struct WebSearchToolDetailSheet: View {
                             .foregroundStyle(.tronInfo)
                         Text("Web Search")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.tronInfo)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -73,13 +73,13 @@ struct WebSearchToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.tronInfo)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.tronInfo)
     }
 
     // MARK: - Content Body
@@ -211,7 +211,7 @@ struct WebSearchToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.tronInfo.opacity(0.6))
                 }
             }
 
@@ -224,7 +224,7 @@ struct WebSearchToolDetailSheet: View {
                     ForEach(Array(parsed.results.enumerated()), id: \.offset) { index, result in
                         if index > 0 {
                             Divider()
-                                .background(Color.tronSlate.opacity(0.08))
+                                .background(Color.tronInfo.opacity(0.08))
                                 .padding(.horizontal, 8)
                         }
                         searchResultRow(result, index: index + 1)
@@ -233,7 +233,7 @@ struct WebSearchToolDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
             }
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronInfo)
         }
     }
 
@@ -290,7 +290,7 @@ struct WebSearchToolDetailSheet: View {
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .tronInfo, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 28))
@@ -353,7 +353,7 @@ struct WebSearchToolDetailSheet: View {
     }
 
     private var searchingSpinner: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .tronInfo, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
                     .tint(.tronInfo)
@@ -390,7 +390,7 @@ struct WebSearchToolDetailSheet: View {
                     ForEach(Array(streaming.results.enumerated()), id: \.offset) { index, result in
                         if index > 0 {
                             Divider()
-                                .background(Color.tronSlate.opacity(0.08))
+                                .background(Color.tronInfo.opacity(0.08))
                                 .padding(.horizontal, 8)
                         }
                         searchResultRow(result, index: index + 1)
@@ -399,7 +399,7 @@ struct WebSearchToolDetailSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
             }
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronInfo)
         }
     }
 

@@ -12,7 +12,7 @@ struct WebFetchToolDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .tronInfo, colorScheme: colorScheme)
     }
 
     private var url: String {
@@ -49,7 +49,7 @@ struct WebFetchToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.tronInfo.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -59,7 +59,7 @@ struct WebFetchToolDetailSheet: View {
                             .foregroundStyle(.tronInfo)
                         Text("Fetch")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.tronInfo)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -67,13 +67,13 @@ struct WebFetchToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.tronInfo)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.tronInfo)
     }
 
     // MARK: - Content Body
@@ -162,7 +162,7 @@ struct WebFetchToolDetailSheet: View {
     // MARK: - Prompt Section
 
     private var promptSection: some View {
-        ToolDetailSection(title: "Prompt", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Prompt", accent: .tronInfo, tint: tint) {
             Text(prompt)
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(tint.body)
@@ -209,7 +209,7 @@ struct WebFetchToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.tronInfo.opacity(0.6))
                 }
             }
 
@@ -226,14 +226,14 @@ struct WebFetchToolDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
             }
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronInfo)
         }
     }
 
     // MARK: - Empty Result Section
 
     private var emptyResultSection: some View {
-        ToolDetailSection(title: "Answer", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Answer", accent: .tronInfo, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "doc.text")
                     .font(.system(size: 28))
@@ -300,7 +300,7 @@ struct WebFetchToolDetailSheet: View {
     }
 
     private var fetchingSpinner: some View {
-        ToolDetailSection(title: "Answer", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Answer", accent: .tronInfo, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
                     .tint(.tronInfo)
@@ -340,7 +340,7 @@ struct WebFetchToolDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
             }
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronInfo)
         }
     }
 }

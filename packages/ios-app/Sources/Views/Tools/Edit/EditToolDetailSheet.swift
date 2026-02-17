@@ -12,7 +12,7 @@ struct EditToolDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .orange, colorScheme: colorScheme)
     }
 
     private var filePath: String {
@@ -74,17 +74,17 @@ struct EditToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.orange.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: "pencil.line")
                             .font(.system(size: 14))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.orange)
                         Text("Edit")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.orange)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -92,13 +92,13 @@ struct EditToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.orange)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.orange)
     }
 
     // MARK: - Content Body
@@ -145,7 +145,7 @@ struct EditToolDetailSheet: View {
     // MARK: - File Info Section
 
     private var fileInfoSection: some View {
-        ToolDetailSection(title: "File", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "File", accent: .orange, tint: tint) {
             HStack(spacing: 8) {
                 Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
                     .font(.system(size: 16))
@@ -235,7 +235,7 @@ struct EditToolDetailSheet: View {
 
     private var diffSection: some View {
         let lineNumWidth = EditDiffParser.lineNumberWidth(for: diffLines)
-        let accentColor: Color = .tronSlate
+        let accentColor: Color = .orange
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -308,13 +308,13 @@ struct EditToolDetailSheet: View {
     private var separatorRow: some View {
         HStack(spacing: 6) {
             Rectangle()
-                .fill(Color.tronSlate.opacity(0.15))
+                .fill(Color.orange.opacity(0.15))
                 .frame(height: 1)
             Text("\u{22EF}")
                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
                 .foregroundStyle(.tronTextMuted.opacity(0.4))
             Rectangle()
-                .fill(Color.tronSlate.opacity(0.15))
+                .fill(Color.orange.opacity(0.15))
                 .frame(height: 1)
         }
         .padding(.vertical, 4)
@@ -356,7 +356,7 @@ struct EditToolDetailSheet: View {
     // MARK: - Fallback Result Section
 
     private func fallbackResultSection(_ result: String) -> some View {
-        ToolDetailSection(title: "Result", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Result", accent: .orange, tint: tint) {
             Text(result)
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(tint.body)
@@ -385,10 +385,10 @@ struct EditToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Status", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Status", accent: .orange, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
-                    .tint(.tronSlate)
+                    .tint(.orange)
                     .scaleEffect(1.1)
                 Text("Editing file...")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))

@@ -1608,7 +1608,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         // thinking + tool_use = 2 messages
         XCTAssertEqual(messages.count, 2)
 
-        // Tool message should have tokenRecord (fallback from text-less turn)
+        // Tool message (last) should have tokenRecord
         if case .toolUse = messages[1].content {
             XCTAssertNotNil(messages[1].tokenRecord, "tokenRecord should be attached to toolUse when no text block exists")
             XCTAssertEqual(messages[1].tokenRecord?.computed.newInputTokens, 10)
@@ -1620,7 +1620,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testTokenRecordFallbackWithMultipleToolUses() {
-        // Turn with [thinking, tool_use, tool_use] — only first tool gets tokenRecord
+        // Turn with [thinking, tool_use, tool_use] — last tool gets tokenRecord
         let tokenRecordPayload: [String: Any] = [
             "source": [
                 "provider": "anthropic",
@@ -1825,6 +1825,149 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertNotNil(messages[0].tokenRecord)
         XCTAssertEqual(messages[0].model, "claude-opus-4-6")
         XCTAssertEqual(messages[0].latencyMs, 2500)
+    }
+
+    // MARK: - Metadata Stripping Tests
+
+    func testMetadataStrippedFromIntermediateTurns() {
+        // Multi-turn session: metadata should only appear on the last assistant
+        // message before each user prompt and at the end of the conversation.
+        // This prevents noisy stats badges after every tool call on session resume.
+        let tokenRecord1: [String: Any] = [
+            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
+                        "rawInputTokens": 100, "rawOutputTokens": 50,
+                        "rawCacheReadTokens": 0, "rawCacheCreationTokens": 0],
+            "computed": ["contextWindowTokens": 150, "newInputTokens": 100,
+                         "previousContextBaseline": 0, "calculationMethod": "anthropic_cache_aware"],
+            "meta": ["turn": 1, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
+                     "normalizedAt": "2026-01-01T00:00:00Z"]
+        ]
+        let tokenRecord2: [String: Any] = [
+            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
+                        "rawInputTokens": 10, "rawOutputTokens": 200,
+                        "rawCacheReadTokens": 140, "rawCacheCreationTokens": 0],
+            "computed": ["contextWindowTokens": 350, "newInputTokens": 10,
+                         "previousContextBaseline": 150, "calculationMethod": "anthropic_cache_aware"],
+            "meta": ["turn": 2, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
+                     "normalizedAt": "2026-01-01T00:00:00Z"]
+        ]
+        let tokenRecord3: [String: Any] = [
+            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
+                        "rawInputTokens": 15, "rawOutputTokens": 300,
+                        "rawCacheReadTokens": 335, "rawCacheCreationTokens": 0],
+            "computed": ["contextWindowTokens": 650, "newInputTokens": 15,
+                         "previousContextBaseline": 350, "calculationMethod": "anthropic_cache_aware"],
+            "meta": ["turn": 3, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
+                     "normalizedAt": "2026-01-01T00:00:00Z"]
+        ]
+
+        let events = [
+            // User prompt
+            sessionEvent(type: "message.user", payload: [
+                "content": AnyCodable("Do something")
+            ], timestamp: timestamp(0), sequence: 1),
+            // Turn 1: text + tool (intermediate)
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Read"), "toolCallId": AnyCodable("tc_1"),
+                "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(1)
+            ], timestamp: timestamp(1), sequence: 2),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_1"), "content": AnyCodable("contents")
+            ], timestamp: timestamp(2), sequence: 3),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "text", "text": "Let me read that file."],
+                    ["type": "tool_use", "id": "tc_1", "name": "Read", "input": ["file_path": "/a.ts"]]
+                ]),
+                "turn": AnyCodable(1), "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(1000), "tokenRecord": AnyCodable(tokenRecord1)
+            ], timestamp: timestamp(3), sequence: 4),
+            // Turn 2: tool only (intermediate)
+            sessionEvent(type: "tool.call", payload: [
+                "name": AnyCodable("Edit"), "toolCallId": AnyCodable("tc_2"),
+                "arguments": AnyCodable(["file_path": "/a.ts"]), "turn": AnyCodable(2)
+            ], timestamp: timestamp(4), sequence: 5),
+            sessionEvent(type: "tool.result", payload: [
+                "toolCallId": AnyCodable("tc_2"), "content": AnyCodable("edited")
+            ], timestamp: timestamp(5), sequence: 6),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "tool_use", "id": "tc_2", "name": "Edit", "input": ["file_path": "/a.ts"]]
+                ]),
+                "turn": AnyCodable(2), "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(2000), "tokenRecord": AnyCodable(tokenRecord2)
+            ], timestamp: timestamp(6), sequence: 7),
+            // Turn 3: final text response
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([
+                    ["type": "text", "text": "All done!"]
+                ]),
+                "turn": AnyCodable(3), "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(500), "tokenRecord": AnyCodable(tokenRecord3)
+            ], timestamp: timestamp(7), sequence: 8)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // user + text1 + tool1 + tool2 + text2 = 5 messages
+        XCTAssertEqual(messages.count, 5)
+
+        // User message
+        if case .text(let t) = messages[0].content { XCTAssertEqual(t, "Do something") }
+
+        // Turn 1 text: metadata stripped (intermediate turn)
+        XCTAssertNil(messages[1].tokenRecord, "Intermediate turn text should not have metadata")
+        XCTAssertNil(messages[1].model)
+
+        // Turn 1 tool: metadata stripped (intermediate turn)
+        XCTAssertNil(messages[2].tokenRecord, "Intermediate turn tool should not have metadata")
+        XCTAssertNil(messages[2].model)
+
+        // Turn 2 tool: metadata stripped (intermediate turn)
+        XCTAssertNil(messages[3].tokenRecord, "Intermediate turn tool should not have metadata")
+        XCTAssertNil(messages[3].model)
+
+        // Turn 3 text (last assistant message): metadata preserved
+        XCTAssertNotNil(messages[4].tokenRecord, "Last assistant message should keep metadata")
+        XCTAssertEqual(messages[4].model, "claude-opus-4-6")
+        XCTAssertEqual(messages[4].latencyMs, 500)
+    }
+
+    func testMetadataPreservedBeforeUserMessage() {
+        // When a user sends a follow-up, the last assistant message before
+        // that user message should retain its metadata.
+        let tokenRecord: [String: Any] = [
+            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
+                        "rawInputTokens": 100, "rawOutputTokens": 50,
+                        "rawCacheReadTokens": 0, "rawCacheCreationTokens": 0],
+            "computed": ["contextWindowTokens": 150, "newInputTokens": 100,
+                         "previousContextBaseline": 0, "calculationMethod": "anthropic_cache_aware"],
+            "meta": ["turn": 1, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
+                     "normalizedAt": "2026-01-01T00:00:00Z"]
+        ]
+
+        let events = [
+            sessionEvent(type: "message.user", payload: [
+                "content": AnyCodable("Hello")
+            ], timestamp: timestamp(0), sequence: 1),
+            sessionEvent(type: "message.assistant", payload: [
+                "content": AnyCodable([["type": "text", "text": "Hi there!"]]),
+                "turn": AnyCodable(1), "model": AnyCodable("claude-opus-4-6"),
+                "latency": AnyCodable(800), "tokenRecord": AnyCodable(tokenRecord)
+            ], timestamp: timestamp(1), sequence: 2),
+            sessionEvent(type: "message.user", payload: [
+                "content": AnyCodable("Thanks")
+            ], timestamp: timestamp(2), sequence: 3)
+        ]
+
+        let messages = UnifiedEventTransformer.transformPersistedEvents(events)
+
+        // user + assistant + user = 3 messages
+        XCTAssertEqual(messages.count, 3)
+
+        // Assistant message (last before user) should have metadata
+        XCTAssertNotNil(messages[1].tokenRecord, "Last assistant before user should keep metadata")
+        XCTAssertEqual(messages[1].model, "claude-opus-4-6")
     }
 
     // MARK: - Deletion Tests

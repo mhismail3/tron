@@ -71,6 +71,12 @@ impl TaskRepository {
             None
         };
 
+        // Normalize empty strings to None for FK columns — some providers
+        // (e.g. OpenAI) send "" instead of null for optional ID fields.
+        let project_id = params.project_id.as_deref().filter(|s| !s.is_empty());
+        let parent_task_id = params.parent_task_id.as_deref().filter(|s| !s.is_empty());
+        let area_id = params.area_id.as_deref().filter(|s| !s.is_empty());
+
         let _ = conn.execute(
             "INSERT INTO tasks (id, project_id, parent_task_id, workspace_id, area_id,
              title, description, active_form, status, priority, source, tags,
@@ -81,10 +87,10 @@ impl TaskRepository {
                      ?13, ?14, ?15, ?16, ?17, ?17, ?18, ?18, ?18, ?19)",
             params![
                 id,
-                params.project_id,
-                params.parent_task_id,
+                project_id,
+                parent_task_id,
                 params.workspace_id,
-                params.area_id,
+                area_id,
                 params.title,
                 params.description,
                 params.active_form,
@@ -148,15 +154,19 @@ impl TaskRepository {
         }
         if let Some(ref pid) = updates.project_id {
             sets.push("project_id = ?".to_string());
-            values.push(Box::new(pid.clone()));
+            // Normalize empty strings to NULL for FK columns
+            let normalized: Option<String> = if pid.is_empty() { None } else { Some(pid.clone()) };
+            values.push(Box::new(normalized));
         }
         if let Some(ref ptid) = updates.parent_task_id {
             sets.push("parent_task_id = ?".to_string());
-            values.push(Box::new(ptid.clone()));
+            let normalized: Option<String> = if ptid.is_empty() { None } else { Some(ptid.clone()) };
+            values.push(Box::new(normalized));
         }
         if let Some(ref aid) = updates.area_id {
             sets.push("area_id = ?".to_string());
-            values.push(Box::new(aid.clone()));
+            let normalized: Option<String> = if aid.is_empty() { None } else { Some(aid.clone()) };
+            values.push(Box::new(normalized));
         }
         if let Some(ref dd) = updates.due_date {
             sets.push("due_date = ?".to_string());
@@ -2297,5 +2307,74 @@ mod tests {
         assert_eq!(progress[0].title, "My Project");
         assert_eq!(progress[0].completed, 1);
         assert_eq!(progress[0].total, 2);
+    }
+
+    // --- FK empty string normalization ---
+
+    #[test]
+    fn create_task_normalizes_empty_project_id() {
+        let conn = setup_db();
+        // Empty string project_id should be normalized to NULL, not trigger FK failure
+        let task = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Task with empty project".to_string(),
+                project_id: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(task.project_id.is_none());
+    }
+
+    #[test]
+    fn create_task_normalizes_empty_area_id() {
+        let conn = setup_db();
+        let task = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Task with empty area".to_string(),
+                area_id: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(task.area_id.is_none());
+    }
+
+    #[test]
+    fn update_task_normalizes_empty_project_id() {
+        let conn = setup_db();
+        let project = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "Proj".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let task = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Task".to_string(),
+                project_id: Some(project.id.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(task.project_id.as_deref(), Some(project.id.as_str()));
+
+        // Update with empty string should set to NULL
+        let updated = TaskRepository::update_task(
+            &conn,
+            &task.id,
+            &TaskUpdateParams {
+                project_id: Some(String::new()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert!(updated.project_id.is_none());
     }
 }

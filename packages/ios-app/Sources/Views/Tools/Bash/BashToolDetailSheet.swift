@@ -13,7 +13,7 @@ struct BashToolDetailSheet: View {
     @State private var showAllLines = false
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .tronEmerald, colorScheme: colorScheme)
     }
 
     // MARK: - Argument Extraction
@@ -96,17 +96,17 @@ struct BashToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.tronEmerald.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: "terminal")
                             .font(.system(size: 14))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.tronEmerald)
                         Text("Bash")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.tronEmerald)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -114,13 +114,13 @@ struct BashToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.tronEmerald)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.tronEmerald)
     }
 
     // MARK: - Content Body
@@ -171,7 +171,7 @@ struct BashToolDetailSheet: View {
     // MARK: - Command Section
 
     private var commandSection: some View {
-        ToolDetailSection(title: "Command", accent: .tronSlate, tint: tint, trailing: commandCopyButton) {
+        ToolDetailSection(title: "Command", accent: .tronEmerald, tint: tint, trailing: commandCopyButton) {
             VStack(alignment: .leading, spacing: 8) {
                 if let desc = commandDescription, !desc.isEmpty {
                     Text(desc)
@@ -195,7 +195,7 @@ struct BashToolDetailSheet: View {
         } label: {
             Image(systemName: "doc.on.doc")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(Color.tronSlate.opacity(0.6))
+                .foregroundStyle(Color.tronEmerald.opacity(0.6))
         }
     }
 
@@ -243,7 +243,7 @@ struct BashToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.tronEmerald.opacity(0.6))
                 }
             }
 
@@ -277,7 +277,7 @@ struct BashToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronEmerald)
         }
     }
 
@@ -300,7 +300,7 @@ struct BashToolDetailSheet: View {
             .padding(.vertical, 8)
             .background {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.tronSlate.opacity(0.06))
+                    .fill(Color.tronEmerald.opacity(0.06))
             }
         }
         .padding(.horizontal, 4)
@@ -310,7 +310,7 @@ struct BashToolDetailSheet: View {
     // MARK: - Empty Output Section
 
     private var emptyOutputSection: some View {
-        ToolDetailSection(title: "Output", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Output", accent: .tronEmerald, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "text.page.slash")
                     .font(.system(size: 28))
@@ -390,10 +390,10 @@ struct BashToolDetailSheet: View {
         if let output = data.streamingOutput, !output.isEmpty {
             streamingOutputSection(output)
         } else {
-            ToolDetailSection(title: "Output", accent: .tronSlate, tint: tint) {
+            ToolDetailSection(title: "Output", accent: .tronEmerald, tint: tint) {
                 VStack(spacing: 10) {
                     ProgressView()
-                        .tint(.tronSlate)
+                        .tint(.tronEmerald)
                         .scaleEffect(1.1)
                     Text("Running command...")
                         .font(TronTypography.mono(size: TronTypography.sizeBody))
@@ -420,7 +420,7 @@ struct BashToolDetailSheet: View {
 
                 ProgressView()
                     .scaleEffect(0.6)
-                    .tint(.tronSlate)
+                    .tint(.tronEmerald)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -449,7 +449,7 @@ struct BashToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.tronEmerald)
         }
     }
 }

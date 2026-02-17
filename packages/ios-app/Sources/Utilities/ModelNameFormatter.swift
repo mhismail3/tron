@@ -60,6 +60,8 @@ enum ModelNameFormatter {
         } else if lowered.contains("-4-") || lowered.contains("sonnet-4") ||
                   lowered.contains("opus-4") || lowered.contains("haiku-4") {
             version = .v4
+        } else if lowered.contains("3-7") || lowered.contains("3.7") {
+            version = .v3_7
         } else if lowered.contains("3-5") || lowered.contains("3.5") {
             version = .v3_5
         } else if lowered.contains("-3-") || lowered.contains("sonnet-3") ||
@@ -212,12 +214,13 @@ enum ModelNameFormatter {
     }
 
     private enum Version {
-        case v3, v3_5, v4, v4_1, v4_5, v4_6
+        case v3, v3_5, v3_7, v4, v4_1, v4_5, v4_6
 
         var displaySuffix: String {
             switch self {
             case .v3: return "3"
             case .v3_5: return "3.5"
+            case .v3_7: return "3.7"
             case .v4: return "4"
             case .v4_1: return "4.1"
             case .v4_5: return "4.5"
@@ -229,6 +232,7 @@ enum ModelNameFormatter {
             switch self {
             case .v3: return "-3"
             case .v3_5: return "-3.5"
+            case .v3_7: return "-3.7"
             case .v4: return "-4"
             case .v4_1: return "-4.1"
             case .v4_5: return "-4.5"

@@ -27,6 +27,7 @@ struct ToolDetailSection<Trailing: View, Content: View>: View {
             VStack(alignment: .leading, spacing: 0) {
                 content()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)

@@ -16,7 +16,7 @@ struct OpenURLToolDetailSheet: View {
     @State private var showInAppBrowser = false
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .blue, colorScheme: colorScheme)
     }
 
     private var url: String {
@@ -58,7 +58,7 @@ struct OpenURLToolDetailSheet: View {
                                 Text("Open")
                                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
                             }
-                            .foregroundStyle(.tronInfo)
+                            .foregroundStyle(.blue)
                         }
                     }
                 }
@@ -66,10 +66,10 @@ struct OpenURLToolDetailSheet: View {
                     HStack(spacing: 6) {
                         Image(systemName: "safari")
                             .font(.system(size: 14))
-                            .foregroundStyle(.tronInfo)
+                            .foregroundStyle(.blue)
                         Text("Open URL")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.blue)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -77,7 +77,7 @@ struct OpenURLToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.blue)
                 }
             }
             .sheet(isPresented: $showInAppBrowser) {
@@ -89,7 +89,7 @@ struct OpenURLToolDetailSheet: View {
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.blue)
     }
 
     // MARK: - Content Body
@@ -132,12 +132,12 @@ struct OpenURLToolDetailSheet: View {
     // MARK: - URL Section
 
     private var urlSection: some View {
-        ToolDetailSection(title: "URL", accent: .tronInfo, tint: tint) {
+        ToolDetailSection(title: "URL", accent: .blue, tint: tint) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "globe")
                         .font(.system(size: 16))
-                        .foregroundStyle(.tronInfo)
+                        .foregroundStyle(.blue)
 
                     Text(domain)
                         .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
@@ -166,12 +166,12 @@ struct OpenURLToolDetailSheet: View {
                             HStack(spacing: 4) {
                                 Text(url)
                                     .font(TronTypography.codeCaption)
-                                    .foregroundStyle(.tronInfo)
+                                    .foregroundStyle(.blue)
                                     .lineLimit(3)
                                     .multilineTextAlignment(.leading)
                                 Image(systemName: "arrow.up.right.square")
                                     .font(.system(size: 10))
-                                    .foregroundStyle(.tronInfo.opacity(0.6))
+                                    .foregroundStyle(.blue.opacity(0.6))
                             }
                         }
                         .buttonStyle(.plain)
@@ -205,7 +205,7 @@ struct OpenURLToolDetailSheet: View {
     // MARK: - Result Section
 
     private var resultSection: some View {
-        ToolDetailSection(title: "Result", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Result", accent: .blue, tint: tint) {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 20))
@@ -264,10 +264,10 @@ struct OpenURLToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Result", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Result", accent: .blue, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
-                    .tint(.tronInfo)
+                    .tint(.blue)
                     .scaleEffect(1.1)
                 Text("Opening URL...")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))

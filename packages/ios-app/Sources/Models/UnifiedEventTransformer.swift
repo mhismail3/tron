@@ -101,6 +101,7 @@ struct UnifiedEventTransformer {
             }
         }
 
+        cleanUpReconstructedMessages(&messages)
         return messages
     }
 
@@ -502,6 +503,47 @@ extension UnifiedEventTransformer {
             }
         }
 
+        cleanUpReconstructedMessages(&state.messages)
         return state
+    }
+
+    // MARK: - Post-Processing
+
+    /// Clean up reconstructed messages for display:
+    /// Strip metadata from intermediate turns — only keep on the last assistant
+    /// message before each user message or at the end of the conversation.
+    /// This prevents noisy stats badges after every tool call on session resume.
+    private static func cleanUpReconstructedMessages(_ messages: inout [ChatMessage]) {
+        // Find indices where metadata should be displayed —
+        // the last assistant message before each user message, and the very last
+        // assistant message in the array. This gives one stats badge per
+        // "response group" (contiguous assistant content between user prompts).
+        var metadataIndices: Set<Int> = []
+
+        for i in messages.indices {
+            if messages[i].role == .user {
+                // Keep metadata on the last assistant message before this user message
+                var j = i - 1
+                while j >= 0 {
+                    if messages[j].role == .assistant {
+                        metadataIndices.insert(j)
+                        break
+                    }
+                    j -= 1
+                }
+            }
+        }
+
+        // Always keep metadata on the very last assistant message
+        if let lastIdx = messages.lastIndex(where: { $0.role == .assistant }) {
+            metadataIndices.insert(lastIdx)
+        }
+
+        // Step 3: Strip metadata from all other messages
+        for i in messages.indices where !metadataIndices.contains(i) {
+            messages[i].tokenRecord = nil
+            messages[i].model = nil
+            messages[i].latencyMs = nil
+        }
     }
 }

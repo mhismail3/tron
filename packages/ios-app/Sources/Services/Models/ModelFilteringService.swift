@@ -172,6 +172,7 @@ enum ModelFilteringService {
             if id.contains("4-5") || id.contains("4.5") { return "Claude 4.5" }
             if id.contains("4-1") || id.contains("4.1") { return "Claude 4.1" }
             if id.contains("opus-4") || id.contains("sonnet-4") || id.contains("haiku-4") { return "Claude 4" }
+            if id.contains("3-7") || id.contains("3.7") { return "Claude 3.7" }
             if id.contains("3-5") || id.contains("3.5") { return "Claude 3.5" }
             return "Claude"
         }

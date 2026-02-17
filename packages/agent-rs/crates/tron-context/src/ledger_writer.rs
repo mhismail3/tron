@@ -123,9 +123,10 @@ pub fn parse_ledger_response(output: &str) -> Result<LedgerParseResult, String> 
 fn extract_json(s: &str) -> String {
     let trimmed = s.trim();
 
-    // Strategy 1: code fence extraction
-    if let Some(json) = extract_from_code_fence(trimmed) {
-        return json;
+    // Strategy 1: code fence extraction, then brace matching to strip any
+    // trailing non-JSON text the LLM may have put inside the fence.
+    if let Some(fenced) = extract_from_code_fence(trimmed) {
+        return extract_by_brace_matching(&fenced).unwrap_or(fenced);
     }
 
     // Strategy 2: brace matching
@@ -391,6 +392,21 @@ mod tests {
             LedgerParseResult::Entry(e) => assert_eq!(e.title, "T"),
             LedgerParseResult::Skip => panic!("expected entry"),
         }
+    }
+
+    #[test]
+    fn parse_code_fence_with_trailing_text_inside_fence() {
+        // LLM puts explanatory text after JSON but inside the code fence
+        let input = "```json\n{\"title\": \"Test\", \"entryType\": \"feature\"}\n\nHere is the explanation of the fields.\n```";
+        let result = parse_ledger_response(input).unwrap();
+        assert!(matches!(result, LedgerParseResult::Entry(_)));
+    }
+
+    #[test]
+    fn extract_json_fence_then_brace_match() {
+        // Content inside fence has trailing text after JSON object
+        let input = "```json\n{\"key\": \"value\"}\nSome explanation\n```";
+        assert_eq!(extract_json(input), "{\"key\": \"value\"}");
     }
 
     // ── extract_json: bare JSON variations ──

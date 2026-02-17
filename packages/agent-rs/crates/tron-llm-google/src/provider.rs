@@ -850,6 +850,16 @@ mod tests {
         assert!(tc.is_none());
     }
 
+    #[test]
+    fn thinking_config_none_for_gemini3_flash() {
+        let mut config = api_key_config();
+        config.model = "gemini-3-flash-preview".into();
+        let provider = GoogleProvider::new(config);
+        let opts = ProviderStreamOptions::default();
+        let tc = provider.build_thinking_config(true, &opts);
+        assert!(tc.is_none(), "gemini-3-flash-preview should not send thinkingConfig");
+    }
+
     // ── System instruction ────────────────────────────────────────────
 
     #[test]

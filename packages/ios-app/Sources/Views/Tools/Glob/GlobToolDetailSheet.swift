@@ -12,7 +12,7 @@ struct GlobToolDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .cyan, colorScheme: colorScheme)
     }
 
     private var pattern: String {
@@ -53,7 +53,7 @@ struct GlobToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.cyan.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -63,7 +63,7 @@ struct GlobToolDetailSheet: View {
                             .foregroundStyle(.cyan)
                         Text("Find")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.cyan)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -71,13 +71,13 @@ struct GlobToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.cyan)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.cyan)
     }
 
     // MARK: - Content Body
@@ -123,7 +123,7 @@ struct GlobToolDetailSheet: View {
     // MARK: - Pattern Section
 
     private var patternSection: some View {
-        ToolDetailSection(title: "Pattern", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Pattern", accent: .cyan, tint: tint) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(pattern)
                     .font(TronTypography.codeCaption)
@@ -193,7 +193,7 @@ struct GlobToolDetailSheet: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronSlate.opacity(0.6))
+                        .foregroundStyle(Color.cyan.opacity(0.6))
                 }
             }
 
@@ -209,7 +209,7 @@ struct GlobToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.cyan)
         }
     }
 
@@ -266,7 +266,7 @@ struct GlobToolDetailSheet: View {
     // MARK: - No Results Section
 
     private var noResultsSection: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .cyan, tint: tint) {
             VStack(spacing: 10) {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(.system(size: 28))
@@ -326,7 +326,7 @@ struct GlobToolDetailSheet: View {
     }
 
     private var searchingSpinner: some View {
-        ToolDetailSection(title: "Results", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Results", accent: .cyan, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
                     .tint(.cyan)
@@ -366,7 +366,7 @@ struct GlobToolDetailSheet: View {
                     .frame(width: 3)
             }
             .padding(14)
-            .sectionFill(.tronSlate)
+            .sectionFill(.cyan)
         }
     }
 }

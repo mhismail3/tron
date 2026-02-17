@@ -274,10 +274,12 @@ private struct SectionFillModifier: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        content.background {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(color.opacity(opacity))
-        }
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(color.opacity(opacity))
+            }
     }
 }
 

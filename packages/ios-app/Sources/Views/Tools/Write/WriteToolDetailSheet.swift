@@ -12,7 +12,7 @@ struct WriteToolDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
-        TintedColors(accent: .tronSlate, colorScheme: colorScheme)
+        TintedColors(accent: .tronPink, colorScheme: colorScheme)
     }
 
     private var filePath: String {
@@ -63,17 +63,17 @@ struct WriteToolDetailSheet: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                             .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
+                            .foregroundStyle(Color.tronPink.opacity(0.6))
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 6) {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 14))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.tronPink)
                         Text("Write")
                             .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
+                            .foregroundStyle(.tronPink)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -81,13 +81,13 @@ struct WriteToolDetailSheet: View {
                         dismiss()
                     }
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
+                    .foregroundStyle(.tronPink)
                 }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
+        .tint(.tronPink)
     }
 
     // MARK: - Content Body
@@ -131,7 +131,7 @@ struct WriteToolDetailSheet: View {
     // MARK: - File Info Section
 
     private var fileInfoSection: some View {
-        ToolDetailSection(title: "File", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "File", accent: .tronPink, tint: tint) {
             HStack(spacing: 8) {
                 Image(systemName: FileDisplayHelpers.fileIcon(for: fileName))
                     .font(.system(size: 16))
@@ -217,7 +217,7 @@ struct WriteToolDetailSheet: View {
 
     private var contentPreviewSection: some View {
         let lineNumWidth = FileDisplayHelpers.lineNumberWidth(lineCount: lineCount)
-        let accentColor: Color = .tronSlate
+        let accentColor: Color = .tronPink
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -288,10 +288,10 @@ struct WriteToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Status", accent: .tronSlate, tint: tint) {
+        ToolDetailSection(title: "Status", accent: .tronPink, tint: tint) {
             VStack(spacing: 10) {
                 ProgressView()
-                    .tint(.tronSlate)
+                    .tint(.tronPink)
                     .scaleEffect(1.1)
                 Text("Writing file...")
                     .font(TronTypography.mono(size: TronTypography.sizeBody))
