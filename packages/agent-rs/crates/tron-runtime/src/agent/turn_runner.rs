@@ -1,9 +1,11 @@
 //! Turn runner — orchestrates a single turn: context → stream → tools → events.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::json;
+use tron_tools::traits::ExecutionMode;
 use tron_context::context_manager::ContextManager;
 use tron_core::content::AssistantContent;
 use tron_core::events::{
@@ -317,13 +319,8 @@ pub async fn execute_turn(
             .get_working_directory()
             .to_owned();
 
-        // Execute tools sequentially
+        // --- Phase 1: Persist all tool.call events upfront ---
         for tc in &stream_result.tool_calls {
-            if cancel.is_cancelled() {
-                break;
-            }
-
-            // Persist tool.call BEFORE execution
             if let Some(p) = persister {
                 p.append_fire_and_forget(session_id, EventType::ToolCall, json!({
                     "toolCallId": tc.id,
@@ -332,44 +329,62 @@ pub async fn execute_turn(
                     "turn": turn,
                 }));
             }
+        }
 
-            let exec_result = tool_executor::execute_tool(
-                tc,
-                registry,
-                guardrails,
-                hooks,
-                session_id,
-                &working_dir,
-                emitter,
-                cancel,
-                subagent_depth,
-                subagent_max_depth,
-            )
-            .await;
+        // --- Phase 2: Execute tools (parallel with serialization groups) ---
+        let waves = build_execution_waves(&stream_result.tool_calls, registry);
+        let mut results: Vec<Option<crate::types::ToolExecutionResult>> =
+            vec![None; stream_result.tool_calls.len()];
 
+        for wave in &waves {
+            if cancel.is_cancelled() {
+                break;
+            }
+
+            let futures: Vec<_> = wave
+                .iter()
+                .map(|&idx| {
+                    let tc = &stream_result.tool_calls[idx];
+                    let registry = &registry;
+                    let guardrails = &guardrails;
+                    let hooks = &hooks;
+                    let working_dir = &working_dir;
+                    let emitter = &emitter;
+                    let cancel = &cancel;
+                    async move {
+                        let result = tool_executor::execute_tool(
+                            tc,
+                            registry,
+                            guardrails,
+                            hooks,
+                            session_id,
+                            working_dir,
+                            emitter,
+                            cancel,
+                            subagent_depth,
+                            subagent_max_depth,
+                        )
+                        .await;
+                        (idx, result)
+                    }
+                })
+                .collect();
+
+            for (idx, result) in futures::future::join_all(futures).await {
+                results[idx] = Some(result);
+            }
+        }
+
+        // --- Phase 3: Process results in original order ---
+        for (i, tc) in stream_result.tool_calls.iter().enumerate() {
+            let Some(exec_result) = results[i].take() else {
+                continue;
+            };
             tool_calls_executed += 1;
 
-            // Add tool result message — extract plain text from blocks (not JSON)
-            let result_text = match &exec_result.result.content {
-                tron_core::tools::ToolResultBody::Text(t) => t.clone(),
-                tron_core::tools::ToolResultBody::Blocks(blocks) => {
-                    blocks
-                        .iter()
-                        .filter_map(|b| {
-                            if let tron_core::content::ToolResultContent::Text { text } = b {
-                                Some(text.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }
-            };
-
+            let result_text = extract_result_text(&exec_result);
             let is_error = exec_result.result.is_error.unwrap_or(false);
 
-            // Persist tool.result AFTER execution
             if let Some(p) = persister {
                 p.append_fire_and_forget(session_id, EventType::ToolResult, json!({
                     "toolCallId": tc.id,
@@ -400,7 +415,6 @@ pub async fn execute_turn(
 
             if exec_result.stops_turn {
                 stop_turn_requested = true;
-                break;
             }
         }
     }
@@ -523,6 +537,68 @@ pub async fn execute_turn(
     }
 }
 
+/// Build execution waves from tool calls, respecting serialization groups.
+///
+/// - Parallel tools all go in wave 0
+/// - Serialized tools in the same group spread across ascending waves
+/// - Returns `Vec<Vec<usize>>` where each inner vec is indices into `tool_calls`
+fn build_execution_waves(
+    tool_calls: &[tron_core::messages::ToolCall],
+    registry: &ToolRegistry,
+) -> Vec<Vec<usize>> {
+    let modes: Vec<_> = tool_calls
+        .iter()
+        .map(|tc| {
+            registry
+                .get(&tc.name)
+                .map_or(ExecutionMode::Parallel, |t| t.execution_mode())
+        })
+        .collect();
+
+    // Fast path: all parallel → single wave
+    if modes
+        .iter()
+        .all(|m| matches!(m, ExecutionMode::Parallel))
+    {
+        return vec![(0..tool_calls.len()).collect()];
+    }
+
+    let mut waves: Vec<Vec<usize>> = vec![vec![]];
+    let mut group_wave: HashMap<String, usize> = HashMap::new();
+
+    for (i, mode) in modes.iter().enumerate() {
+        match mode {
+            ExecutionMode::Parallel => waves[0].push(i),
+            ExecutionMode::Serialized(group) => {
+                let wave_idx = group_wave.get(group).copied().unwrap_or(0);
+                while waves.len() <= wave_idx {
+                    waves.push(vec![]);
+                }
+                waves[wave_idx].push(i);
+                let _ = group_wave.insert(group.clone(), wave_idx + 1);
+            }
+        }
+    }
+
+    waves.retain(|w| !w.is_empty());
+    waves
+}
+
+/// Extract plain text from a tool execution result.
+fn extract_result_text(exec_result: &crate::types::ToolExecutionResult) -> String {
+    match &exec_result.result.content {
+        tron_core::tools::ToolResultBody::Text(t) => t.clone(),
+        tron_core::tools::ToolResultBody::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|b| match b {
+                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                tron_core::content::ToolResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,5 +653,143 @@ mod tests {
             ..Default::default()
         };
         assert!(tr.stop_turn_requested);
+    }
+
+    // ── build_execution_waves unit tests ──
+
+    use serde_json::Map;
+    use tron_core::messages::ToolCall;
+
+    fn tc(name: &str) -> ToolCall {
+        ToolCall {
+            content_type: "tool_use".into(),
+            id: format!("tc-{name}"),
+            name: name.into(),
+            arguments: Map::new(),
+            thought_signature: None,
+        }
+    }
+
+    /// Stub tool for wave builder tests — always Parallel.
+    struct ParallelStub(&'static str);
+    #[async_trait::async_trait]
+    impl tron_tools::traits::TronTool for ParallelStub {
+        fn name(&self) -> &str { self.0 }
+        fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
+        fn definition(&self) -> tron_core::tools::Tool {
+            tron_core::tools::Tool {
+                name: self.0.into(),
+                description: String::new(),
+                parameters: tron_core::tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None, required: None, description: None,
+                    extra: Map::new(),
+                },
+            }
+        }
+        async fn execute(&self, _: serde_json::Value, _: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            Ok(tron_core::tools::text_result("ok", false))
+        }
+    }
+
+    /// Stub tool that returns Serialized(group).
+    struct SerializedStub { name: &'static str, group: &'static str }
+    #[async_trait::async_trait]
+    impl tron_tools::traits::TronTool for SerializedStub {
+        fn name(&self) -> &str { self.name }
+        fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
+        fn execution_mode(&self) -> ExecutionMode { ExecutionMode::Serialized(self.group.into()) }
+        fn definition(&self) -> tron_core::tools::Tool {
+            tron_core::tools::Tool {
+                name: self.name.into(),
+                description: String::new(),
+                parameters: tron_core::tools::ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None, required: None, description: None,
+                    extra: Map::new(),
+                },
+            }
+        }
+        async fn execute(&self, _: serde_json::Value, _: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            Ok(tron_core::tools::text_result("ok", false))
+        }
+    }
+
+    fn wave_registry(tools: Vec<Arc<dyn tron_tools::traits::TronTool>>) -> ToolRegistry {
+        let mut reg = ToolRegistry::new();
+        for t in tools { reg.register(t); }
+        reg
+    }
+
+    #[test]
+    fn build_execution_waves_all_parallel() {
+        let reg = wave_registry(vec![
+            Arc::new(ParallelStub("read")),
+            Arc::new(ParallelStub("write")),
+            Arc::new(ParallelStub("grep")),
+        ]);
+        let calls = vec![tc("read"), tc("write"), tc("grep")];
+        let waves = build_execution_waves(&calls, &reg);
+        assert_eq!(waves.len(), 1);
+        assert_eq!(waves[0], vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn build_execution_waves_mixed() {
+        // [Read(parallel), Browse₁(serialized:browser), Read(parallel), Browse₂(serialized:browser)]
+        let reg = wave_registry(vec![
+            Arc::new(ParallelStub("read")),
+            Arc::new(SerializedStub { name: "browse", group: "browser" }),
+        ]);
+        let calls = vec![tc("read"), tc("browse"), tc("read"), tc("browse")];
+        let waves = build_execution_waves(&calls, &reg);
+        assert_eq!(waves.len(), 2);
+        assert_eq!(waves[0], vec![0, 1, 2]); // parallel + first browser
+        assert_eq!(waves[1], vec![3]);        // second browser
+    }
+
+    #[test]
+    fn build_execution_waves_multiple_groups() {
+        // [Browse₁(browser), Bash₁(shell), Browse₂(browser), Bash₂(shell)]
+        let reg = wave_registry(vec![
+            Arc::new(SerializedStub { name: "browse", group: "browser" }),
+            Arc::new(SerializedStub { name: "bash", group: "shell" }),
+        ]);
+        let calls = vec![tc("browse"), tc("bash"), tc("browse"), tc("bash")];
+        let waves = build_execution_waves(&calls, &reg);
+        assert_eq!(waves.len(), 2);
+        assert_eq!(waves[0], vec![0, 1]); // first of each group
+        assert_eq!(waves[1], vec![2, 3]); // second of each group
+    }
+
+    #[test]
+    fn build_execution_waves_single_tool() {
+        let reg = wave_registry(vec![Arc::new(ParallelStub("read"))]);
+        let calls = vec![tc("read")];
+        let waves = build_execution_waves(&calls, &reg);
+        assert_eq!(waves.len(), 1);
+        assert_eq!(waves[0], vec![0]);
+    }
+
+    #[test]
+    fn build_execution_waves_unknown_tool_defaults_parallel() {
+        let reg = ToolRegistry::new(); // empty — no tools registered
+        let calls = vec![tc("unknown1"), tc("unknown2")];
+        let waves = build_execution_waves(&calls, &reg);
+        assert_eq!(waves.len(), 1);
+        assert_eq!(waves[0], vec![0, 1]);
+    }
+
+    #[test]
+    fn build_execution_waves_only_serialized() {
+        let reg = wave_registry(vec![
+            Arc::new(SerializedStub { name: "browse", group: "browser" }),
+        ]);
+        let calls = vec![tc("browse"), tc("browse"), tc("browse")];
+        let waves = build_execution_waves(&calls, &reg);
+        assert_eq!(waves.len(), 3);
+        assert_eq!(waves[0], vec![0]);
+        assert_eq!(waves[1], vec![1]);
+        assert_eq!(waves[2], vec![2]);
     }
 }

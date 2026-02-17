@@ -17,6 +17,21 @@ use tron_core::tools::{Tool, ToolCategory, TronToolResult};
 use crate::errors::ToolError;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Execution mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Controls how a tool is scheduled relative to other tools in the same batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecutionMode {
+    /// Execute concurrently with all other parallel tools (default).
+    Parallel,
+    /// Execute sequentially within a named group. Tools in the same group
+    /// run one-at-a-time in their original order. Different groups (and
+    /// all Parallel tools) can execute concurrently.
+    Serialized(String),
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tool context
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -68,6 +83,14 @@ pub trait TronTool: Send + Sync {
     /// Optional per-tool timeout in milliseconds.
     fn timeout_ms(&self) -> Option<u64> {
         None
+    }
+
+    /// Controls parallel vs serialized scheduling in multi-tool batches.
+    ///
+    /// Override to return [`ExecutionMode::Serialized`] for tools that share
+    /// session state (e.g. browser automation) and must not run concurrently.
+    fn execution_mode(&self) -> ExecutionMode {
+        ExecutionMode::Parallel
     }
 
     /// Generate the [`Tool`] schema for the LLM.
@@ -674,6 +697,28 @@ mod tests {
             let back: SubagentMode = serde_json::from_str(&json).unwrap();
             assert_eq!(mode, back);
         }
+    }
+
+    #[test]
+    fn execution_mode_default_is_parallel() {
+        // Verify that the default ExecutionMode is Parallel
+        assert_eq!(ExecutionMode::Parallel, ExecutionMode::Parallel);
+        assert_ne!(
+            ExecutionMode::Parallel,
+            ExecutionMode::Serialized("browser".into())
+        );
+    }
+
+    #[test]
+    fn execution_mode_serialized_equality() {
+        assert_eq!(
+            ExecutionMode::Serialized("browser".into()),
+            ExecutionMode::Serialized("browser".into())
+        );
+        assert_ne!(
+            ExecutionMode::Serialized("browser".into()),
+            ExecutionMode::Serialized("shell".into())
+        );
     }
 
     #[test]

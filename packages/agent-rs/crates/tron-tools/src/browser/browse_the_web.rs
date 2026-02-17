@@ -12,7 +12,7 @@ use tron_core::tools::{
 };
 
 use crate::errors::ToolError;
-use crate::traits::{BrowserAction, BrowserDelegate, ToolContext, TronTool};
+use crate::traits::{BrowserAction, BrowserDelegate, ExecutionMode, ToolContext, TronTool};
 use crate::utils::validation::validate_required_string;
 
 const VALID_ACTIONS: &[&str] = &[
@@ -56,6 +56,10 @@ impl TronTool for BrowseTheWebTool {
 
     fn category(&self) -> ToolCategory {
         ToolCategory::Custom
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        ExecutionMode::Serialized("browser".into())
     }
 
     fn definition(&self) -> Tool {
@@ -175,7 +179,7 @@ Browser sessions are persistent — once created, you can perform multiple actio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::BrowserResult;
+    use crate::traits::{BrowserResult, ExecutionMode};
     use std::sync::Mutex;
 
     struct MockBrowser {
@@ -252,6 +256,15 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(""),
         }
+    }
+
+    #[test]
+    fn browse_the_web_execution_mode() {
+        let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
+        assert_eq!(
+            tool.execution_mode(),
+            ExecutionMode::Serialized("browser".into())
+        );
     }
 
     #[tokio::test]
