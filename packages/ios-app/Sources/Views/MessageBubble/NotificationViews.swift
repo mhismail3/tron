@@ -402,6 +402,27 @@ struct RulesLoadedNotificationView: View {
     }
 }
 
+// MARK: - Rules Activated Notification View
+
+struct RulesActivatedNotificationView: View {
+    let rules: [ActivatedRuleEntry]
+    let totalActivated: Int
+
+    var body: some View {
+        NotificationPill(tint: .tronIndigo) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.fill")
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronIndigo)
+
+                Text("Loaded \(rules.count) nested \(rules.count == 1 ? "rule" : "rules")")
+                    .font(TronTypography.filePath)
+                    .foregroundStyle(.tronIndigo.opacity(0.9))
+            }
+        }
+    }
+}
+
 // MARK: - Workspace Deleted Notification View
 
 struct WorkspaceDeletedNotificationView: View {

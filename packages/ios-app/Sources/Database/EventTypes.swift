@@ -168,6 +168,13 @@ struct SessionEvent: Identifiable, Codable, EventTransformable {
             }
             return "Rules loaded"
 
+        case .rulesActivated:
+            let count = payload.int("totalActivated") ?? 0
+            if count > 0 {
+                return "Rules activated (\(count))"
+            }
+            return "Rules activated"
+
         case .contextCleared:
             return "Context cleared"
 
@@ -466,6 +473,7 @@ enum SessionEventType: String, Codable {
 
     // Rules tracking
     case rulesLoaded = "rules.loaded"
+    case rulesActivated = "rules.activated"
 
     // Context
     case contextCleared = "context.cleared"

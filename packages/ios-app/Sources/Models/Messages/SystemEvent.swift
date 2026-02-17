@@ -27,6 +27,8 @@ enum SystemEvent: Equatable {
     case skillRemoved(skillName: String)
     /// Rules were loaded on session start
     case rulesLoaded(count: Int)
+    /// Dynamic scoped rules were activated by file access
+    case rulesActivated(rules: [ActivatedRuleEntry], totalActivated: Int)
     /// Catching up to in-progress session
     case catchingUp
     /// Turn failed with error
@@ -72,6 +74,8 @@ enum SystemEvent: Equatable {
             return "\(skillName) removed from context"
         case .rulesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
+        case .rulesActivated(let rules, _):
+            return "Loaded \(rules.count) nested \(rules.count == 1 ? "rule" : "rules")"
         case .catchingUp:
             return "Loading latest messages..."
         case .turnFailed(let error, _, _):

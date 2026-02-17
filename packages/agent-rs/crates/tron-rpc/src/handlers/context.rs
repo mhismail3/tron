@@ -341,6 +341,62 @@ impl MethodHandler for GetDetailedSnapshotHandler {
                 }
             }
 
+            // Include dynamically activated rules from rules.activated events.
+            // Respect compaction boundaries: only include activations after the
+            // latest compact.boundary / compact.summary / context.cleared event.
+            let activated_events = ctx.event_store
+                .get_events_by_type(
+                    &session_id,
+                    &["rules.activated", "compact.boundary", "compact.summary", "context.cleared"],
+                    None,
+                )
+                .unwrap_or_default();
+
+            // Walk events chronologically. Reset accumulated paths on boundaries.
+            let mut activated_paths = std::collections::HashSet::new();
+            let mut activated_entries: Vec<(String, String)> = Vec::new();
+            for event in &activated_events {
+                if event.event_type == "compact.boundary"
+                    || event.event_type == "compact.summary"
+                    || event.event_type == "context.cleared"
+                {
+                    activated_paths.clear();
+                    activated_entries.clear();
+                    continue;
+                }
+                if let Ok(payload) = serde_json::from_str::<Value>(&event.payload) {
+                    if let Some(rules) = payload.get("rules").and_then(Value::as_array) {
+                        for rule in rules {
+                            if let (Some(rel), Some(scope)) = (
+                                rule.get("relativePath").and_then(Value::as_str),
+                                rule.get("scopeDir").and_then(Value::as_str),
+                            ) {
+                                if activated_paths.insert(rel.to_string()) {
+                                    activated_entries.push((rel.to_string(), scope.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Append activated rules as directory-level entries (deduped against static files)
+            let existing_paths: std::collections::HashSet<String> = files
+                .iter()
+                .filter_map(|f| f.get("relativePath").and_then(Value::as_str).map(String::from))
+                .collect();
+            for (rel_path, _scope_dir) in &activated_entries {
+                if !existing_paths.contains(rel_path) {
+                    let abs = wd_path.join(rel_path);
+                    files.push(json!({
+                        "path": abs.to_string_lossy(),
+                        "relativePath": rel_path,
+                        "level": "directory",
+                        "depth": rel_path.matches('/').count(),
+                    }));
+                }
+            }
+
             let total_files = files.len();
             if total_files > 0 {
                 Some(json!({

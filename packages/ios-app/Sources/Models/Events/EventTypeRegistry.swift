@@ -50,6 +50,7 @@ enum PersistedEventType: String, CaseIterable {
 
     // Rules
     case rulesLoaded = "rules.loaded"
+    case rulesActivated = "rules.activated"
 
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
@@ -99,7 +100,7 @@ enum PersistedEventType: String, CaseIterable {
              .toolCall, .toolResult,
              .notificationInterrupted, .notificationSubagentResult,
              .configModelSwitch, .configReasoningLevel,
-             .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded,
+             .contextCleared, .compactBoundary, .skillRemoved, .rulesLoaded, .rulesActivated,
              .memoryLedger, .memoryLoaded,
              .errorAgent, .errorTool, .errorProvider,
              .turnFailed:
@@ -180,6 +181,7 @@ enum PersistedEventType: String, CaseIterable {
         case .skillAdded: return "Skill added"
         case .skillRemoved: return "Skill removed"
         case .rulesLoaded: return "Rules loaded"
+        case .rulesActivated: return "Rules activated"
         case .compactBoundary: return "Compact boundary"
         case .compactSummary: return "Compact summary"
         case .contextCleared: return "Context cleared"

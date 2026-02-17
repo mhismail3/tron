@@ -78,6 +78,9 @@ struct SystemEventView: View {
         case .rulesLoaded(let count):
             RulesLoadedNotificationView(count: count)
 
+        case .rulesActivated(let rules, let total):
+            RulesActivatedNotificationView(rules: rules, totalActivated: total)
+
         case .catchingUp:
             CatchingUpNotificationView()
 

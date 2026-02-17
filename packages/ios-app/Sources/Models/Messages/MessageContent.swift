@@ -69,6 +69,10 @@ enum MessageContent: Equatable {
     static func rulesLoaded(count: Int) -> MessageContent {
         .systemEvent(.rulesLoaded(count: count))
     }
+    /// In-chat notification for dynamically activated rules
+    static func rulesActivated(rules: [ActivatedRuleEntry], totalActivated: Int) -> MessageContent {
+        .systemEvent(.rulesActivated(rules: rules, totalActivated: totalActivated))
+    }
     /// In-chat notification for catching up to in-progress session
     static var catchingUp: MessageContent {
         .systemEvent(.catchingUp)

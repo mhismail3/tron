@@ -170,6 +170,8 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformSkillRemoved(payload, timestamp: ts)
         case .rulesLoaded:
             return SystemEventHandlers.transformRulesLoaded(payload, timestamp: ts)
+        case .rulesActivated:
+            return SystemEventHandlers.transformRulesActivated(payload, timestamp: ts)
         case .streamThinkingComplete:
             return SystemEventHandlers.transformThinkingComplete(payload, timestamp: ts)
         default:
@@ -314,7 +316,7 @@ extension UnifiedEventTransformer {
             case .messageUser, .messageSystem,
                  .notificationInterrupted, .notificationSubagentResult,
                  .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .memoryLedger, .memoryLoaded, .skillRemoved, .rulesLoaded,
+                 .contextCleared, .memoryLedger, .memoryLoaded, .skillRemoved, .rulesLoaded, .rulesActivated,
                  .errorAgent, .errorTool, .errorProvider:
                 if var message = transformPersistedEvent(event) {
                     if eventType == .messageUser {

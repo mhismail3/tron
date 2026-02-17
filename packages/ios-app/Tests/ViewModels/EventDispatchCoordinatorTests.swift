@@ -685,6 +685,7 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
     var handleSkillRemovedCalledWith: SkillRemovedPlugin.Result?
+    var handleRulesActivatedCalledWith: RulesActivatedPlugin.Result?
 
     // MARK: - Browser
     var handleBrowserFrameCalledWith: BrowserFramePlugin.Result?
@@ -799,6 +800,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleSkillRemoved(_ result: SkillRemovedPlugin.Result) {
         handleSkillRemovedCalledWith = result
+    }
+
+    func handleRulesActivated(_ result: RulesActivatedPlugin.Result) {
+        handleRulesActivatedCalledWith = result
     }
 
     func handleBrowserFrame(_ result: BrowserFramePlugin.Result) {

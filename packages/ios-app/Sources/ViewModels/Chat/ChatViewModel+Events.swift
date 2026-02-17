@@ -406,6 +406,21 @@ extension ChatViewModel {
         }
     }
 
+    func handleRulesActivated(_ pluginResult: RulesActivatedPlugin.Result) {
+        let dirs = pluginResult.rules.map(\.scopeDir).joined(separator: ", ")
+        logger.info("Rules activated for: \(dirs)", category: .events)
+
+        let message = ChatMessage.rulesActivated(
+            rules: pluginResult.rules,
+            totalActivated: pluginResult.totalActivated
+        )
+        messages.append(message)
+
+        Task {
+            await refreshContextFromServer()
+        }
+    }
+
     /// Handle enriched provider errors from the agent.error event.
     /// Only terminal errors reach here (retries are silent).
     /// Resets all processing state and shows error notification pill.

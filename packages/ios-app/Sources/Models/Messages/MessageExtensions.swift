@@ -92,6 +92,11 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .rulesLoaded(count: count))
     }
 
+    /// In-chat notification for dynamically activated rules
+    static func rulesActivated(rules: [ActivatedRuleEntry], totalActivated: Int) -> ChatMessage {
+        ChatMessage(role: .system, content: .rulesActivated(rules: rules, totalActivated: totalActivated))
+    }
+
     /// In-chat notification for catching up to in-progress session
     static func catchingUp() -> ChatMessage {
         ChatMessage(role: .system, content: .catchingUp)

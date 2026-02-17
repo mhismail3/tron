@@ -102,6 +102,32 @@ enum SystemEventHandlers {
         )
     }
 
+    /// Transform rules.activated event into a ChatMessage.
+    ///
+    /// Rules activated events indicate when scoped rules were dynamically
+    /// activated by file access in a matching directory.
+    static func transformRulesActivated(
+        _ payload: [String: AnyCodable],
+        timestamp: Date
+    ) -> ChatMessage? {
+        let totalActivated = payload["totalActivated"]?.value as? Int ?? 0
+        var entries: [ActivatedRuleEntry] = []
+        if let rulesValue = payload["rules"],
+           let rulesArray = rulesValue.value as? [[String: Any]] {
+            for dict in rulesArray {
+                guard let relPath = dict["relativePath"] as? String,
+                      let scopeDir = dict["scopeDir"] as? String else { continue }
+                entries.append(ActivatedRuleEntry(relativePath: relPath, scopeDir: scopeDir))
+            }
+        }
+        guard !entries.isEmpty else { return nil }
+        return ChatMessage(
+            role: .system,
+            content: .rulesActivated(rules: entries, totalActivated: totalActivated),
+            timestamp: timestamp
+        )
+    }
+
     /// Transform stream.thinking_complete event into a ChatMessage.
     ///
     /// Thinking complete events contain the final extended thinking content.

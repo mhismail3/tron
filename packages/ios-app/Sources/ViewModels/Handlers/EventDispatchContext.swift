@@ -32,6 +32,7 @@ import Foundation
     func handleContextCleared(_ result: ContextClearedPlugin.Result)
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result)
     func handleSkillRemoved(_ result: SkillRemovedPlugin.Result)
+    func handleRulesActivated(_ result: RulesActivatedPlugin.Result)
 }
 
 @MainActor protocol BrowserEventHandler: AnyObject {

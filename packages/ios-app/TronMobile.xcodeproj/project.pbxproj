@@ -281,6 +281,7 @@
 		8D03520968C046CF0A0C5CC9 /* TronMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B018ED18CE376F88F9C442F4 /* TronMobileApp.swift */; };
 		8D04A163F49EA655DFAEEC5B /* ToolEventCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B459558B2DDAE5B155700AB /* ToolEventCoordinator.swift */; };
 		8D34B457F6593EB40143C801 /* AgentPhaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F702192F193F9B8F7D1EFCEE /* AgentPhaseTests.swift */; };
+		8D7383DFCFF96D6A51E0DA48 /* RulesActivatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE990D415136C2BBE7E29904 /* RulesActivatedPlugin.swift */; };
 		8DFB08D780E2AEE67F63FAF6 /* SheetStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93A435842CC8F73BA9E6476A /* SheetStateTests.swift */; };
 		8E47281EC7DDAF43ADA30993 /* ContextTrackingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */; };
 		8E74CB99BC063A46DE098FBD /* VoiceNoteDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE84677D6CFED47B780B247 /* VoiceNoteDetailSheet.swift */; };
@@ -874,6 +875,7 @@
 		AD437E42ED6468422C818F7F /* RPCTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RPCTransport.swift; sourceTree = "<group>"; };
 		AD59D6ED1089F36BD289F7CC /* ToolKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolKind.swift; sourceTree = "<group>"; };
 		AD7CBA62B31BF81007E9B142 /* ChatSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSheetTests.swift; sourceTree = "<group>"; };
+		AE990D415136C2BBE7E29904 /* RulesActivatedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesActivatedPlugin.swift; sourceTree = "<group>"; };
 		AF444904C1F00E1BF54091DF /* IBMPlexSerif-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexSerif-Regular.ttf"; sourceTree = "<group>"; };
 		AF550C99638AAC41D6ACAD87 /* TronLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronLogger.swift; sourceTree = "<group>"; };
 		AF72AC16DF2C687D9812B3D5 /* RememberToolDetailSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RememberToolDetailSheetTests.swift; sourceTree = "<group>"; };
@@ -1836,6 +1838,7 @@
 				CF4D7932E415EF8FCCB9ADDC /* MemoryUpdatedPlugin.swift */,
 				3B9B869A32A0EF5A35F9D34F /* MemoryUpdatingPlugin.swift */,
 				A208757B29D974B8B65009CB /* MessageDeletedPlugin.swift */,
+				AE990D415136C2BBE7E29904 /* RulesActivatedPlugin.swift */,
 				EA3AD6BC883E889FAA49FBB2 /* SkillRemovedPlugin.swift */,
 				7A0089B84FFEBA67C05982B8 /* TurnFailedPlugin.swift */,
 			);
@@ -2902,6 +2905,7 @@
 				FA07B6642F2E331B8B609801 /* RenderAppUIChipTracker.swift in Sources */,
 				B9AFC95D5047343FDAD42B16 /* RenderAppUITypes.swift in Sources */,
 				9345B5E0E28C24D96192CB0E /* Rules.swift in Sources */,
+				8D7383DFCFF96D6A51E0DA48 /* RulesActivatedPlugin.swift in Sources */,
 				6A7E6FCAB5A771B592BD433A /* RulesSectionViews.swift in Sources */,
 				970E2F22C4BB8ADCEB384E73 /* SafariView.swift in Sources */,
 				C8FF9F298CA63E0D7F663688 /* SandboxesDashboardView.swift in Sources */,

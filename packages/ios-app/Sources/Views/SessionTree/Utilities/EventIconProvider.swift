@@ -31,6 +31,8 @@ enum EventIconProvider {
             return "checkmark.circle.fill"
         case .rulesLoaded:
             return "doc.text.fill"
+        case .rulesActivated:
+            return "doc.text.badge.plus"
         case .contextCleared:
             return "clear.fill"
         case .skillAdded, .skillRemoved:
@@ -88,7 +90,7 @@ enum EventIconProvider {
                 return .tronError
             }
             return .tronSuccess
-        case .rulesLoaded:
+        case .rulesLoaded, .rulesActivated:
             return .tronPurple
         case .contextCleared:
             return .tronCyan

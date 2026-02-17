@@ -143,6 +143,14 @@ struct LoadedRules: Codable, Equatable {
     }
 }
 
+// MARK: - Activated Rule Entry
+
+/// A single dynamically activated scoped rule
+struct ActivatedRuleEntry: Equatable {
+    let relativePath: String
+    let scopeDir: String
+}
+
 // MARK: - Rules Loaded Payload
 
 /// Payload for rules.loaded event from server
