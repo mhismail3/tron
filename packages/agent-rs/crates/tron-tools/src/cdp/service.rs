@@ -50,10 +50,14 @@ impl BrowserService {
             return Ok(Arc::clone(session.value()));
         }
 
-        let session = Arc::new(BrowserSession::launch(&self.chrome_path).await?);
+        let session = Arc::new(BrowserSession::launch(&self.chrome_path).await.map_err(|e| {
+            tracing::error!(session_id, error = %e, "browser session creation failed");
+            e
+        })?);
         let _ = self
             .sessions
             .insert(session_id.to_string(), Arc::clone(&session));
+        metrics::gauge!("browser_sessions_active").increment(1.0);
         tracing::info!(session_id, "browser session created");
         Ok(session)
     }
@@ -112,6 +116,7 @@ impl BrowserService {
             let _ = self.frame_tx.send(BrowserEvent::Closed {
                 session_id: session_id.to_string(),
             });
+            metrics::gauge!("browser_sessions_active").decrement(1.0);
             tracing::info!(session_id, "browser session closed");
         }
         Ok(())

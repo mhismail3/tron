@@ -11,6 +11,7 @@ use tron_core::events::HookResult as EventHookResult;
 use crate::hooks::engine::HookEngine;
 use crate::hooks::types::{HookAction, HookContext};
 
+use metrics::{counter, histogram};
 use tracing::{debug, info};
 
 use crate::agent::event_emitter::EventEmitter;
@@ -238,6 +239,8 @@ impl CompactionHandler {
             tokens_before,
         });
 
+        let compaction_start = std::time::Instant::now();
+
         // Execute compaction: LLM summarizer via subsession, or keyword fallback
         let result = if let Some(ref manager) = self.subagent_manager {
             let spawner = SubagentManagerSpawner {
@@ -263,6 +266,9 @@ impl CompactionHandler {
 
         match result {
             Ok(compaction_result) => {
+                counter!("compaction_total", "status" => "success").increment(1);
+                histogram!("compaction_duration_seconds")
+                    .record(compaction_start.elapsed().as_secs_f64());
                 let tokens_after = context_manager.get_current_tokens();
                 info!(session_id, tokens_before, tokens_after, "compaction complete");
                 let _ = emitter.emit(TronEvent::CompactionComplete {
@@ -292,7 +298,8 @@ impl CompactionHandler {
                     summary: Some(format!("Compaction failed: {e}")),
                     estimated_context_tokens: Some(tokens_before),
                 });
-                tracing::warn!("Compaction failed: {e}");
+                counter!("compaction_total", "status" => "failure").increment(1);
+                tracing::warn!(session_id, tokens_before, error = %e, "compaction failed");
                 Ok(false)
             }
         }

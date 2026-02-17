@@ -94,7 +94,7 @@ pub async fn exchange_code_for_tokens_with_client(
 }
 
 /// Refresh an expired OAuth token.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(provider = "anthropic"))]
 pub async fn refresh_token(
     config: &OAuthConfig,
     refresh_token: &str,
@@ -103,7 +103,7 @@ pub async fn refresh_token(
 }
 
 /// Refresh an expired OAuth token using a shared HTTP client.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(provider = "anthropic"))]
 pub async fn refresh_token_with_client(
     config: &OAuthConfig,
     refresh_token: &str,
@@ -254,8 +254,16 @@ async fn maybe_refresh_tokens(
     }
 
     tracing::info!("Anthropic OAuth token expired, refreshing...");
-    let new_tokens = refresh_token_with_client(config, &tokens.refresh_token, client).await?;
-    Ok((new_tokens, true))
+    match refresh_token_with_client(config, &tokens.refresh_token, client).await {
+        Ok(new_tokens) => {
+            metrics::counter!("auth_refresh_total", "provider" => "anthropic", "status" => "success").increment(1);
+            Ok((new_tokens, true))
+        }
+        Err(e) => {
+            metrics::counter!("auth_refresh_total", "provider" => "anthropic", "status" => "failure").increment(1);
+            Err(e)
+        }
+    }
 }
 
 /// Token endpoint response.

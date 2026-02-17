@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use metrics::counter;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use crate::rpc::types::RpcEvent;
@@ -59,6 +60,7 @@ impl BroadcastManager {
             if conn.session_id().as_deref() == Some(session_id)
                 && !conn.send(json.clone())
             {
+                counter!("ws_broadcast_drops_total").increment(1);
                 let drops = conn.drop_count();
                 warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
             }
@@ -82,6 +84,7 @@ impl BroadcastManager {
         );
         for conn in conns.values() {
             if !conn.send(json.clone()) {
+                counter!("ws_broadcast_drops_total").increment(1);
                 let drops = conn.drop_count();
                 warn!(conn_id = %conn.id, total_drops = drops, "failed to send event to client (channel full)");
             }

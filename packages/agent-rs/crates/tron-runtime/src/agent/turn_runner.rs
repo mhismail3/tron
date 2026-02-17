@@ -20,7 +20,7 @@ use tron_llm::{ProviderHealthTracker, StreamFactory, StreamRetryConfig, with_pro
 use tron_tools::registry::ToolRegistry;
 
 use metrics::{counter, histogram};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::agent::compaction_handler::CompactionHandler;
 use crate::agent::event_emitter::EventEmitter;
@@ -137,6 +137,7 @@ pub async fn execute_turn(
     // 5. Stream from Provider (with retry if configured)
     let provider_name = provider.provider_type().as_str().to_owned();
     counter!("provider_requests_total", "provider" => provider_name.clone()).increment(1);
+    let request_start = Instant::now();
 
     let stream = if let Some(retry) = retry_config {
         // Wrap with retry — factory creates a new stream on each attempt
@@ -166,6 +167,15 @@ pub async fn execute_turn(
                 let category = e.category().to_owned();
                 let recoverable = e.is_retryable();
                 counter!("provider_errors_total", "provider" => provider_name.clone(), "status" => category.clone()).increment(1);
+                histogram!("provider_request_duration_seconds", "provider" => provider_name.clone())
+                    .record(request_start.elapsed().as_secs_f64());
+                warn!(
+                    provider = %provider_name,
+                    model = %provider.model(),
+                    status = %category,
+                    error = %e,
+                    "provider stream error"
+                );
 
                 let _ = emitter.emit(TronEvent::TurnFailed {
                     base: BaseEvent::now(session_id),
@@ -200,6 +210,8 @@ pub async fn execute_turn(
                 if let Some(ht) = health_tracker {
                     ht.record_failure(&provider_name);
                 }
+                histogram!("provider_request_duration_seconds", "provider" => provider_name.clone())
+                    .record(request_start.elapsed().as_secs_f64());
                 let error_msg = e.to_string();
                 error!(session_id, turn, error = %error_msg, "stream failed");
                 let _ = emitter.emit(TronEvent::TurnFailed {
@@ -219,6 +231,24 @@ pub async fn execute_turn(
                 };
             }
         };
+
+    // Record provider request duration (covers full stream consumption)
+    histogram!("provider_request_duration_seconds", "provider" => provider_name.clone())
+        .record(request_start.elapsed().as_secs_f64());
+
+    // Record time-to-first-token if available
+    if let Some(ttft) = stream_result.ttft_ms {
+        histogram!("provider_ttft_seconds", "provider" => provider_name.clone())
+            .record(ttft as f64 / 1000.0);
+    }
+
+    // Record LLM token counts
+    if let Some(ref usage) = stream_result.token_usage {
+        counter!("llm_tokens_total", "provider" => provider_name.clone(), "direction" => "input")
+            .increment(usage.input_tokens);
+        counter!("llm_tokens_total", "provider" => provider_name.clone(), "direction" => "output")
+            .increment(usage.output_tokens);
+    }
 
     if stream_result.interrupted {
         // Persist partial message.assistant so reconstruction shows streamed content
@@ -564,7 +594,8 @@ pub async fn execute_turn(
 
     // Record turn metrics
     counter!("agent_turns_total", "model" => provider.model().to_owned()).increment(1);
-    histogram!("agent_turn_duration_seconds").record(turn_start.elapsed().as_secs_f64());
+    histogram!("agent_turn_duration_seconds", "model" => provider.model().to_owned())
+        .record(turn_start.elapsed().as_secs_f64());
 
     // Determine stop reason for this turn
     let stop_reason = if stop_turn_requested {

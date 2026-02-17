@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use crate::rpc::context::RpcContext;
 use crate::rpc::registry::MethodRegistry;
 
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, histogram};
 use tracing::{debug, info, instrument, warn};
 
 use super::broadcast::BroadcastManager;
@@ -44,9 +44,11 @@ pub async fn run_ws_session(
     let (send_tx, mut send_rx) = mpsc::channel::<String>(1024);
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
+    let connection_start = std::time::Instant::now();
     info!(client_id, "client connected");
     counter!("ws_connections_total").increment(1);
     gauge!("ws_connections_active").increment(1.0);
+    gauge!("sessions_active").increment(1.0);
 
     // Register with broadcast manager
     broadcast.add(connection.clone()).await;
@@ -152,6 +154,8 @@ pub async fn run_ws_session(
     info!(client_id, "client disconnected");
     counter!("ws_disconnections_total").increment(1);
     gauge!("ws_connections_active").decrement(1.0);
+    gauge!("sessions_active").decrement(1.0);
+    histogram!("ws_connection_duration_seconds").record(connection_start.elapsed().as_secs_f64());
     outbound.abort();
     broadcast.remove(&client_id).await;
 }

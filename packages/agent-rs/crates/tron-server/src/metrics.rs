@@ -41,7 +41,7 @@ pub const WS_BROADCAST_DROPS_TOTAL: &str = "ws_broadcast_drops_total";
 pub const AGENT_RUNS_ACTIVE: &str = "agent_runs_active";
 /// Agent turns total (counter, labels: model).
 pub const AGENT_TURNS_TOTAL: &str = "agent_turns_total";
-/// Agent turn duration seconds (histogram).
+/// Agent turn duration seconds (histogram, labels: model).
 pub const AGENT_TURN_DURATION_SECONDS: &str = "agent_turn_duration_seconds";
 /// Provider requests total (counter, labels: provider).
 pub const PROVIDER_REQUESTS_TOTAL: &str = "provider_requests_total";
@@ -55,6 +55,24 @@ pub const PROVIDER_REQUEST_DURATION_SECONDS: &str = "provider_request_duration_s
 pub const PROVIDER_TTFT_SECONDS: &str = "provider_ttft_seconds";
 /// Provider degraded state (gauge, labels: provider). 1 = degraded, 0 = healthy.
 pub const PROVIDER_DEGRADED: &str = "provider_degraded";
+/// Tool executions total (counter, labels: tool).
+pub const TOOL_EXECUTIONS_TOTAL: &str = "tool_executions_total";
+/// Tool execution duration seconds (histogram, labels: tool).
+pub const TOOL_EXECUTION_DURATION_SECONDS: &str = "tool_execution_duration_seconds";
+/// LLM tokens total (counter, labels: provider, direction).
+pub const LLM_TOKENS_TOTAL: &str = "llm_tokens_total";
+/// Active sessions (gauge).
+pub const SESSIONS_ACTIVE: &str = "sessions_active";
+/// Compaction total (counter, labels: status).
+pub const COMPACTION_TOTAL: &str = "compaction_total";
+/// Compaction duration seconds (histogram).
+pub const COMPACTION_DURATION_SECONDS: &str = "compaction_duration_seconds";
+/// Active browser sessions (gauge).
+pub const BROWSER_SESSIONS_ACTIVE: &str = "browser_sessions_active";
+/// Auth token refresh total (counter, labels: provider, status).
+pub const AUTH_REFRESH_TOTAL: &str = "auth_refresh_total";
+/// WebSocket connection duration seconds (histogram).
+pub const WS_CONNECTION_DURATION_SECONDS: &str = "ws_connection_duration_seconds";
 
 #[cfg(test)]
 mod tests {
@@ -90,6 +108,15 @@ mod tests {
             PROVIDER_REQUEST_DURATION_SECONDS,
             PROVIDER_TTFT_SECONDS,
             PROVIDER_DEGRADED,
+            TOOL_EXECUTIONS_TOTAL,
+            TOOL_EXECUTION_DURATION_SECONDS,
+            LLM_TOKENS_TOTAL,
+            SESSIONS_ACTIVE,
+            COMPACTION_TOTAL,
+            COMPACTION_DURATION_SECONDS,
+            BROWSER_SESSIONS_ACTIVE,
+            AUTH_REFRESH_TOTAL,
+            WS_CONNECTION_DURATION_SECONDS,
         ];
         for name in names {
             assert!(

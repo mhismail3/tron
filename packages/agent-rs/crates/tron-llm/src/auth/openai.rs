@@ -20,13 +20,13 @@ pub const PROVIDER_KEY: &str = "openai-codex";
 const TOKEN_EXPIRY_BUFFER_SECONDS: i64 = 300;
 
 /// Refresh an `OpenAI` OAuth token.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn refresh_token(refresh_token: &str) -> Result<OAuthTokens, AuthError> {
     refresh_token_with_client(refresh_token, &reqwest::Client::new()).await
 }
 
 /// Refresh an `OpenAI` OAuth token using a shared HTTP client.
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(provider = "openai"))]
 pub async fn refresh_token_with_client(
     refresh_token: &str,
     client: &reqwest::Client,
@@ -144,8 +144,16 @@ async fn maybe_refresh_tokens(
     }
 
     tracing::info!("`OpenAI` OAuth token expired, refreshing...");
-    let new_tokens = refresh_token_with_client(&tokens.refresh_token, client).await?;
-    Ok((new_tokens, true))
+    match refresh_token_with_client(&tokens.refresh_token, client).await {
+        Ok(new_tokens) => {
+            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "success").increment(1);
+            Ok((new_tokens, true))
+        }
+        Err(e) => {
+            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "failure").increment(1);
+            Err(e)
+        }
+    }
 }
 
 /// `OpenAI` token endpoint response.

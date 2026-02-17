@@ -4989,6 +4989,7 @@ dependencies = [
  "html2text",
  "indexmap",
  "insta",
+ "metrics",
  "mockall",
  "parking_lot",
  "regex",

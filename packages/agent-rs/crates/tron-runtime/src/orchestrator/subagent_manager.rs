@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, info_span, Instrument};
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_events::{EventStore, EventType};
 use crate::guardrails::GuardrailEngine;
@@ -279,6 +279,12 @@ impl SubagentManager {
         let parent_session_id = config.parent_session_id.clone();
         let tracker_clone = tracker.clone();
 
+        let subsession_span = info_span!(
+            "subsession",
+            session_id = %child_session_id,
+            parent_session_id = %parent_session_id,
+            spawn_type = "subsession",
+        );
         let _ = tokio::spawn(async move {
             let provider = match provider_factory.create_for_model(&model_owned).await {
                 Ok(p) => p,
@@ -429,7 +435,7 @@ impl SubagentManager {
                 duration_ms,
                 "subsession execution finished"
             );
-        });
+        }.instrument(subsession_span));
 
         // 6. If blocking, wait for completion
         if config.blocking {
@@ -582,6 +588,13 @@ impl SubagentSpawner for SubagentManager {
         let blocking = config.blocking;
         let tracker_clone = tracker.clone();
 
+        let subagent_span = info_span!(
+            "subagent",
+            session_id = %child_session_id,
+            parent_session_id = %parent_sid,
+            depth = subagent_depth,
+            spawn_type = "tool_agent",
+        );
         let _ = tokio::spawn(async move {
             let provider = match provider_factory.create_for_model(&model_owned).await {
                 Ok(p) => p,
@@ -933,7 +946,7 @@ impl SubagentSpawner for SubagentManager {
                 duration_ms,
                 "subagent execution finished"
             );
-        });
+        }.instrument(subagent_span));
 
         // 5. If blocking, wait for completion
         if config.blocking {

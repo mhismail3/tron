@@ -13,7 +13,8 @@ use crate::hooks::types::{HookAction, HookContext};
 use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::ToolContext;
 
-use tracing::{debug, error, instrument, warn};
+use metrics::{counter, histogram};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::types::ToolExecutionResult;
@@ -174,6 +175,11 @@ pub async fn execute_tool(
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
+    // Record tool metrics
+    counter!("tool_executions_total", "tool" => tool_name.clone()).increment(1);
+    histogram!("tool_execution_duration_seconds", "tool" => tool_name.clone())
+        .record(start.elapsed().as_secs_f64());
+
     // 6. Emit ToolExecutionEnd
     let _ = emitter.emit(TronEvent::ToolExecutionEnd {
         base: BaseEvent::now(session_id),
@@ -183,7 +189,7 @@ pub async fn execute_tool(
         is_error: tool_result.is_error,
         result: Some(tool_result.clone()),
     });
-    debug!(tool_name, tool_call_id, duration_ms, "tool executed");
+    info!(tool = %tool_name, duration_ms, "tool executed");
 
     // 7. Execute PostToolUse hooks (background, fire-and-forget)
     if let Some(hook_engine) = hooks {

@@ -316,6 +316,8 @@ pub struct StreamResult {
     pub interrupted: bool,
     /// Partial content if interrupted.
     pub partial_content: Option<String>,
+    /// Time to first token in milliseconds (from stream start to first content).
+    pub ttft_ms: Option<u64>,
 }
 
 #[cfg(test)]

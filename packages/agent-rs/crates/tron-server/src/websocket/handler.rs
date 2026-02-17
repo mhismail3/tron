@@ -20,7 +20,7 @@ pub struct HandleResult {
 ///
 /// Parses the message as an `RpcRequest`, dispatches to the registry, and
 /// returns the serialized `RpcResponse` along with the method name.
-#[instrument(skip_all, fields(method))]
+#[instrument(skip_all, fields(method, session_id))]
 pub async fn handle_message(
     message: &str,
     registry: &MethodRegistry,
@@ -47,6 +47,9 @@ pub async fn handle_message(
     let method = request.method.clone();
     let id = &request.id;
     let _ = tracing::Span::current().record("method", method.as_str());
+    if let Some(sid) = request.params.as_ref().and_then(|p| p.get("sessionId")).and_then(|v| v.as_str()) {
+        let _ = tracing::Span::current().record("session_id", sid);
+    }
     debug!(method, id, "dispatching RPC");
 
     if !registry.has_method(&method) {

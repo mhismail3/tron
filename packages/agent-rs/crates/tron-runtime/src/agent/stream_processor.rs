@@ -1,6 +1,7 @@
 //! Stream processor — consumes `StreamEventStream`, accumulates content blocks.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::StreamExt;
 use serde_json::Map;
@@ -15,7 +16,7 @@ use crate::types::StreamResult;
 use tron_llm::provider::{ProviderError, StreamEventStream};
 
 /// Process an LLM stream, accumulating content and emitting events.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
 pub async fn process_stream(
     mut stream: StreamEventStream,
     session_id: &str,
@@ -34,6 +35,8 @@ pub async fn process_stream(
     #[allow(unused_assignments)]
     let mut final_message: Option<AssistantMessage> = None;
     let mut thinking_signature: Option<String> = None;
+    let stream_start = Instant::now();
+    let mut ttft_ms: Option<u64> = None;
 
     loop {
         // biased: prefer cancellation when both a stream event and cancel are ready
@@ -48,6 +51,7 @@ pub async fn process_stream(
                     token_usage,
                     interrupted: true,
                     partial_content: partial,
+                    ttft_ms,
                 });
             }
             event = stream.next() => event,
@@ -73,6 +77,7 @@ pub async fn process_stream(
                     token_usage,
                     interrupted: true,
                     partial_content: partial,
+                    ttft_ms,
                 });
             }
             Some(Err(e)) => {
@@ -81,6 +86,9 @@ pub async fn process_stream(
             Some(Ok(stream_event)) => {
                 match stream_event {
                     StreamEvent::TextDelta { delta } => {
+                        if ttft_ms.is_none() {
+                            ttft_ms = Some(stream_start.elapsed().as_millis() as u64);
+                        }
                         text_acc.push_str(&delta);
                         let _ = emitter.emit(TronEvent::MessageUpdate {
                             base: BaseEvent::now(session_id),
@@ -97,6 +105,9 @@ pub async fn process_stream(
                     }
 
                     StreamEvent::ThinkingDelta { delta } => {
+                        if ttft_ms.is_none() {
+                            ttft_ms = Some(stream_start.elapsed().as_millis() as u64);
+                        }
                         thinking_acc.push_str(&delta);
                         let _ = emitter.emit(TronEvent::ThinkingDelta {
                             base: BaseEvent::now(session_id),
@@ -220,6 +231,7 @@ pub async fn process_stream(
         token_usage,
         interrupted: false,
         partial_content: None,
+        ttft_ms,
     })
 }
 
