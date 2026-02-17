@@ -75,7 +75,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         .build_recorder().handle();
     let server = Arc::new(TronServer::new(config, registry, rpc_context, metrics_handle));
 
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
+    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None, server.shutdown().token());
     let _bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
@@ -237,7 +237,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         .build_recorder().handle();
     let server = Arc::new(TronServer::new(config, registry, rpc_context, metrics_handle));
 
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
+    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None, server.shutdown().token());
     drop(tokio::spawn(bridge.run()));
 
     let (addr, _handle) = server.listen().await.unwrap();

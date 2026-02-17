@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tron_tools::cdp::types::BrowserEvent;
 use tron_core::events::TronEvent;
 use crate::rpc::types::RpcEvent;
@@ -15,6 +16,7 @@ pub struct EventBridge {
     rx: broadcast::Receiver<TronEvent>,
     browser_rx: Option<broadcast::Receiver<BrowserEvent>>,
     broadcast: Arc<BroadcastManager>,
+    cancel: CancellationToken,
 }
 
 impl EventBridge {
@@ -25,21 +27,27 @@ impl EventBridge {
         rx: broadcast::Receiver<TronEvent>,
         broadcast: Arc<BroadcastManager>,
         browser_rx: Option<broadcast::Receiver<BrowserEvent>>,
+        cancel: CancellationToken,
     ) -> Self {
         Self {
             rx,
             browser_rx,
             broadcast,
+            cancel,
         }
     }
 
-    /// Run the bridge loop. Exits when the broadcast sender is dropped.
+    /// Run the bridge loop. Exits on shutdown signal or when the broadcast sender is dropped.
     #[tracing::instrument(skip_all, name = "event_bridge")]
     pub async fn run(mut self) {
         if let Some(mut browser_rx) = self.browser_rx.take() {
-            // Dual-channel select: TronEvent + BrowserEvent
+            // Dual-channel select: TronEvent + BrowserEvent + shutdown
             loop {
                 tokio::select! {
+                    () = self.cancel.cancelled() => {
+                        tracing::info!("event bridge: shutdown signal received");
+                        break;
+                    }
                     result = self.rx.recv() => {
                         match result {
                             Ok(event) => self.bridge_tron_event(&event).await,
@@ -47,7 +55,7 @@ impl EventBridge {
                                 tracing::warn!(lagged = n, "event bridge lagged");
                             }
                             Err(broadcast::error::RecvError::Closed) => {
-                                tracing::info!("Event bridge: sender closed, exiting");
+                                tracing::info!("event bridge: sender closed, exiting");
                                 break;
                             }
                         }
@@ -60,7 +68,6 @@ impl EventBridge {
                             }
                             Err(broadcast::error::RecvError::Closed) => {
                                 tracing::debug!("browser event channel closed, continuing with TronEvent only");
-                                // Fall through to single-channel mode
                                 self.run_tron_only().await;
                                 break;
                             }
@@ -69,21 +76,28 @@ impl EventBridge {
                 }
             }
         } else {
-            // Single-channel: TronEvent only (no browser)
             self.run_tron_only().await;
         }
     }
 
     async fn run_tron_only(&mut self) {
         loop {
-            match self.rx.recv().await {
-                Ok(event) => self.bridge_tron_event(&event).await,
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(lagged = n, "event bridge lagged");
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    tracing::info!("Event bridge: sender closed, exiting");
+            tokio::select! {
+                () = self.cancel.cancelled() => {
+                    tracing::info!("event bridge: shutdown signal received");
                     break;
+                }
+                result = self.rx.recv() => {
+                    match result {
+                        Ok(event) => self.bridge_tron_event(&event).await,
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(lagged = n, "event bridge lagged");
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            tracing::info!("event bridge: sender closed, exiting");
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -971,7 +985,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None);
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
 
         // Spawn bridge
         let handle = tokio::spawn(bridge.run());
@@ -1004,7 +1018,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None);
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
         let handle = tokio::spawn(bridge.run());
 
         // Send event with empty session_id (global)
@@ -1767,7 +1781,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None);
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
         let handle = tokio::spawn(bridge.run());
 
         // Send CompactionStart

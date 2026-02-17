@@ -490,7 +490,12 @@ async fn main() -> Result<()> {
 
     // Event bridge: orchestrator events + browser frames → WebSocket clients
     let browser_rx = browser_service.as_ref().map(|svc| svc.subscribe());
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), browser_rx);
+    let bridge = EventBridge::new(
+        orchestrator.subscribe(),
+        server.broadcast().clone(),
+        browser_rx,
+        server.shutdown().token(),
+    );
     let bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, server_handle) = server
@@ -835,7 +840,7 @@ mod tests {
             .build_recorder().handle();
         let server = TronServer::new(config, registry, rpc_context, metrics_handle);
 
-        let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None);
+        let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None, server.shutdown().token());
         let _bridge = tokio::spawn(bridge.run());
 
         let (addr, handle) = server.listen().await.unwrap();

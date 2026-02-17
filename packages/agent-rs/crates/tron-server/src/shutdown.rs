@@ -48,11 +48,7 @@ impl ShutdownCoordinator {
         self.shutdown();
         info!(task_count = handles.len(), timeout_secs = timeout.as_secs(), "waiting for tasks to complete");
 
-        let drain = async {
-            for handle in handles {
-                let _ = handle.await;
-            }
-        };
+        let drain = futures::future::join_all(handles);
 
         if tokio::time::timeout(timeout, drain).await.is_err() {
             warn!("shutdown timed out after {timeout:?}, some tasks may still be running");
