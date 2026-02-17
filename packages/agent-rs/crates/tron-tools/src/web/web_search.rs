@@ -74,6 +74,7 @@ impl TronTool for WebSearchTool {
                 - **news**: Current news articles\n\
                 - **images**: Image search\n\
                 - **videos**: Video search\n\n\
+                Rate limit: 1 query per second. Batch your searches rather than issuing many in parallel.\n\n\
                 Tips:\n\
                 - Use 'news' endpoint for current events\n\
                 - Use 'freshness' to filter by recency: 'pd' (day), 'pw' (week), 'pm' (month), 'py' (year)\n\
