@@ -647,6 +647,17 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "totalFiles": total_files,
             "dynamicRulesCount": dynamic_rules_count,
         })),
+        TronEvent::RulesActivated {
+            rules,
+            total_activated,
+            ..
+        } => Some(serde_json::json!({
+            "rules": rules.iter().map(|r| serde_json::json!({
+                "relativePath": r.relative_path,
+                "scopeDir": r.scope_dir,
+            })).collect::<Vec<_>>(),
+            "totalActivated": total_activated,
+        })),
         TronEvent::MemoryLoaded { count, .. } => Some(serde_json::json!({
             "count": count,
         })),
@@ -659,14 +670,27 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             model,
             max_turns,
             spawn_depth,
+            tool_call_id,
+            blocking,
+            working_directory,
             ..
-        } => Some(serde_json::json!({
-            "subagentSessionId": subagent_session_id,
-            "task": task,
-            "model": model,
-            "maxTurns": max_turns,
-            "spawnDepth": spawn_depth,
-        })),
+        } => {
+            let mut data = serde_json::json!({
+                "subagentSessionId": subagent_session_id,
+                "task": task,
+                "model": model,
+                "maxTurns": max_turns,
+                "spawnDepth": spawn_depth,
+                "blocking": blocking,
+            });
+            if let Some(id) = tool_call_id {
+                data["toolCallId"] = serde_json::json!(id);
+            }
+            if let Some(wd) = working_directory {
+                data["workingDirectory"] = serde_json::json!(wd);
+            }
+            Some(data)
+        }
         TronEvent::SubagentStatusUpdate {
             subagent_session_id,
             status,
@@ -687,34 +711,81 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         TronEvent::SubagentCompleted {
             subagent_session_id,
             total_turns,
-            duration_ms,
-            output,
+            duration,
+            full_output,
+            result_summary,
             token_usage,
+            model,
             ..
         } => {
             let mut data = serde_json::json!({
                 "subagentSessionId": subagent_session_id,
                 "totalTurns": total_turns,
-                "durationMs": duration_ms,
+                "duration": duration,
             });
-            if let Some(o) = output {
-                data["output"] = serde_json::json!(o);
+            if let Some(o) = full_output {
+                data["fullOutput"] = serde_json::json!(o);
+            }
+            if let Some(s) = result_summary {
+                data["resultSummary"] = serde_json::json!(s);
             }
             if let Some(tu) = token_usage {
                 data["tokenUsage"] = tu.clone();
+            }
+            if let Some(m) = model {
+                data["model"] = serde_json::json!(m);
             }
             Some(data)
         }
         TronEvent::SubagentFailed {
             subagent_session_id,
             error,
-            duration_ms,
+            duration,
             ..
         } => Some(serde_json::json!({
             "subagentSessionId": subagent_session_id,
             "error": error,
-            "durationMs": duration_ms,
+            "duration": duration,
         })),
+        TronEvent::SubagentEvent {
+            subagent_session_id,
+            event,
+            ..
+        } => Some(serde_json::json!({
+            "subagentSessionId": subagent_session_id,
+            "event": event,
+        })),
+        TronEvent::SubagentResultAvailable {
+            parent_session_id,
+            subagent_session_id,
+            task,
+            result_summary,
+            success,
+            total_turns,
+            duration,
+            token_usage,
+            error,
+            completed_at,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "parentSessionId": parent_session_id,
+                "subagentSessionId": subagent_session_id,
+                "task": task,
+                "resultSummary": result_summary,
+                "success": success,
+                "totalTurns": total_turns,
+                "duration": duration,
+                "completedAt": completed_at,
+            });
+            if let Some(tu) = token_usage {
+                data["tokenUsage"] = tu.clone();
+            }
+            if let Some(e) = error {
+                data["error"] = serde_json::json!(e);
+            }
+            Some(data)
+        }
         // Events with no additional data (empty object so iOS can decode `data: {}`)
         TronEvent::AgentStart { .. }
         | TronEvent::AgentReady { .. }
@@ -767,12 +838,15 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         "context_cleared" => "agent.context_cleared",
         "message_deleted" => "agent.message_deleted",
         "rules_loaded" => "rules.loaded",
+        "rules_activated" => "rules.activated",
         "memory_loaded" => "memory.loaded",
         "skill_removed" => "agent.skill_removed",
         "subagent_spawned" => "agent.subagent_spawned",
         "subagent_status_update" => "agent.subagent_status",
         "subagent_completed" => "agent.subagent_completed",
         "subagent_failed" => "agent.subagent_failed",
+        "subagent_event" => "agent.subagent_event",
+        "subagent_result_available" => "agent.subagent_result_available",
         other => other,
     };
 
@@ -1437,12 +1511,15 @@ mod tests {
             TronEvent::ContextCleared { base: base.clone(), tokens_before: 0, tokens_after: 0 },
             TronEvent::MessageDeleted { base: base.clone(), target_event_id: "id".into(), target_type: "t".into(), target_turn: None, reason: None },
             TronEvent::RulesLoaded { base: base.clone(), total_files: 3, dynamic_rules_count: 1 },
+            TronEvent::RulesActivated { base: base.clone(), rules: vec![tron_core::events::ActivatedRuleInfo { relative_path: "src/.claude/CLAUDE.md".into(), scope_dir: "src".into() }], total_activated: 1 },
             TronEvent::MemoryLoaded { base: base.clone(), count: 2 },
             TronEvent::SkillRemoved { base: base.clone(), skill_name: "n".into() },
-            TronEvent::SubagentSpawned { base: base.clone(), subagent_session_id: "sub-1".into(), task: "t".into(), model: "m".into(), max_turns: 5, spawn_depth: 0 },
+            TronEvent::SubagentSpawned { base: base.clone(), subagent_session_id: "sub-1".into(), task: "t".into(), model: "m".into(), max_turns: 5, spawn_depth: 0, tool_call_id: None, blocking: true, working_directory: None },
             TronEvent::SubagentStatusUpdate { base: base.clone(), subagent_session_id: "sub-1".into(), status: "running".into(), current_turn: 1, activity: None },
-            TronEvent::SubagentCompleted { base: base.clone(), subagent_session_id: "sub-1".into(), total_turns: 3, duration_ms: 5000, output: None, token_usage: None },
-            TronEvent::SubagentFailed { base, subagent_session_id: "sub-1".into(), error: "e".into(), duration_ms: 1000 },
+            TronEvent::SubagentCompleted { base: base.clone(), subagent_session_id: "sub-1".into(), total_turns: 3, duration: 5000, full_output: None, result_summary: None, token_usage: None, model: None },
+            TronEvent::SubagentFailed { base: base.clone(), subagent_session_id: "sub-1".into(), error: "e".into(), duration: 1000 },
+            TronEvent::SubagentEvent { base: base.clone(), subagent_session_id: "sub-1".into(), event: serde_json::json!({"type": "text_delta"}) },
+            TronEvent::SubagentResultAvailable { base, parent_session_id: "p1".into(), subagent_session_id: "sub-1".into(), task: "t".into(), result_summary: "done".into(), success: true, total_turns: 2, duration: 3000, token_usage: None, error: None, completed_at: "2024-01-01T00:00:00Z".into() },
         ];
         for event in &events {
             let rpc = tron_event_to_rpc(event);
@@ -1732,5 +1809,117 @@ mod tests {
 
         drop(tx);
         let _ = handle.await;
+    }
+
+    // ── Subagent event wire format tests ──
+
+    #[test]
+    fn converts_subagent_spawned_with_new_fields() {
+        let event = TronEvent::SubagentSpawned {
+            base: BaseEvent::now("s1"),
+            subagent_session_id: "sub-1".into(),
+            task: "count files".into(),
+            model: "claude-sonnet-4-5-20250929".into(),
+            max_turns: 50,
+            spawn_depth: 0,
+            tool_call_id: Some("tc_42".into()),
+            blocking: false,
+            working_directory: Some("/tmp/project".into()),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.subagent_spawned");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["toolCallId"], "tc_42");
+        assert_eq!(data["blocking"], false);
+        assert_eq!(data["workingDirectory"], "/tmp/project");
+        assert_eq!(data["subagentSessionId"], "sub-1");
+    }
+
+    #[test]
+    fn converts_subagent_completed_with_new_fields() {
+        let event = TronEvent::SubagentCompleted {
+            base: BaseEvent::now("s1"),
+            subagent_session_id: "sub-1".into(),
+            total_turns: 3,
+            duration: 5000,
+            full_output: Some("Full result text".into()),
+            result_summary: Some("Full resu...".into()),
+            token_usage: Some(serde_json::json!({"input": 100})),
+            model: Some("claude-sonnet-4-5-20250929".into()),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.subagent_completed");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["duration"], 5000);
+        assert_eq!(data["fullOutput"], "Full result text");
+        assert_eq!(data["resultSummary"], "Full resu...");
+        assert_eq!(data["model"], "claude-sonnet-4-5-20250929");
+        assert_eq!(data["totalTurns"], 3);
+        // Verify durationMs is NOT present (renamed to duration)
+        assert!(data.get("durationMs").is_none());
+    }
+
+    #[test]
+    fn converts_subagent_failed_uses_duration() {
+        let event = TronEvent::SubagentFailed {
+            base: BaseEvent::now("s1"),
+            subagent_session_id: "sub-1".into(),
+            error: "provider error".into(),
+            duration: 1500,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.subagent_failed");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["duration"], 1500);
+        assert!(data.get("durationMs").is_none());
+    }
+
+    #[test]
+    fn converts_subagent_event() {
+        let inner = serde_json::json!({
+            "type": "text_delta",
+            "data": { "delta": "hello" },
+            "timestamp": "2024-01-01T00:00:00Z",
+        });
+        let event = TronEvent::SubagentEvent {
+            base: BaseEvent::now("s1"),
+            subagent_session_id: "sub-1".into(),
+            event: inner.clone(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.subagent_event");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["subagentSessionId"], "sub-1");
+        assert_eq!(data["event"], inner);
+    }
+
+    #[test]
+    fn converts_subagent_result_available() {
+        let event = TronEvent::SubagentResultAvailable {
+            base: BaseEvent::now("s1"),
+            parent_session_id: "parent-1".into(),
+            subagent_session_id: "sub-1".into(),
+            task: "count files".into(),
+            result_summary: "Found 42 files".into(),
+            success: true,
+            total_turns: 2,
+            duration: 3000,
+            token_usage: Some(serde_json::json!({"input": 50})),
+            error: None,
+            completed_at: "2024-01-01T00:00:00Z".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "agent.subagent_result_available");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["parentSessionId"], "parent-1");
+        assert_eq!(data["subagentSessionId"], "sub-1");
+        assert_eq!(data["task"], "count files");
+        assert_eq!(data["resultSummary"], "Found 42 files");
+        assert_eq!(data["success"], true);
+        assert_eq!(data["totalTurns"], 2);
+        assert_eq!(data["duration"], 3000);
+        assert_eq!(data["completedAt"], "2024-01-01T00:00:00Z");
+        assert_eq!(data["tokenUsage"]["input"], 50);
+        assert!(data.get("error").is_none());
     }
 }

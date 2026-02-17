@@ -115,6 +115,8 @@ pub struct AgentRuntimeSettings {
     pub max_turns: u32,
     /// Timeout for inactive sessions in milliseconds.
     pub inactive_session_timeout_ms: u64,
+    /// Maximum subagent nesting depth.
+    pub subagent_max_depth: u32,
 }
 
 impl Default for AgentRuntimeSettings {
@@ -122,6 +124,7 @@ impl Default for AgentRuntimeSettings {
         Self {
             max_turns: 100,
             inactive_session_timeout_ms: 1_800_000,
+            subagent_max_depth: 3,
         }
     }
 }
@@ -335,6 +338,18 @@ mod tests {
         let a = AgentRuntimeSettings::default();
         assert_eq!(a.max_turns, 100);
         assert_eq!(a.inactive_session_timeout_ms, 1_800_000);
+        assert_eq!(a.subagent_max_depth, 3);
+    }
+
+    #[test]
+    fn agent_serde_subagent_max_depth() {
+        let json = serde_json::json!({ "subagentMaxDepth": 5 });
+        let a: AgentRuntimeSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(a.subagent_max_depth, 5);
+        assert_eq!(a.max_turns, 100); // other fields default
+
+        let roundtrip = serde_json::to_value(&a).unwrap();
+        assert_eq!(roundtrip.get("subagentMaxDepth").unwrap(), 5);
     }
 
     #[test]

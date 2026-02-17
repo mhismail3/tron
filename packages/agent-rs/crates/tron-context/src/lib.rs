@@ -19,6 +19,7 @@ pub mod ledger_writer;
 pub mod llm_summarizer;
 pub mod loader;
 pub mod message_store;
+pub mod path_extractor;
 pub mod rules_discovery;
 pub mod rules_index;
 pub mod rules_tracker;

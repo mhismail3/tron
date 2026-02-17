@@ -1,4 +1,4 @@
-//! The [`EventType`] enum — all 59 session event type discriminators.
+//! The [`EventType`] enum — all 60 session event type discriminators.
 //!
 //! Every variant has an exact `#[serde(rename)]` matching the TypeScript
 //! string literal (e.g., `"session.start"`). This ensures wire-format
@@ -13,7 +13,7 @@ use std::str::FromStr;
 
 /// All session event types.
 ///
-/// The 59 variants cover every persisted event in the Tron event sourcing
+/// The 60 variants cover every persisted event in the Tron event sourcing
 /// system. Each variant serializes to the exact dot-separated string that
 /// iOS and the WebSocket protocol expect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -112,6 +112,9 @@ pub enum EventType {
     /// Rules indexed.
     #[serde(rename = "rules.indexed")]
     RulesIndexed,
+    /// Scoped rules activated by file path touches.
+    #[serde(rename = "rules.activated")]
+    RulesActivated,
 
     // -- Metadata --
     /// Session metadata updated.
@@ -243,7 +246,7 @@ pub enum EventType {
 /// All event type variants in definition order.
 ///
 /// Useful for iteration in tests and manifest generation.
-pub const ALL_EVENT_TYPES: [EventType; 59] = [
+pub const ALL_EVENT_TYPES: [EventType; 60] = [
     EventType::SessionStart,
     EventType::SessionEnd,
     EventType::SessionFork,
@@ -269,6 +272,7 @@ pub const ALL_EVENT_TYPES: [EventType; 59] = [
     EventType::SkillRemoved,
     EventType::RulesLoaded,
     EventType::RulesIndexed,
+    EventType::RulesActivated,
     EventType::MetadataUpdate,
     EventType::MetadataTag,
     EventType::FileRead,
@@ -335,6 +339,7 @@ impl EventType {
             Self::SkillRemoved => "skill.removed",
             Self::RulesLoaded => "rules.loaded",
             Self::RulesIndexed => "rules.indexed",
+            Self::RulesActivated => "rules.activated",
             Self::MetadataUpdate => "metadata.update",
             Self::MetadataTag => "metadata.tag",
             Self::FileRead => "file.read",
@@ -454,7 +459,10 @@ impl EventType {
     /// Whether this is a rules event (`rules.*`).
     #[must_use]
     pub fn is_rules_type(self) -> bool {
-        matches!(self, Self::RulesLoaded | Self::RulesIndexed)
+        matches!(
+            self,
+            Self::RulesLoaded | Self::RulesIndexed | Self::RulesActivated
+        )
     }
 
     /// Whether this is a memory event (`memory.*`).
@@ -528,7 +536,7 @@ mod tests {
     use super::*;
 
     /// Canonical mapping: (variant, expected string).
-    const EXPECTED: [(EventType, &str); 59] = [
+    const EXPECTED: [(EventType, &str); 60] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -554,6 +562,7 @@ mod tests {
         (EventType::SkillRemoved, "skill.removed"),
         (EventType::RulesLoaded, "rules.loaded"),
         (EventType::RulesIndexed, "rules.indexed"),
+        (EventType::RulesActivated, "rules.activated"),
         (EventType::MetadataUpdate, "metadata.update"),
         (EventType::MetadataTag, "metadata.tag"),
         (EventType::FileRead, "file.read"),
@@ -591,8 +600,8 @@ mod tests {
     ];
 
     #[test]
-    fn all_event_types_constant_has_59_variants() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 59);
+    fn all_event_types_constant_has_60_variants() {
+        assert_eq!(ALL_EVENT_TYPES.len(), 60);
     }
 
     #[test]
@@ -724,6 +733,7 @@ mod tests {
     fn is_rules_type() {
         assert!(EventType::RulesLoaded.is_rules_type());
         assert!(EventType::RulesIndexed.is_rules_type());
+        assert!(EventType::RulesActivated.is_rules_type());
         assert!(!EventType::SkillAdded.is_rules_type());
     }
 

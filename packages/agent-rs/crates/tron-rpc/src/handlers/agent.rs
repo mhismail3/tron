@@ -438,16 +438,23 @@ impl MethodHandler for PromptHandler {
                 use tron_runtime::orchestrator::agent_runner::run_agent;
                 use tron_runtime::types::{AgentConfig, RunContext};
 
-                // 1. Resume session to get reconstructed state (messages, model, etc.)
-                let state = match session_manager.resume_session(&session_id_clone) {
-                    Ok(active) => active.state.clone(),
+                // 1. Resume session to get reconstructed state + persister
+                let (state, persister) = match session_manager.resume_session(&session_id_clone) {
+                    Ok(active) => (active.state.clone(), active.context.persister.clone()),
                     Err(e) => {
                         warn!(session_id = %session_id_clone, error = %e, "failed to resume session, starting fresh");
-                        tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
+                        let fresh_state = tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
                             model: model.clone(),
                             working_directory: Some(working_dir.clone()),
                             ..Default::default()
-                        }
+                        };
+                        let fresh_persister = std::sync::Arc::new(
+                            tron_runtime::orchestrator::event_persister::EventPersister::new(
+                                event_store.clone(),
+                                session_id_clone.clone(),
+                            ),
+                        );
+                        (fresh_state, fresh_persister)
                     }
                 };
 
@@ -478,6 +485,61 @@ impl MethodHandler for PromptHandler {
 
                 // 4. Merge rules (global first, then project)
                 let combined_rules = tron_context::loader::merge_rules(global_rules, project_rules);
+
+                // 4b. Discover scoped rules for dynamic path-based activation
+                let rules_index = {
+                    let wd_path = std::path::Path::new(&working_dir);
+                    let rules_settings = tron_settings::get_settings();
+                    let config = tron_context::rules_discovery::RulesDiscoveryConfig {
+                        project_root: wd_path.to_path_buf(),
+                        discover_standalone_files: rules_settings
+                            .context
+                            .rules
+                            .discover_standalone_files,
+                        exclude_root_level: true,
+                        ..Default::default()
+                    };
+                    let discovered = tron_context::rules_discovery::discover_rules_files(&config);
+                    if discovered.is_empty() {
+                        None
+                    } else {
+                        Some(tron_context::rules_index::RulesIndex::new(discovered))
+                    }
+                };
+
+                // 4c. Reconstruct prior rule activations on session resume
+                let is_resumed = !state.messages.is_empty();
+                let pre_activated_rules = if is_resumed {
+                    let events = event_store
+                        .get_events_by_type(
+                            &session_id_clone,
+                            &["rules.activated", "compact.boundary", "compact.summary", "context.cleared"],
+                            None,
+                        )
+                        .unwrap_or_default();
+                    let boundary_types = ["compact.boundary", "compact.summary", "context.cleared"];
+                    let mut activated: Vec<String> = Vec::new();
+                    for event in &events {
+                        if boundary_types.contains(&event.event_type.as_str()) {
+                            activated.clear();
+                        } else if event.event_type == "rules.activated" {
+                            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
+                                if let Some(rules) = payload.get("rules").and_then(|r| r.as_array()) {
+                                    for rule in rules {
+                                        if let Some(p) = rule.get("relativePath").and_then(|v| v.as_str()) {
+                                            if !activated.contains(&p.to_owned()) {
+                                                activated.push(p.to_owned());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    activated
+                } else {
+                    vec![]
+                };
 
                 // 5. Load workspace memory from ledger entries
                 // (rules.loaded / memory.loaded events are emitted optimistically
@@ -571,22 +633,18 @@ impl MethodHandler for PromptHandler {
                         is_subagent: false,
                         denied_tools: vec![],
                         subagent_depth: 0,
-                        subagent_max_depth: 3,
+                        subagent_max_depth: settings.agent.subagent_max_depth,
                         rules_content: combined_rules,
                         initial_messages: messages,
                         memory_content: memory,
+                        rules_index,
+                        pre_activated_rules,
                     },
                 );
 
                 agent.set_abort_token(cancel_token);
 
-                // 7a. Create inline persister — events are written during turn execution
-                let persister = std::sync::Arc::new(
-                    tron_runtime::orchestrator::event_persister::EventPersister::new(
-                        event_store.clone(),
-                        session_id_clone.clone(),
-                    ),
-                );
+                // 7a. Attach the session's persister — events are written during turn execution
                 agent.set_persister(Some(persister.clone()));
 
                 // 7b. Persist message.user event BEFORE agent runs (matches TS server)

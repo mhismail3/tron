@@ -328,6 +328,27 @@ impl RulesTracker {
         self.activated_scoped_rules.len()
     }
 
+    /// Pre-activate a rule by its relative path (for session reconstruction).
+    ///
+    /// Looks up the rule in the index and activates it without a file path
+    /// touch. Returns `true` if the rule was newly activated.
+    pub fn pre_activate(&mut self, rule_relative_path: &str) -> bool {
+        let Some(index) = &self.rules_index else {
+            return false;
+        };
+        let Some(rule) = index.find_by_relative_path(rule_relative_path).cloned() else {
+            return false;
+        };
+        if self.activated_keys.insert(rule.relative_path.clone()) {
+            self.activated_scoped_rules
+                .push((rule.relative_path.clone(), rule));
+            self.dynamic_content_dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Clear dynamic activation state (for compaction boundary).
     ///
     /// Resets touched paths and activated rules but preserves the index.
@@ -814,6 +835,77 @@ mod tests {
         tracker.set_rules_index(index);
 
         assert!(tracker.has_rules());
+    }
+
+    // -- Pre-activate --
+
+    #[test]
+    fn pre_activate_activates_by_relative_path() {
+        let scoped = make_scoped_rule(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            "# Context rules",
+        );
+        let index = RulesIndex::new(vec![scoped]);
+        let mut tracker = RulesTracker::new();
+        tracker.set_rules_index(index);
+
+        assert!(tracker.pre_activate("src/context/.claude/CLAUDE.md"));
+        assert_eq!(tracker.activated_scoped_rules_count(), 1);
+    }
+
+    #[test]
+    fn pre_activate_unknown_path_returns_false() {
+        let scoped = make_scoped_rule(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            "# Rules",
+        );
+        let index = RulesIndex::new(vec![scoped]);
+        let mut tracker = RulesTracker::new();
+        tracker.set_rules_index(index);
+
+        assert!(!tracker.pre_activate("nonexistent/.claude/CLAUDE.md"));
+        assert_eq!(tracker.activated_scoped_rules_count(), 0);
+    }
+
+    #[test]
+    fn pre_activate_already_activated_is_idempotent() {
+        let scoped = make_scoped_rule(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            "# Rules",
+        );
+        let index = RulesIndex::new(vec![scoped]);
+        let mut tracker = RulesTracker::new();
+        tracker.set_rules_index(index);
+
+        assert!(tracker.pre_activate("src/context/.claude/CLAUDE.md"));
+        assert!(!tracker.pre_activate("src/context/.claude/CLAUDE.md"));
+        assert_eq!(tracker.activated_scoped_rules_count(), 1);
+    }
+
+    #[test]
+    fn pre_activate_without_index_returns_false() {
+        let mut tracker = RulesTracker::new();
+        assert!(!tracker.pre_activate("anything/.claude/CLAUDE.md"));
+    }
+
+    #[test]
+    fn pre_activate_makes_content_available() {
+        let scoped = make_scoped_rule(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            "# Context rules",
+        );
+        let index = RulesIndex::new(vec![scoped]);
+        let mut tracker = RulesTracker::new();
+        tracker.set_rules_index(index);
+
+        let _ = tracker.pre_activate("src/context/.claude/CLAUDE.md");
+        let content = tracker.build_dynamic_rules_content().unwrap();
+        assert!(content.contains("# Context rules"));
+        assert!(content.contains("(activated)"));
     }
 
     // -- Event sourcing --

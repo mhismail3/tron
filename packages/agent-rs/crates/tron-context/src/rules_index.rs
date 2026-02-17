@@ -98,6 +98,15 @@ impl RulesIndex {
     pub fn scoped_count(&self) -> usize {
         self.scoped_rules.len()
     }
+
+    /// Find a rule by its relative path (exact match).
+    #[must_use]
+    pub fn find_by_relative_path(&self, relative_path: &str) -> Option<&DiscoveredRulesFile> {
+        self.global_rules
+            .iter()
+            .chain(self.scoped_rules.iter())
+            .find(|r| r.relative_path == relative_path)
+    }
 }
 
 /// Check if a file path falls under a scope directory.
@@ -275,6 +284,31 @@ mod tests {
             1
         );
         assert!(index.match_path("src/runtime/agent.ts").is_empty());
+    }
+
+    #[test]
+    fn find_by_relative_path_returns_scoped_rule() {
+        let scoped = make_scoped("packages/agent", "packages/agent/.claude/CLAUDE.md");
+        let index = RulesIndex::new(vec![scoped]);
+        let found = index.find_by_relative_path("packages/agent/.claude/CLAUDE.md");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().scope_dir, "packages/agent");
+    }
+
+    #[test]
+    fn find_by_relative_path_returns_global_rule() {
+        let global = make_global(".claude/CLAUDE.md");
+        let index = RulesIndex::new(vec![global]);
+        let found = index.find_by_relative_path(".claude/CLAUDE.md");
+        assert!(found.is_some());
+        assert!(found.unwrap().is_global);
+    }
+
+    #[test]
+    fn find_by_relative_path_returns_none_for_unknown() {
+        let scoped = make_scoped("packages/agent", "packages/agent/.claude/CLAUDE.md");
+        let index = RulesIndex::new(vec![scoped]);
+        assert!(index.find_by_relative_path("nonexistent.md").is_none());
     }
 
     #[test]

@@ -7,7 +7,8 @@ use serde_json::json;
 use tron_context::context_manager::ContextManager;
 use tron_core::content::AssistantContent;
 use tron_core::events::{
-    BaseEvent, CompactionReason, ResponseTokenUsage, ToolCallSummary, TronEvent, TurnTokenUsage,
+    ActivatedRuleInfo, BaseEvent, CompactionReason, ResponseTokenUsage, ToolCallSummary,
+    TronEvent, TurnTokenUsage,
 };
 use tron_core::messages::{Message, ToolResultMessageContent};
 use tron_guardrails::GuardrailEngine;
@@ -51,7 +52,7 @@ pub async fn execute_turn(
     let turn_start = Instant::now();
 
     // 1. Check context capacity (compact if needed)
-    if let Err(e) = compaction
+    match compaction
         .check_and_compact(
             context_manager,
             hooks,
@@ -61,12 +62,18 @@ pub async fn execute_turn(
         )
         .await
     {
-        return TurnResult {
-            success: false,
-            error: Some(format!("Compaction error: {e}")),
-            stop_reason: Some(StopReason::Error),
-            ..Default::default()
-        };
+        Err(e) => {
+            return TurnResult {
+                success: false,
+                error: Some(format!("Compaction error: {e}")),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+        Ok(true) => {
+            context_manager.clear_dynamic_rules();
+        }
+        Ok(false) => {}
     }
 
     // 2. Emit TurnStart and persist (TS persists stream.turn_start events)
@@ -287,6 +294,7 @@ pub async fn execute_turn(
     // 9. Execute tool calls if present
     let mut tool_calls_executed = 0;
     let mut stop_turn_requested = false;
+    let mut all_activations: Vec<ActivatedRuleInfo> = Vec::new();
 
     if !stream_result.tool_calls.is_empty() {
         // Emit ToolUseBatch
@@ -378,10 +386,45 @@ pub async fn execute_turn(
                 is_error: if is_error { Some(true) } else { None },
             });
 
+            // Extract file paths from tool call and activate matching scoped rules
+            let touched = tron_context::path_extractor::extract_touched_paths(
+                &tc.name,
+                &tc.arguments,
+                std::path::Path::new(&working_dir),
+                std::path::Path::new(&working_dir),
+            );
+            for path in &touched {
+                let new_acts = context_manager.touch_file_path(path);
+                all_activations.extend(new_acts);
+            }
+
             if exec_result.stops_turn {
                 stop_turn_requested = true;
                 break;
             }
+        }
+    }
+
+    // 9b. Emit batched rules.activated if any new rules were activated this turn
+    if !all_activations.is_empty() {
+        let total = context_manager.rules_tracker().activated_scoped_rules_count() as u32;
+        let _ = emitter.emit(TronEvent::RulesActivated {
+            base: BaseEvent::now(session_id),
+            rules: all_activations.clone(),
+            total_activated: total,
+        });
+        if let Some(p) = persister {
+            p.append_fire_and_forget(
+                session_id,
+                EventType::RulesActivated,
+                json!({
+                    "rules": all_activations.iter().map(|a| json!({
+                        "relativePath": a.relative_path,
+                        "scopeDir": a.scope_dir,
+                    })).collect::<Vec<_>>(),
+                    "totalActivated": total,
+                }),
+            );
         }
     }
 

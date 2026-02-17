@@ -5,12 +5,15 @@
 //! compaction, tool result processing, model switching, and system
 //! prompt management.
 
+use tron_core::events::ActivatedRuleInfo;
 use tron_core::messages::Message;
 
 use crate::compaction_engine::{CompactionDeps, CompactionEngine};
 use crate::constants::{CHARS_PER_TOKEN, Thresholds, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS};
 use crate::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
 use crate::message_store::MessageStore;
+use crate::rules_index::RulesIndex;
+use crate::rules_tracker::RulesTracker;
 use crate::summarizer::Summarizer;
 use crate::system_prompts;
 use crate::token_estimator;
@@ -42,6 +45,8 @@ pub struct ContextManager {
     session_memories: Vec<SessionMemoryEntry>,
     /// Callback for when compaction is needed.
     on_compaction_needed: Option<Box<dyn Fn() + Send + Sync>>,
+    /// Rules tracker for dynamic scoped-rule activation.
+    rules_tracker: RulesTracker,
 }
 
 impl ContextManager {
@@ -70,6 +75,7 @@ impl ContextManager {
             memory_content: None,
             session_memories: Vec::new(),
             on_compaction_needed: None,
+            rules_tracker: RulesTracker::new(),
         }
     }
 
@@ -124,6 +130,64 @@ impl ContextManager {
     /// Set the dynamic (path-scoped) rules content.
     pub fn set_dynamic_rules_content(&mut self, content: Option<String>) {
         self.dynamic_rules_content = content;
+    }
+
+    // ── Dynamic rules activation ───────────────────────────────────────
+
+    /// Set the rules index for dynamic path-scoped activation.
+    pub fn set_rules_index(&mut self, index: RulesIndex) {
+        self.rules_tracker.set_rules_index(index);
+    }
+
+    /// Record a file path touch and activate matching scoped rules.
+    ///
+    /// Returns info about newly activated rules (empty if no new activations).
+    pub fn touch_file_path(&mut self, relative_path: &str) -> Vec<ActivatedRuleInfo> {
+        if !self.rules_tracker.touch_path(relative_path) {
+            return vec![];
+        }
+        // Rebuild dynamic content after new activations
+        let content = self
+            .rules_tracker
+            .build_dynamic_rules_content()
+            .map(String::from);
+        self.dynamic_rules_content = content;
+
+        // Return all activated rules (caller decides which are "new" based on batch)
+        self.rules_tracker
+            .activated_rules()
+            .iter()
+            .map(|r| ActivatedRuleInfo {
+                relative_path: r.relative_path.clone(),
+                scope_dir: r.scope_dir.clone(),
+            })
+            .collect()
+    }
+
+    /// Clear dynamic rules state (for compaction boundary).
+    pub fn clear_dynamic_rules(&mut self) {
+        self.rules_tracker.clear_dynamic_state();
+        self.dynamic_rules_content = None;
+    }
+
+    /// Pre-activate a rule by its relative path (for session reconstruction).
+    pub fn pre_activate_rule(&mut self, rule_relative_path: &str) -> bool {
+        self.rules_tracker.pre_activate(rule_relative_path)
+    }
+
+    /// Rebuild dynamic_rules_content from current tracker state.
+    ///
+    /// Call after `pre_activate_rule()` batch to update the content field.
+    pub fn finalize_rule_activations(&mut self) {
+        if let Some(content) = self.rules_tracker.build_dynamic_rules_content() {
+            self.dynamic_rules_content = Some(content.to_owned());
+        }
+    }
+
+    /// Get a reference to the rules tracker.
+    #[must_use]
+    pub fn rules_tracker(&self) -> &RulesTracker {
+        &self.rules_tracker
     }
 
     /// Set the workspace memory content.
@@ -670,6 +734,179 @@ mod tests {
         assert!(cm.get_api_context_tokens().is_some());
         cm.clear_messages();
         assert!(cm.get_api_context_tokens().is_none());
+    }
+
+    // -- dynamic rules integration --
+
+    fn make_discovered(
+        scope_dir: &str,
+        relative_path: &str,
+        is_global: bool,
+        content: &str,
+    ) -> crate::rules_discovery::DiscoveredRulesFile {
+        crate::rules_discovery::DiscoveredRulesFile {
+            path: std::path::PathBuf::from(format!("/project/{relative_path}")),
+            relative_path: relative_path.to_owned(),
+            content: content.to_owned(),
+            scope_dir: scope_dir.to_owned(),
+            is_global,
+            is_standalone: false,
+            size_bytes: content.len() as u64,
+            modified_at: std::time::SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn touch_file_path_without_index_returns_empty() {
+        let mut cm = ContextManager::new(test_config());
+        let result = cm.touch_file_path("src/foo.rs");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn touch_file_path_activates_matching_rule() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Context rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+
+        let result = cm.touch_file_path("src/context/loader.rs");
+        assert!(!result.is_empty());
+        assert_eq!(result[0].scope_dir, "src/context");
+    }
+
+    #[test]
+    fn touch_file_path_updates_dynamic_rules_content() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Context rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+
+        assert!(cm.get_dynamic_rules_content().is_none());
+        let _ = cm.touch_file_path("src/context/loader.rs");
+        assert!(cm.get_dynamic_rules_content().is_some());
+        assert!(cm
+            .get_dynamic_rules_content()
+            .unwrap()
+            .contains("# Context rules"));
+    }
+
+    #[test]
+    fn touch_file_path_idempotent_for_same_scope() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+
+        let r1 = cm.touch_file_path("src/context/a.rs");
+        let r2 = cm.touch_file_path("src/context/b.rs");
+        assert!(!r1.is_empty());
+        assert!(r2.is_empty()); // Same scope, no new activation
+    }
+
+    #[test]
+    fn clear_dynamic_rules_resets_content_and_tracker() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+        let _ = cm.touch_file_path("src/context/loader.rs");
+        assert!(cm.get_dynamic_rules_content().is_some());
+
+        cm.clear_dynamic_rules();
+        assert!(cm.get_dynamic_rules_content().is_none());
+        assert_eq!(cm.rules_tracker().activated_scoped_rules_count(), 0);
+    }
+
+    #[test]
+    fn clear_dynamic_rules_allows_reactivation() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+        let _ = cm.touch_file_path("src/context/loader.rs");
+
+        cm.clear_dynamic_rules();
+
+        // Should activate again
+        let result = cm.touch_file_path("src/context/loader.rs");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn pre_activate_rule_sets_content() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Context rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+
+        assert!(cm.pre_activate_rule("src/context/.claude/CLAUDE.md"));
+        cm.finalize_rule_activations();
+        assert!(cm
+            .get_dynamic_rules_content()
+            .unwrap()
+            .contains("# Context rules"));
+    }
+
+    #[test]
+    fn pre_activate_rule_unknown_returns_false() {
+        let mut cm = ContextManager::new(test_config());
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+
+        assert!(!cm.pre_activate_rule("nonexistent/.claude/CLAUDE.md"));
+    }
+
+    #[test]
+    fn set_rules_index_enables_activation() {
+        let mut cm = ContextManager::new(test_config());
+        // No index → no activation
+        assert!(cm.touch_file_path("src/context/loader.rs").is_empty());
+
+        // Set index → activation works
+        let scoped = make_discovered(
+            "src/context",
+            "src/context/.claude/CLAUDE.md",
+            false,
+            "# Rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scoped]));
+        assert!(!cm.touch_file_path("src/context/loader.rs").is_empty());
+    }
+
+    #[test]
+    fn rules_tracker_accessible_via_getter() {
+        let cm = ContextManager::new(test_config());
+        assert_eq!(cm.rules_tracker().activated_scoped_rules_count(), 0);
     }
 
     // -- rules & memory --

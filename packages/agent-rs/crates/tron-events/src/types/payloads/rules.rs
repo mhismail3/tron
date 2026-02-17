@@ -60,3 +60,23 @@ pub struct RulesIndexedFile {
     /// File size in bytes.
     pub size_bytes: i64,
 }
+
+/// Payload for `rules.activated` events.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesActivatedPayload {
+    /// Rules that were activated this turn.
+    pub rules: Vec<RulesActivatedEntry>,
+    /// Total number of activated scoped rules (cumulative).
+    pub total_activated: u32,
+}
+
+/// A single activated rule entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesActivatedEntry {
+    /// Relative path of the rules file.
+    pub relative_path: String,
+    /// Scope directory this rule applies to.
+    pub scope_dir: String,
+}

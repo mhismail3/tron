@@ -238,6 +238,7 @@ mod tests {
             skills: None,
             max_depth: 0,
             current_depth: 0,
+            tool_call_id: None,
         };
         let err = spawner.spawn(config).await;
         assert!(err.is_err());

@@ -102,6 +102,8 @@ pub enum SessionEventPayload {
     RulesLoaded(payloads::rules::RulesLoadedPayload),
     /// `rules.indexed`
     RulesIndexed(payloads::rules::RulesIndexedPayload),
+    /// `rules.activated`
+    RulesActivated(payloads::rules::RulesActivatedPayload),
     /// `metadata.update`
     MetadataUpdate(payloads::metadata::MetadataUpdatePayload),
     /// `metadata.tag`
@@ -203,6 +205,7 @@ impl SessionEvent {
             EventType::SkillRemoved => Ok(SessionEventPayload::SkillRemoved(serde_json::from_value(self.payload.clone())?)),
             EventType::RulesLoaded => Ok(SessionEventPayload::RulesLoaded(serde_json::from_value(self.payload.clone())?)),
             EventType::RulesIndexed => Ok(SessionEventPayload::RulesIndexed(serde_json::from_value(self.payload.clone())?)),
+            EventType::RulesActivated => Ok(SessionEventPayload::RulesActivated(serde_json::from_value(self.payload.clone())?)),
             EventType::MetadataUpdate => Ok(SessionEventPayload::MetadataUpdate(serde_json::from_value(self.payload.clone())?)),
             EventType::MetadataTag => Ok(SessionEventPayload::MetadataTag(serde_json::from_value(self.payload.clone())?)),
             EventType::FileRead => Ok(SessionEventPayload::FileRead(serde_json::from_value(self.payload.clone())?)),

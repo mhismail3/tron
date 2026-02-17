@@ -253,6 +253,16 @@ pub enum BackgroundHookResult {
     Error,
 }
 
+/// Info about a dynamically activated scoped rule.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivatedRuleInfo {
+    /// Path relative to project root (e.g., `src/context/.claude/CLAUDE.md`).
+    pub relative_path: String,
+    /// Directory this rule applies to (e.g., `src/context`).
+    pub scope_dir: String,
+}
+
 /// Compaction trigger reason.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -956,6 +966,19 @@ pub enum TronEvent {
         dynamic_rules_count: u32,
     },
 
+    /// Scoped rules activated by file path touches.
+    #[serde(rename = "rules_activated")]
+    RulesActivated {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Newly activated rules.
+        rules: Vec<ActivatedRuleInfo>,
+        /// Total number of activated scoped rules (cumulative).
+        #[serde(rename = "totalActivated")]
+        total_activated: u32,
+    },
+
     /// Memory loaded (memory context loaded).
     #[serde(rename = "memory_loaded")]
     MemoryLoaded {
@@ -998,6 +1021,14 @@ pub enum TronEvent {
         /// Nesting depth.
         #[serde(rename = "spawnDepth")]
         spawn_depth: u32,
+        /// Tool call ID that triggered the spawn.
+        #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        /// Whether the subagent blocks the parent.
+        blocking: bool,
+        /// Working directory for the subagent.
+        #[serde(rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
+        working_directory: Option<String>,
     },
 
     /// Subagent status update (forwarded child events).
@@ -1032,14 +1063,19 @@ pub enum TronEvent {
         #[serde(rename = "totalTurns")]
         total_turns: u32,
         /// Duration in milliseconds.
-        #[serde(rename = "durationMs")]
-        duration_ms: u64,
-        /// Output text.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        output: Option<String>,
+        duration: u64,
+        /// Full output text.
+        #[serde(rename = "fullOutput", skip_serializing_if = "Option::is_none")]
+        full_output: Option<String>,
+        /// Truncated result summary.
+        #[serde(rename = "resultSummary", skip_serializing_if = "Option::is_none")]
+        result_summary: Option<String>,
         /// Token usage.
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<Value>,
+        /// Model used.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
 
     /// Subagent failed.
@@ -1054,8 +1090,55 @@ pub enum TronEvent {
         /// Error message.
         error: String,
         /// Duration in milliseconds.
-        #[serde(rename = "durationMs")]
-        duration_ms: u64,
+        duration: u64,
+    },
+
+    /// Forwarded child event (streaming content for iOS detail sheet).
+    #[serde(rename = "subagent_event")]
+    SubagentEvent {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Child session ID.
+        #[serde(rename = "subagentSessionId")]
+        subagent_session_id: String,
+        /// Mapped child event payload.
+        event: Value,
+    },
+
+    /// Non-blocking subagent result available (WebSocket notification).
+    #[serde(rename = "subagent_result_available")]
+    SubagentResultAvailable {
+        /// Base fields.
+        #[serde(flatten)]
+        base: BaseEvent,
+        /// Parent session ID.
+        #[serde(rename = "parentSessionId")]
+        parent_session_id: String,
+        /// Child session ID.
+        #[serde(rename = "subagentSessionId")]
+        subagent_session_id: String,
+        /// Task description.
+        task: String,
+        /// Truncated result summary.
+        #[serde(rename = "resultSummary")]
+        result_summary: String,
+        /// Whether the subagent succeeded.
+        success: bool,
+        /// Total turns executed.
+        #[serde(rename = "totalTurns")]
+        total_turns: u32,
+        /// Duration in milliseconds.
+        duration: u64,
+        /// Token usage.
+        #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
+        token_usage: Option<Value>,
+        /// Error message (if failed).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        /// ISO 8601 completion timestamp.
+        #[serde(rename = "completedAt")]
+        completed_at: String,
     },
 }
 
@@ -1104,12 +1187,15 @@ impl TronEvent {
             | Self::ContextCleared { base, .. }
             | Self::MessageDeleted { base, .. }
             | Self::RulesLoaded { base, .. }
+            | Self::RulesActivated { base, .. }
             | Self::MemoryLoaded { base, .. }
             | Self::SkillRemoved { base, .. }
             | Self::SubagentSpawned { base, .. }
             | Self::SubagentStatusUpdate { base, .. }
             | Self::SubagentCompleted { base, .. }
-            | Self::SubagentFailed { base, .. } => base,
+            | Self::SubagentFailed { base, .. }
+            | Self::SubagentEvent { base, .. }
+            | Self::SubagentResultAvailable { base, .. } => base,
         }
     }
 
@@ -1169,12 +1255,15 @@ impl TronEvent {
             Self::ContextCleared { .. } => "context_cleared",
             Self::MessageDeleted { .. } => "message_deleted",
             Self::RulesLoaded { .. } => "rules_loaded",
+            Self::RulesActivated { .. } => "rules_activated",
             Self::MemoryLoaded { .. } => "memory_loaded",
             Self::SkillRemoved { .. } => "skill_removed",
             Self::SubagentSpawned { .. } => "subagent_spawned",
             Self::SubagentStatusUpdate { .. } => "subagent_status_update",
             Self::SubagentCompleted { .. } => "subagent_completed",
             Self::SubagentFailed { .. } => "subagent_failed",
+            Self::SubagentEvent { .. } => "subagent_event",
+            Self::SubagentResultAvailable { .. } => "subagent_result_available",
         }
     }
 
@@ -1851,6 +1940,14 @@ mod tests {
                 total_files: 3,
                 dynamic_rules_count: 1,
             },
+            TronEvent::RulesActivated {
+                base: base.clone(),
+                rules: vec![ActivatedRuleInfo {
+                    relative_path: "src/.claude/CLAUDE.md".into(),
+                    scope_dir: "src".into(),
+                }],
+                total_activated: 1,
+            },
             TronEvent::MemoryLoaded {
                 base: base.clone(),
                 count: 2,
@@ -1866,6 +1963,9 @@ mod tests {
                 model: "m".into(),
                 max_turns: 50,
                 spawn_depth: 0,
+                tool_call_id: None,
+                blocking: true,
+                working_directory: None,
             },
             TronEvent::SubagentStatusUpdate {
                 base: base.clone(),
@@ -1878,25 +1978,45 @@ mod tests {
                 base: base.clone(),
                 subagent_session_id: "sub-1".into(),
                 total_turns: 3,
-                duration_ms: 5000,
-                output: None,
+                duration: 5000,
+                full_output: None,
+                result_summary: None,
                 token_usage: None,
+                model: None,
             },
             TronEvent::SubagentFailed {
-                base,
+                base: base.clone(),
                 subagent_session_id: "sub-1".into(),
                 error: "e".into(),
-                duration_ms: 1000,
+                duration: 1000,
+            },
+            TronEvent::SubagentEvent {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                event: json!({"type": "text_delta", "data": {"delta": "hi"}}),
+            },
+            TronEvent::SubagentResultAvailable {
+                base,
+                parent_session_id: "p1".into(),
+                subagent_session_id: "sub-1".into(),
+                task: "t".into(),
+                result_summary: "done".into(),
+                success: true,
+                total_turns: 2,
+                duration: 3000,
+                token_usage: None,
+                error: None,
+                completed_at: "2024-01-01T00:00:00Z".into(),
             },
         ];
 
-        // All 41 variants
-        assert_eq!(events.len(), 41);
+        // All 44 variants
+        assert_eq!(events.len(), 44);
 
         let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
         types.sort();
         types.dedup();
-        assert_eq!(types.len(), 41);
+        assert_eq!(types.len(), 44);
     }
 
     #[test]

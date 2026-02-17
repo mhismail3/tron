@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use tron_context::context_manager::ContextManager;
+use tron_context::rules_index::RulesIndex;
 use tron_context::types::ContextManagerConfig;
 use tron_core::messages::Message;
 use tron_guardrails::GuardrailEngine;
@@ -37,6 +38,10 @@ pub struct CreateAgentOpts {
     pub initial_messages: Vec<Message>,
     /// Workspace memory content (~/.tron/notes/MEMORY.md).
     pub memory_content: Option<String>,
+    /// Scoped rules index for dynamic path-based activation.
+    pub rules_index: Option<RulesIndex>,
+    /// Rule relative paths to pre-activate (from session reconstruction).
+    pub pre_activated_rules: Vec<String>,
 }
 
 /// Factory for constructing `TronAgent` instances.
@@ -45,10 +50,13 @@ pub struct AgentFactory;
 impl AgentFactory {
     /// Create a new agent for the given session.
     pub fn create_agent(
-        config: AgentConfig,
+        mut config: AgentConfig,
         session_id: String,
         opts: CreateAgentOpts,
     ) -> TronAgent {
+        config.subagent_depth = opts.subagent_depth;
+        config.subagent_max_depth = opts.subagent_max_depth;
+
         let mut registry = opts.tools;
 
         // Remove denied tools for subagents
@@ -97,6 +105,17 @@ impl AgentFactory {
             context_manager.set_memory_content(opts.memory_content);
         }
 
+        // Wire scoped-rules index for dynamic activation
+        if let Some(index) = opts.rules_index {
+            context_manager.set_rules_index(index);
+        }
+        for path in &opts.pre_activated_rules {
+            let _ = context_manager.pre_activate_rule(path);
+        }
+        if !opts.pre_activated_rules.is_empty() {
+            context_manager.finalize_rule_activations();
+        }
+
         TronAgent::new(
             config,
             opts.provider,
@@ -131,6 +150,8 @@ mod tests {
             rules_content: None,
             initial_messages: vec![],
             memory_content: None,
+            rules_index: None,
+            pre_activated_rules: vec![],
         }
     }
 
@@ -289,6 +310,33 @@ mod tests {
             agent.context_manager().get_context_limit(),
             tron_tokens::get_context_limit("gemini-2.5-pro")
         );
+    }
+
+    #[test]
+    fn factory_applies_depth_from_opts() {
+        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        opts.subagent_depth = 1;
+        opts.subagent_max_depth = 3;
+
+        let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
+        assert_eq!(agent.subagent_depth(), 1);
+        assert_eq!(agent.subagent_max_depth(), 3);
+    }
+
+    #[test]
+    fn factory_overrides_config_depth_with_opts() {
+        let config = AgentConfig {
+            subagent_depth: 99,
+            subagent_max_depth: 99,
+            ..AgentConfig::default()
+        };
+        let mut opts = default_opts(Arc::new(MockProvider), ToolRegistry::new());
+        opts.subagent_depth = 2;
+        opts.subagent_max_depth = 5;
+
+        let agent = AgentFactory::create_agent(config, "s1".into(), opts);
+        assert_eq!(agent.subagent_depth(), 2);
+        assert_eq!(agent.subagent_max_depth(), 5);
     }
 
     // ── Subagent tool removal tests ──

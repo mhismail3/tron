@@ -295,6 +295,18 @@ impl TronAgent {
     pub fn emitter(&self) -> &Arc<EventEmitter> {
         &self.emitter
     }
+
+}
+
+#[cfg(test)]
+impl TronAgent {
+    pub(crate) fn subagent_depth(&self) -> u32 {
+        self.config.subagent_depth
+    }
+
+    pub(crate) fn subagent_max_depth(&self) -> u32 {
+        self.config.subagent_max_depth
+    }
 }
 
 #[cfg(test)]

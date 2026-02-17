@@ -27,7 +27,6 @@ use tron_tools::traits::{
 use crate::agent::event_emitter::EventEmitter;
 use crate::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
 use crate::orchestrator::agent_runner;
-use crate::orchestrator::event_persister::EventPersister;
 use crate::orchestrator::session_manager::SessionManager;
 use crate::types::{AgentConfig as AgentCfg, ReasoningLevel, RunContext};
 
@@ -109,15 +108,10 @@ pub struct SubsessionOutput {
 
 /// Internal tracking for a running subagent.
 struct TrackedSubagent {
-    #[allow(dead_code)]
-    session_id: String,
-    #[allow(dead_code)]
     parent_session_id: String,
     task: String,
     model: String,
     depth: u32,
-    #[allow(dead_code)]
-    max_depth: u32,
     spawn_type: SpawnType,
     started_at: Instant,
     done: Notify,
@@ -136,9 +130,6 @@ pub struct SubagentManager {
     hooks: Option<Arc<HookEngine>>,
     /// Tracked subagents: child_session_id → TrackedSubagent.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
-    /// Parent → children mapping.
-    #[allow(dead_code)]
-    children: DashMap<String, Vec<String>>,
 }
 
 impl SubagentManager {
@@ -160,7 +151,6 @@ impl SubagentManager {
             guardrails,
             hooks,
             subagents: DashMap::new(),
-            children: DashMap::new(),
         }
     }
 
@@ -191,8 +181,7 @@ impl SubagentManager {
                     && entry.value().result.lock().is_none()
             })
             .map(|entry| {
-                let v = entry.value();
-                (v.session_id.clone(), v.task.clone())
+                (entry.key().clone(), entry.value().task.clone())
             })
             .collect()
     }
@@ -231,12 +220,10 @@ impl SubagentManager {
         // 2. Register tracking
         let cancel = CancellationToken::new();
         let tracker = Arc::new(TrackedSubagent {
-            session_id: child_session_id.clone(),
             parent_session_id: config.parent_session_id.clone(),
             task: task.clone(),
             model: model.to_owned(),
             depth: 0,
-            max_depth: config.max_depth,
             spawn_type: SpawnType::Subsession,
             started_at: Instant::now(),
             done: Notify::new(),
@@ -256,6 +243,9 @@ impl SubagentManager {
             model: model.to_owned(),
             max_turns: config.max_turns,
             spawn_depth: 0,
+            tool_call_id: None,
+            blocking: config.blocking,
+            working_directory: Some(config.working_directory.clone()),
         });
 
         // 4. Build tools
@@ -332,17 +322,27 @@ impl SubagentManager {
                     rules_content: None,
                     initial_messages: vec![],
                     memory_content: None,
+                    rules_index: None,
+                    pre_activated_rules: vec![],
                 },
             );
 
             agent.set_abort_token(cancel);
 
-            // Create inline persister for child session
-            let persister = Arc::new(EventPersister::new(
-                event_store.clone(),
-                child_sid.clone(),
-            ));
-            agent.set_persister(Some(persister.clone()));
+            // Use the session's persister (created by SessionManager in create_session_for_subagent)
+            let active = session_mgr
+                .resume_session(&child_sid)
+                .expect("just-created subsession must be in active_sessions");
+            let persister = active.context.persister.clone();
+            agent.set_persister(Some(persister));
+
+            // Persist message.user — matching regular session flow
+            let _ = event_store.append(&tron_events::AppendOptions {
+                session_id: &child_sid,
+                event_type: EventType::MessageUser,
+                payload: json!({"content": task}),
+                parent_id: None,
+            });
 
             // Run the agent
             let result = agent_runner::run_agent(
@@ -356,9 +356,6 @@ impl SubagentManager {
                 &child_broadcast,
             )
             .await;
-
-            // Flush persister
-            let _ = persister.flush().await;
 
             let duration_ms = tracker_clone.started_at.elapsed().as_millis() as u64;
 
@@ -391,7 +388,7 @@ impl SubagentManager {
                     base: BaseEvent::now(&parent_session_id),
                     subagent_session_id: child_sid.clone(),
                     error: error.clone(),
-                    duration_ms,
+                    duration: duration_ms,
                 });
 
                 *tracker_clone.result.lock() = Some(SubagentResult {
@@ -406,9 +403,11 @@ impl SubagentManager {
                     base: BaseEvent::now(&parent_session_id),
                     subagent_session_id: child_sid.clone(),
                     total_turns: result.turns_executed,
-                    duration_ms,
-                    output: Some(output.clone()),
+                    duration: duration_ms,
+                    full_output: Some(output.clone()),
+                    result_summary: Some(truncate(&output, 200).to_owned()),
                     token_usage: token_usage.clone(),
+                    model: Some(model_owned.clone()),
                 });
 
                 *tracker_clone.result.lock() = Some(SubagentResult {
@@ -519,12 +518,10 @@ impl SubagentSpawner for SubagentManager {
         // 2. Register tracking
         let cancel = CancellationToken::new();
         let tracker = Arc::new(TrackedSubagent {
-            session_id: child_session_id.clone(),
             parent_session_id: parent_sid.clone(),
             task: task.clone(),
             model: model.to_owned(),
             depth: config.current_depth,
-            max_depth: config.max_depth,
             spawn_type: SpawnType::ToolAgent,
             started_at: Instant::now(),
             done: Notify::new(),
@@ -535,15 +532,37 @@ impl SubagentSpawner for SubagentManager {
         let _ = self.subagents
             .insert(child_session_id.clone(), tracker.clone());
 
-        // 3. Emit SubagentSpawned on broadcast
+        // 3. Emit SubagentSpawned on broadcast (routed to parent session for iOS)
         let _ = self.broadcast.emit(TronEvent::SubagentSpawned {
-            base: BaseEvent::now(&child_session_id),
+            base: BaseEvent::now(&parent_sid),
             subagent_session_id: child_session_id.clone(),
             task: task.clone(),
             model: model.to_owned(),
             max_turns: config.max_turns,
             spawn_depth: config.current_depth,
+            tool_call_id: config.tool_call_id.clone(),
+            blocking: config.blocking,
+            working_directory: Some(config.working_directory.clone()),
         });
+
+        // Persist subagent.spawned to parent session (iOS reconstructs from this on resume)
+        if !parent_sid.is_empty() {
+            let _ = self.event_store.append(&tron_events::AppendOptions {
+                session_id: &parent_sid,
+                event_type: EventType::SubagentSpawned,
+                payload: json!({
+                    "subagentSessionId": child_session_id,
+                    "task": task,
+                    "model": model,
+                    "maxTurns": config.max_turns,
+                    "spawnDepth": config.current_depth,
+                    "toolCallId": config.tool_call_id,
+                    "blocking": config.blocking,
+                    "workingDirectory": config.working_directory,
+                }),
+                parent_id: None,
+            });
+        }
 
         // 4. Spawn execution task
         let session_mgr = self.session_manager.clone();
@@ -560,6 +579,7 @@ impl SubagentSpawner for SubagentManager {
         let working_directory = config.working_directory.clone();
         let subagent_max_depth = config.max_depth;
         let subagent_depth = config.current_depth;
+        let blocking = config.blocking;
         let tracker_clone = tracker.clone();
 
         let _ = tokio::spawn(async move {
@@ -606,22 +626,34 @@ impl SubagentSpawner for SubagentManager {
                     rules_content: None,
                     initial_messages: vec![],
                     memory_content: None,
+                    rules_index: None,
+                    pre_activated_rules: vec![],
                 },
             );
 
             agent.set_abort_token(cancel);
 
-            // Create inline persister for child session
-            let persister = Arc::new(EventPersister::new(
-                event_store.clone(),
-                child_sid.clone(),
-            ));
+            // Use the session's persister (created by SessionManager in create_session_for_subagent)
+            let active = session_mgr
+                .resume_session(&child_sid)
+                .expect("just-created subagent session must be in active_sessions");
+            let persister = active.context.persister.clone();
+            agent.set_persister(Some(persister));
 
-            // Subscribe to child events for forwarding
+            // Persist message.user — matching regular session flow
+            let _ = event_store.append(&tron_events::AppendOptions {
+                session_id: &child_sid,
+                event_type: EventType::MessageUser,
+                payload: json!({"content": task}),
+                parent_id: None,
+            });
+
+            // Subscribe to child events for forwarding to parent broadcast.
+            // Child event persistence is handled by the agent's EventPersister (via turn_runner).
             let mut child_rx = child_broadcast.subscribe();
             let forward_broadcast = broadcast.clone();
             let forward_child_sid = child_sid.clone();
-            let forward_persister = persister.clone();
+            let forward_parent_sid = parent_sid.clone();
             let forward_cancel = CancellationToken::new();
             let forward_cancel_clone = forward_cancel.clone();
 
@@ -651,29 +683,79 @@ impl SubagentSpawner for SubagentManager {
                                     };
                                     if let Some(activity_text) = activity {
                                         let _ = forward_broadcast.emit(TronEvent::SubagentStatusUpdate {
-                                            base: BaseEvent::now(&forward_child_sid),
+                                            base: BaseEvent::now(&forward_parent_sid),
                                             subagent_session_id: forward_child_sid.clone(),
                                             status: "running".into(),
                                             current_turn,
                                             activity: Some(activity_text),
                                         });
                                     }
-                                    // Persist child events
-                                    let event_type = match e {
-                                        TronEvent::TurnStart { .. } => Some(EventType::StreamTurnStart),
-                                        TronEvent::TurnEnd { .. } => Some(EventType::StreamTurnEnd),
-                                        TronEvent::ToolExecutionStart { .. } => Some(EventType::ToolCall),
-                                        TronEvent::ToolExecutionEnd { .. } => Some(EventType::ToolResult),
+
+                                    // Forward streaming events as SubagentEvent (iOS detail sheet)
+                                    let forwarded_event = match e {
+                                        TronEvent::MessageUpdate { content, .. } => Some(json!({
+                                            "type": "text_delta",
+                                            "data": { "delta": content },
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                        TronEvent::ToolExecutionStart { tool_call_id, tool_name, arguments, .. } => Some(json!({
+                                            "type": "tool_start",
+                                            "data": {
+                                                "toolCallId": tool_call_id,
+                                                "toolName": tool_name,
+                                                "arguments": arguments,
+                                            },
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                        TronEvent::ToolExecutionEnd { tool_call_id, tool_name, is_error, duration, result, .. } => {
+                                            let result_text = result.as_ref().map(|r| {
+                                                match &r.content {
+                                                    tron_core::tools::ToolResultBody::Text(s) => s.clone(),
+                                                    tron_core::tools::ToolResultBody::Blocks(blocks) => {
+                                                        blocks.iter().filter_map(|b| {
+                                                            if let tron_core::content::ToolResultContent::Text { text } = b {
+                                                                Some(text.as_str())
+                                                            } else {
+                                                                None
+                                                            }
+                                                        }).collect::<Vec<_>>().join("")
+                                                    }
+                                                }
+                                            });
+                                            Some(json!({
+                                                "type": "tool_end",
+                                                "data": {
+                                                    "toolCallId": tool_call_id,
+                                                    "toolName": tool_name,
+                                                    "success": !is_error.unwrap_or(false),
+                                                    "result": result_text,
+                                                    "duration": duration,
+                                                },
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            }))
+                                        },
+                                        TronEvent::TurnStart { turn, .. } => Some(json!({
+                                            "type": "turn_start",
+                                            "data": { "turn": turn },
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
+                                        TronEvent::TurnEnd { turn, .. } => Some(json!({
+                                            "type": "turn_end",
+                                            "data": { "turn": turn },
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })),
                                         _ => None,
                                     };
-                                    if let Some(et) = event_type {
-                                        let payload = serde_json::to_value(e).unwrap_or_default();
-                                        forward_persister.append_fire_and_forget(
-                                            &forward_child_sid,
-                                            et,
-                                            payload,
-                                        );
+                                    if let Some(event_data) = forwarded_event {
+                                        let _ = forward_broadcast.emit(TronEvent::SubagentEvent {
+                                            base: BaseEvent::now(&forward_parent_sid),
+                                            subagent_session_id: forward_child_sid.clone(),
+                                            event: event_data,
+                                        });
                                     }
+
+                                    // Child event persistence is handled by the agent's
+                                    // own EventPersister (via turn_runner) — not here.
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
@@ -701,9 +783,6 @@ impl SubagentSpawner for SubagentManager {
             // Stop forwarding
             forward_cancel.cancel();
             let _ = forward_handle.await;
-
-            // Flush persister
-            let _ = persister.flush().await;
 
             let duration_ms = tracker_clone.started_at.elapsed().as_millis() as u64;
 
@@ -735,13 +814,27 @@ impl SubagentSpawner for SubagentManager {
 
             if !success {
                 let error = result.error.unwrap_or_else(|| "Unknown error".into());
-                // Emit SubagentFailed
+                // Emit SubagentFailed (routed to parent session)
                 let _ = broadcast.emit(TronEvent::SubagentFailed {
-                    base: BaseEvent::now(&child_sid),
+                    base: BaseEvent::now(&tracker_clone.parent_session_id),
                     subagent_session_id: child_sid.clone(),
                     error: error.clone(),
-                    duration_ms,
+                    duration: duration_ms,
                 });
+
+                // Persist subagent.failed to parent session
+                if !tracker_clone.parent_session_id.is_empty() {
+                    let _ = event_store.append(&tron_events::AppendOptions {
+                        session_id: &tracker_clone.parent_session_id,
+                        event_type: EventType::SubagentFailed,
+                        payload: json!({
+                            "subagentSessionId": child_sid,
+                            "error": error,
+                            "duration": duration_ms,
+                        }),
+                        parent_id: None,
+                    });
+                }
 
                 result_output = error.clone();
                 *tracker_clone.result.lock() = Some(SubagentResult {
@@ -752,15 +845,34 @@ impl SubagentSpawner for SubagentManager {
                     status: "failed".into(),
                 });
             } else {
-                // Emit SubagentCompleted
+                // Emit SubagentCompleted (routed to parent session)
                 let _ = broadcast.emit(TronEvent::SubagentCompleted {
-                    base: BaseEvent::now(&child_sid),
+                    base: BaseEvent::now(&tracker_clone.parent_session_id),
                     subagent_session_id: child_sid.clone(),
                     total_turns: result.turns_executed,
-                    duration_ms,
-                    output: Some(output.clone()),
+                    duration: duration_ms,
+                    full_output: Some(output.clone()),
+                    result_summary: Some(truncate(&output, 200).to_owned()),
                     token_usage: token_usage.clone(),
+                    model: Some(model_owned.clone()),
                 });
+
+                // Persist subagent.completed to parent session
+                if !tracker_clone.parent_session_id.is_empty() {
+                    let _ = event_store.append(&tron_events::AppendOptions {
+                        session_id: &tracker_clone.parent_session_id,
+                        event_type: EventType::SubagentCompleted,
+                        payload: json!({
+                            "subagentSessionId": child_sid,
+                            "totalTurns": result.turns_executed,
+                            "duration": duration_ms,
+                            "fullOutput": truncate(&output, 4000),
+                            "resultSummary": truncate(&output, 200),
+                            "model": model_owned,
+                        }),
+                        parent_id: None,
+                    });
+                }
 
                 result_output = output.clone();
                 *tracker_clone.result.lock() = Some(SubagentResult {
@@ -773,8 +885,8 @@ impl SubagentSpawner for SubagentManager {
             }
 
             // Persist notification.subagent_result to parent session's event store
-            // (enables session resume to reconstruct pending results)
-            if !tracker_clone.parent_session_id.is_empty() {
+            // Only for non-blocking subagents (blocking results go directly to tool output)
+            if !blocking && !tracker_clone.parent_session_id.is_empty() {
                 let payload = json!({
                     "parentSessionId": tracker_clone.parent_session_id,
                     "subagentSessionId": child_sid,
@@ -783,7 +895,7 @@ impl SubagentSpawner for SubagentManager {
                     "success": success,
                     "totalTurns": result.turns_executed as i64,
                     "duration": duration_ms as i64,
-                    "tokenUsage": token_usage.unwrap_or(json!({})),
+                    "tokenUsage": token_usage.clone().unwrap_or(json!({})),
                     "completedAt": chrono::Utc::now().to_rfc3339(),
                     "output": truncate(&result_output, 4000),
                 });
@@ -792,6 +904,21 @@ impl SubagentSpawner for SubagentManager {
                     event_type: EventType::NotificationSubagentResult,
                     payload,
                     parent_id: None,
+                });
+
+                // Broadcast SubagentResultAvailable for live WebSocket clients
+                let _ = broadcast.emit(TronEvent::SubagentResultAvailable {
+                    base: BaseEvent::now(&tracker_clone.parent_session_id),
+                    parent_session_id: tracker_clone.parent_session_id.clone(),
+                    subagent_session_id: child_sid.clone(),
+                    task: tracker_clone.task.clone(),
+                    result_summary: truncate(&result_output, 200).to_owned(),
+                    success,
+                    total_turns: result.turns_executed,
+                    duration: duration_ms,
+                    token_usage,
+                    error: if success { None } else { Some(result_output.clone()) },
+                    completed_at: chrono::Utc::now().to_rfc3339(),
                 });
             }
 
@@ -1202,6 +1329,7 @@ mod tests {
             skills: None,
             max_depth: 0,
             current_depth: 0,
+            tool_call_id: None,
         }
     }
 
@@ -1595,17 +1723,23 @@ mod tests {
     // ── notification.subagent_result persistence tests ──
 
     #[tokio::test]
-    async fn spawn_persists_notification_to_parent_session() {
+    async fn spawn_nonblocking_persists_notification_to_parent_session() {
         let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
-        // Create a parent session so the event store can persist to it
         let parent_sid = session_mgr
             .create_session("mock-model", "/tmp", None)
             .unwrap();
 
         let mut config = make_config("research task");
         config.parent_session_id = Some(parent_sid.clone());
-        let _handle = manager.spawn(config).await.unwrap();
+        config.blocking = false;
+        let handle = manager.spawn(config).await.unwrap();
+
+        // Wait for non-blocking agent to finish
+        let _ = manager
+            .wait_for_agents(&[handle.session_id], WaitMode::All, 10_000)
+            .await
+            .unwrap();
 
         // Check the parent session for notification.subagent_result events
         let events = store
@@ -1636,7 +1770,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spawn_failed_persists_notification_with_success_false() {
+    async fn spawn_nonblocking_failed_persists_notification_with_success_false() {
         let (manager, session_mgr, store) = make_subagent_manager(Arc::new(ErrorProvider));
 
         let parent_sid = session_mgr
@@ -1645,7 +1779,14 @@ mod tests {
 
         let mut config = make_config("failing task");
         config.parent_session_id = Some(parent_sid.clone());
-        let _handle = manager.spawn(config).await.unwrap();
+        config.blocking = false;
+        let handle = manager.spawn(config).await.unwrap();
+
+        // Wait for non-blocking agent to finish
+        let _ = manager
+            .wait_for_agents(&[handle.session_id], WaitMode::All, 10_000)
+            .await
+            .unwrap();
 
         let events = store
             .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
@@ -1654,6 +1795,83 @@ mod tests {
 
         let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["success"], false);
+    }
+
+    #[tokio::test]
+    async fn spawn_blocking_skips_notification() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+
+        let mut config = make_config("blocking task");
+        config.parent_session_id = Some(parent_sid.clone());
+        config.blocking = true;
+        let _handle = manager.spawn(config).await.unwrap();
+
+        // Blocking subagents should NOT persist notification.subagent_result
+        let events = store
+            .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+            .unwrap();
+        assert!(events.is_empty(), "blocking subagents should not persist notification events");
+    }
+
+    #[tokio::test]
+    async fn spawn_persists_lifecycle_events_to_parent() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+
+        let mut config = make_config("lifecycle task");
+        config.parent_session_id = Some(parent_sid.clone());
+        let _handle = manager.spawn(config).await.unwrap();
+
+        // subagent.spawned should be persisted to parent
+        let spawned = store
+            .get_events_by_type(&parent_sid, &["subagent.spawned"], None)
+            .unwrap();
+        assert_eq!(spawned.len(), 1, "expected subagent.spawned in parent session");
+        let payload: serde_json::Value = serde_json::from_str(&spawned[0].payload).unwrap();
+        assert_eq!(payload["task"], "lifecycle task");
+
+        // subagent.completed should be persisted to parent
+        let completed = store
+            .get_events_by_type(&parent_sid, &["subagent.completed"], None)
+            .unwrap();
+        assert_eq!(completed.len(), 1, "expected subagent.completed in parent session");
+        let payload: serde_json::Value = serde_json::from_str(&completed[0].payload).unwrap();
+        assert!(payload["subagentSessionId"].is_string());
+        assert!(payload["totalTurns"].is_number());
+    }
+
+    #[tokio::test]
+    async fn spawn_failed_persists_lifecycle_events_to_parent() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(ErrorProvider));
+
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+
+        let mut config = make_config("failing lifecycle task");
+        config.parent_session_id = Some(parent_sid.clone());
+        let _handle = manager.spawn(config).await.unwrap();
+
+        // subagent.spawned should be persisted
+        let spawned = store
+            .get_events_by_type(&parent_sid, &["subagent.spawned"], None)
+            .unwrap();
+        assert_eq!(spawned.len(), 1);
+
+        // subagent.failed should be persisted
+        let failed = store
+            .get_events_by_type(&parent_sid, &["subagent.failed"], None)
+            .unwrap();
+        assert_eq!(failed.len(), 1);
+        let payload: serde_json::Value = serde_json::from_str(&failed[0].payload).unwrap();
+        assert!(payload["error"].is_string());
     }
 
     #[tokio::test]
@@ -1672,5 +1890,56 @@ mod tests {
             .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
             .unwrap();
         assert!(events.is_empty(), "subsessions should not persist notification events");
+    }
+
+    // ── message.user persistence tests ──
+
+    #[tokio::test]
+    async fn spawn_persists_message_user_to_child_session() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+        let mut config = make_config("research task");
+        config.parent_session_id = Some(parent_sid);
+        let handle = manager.spawn(config).await.unwrap();
+
+        let events = store
+            .get_events_by_type(&handle.session_id, &["message.user"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1, "expected message.user in child session");
+        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["content"], "research task");
+    }
+
+    #[tokio::test]
+    async fn spawn_subsession_persists_message_user_to_child_session() {
+        let (manager, _, store) = make_subagent_manager(Arc::new(MockProvider));
+        let config = make_subsession_config("summarize this", "parent-001");
+        let result = manager.spawn_subsession(config).await.unwrap();
+
+        let events = store
+            .get_events_by_type(&result.session_id, &["message.user"], None)
+            .unwrap();
+        assert_eq!(events.len(), 1, "expected message.user in child session");
+        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["content"], "summarize this");
+    }
+
+    #[tokio::test]
+    async fn spawn_end_session_flushes_persisted_events() {
+        let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
+        let parent_sid = session_mgr
+            .create_session("mock-model", "/tmp", None)
+            .unwrap();
+        let mut config = make_config("test task");
+        config.parent_session_id = Some(parent_sid);
+        let handle = manager.spawn(config).await.unwrap();
+
+        // After blocking spawn completes (which calls end_session), events should exist
+        let events = store
+            .get_events_by_type(&handle.session_id, &["message.assistant"], None)
+            .unwrap();
+        assert!(!events.is_empty(), "expected message.assistant events after end_session flush");
     }
 }

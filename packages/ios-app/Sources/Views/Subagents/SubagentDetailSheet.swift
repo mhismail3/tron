@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// Detail sheet shown when tapping a subagent chip.
-/// Displays task info, status, duration, turn count, and full output.
-/// Shows real-time activity events while the subagent is running.
+/// Displays task info, status, duration, turn count, and full chat history.
+/// Uses MessageBubble rendering (same as regular sessions) for all states.
 @available(iOS 26.0, *)
 struct SubagentDetailSheet: View {
     let data: SubagentToolData
@@ -13,19 +13,10 @@ struct SubagentDetailSheet: View {
     var onSendResults: ((SubagentToolData) -> Void)?
     @Environment(\.dismiss) private var dismiss
 
-    /// Loading state for async event sync (running subagents)
-    @State private var isLoadingEvents = false
-
-    /// Chat history state (completed/failed subagents)
+    /// Chat history state
     @State private var chatEvents: [RawEvent] = []
     @State private var isLoadingChat = false
     @State private var chatLoadError: String? = nil
-
-    /// Number of events to show per page
-    private static let eventsPageSize = 15
-
-    /// Number of visible events (pagination state)
-    @State private var visibleEventCount: Int = eventsPageSize
 
     /// Whether summary is expanded (for long outputs)
     @State private var isSummaryExpanded: Bool = false
@@ -33,27 +24,7 @@ struct SubagentDetailSheet: View {
     /// Character limit before showing expand/collapse
     private static let summaryCharacterLimit = 500
 
-    /// All events for this subagent (derived from state for real-time updates)
-    private var allEvents: [SubagentEventItem] {
-        subagentState.getEvents(for: data.subagentSessionId)
-    }
-
-    /// Visible events based on pagination
-    private var visibleEvents: [SubagentEventItem] {
-        Array(allEvents.prefix(visibleEventCount))
-    }
-
-    /// Whether there are more events to show
-    private var hasMoreEvents: Bool {
-        allEvents.count > visibleEventCount
-    }
-
-    /// Count of hidden events
-    private var hiddenEventCount: Int {
-        max(0, allEvents.count - visibleEventCount)
-    }
-
-    /// Chat messages derived from raw events (completed/failed subagents)
+    /// Chat messages derived from raw events
     private var chatMessages: [ChatMessage] {
         UnifiedEventTransformer.transformPersistedEvents(chatEvents)
     }
@@ -82,16 +53,9 @@ struct SubagentDetailSheet: View {
                     taskSection
                         .padding(.horizontal)
 
-                    // Chat/Activity section
-                    if data.status == .running {
-                        // Running: show live activity stream
-                        activitySection
-                            .padding(.horizontal)
-                    } else {
-                        // Completed/Failed: show full chat with MessageBubble rendering
-                        chatSection
-                            .padding(.horizontal)
-                    }
+                    // Chat section — same MessageBubble rendering for all states
+                    chatSection
+                        .padding(.horizontal)
                 }
                 .padding(.vertical)
             }
@@ -131,50 +95,25 @@ struct SubagentDetailSheet: View {
         }
         .presentationDragIndicator(.hidden)
         .tint(titleColor)
-        .task {
+        .task(id: data.status) {
+            // Load chat history (uses events.getHistory RPC → MessageBubble rendering)
+            await loadChatHistory()
+
+            // While running, poll for new events as the child agent persists them
             if data.status == .running {
-                // Running: load activity events for live streaming
-                await loadSubagentEvents()
-            } else {
-                // Completed/Failed: load full chat history
-                await loadChatHistory()
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(2))
+                    if Task.isCancelled { break }
+                    await refreshChatHistory()
+                }
             }
         }
     }
 
-    // MARK: - Event Loading
+    // MARK: - Chat History Loading
 
-    /// Load subagent events - first from local DB, then sync from server if needed
-    private func loadSubagentEvents() async {
-        // Skip if already loaded with events
-        if subagentState.hasLoadedEvents(for: data.subagentSessionId),
-           !subagentState.getEvents(for: data.subagentSessionId).isEmpty {
-            return
-        }
-
-        isLoadingEvents = true
-        defer { isLoadingEvents = false }
-
-        // First try loading from local database
-        subagentState.loadEventsFromDatabase(for: data.subagentSessionId, eventDB: eventStoreManager.eventDB)
-
-        // If still empty, sync from server then reload
-        if subagentState.getEvents(for: data.subagentSessionId).isEmpty {
-            // Sync subagent session events from server
-            do {
-                try await eventStoreManager.syncSessionEvents(sessionId: data.subagentSessionId)
-                // Reload from database after sync
-                subagentState.loadEventsFromDatabase(for: data.subagentSessionId, eventDB: eventStoreManager.eventDB, forceReload: true)
-            } catch {
-                // Sync failed - events will remain empty
-            }
-        }
-    }
-
-    /// Load full chat history from server for completed/failed subagents
+    /// Load full chat history from server (works for all subagent states)
     private func loadChatHistory() async {
-        guard data.status != .running else { return }
-
         isLoadingChat = true
         chatLoadError = nil
         defer { isLoadingChat = false }
@@ -191,27 +130,25 @@ struct SubagentDetailSheet: View {
         }
     }
 
-    // MARK: - Header Tags
-
-    /// Compute effective turn count - use activity events if currentTurn is 0 for completed subagents
-    private var effectiveTurnCount: Int {
-        if data.currentTurn > 0 {
-            return data.currentTurn
+    /// Refresh chat history without showing loading spinner (for polling while running)
+    private func refreshChatHistory() async {
+        do {
+            let result = try await rpcClient.eventSync.getHistory(
+                sessionId: data.subagentSessionId,
+                types: nil,
+                limit: 1000
+            )
+            chatEvents = result.events
+        } catch {
+            // Silently ignore refresh errors — next poll will retry
         }
-        // For completed subagents with 0 turns, derive from activity events
-        // Each turn typically has at least one tool call, so count unique tool events
-        if data.status == .completed || data.status == .failed {
-            let events = allEvents
-            // Count tool events as proxy for turns (at minimum 1 if there's any activity)
-            let toolCount = events.filter { $0.type == .tool }.count
-            return max(1, toolCount > 0 ? (toolCount + 1) / 2 : 1) // Rough estimate: ~2 tools per turn on average, minimum 1
-        }
-        return data.currentTurn
     }
+
+    // MARK: - Header Tags
 
     private var headerTags: some View {
         HStack(spacing: 8) {
-            SubagentStatBadge(label: "Turns:", value: "\(effectiveTurnCount)", color: titleColor)
+            SubagentStatBadge(label: "Turns:", value: "\(max(data.currentTurn, 1))", color: titleColor)
 
             if let duration = data.formattedDuration {
                 SubagentStatBadge(label: "Duration:", value: duration, color: titleColor)
@@ -252,99 +189,6 @@ struct SubagentDetailSheet: View {
         }
     }
 
-    // MARK: - Activity Section
-
-    private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Section header
-            HStack {
-                Text("Activity")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
-                    .foregroundStyle(.tronTextSecondary)
-
-                // Event count badge
-                if !allEvents.isEmpty {
-                    Text("\(allEvents.count)")
-                        .font(TronTypography.codeSM)
-                        .foregroundStyle(.tronTextMuted)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color.tronOverlay(0.1))
-                        )
-                }
-
-                Spacer()
-
-                if data.status == .running {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .scaleEffect(0.5)
-                        .frame(width: 12, height: 12)
-                        .tint(titleColor)
-                }
-            }
-
-            // Card content
-            VStack(alignment: .leading, spacing: 0) {
-                if allEvents.isEmpty {
-                    // Empty state - different message based on status and loading state
-                    HStack(spacing: 8) {
-                        if isLoadingEvents {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                                .scaleEffect(0.7)
-                                .frame(width: 14, height: 14)
-                                .tint(.tronTextMuted)
-                            Text("Loading activity...")
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronTextMuted)
-                        } else if data.status == .running {
-                            Image(systemName: "ellipsis")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronTextMuted)
-                                .symbolEffect(.variableColor.iterative, options: .repeating)
-                            Text("Waiting for activity...")
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronTextMuted)
-                        } else {
-                            Image(systemName: "tray")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronTextMuted)
-                            Text("No activity recorded")
-                                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                                .foregroundStyle(.tronTextMuted)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                } else {
-                    // Event list with pagination
-                    // Use LazyVStack for performance with many events
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(visibleEvents) { event in
-                            SubagentEventRow(event: event, accentColor: titleColor)
-                                .id(event.id)
-                        }
-
-                        // "Show more" button when there are hidden events
-                        if hasMoreEvents {
-                            showMoreButton
-                        }
-                    }
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                }
-            }
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(titleColor.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        }
-    }
-
     // MARK: - Chat Section
 
     private var chatSection: some View {
@@ -365,6 +209,14 @@ struct SubagentDetailSheet: View {
                 }
 
                 Spacer()
+
+                if data.status == .running {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.5)
+                        .frame(width: 12, height: 12)
+                        .tint(titleColor)
+                }
             }
 
             // Content
@@ -432,12 +284,22 @@ struct SubagentDetailSheet: View {
 
     private var chatEmptyView: some View {
         HStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
-            Text("No chat history")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
+            if data.status == .running {
+                Image(systemName: "ellipsis")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextMuted)
+                    .symbolEffect(.variableColor.iterative, options: .repeating)
+                Text("Waiting for content...")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextMuted)
+            } else {
+                Image(systemName: "tray")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextMuted)
+                Text("No chat history")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextMuted)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
@@ -455,36 +317,6 @@ struct SubagentDetailSheet: View {
                 MessageBubble(message: message)
             }
         }
-    }
-
-    // MARK: - Show More Button
-
-    private var showMoreButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                visibleEventCount += Self.eventsPageSize
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                Text("Show \(min(hiddenEventCount, Self.eventsPageSize)) more")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .medium))
-                Text("(\(hiddenEventCount) hidden)")
-                    .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextMuted)
-            }
-            .foregroundStyle(titleColor)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(titleColor.opacity(0.08))
-            )
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 6)
-        .padding(.top, 4)
     }
 
     // MARK: - Summary Section

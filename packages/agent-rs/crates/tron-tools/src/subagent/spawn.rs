@@ -156,6 +156,7 @@ Returns (when mode=inProcess and blocking=true):\n\
             skills,
             max_depth: user_max_depth,
             current_depth: ctx.subagent_depth + 1,
+            tool_call_id: Some(ctx.tool_call_id.clone()),
         };
 
         match self.spawner.spawn(config).await {
