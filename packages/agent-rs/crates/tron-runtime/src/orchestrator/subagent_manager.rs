@@ -126,7 +126,7 @@ pub struct SubagentManager {
     broadcast: Arc<EventEmitter>,
     provider_factory: Arc<dyn ProviderFactory>,
     tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
-    guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
     /// Tracked subagents: child_session_id → TrackedSubagent.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
@@ -139,7 +139,7 @@ impl SubagentManager {
         event_store: Arc<EventStore>,
         broadcast: Arc<EventEmitter>,
         provider_factory: Arc<dyn ProviderFactory>,
-        guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+        guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
         hooks: Option<Arc<HookEngine>>,
     ) -> Self {
         Self {

@@ -237,6 +237,11 @@ pub async fn load_server_auth_with_client(
 }
 
 /// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
+///
+/// Note: This function is not synchronized. Concurrent calls may both trigger
+/// a refresh to the token endpoint. This is harmless — both calls receive valid
+/// tokens and the last writer wins on disk. Adding a lock was considered but
+/// rejected as unnecessary complexity for a benign race.
 async fn maybe_refresh_tokens(
     tokens: &OAuthTokens,
     config: &OAuthConfig,
@@ -268,15 +273,9 @@ struct TokenResponse {
     expires_in: i64,
 }
 
-/// Simple URL encoding for query parameters.
+/// URL-encode a string for use in query parameters.
 fn urlencoded(s: &str) -> String {
-    s.replace('%', "%25")
-        .replace(' ', "%20")
-        .replace('&', "%26")
-        .replace('=', "%3D")
-        .replace('+', "%2B")
-        .replace('/', "%2F")
-        .replace(':', "%3A")
+    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -318,6 +317,25 @@ mod tests {
     fn urlencoded_basic() {
         assert_eq!(urlencoded("hello world"), "hello%20world");
         assert_eq!(urlencoded("a&b=c"), "a%26b%3Dc");
+    }
+
+    #[test]
+    fn urlencoded_special_chars() {
+        assert!(urlencoded("#?@!").contains("%23"));
+        assert!(urlencoded("#?@!").contains("%3F"));
+        assert!(urlencoded("#?@!").contains("%40"));
+        assert!(urlencoded("#?@!").contains("%21"));
+    }
+
+    #[test]
+    fn urlencoded_empty_string() {
+        assert_eq!(urlencoded(""), "");
+    }
+
+    #[test]
+    fn urlencoded_no_encoding_needed() {
+        // Pure alphanumeric should pass through unchanged
+        assert_eq!(urlencoded("abc123"), "abc123");
     }
 
     #[tokio::test]

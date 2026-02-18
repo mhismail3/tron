@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use metrics::{counter, histogram};
@@ -37,6 +38,9 @@ impl MethodRegistry {
         let _ = self.handlers.insert(method.to_owned(), Arc::new(handler));
     }
 
+    /// Maximum time a single RPC handler is allowed to run.
+    const HANDLER_TIMEOUT: Duration = Duration::from_secs(60);
+
     /// Dispatch a request to the appropriate handler.
     pub async fn dispatch(&self, request: RpcRequest, ctx: &RpcContext) -> RpcResponse {
         let method = request.method.clone();
@@ -52,9 +56,15 @@ impl MethodRegistry {
         };
 
         let start = std::time::Instant::now();
-        let response = match handler.handle(request.params, ctx).await {
-            Ok(result) => RpcResponse::success(&request.id, result),
-            Err(err) => {
+        let result = tokio::time::timeout(
+            Self::HANDLER_TIMEOUT,
+            handler.handle(request.params, ctx),
+        )
+        .await;
+
+        let response = match result {
+            Ok(Ok(result)) => RpcResponse::success(&request.id, result),
+            Ok(Err(err)) => {
                 counter!("rpc_errors_total", "method" => method.clone(), "error_type" => err.code().to_owned()).increment(1);
                 let body = err.to_error_body();
                 RpcResponse {
@@ -63,6 +73,15 @@ impl MethodRegistry {
                     result: None,
                     error: Some(body),
                 }
+            }
+            Err(_elapsed) => {
+                counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "timeout").increment(1);
+                tracing::error!(method, "RPC handler timed out after {:?}", Self::HANDLER_TIMEOUT);
+                RpcResponse::error(
+                    &request.id,
+                    errors::INTERNAL_ERROR,
+                    format!("Handler for '{method}' timed out"),
+                )
             }
         };
 
@@ -325,5 +344,66 @@ mod tests {
         let resp = reg.dispatch(make_request("r1", "test", None), &ctx).await;
         // FailHandler should have replaced EchoHandler
         assert!(!resp.success);
+    }
+
+    struct SlowHandler {
+        delay: std::time::Duration,
+    }
+
+    #[async_trait]
+    impl MethodHandler for SlowHandler {
+        async fn handle(
+            &self,
+            _params: Option<Value>,
+            _ctx: &RpcContext,
+        ) -> Result<Value, RpcError> {
+            tokio::time::sleep(self.delay).await;
+            Ok(json!("done"))
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_fast_handler_unaffected_by_timeout() {
+        let ctx = make_test_context();
+        let mut reg = MethodRegistry::new();
+        reg.register(
+            "fast",
+            SlowHandler {
+                delay: std::time::Duration::from_millis(1),
+            },
+        );
+
+        let resp = reg
+            .dispatch(make_request("r1", "fast", None), &ctx)
+            .await;
+        assert!(resp.success);
+        assert_eq!(resp.result.unwrap(), "done");
+    }
+
+    #[tokio::test]
+    async fn dispatch_timeout_returns_error() {
+        // Use a custom registry with a very short timeout to test the timeout path
+        // without actually waiting 60 seconds. We'll test indirectly by verifying
+        // the timeout machinery works with tokio's pause feature.
+        tokio::time::pause();
+
+        let ctx = make_test_context();
+        let mut reg = MethodRegistry::new();
+        reg.register(
+            "slow",
+            SlowHandler {
+                delay: std::time::Duration::from_secs(120),
+            },
+        );
+
+        let resp = reg
+            .dispatch(make_request("r-timeout", "slow", None), &ctx)
+            .await;
+
+        assert!(!resp.success);
+        assert_eq!(resp.id, "r-timeout");
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, "INTERNAL_ERROR");
+        assert!(err.message.contains("timed out"));
     }
 }

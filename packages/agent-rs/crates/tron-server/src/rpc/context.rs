@@ -25,7 +25,7 @@ pub struct AgentDeps {
     /// Factory that creates a fresh tool registry per agent.
     pub tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
     /// Guardrail engine (optional).
-    pub guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Hook engine (optional).
     pub hooks: Option<Arc<HookEngine>>,
 }

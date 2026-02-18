@@ -21,7 +21,7 @@ pub struct CreateAgentOpts {
     /// Tool registry.
     pub tools: ToolRegistry,
     /// Guardrail engine (optional).
-    pub guardrails: Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Hook engine (optional).
     pub hooks: Option<Arc<HookEngine>>,
     /// Whether this is a subagent.

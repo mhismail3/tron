@@ -117,6 +117,7 @@ assert_matches = "1"
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.9"
+percent-encoding = "2"
 
 # Concurrency
 parking_lot = "0.12"

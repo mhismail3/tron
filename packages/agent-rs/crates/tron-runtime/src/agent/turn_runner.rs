@@ -45,7 +45,7 @@ pub async fn execute_turn(
     context_manager: &mut ContextManager,
     provider: &Arc<dyn Provider>,
     registry: &ToolRegistry,
-    guardrails: &Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    guardrails: &Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: &Option<Arc<HookEngine>>,
     compaction: &CompactionHandler,
     session_id: &str,
@@ -268,6 +268,7 @@ pub async fn execute_turn(
                     "stopReason": "interrupted",
                     "interrupted": true,
                     "providerType": provider.provider_type().as_str(),
+                    "tokenUsageAvailable": stream_result.token_usage.is_some(),
                 });
                 if let Some(ref usage) = stream_result.token_usage {
                     payload["tokenUsage"] = persistence::build_token_usage_json(usage);
@@ -725,6 +726,7 @@ fn extract_result_text(exec_result: &crate::types::ToolExecutionResult) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tron_core::messages::TokenUsage;
 
     // Turn runner tests require mock Provider, which we test at the
     // TronAgent integration level. Here we verify TurnResult construction.
@@ -951,5 +953,37 @@ mod tests {
         assert_eq!(waves[0], vec![0]);
         assert_eq!(waves[1], vec![1]);
         assert_eq!(waves[2], vec![2]);
+    }
+
+    #[test]
+    fn turn_result_interrupted_token_usage_none() {
+        let result = TurnResult {
+            success: true,
+            interrupted: true,
+            token_usage: None,
+            stop_reason: Some(StopReason::Interrupted),
+            ..Default::default()
+        };
+        assert!(result.interrupted);
+        assert!(result.token_usage.is_none());
+    }
+
+    #[test]
+    fn turn_result_interrupted_with_partial_usage() {
+        let usage = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 20,
+            ..Default::default()
+        };
+        let result = TurnResult {
+            success: true,
+            interrupted: true,
+            token_usage: Some(usage),
+            stop_reason: Some(StopReason::Interrupted),
+            ..Default::default()
+        };
+        assert!(result.interrupted);
+        assert!(result.token_usage.is_some());
+        assert_eq!(result.token_usage.unwrap().input_tokens, 100);
     }
 }

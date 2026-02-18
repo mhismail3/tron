@@ -58,7 +58,12 @@ impl ClientConnection {
         if self.tx.try_send(message).is_ok() {
             true
         } else {
-            let _ = self.dropped_messages.fetch_add(1, Ordering::Relaxed);
+            let dropped = self.dropped_messages.fetch_add(1, Ordering::Relaxed) + 1;
+            tracing::warn!(
+                connection_id = %self.id,
+                dropped,
+                "WebSocket send channel full, dropping message"
+            );
             false
         }
     }
@@ -243,5 +248,24 @@ mod tests {
         assert!(sent);
         let msg = rx.recv().await.unwrap();
         assert!(msg.is_empty());
+    }
+
+    #[test]
+    fn drop_count_starts_at_zero() {
+        let (conn, _rx) = make_connection();
+        assert_eq!(conn.drop_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn drop_count_accumulates() {
+        let (tx, _rx) = mpsc::channel(1);
+        let conn = ClientConnection::new("conn_drop".into(), tx);
+        // Fill the channel
+        assert!(conn.send(Arc::new("fill".into())));
+        // Send 5 more that will be dropped
+        for _ in 0..5 {
+            assert!(!conn.send(Arc::new("drop".into())));
+        }
+        assert_eq!(conn.drop_count(), 5);
     }
 }

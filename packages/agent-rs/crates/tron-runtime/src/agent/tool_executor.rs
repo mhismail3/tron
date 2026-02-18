@@ -31,7 +31,7 @@ use crate::types::ToolExecutionResult;
 pub async fn execute_tool(
     tool_call: &ToolCall,
     registry: &ToolRegistry,
-    guardrails: &Option<Arc<std::sync::Mutex<GuardrailEngine>>>,
+    guardrails: &Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: &Option<Arc<HookEngine>>,
     session_id: &str,
     working_directory: &str,
@@ -69,7 +69,8 @@ pub async fn execute_tool(
             session_id: Some(session_id.to_owned()),
             tool_call_id: Some(tool_call_id.clone()),
         };
-        if let Ok(mut engine) = guardrail_engine.lock() {
+        {
+            let mut engine = guardrail_engine.lock();
             let eval = engine.evaluate(&eval_ctx);
             if eval.blocked {
                 warn!(tool_name, "blocked by guardrail");
@@ -213,7 +214,9 @@ pub async fn execute_tool(
             tool_name: Some(tool_name.clone()),
             tool_call_id: Some(tool_call_id.clone()),
         });
-        // Fire and forget
+        // PostToolUse hooks run fire-and-forget. If the hook panics, tokio logs
+        // the panic to stderr and the HookCompleted event won't be emitted.
+        // This is acceptable because PostToolUse hooks are non-blocking by design.
         let engine = hook_engine.clone();
         let emitter_bg = emitter.clone();
         let sid = session_id.to_owned();
@@ -430,7 +433,7 @@ mod tests {
             patterns: vec![regex::Regex::new("rm -rf").unwrap()],
         }));
 
-        let guardrails = Some(Arc::new(std::sync::Mutex::new(engine)));
+        let guardrails = Some(Arc::new(parking_lot::Mutex::new(engine)));
 
         let mut args = Map::new();
         let _ = args.insert("text".into(), json!("rm -rf /"));
@@ -684,5 +687,50 @@ mod tests {
         assert!(!r1.stops_turn);
         assert!(!r2.result.is_error.unwrap_or(false));
         assert!(r2.stops_turn);
+    }
+
+    #[tokio::test]
+    async fn guardrail_lock_always_succeeds() {
+        let engine = GuardrailEngine::new(crate::guardrails::GuardrailEngineOptions::default());
+        let guardrails = Arc::new(parking_lot::Mutex::new(engine));
+        // parking_lot::Mutex::lock() always succeeds (no Result, no poison)
+        let _guard = guardrails.lock();
+    }
+
+    #[tokio::test]
+    async fn guardrail_evaluates_after_lock() {
+        let mut engine = GuardrailEngine::new(crate::guardrails::GuardrailEngineOptions::default());
+        use crate::guardrails::rules::{GuardrailRule, RuleBase, pattern::PatternRule};
+        use crate::guardrails::types::Severity;
+        engine.register_rule(GuardrailRule::Pattern(PatternRule {
+            base: RuleBase {
+                id: "test".into(),
+                name: "Test".into(),
+                description: "Test".into(),
+                severity: Severity::Block,
+                scope: crate::guardrails::types::Scope::Tool,
+                tier: crate::guardrails::types::RuleTier::Custom,
+                tools: vec!["bash".into()],
+                priority: 100,
+                enabled: true,
+                tags: vec![],
+            },
+            target_argument: "command".into(),
+            patterns: vec![regex::Regex::new("rm").unwrap()],
+        }));
+
+        let guardrails = Arc::new(parking_lot::Mutex::new(engine));
+        let guard = guardrails.lock();
+        let eval_ctx = EvaluationContext {
+            tool_name: "bash".into(),
+            tool_arguments: json!({"command": "rm -rf /"}),
+            session_id: None,
+            tool_call_id: None,
+        };
+        // Can't call evaluate on immutable guard — drop and re-lock as mutable
+        drop(guard);
+        let mut guard = guardrails.lock();
+        let eval = guard.evaluate(&eval_ctx);
+        assert!(eval.blocked);
     }
 }

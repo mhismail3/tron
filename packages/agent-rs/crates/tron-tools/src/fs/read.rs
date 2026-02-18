@@ -22,6 +22,7 @@ use crate::utils::validation::validate_required_string;
 
 const MAX_LINE_LENGTH: usize = 2000;
 const MAX_OUTPUT_TOKENS: usize = 20_000;
+const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
 const ARROW: &str = "\u{2192}";
 
 /// The `Read` tool reads file contents with line numbers.
@@ -118,6 +119,15 @@ impl TronTool for ReadTool {
             Ok(b) => b,
             Err(e) => return Ok(format_fs_error(&e, &resolved.to_string_lossy(), "reading")),
         };
+
+        // File size guard
+        if bytes.len() > MAX_FILE_SIZE {
+            return Ok(error_result(format!(
+                "File too large: {} bytes (max {} MB). Use offset/limit for partial reads.",
+                bytes.len(),
+                MAX_FILE_SIZE / 1024 / 1024
+            )));
+        }
 
         // Binary detection
         let check_len = bytes.len().min(8192);
@@ -442,5 +452,48 @@ mod tests {
             .await
             .unwrap();
         assert!(r.details.unwrap()["truncated"].as_bool().unwrap());
+    }
+
+    #[tokio::test]
+    async fn file_too_large_returns_error() {
+        let mut fs = MockFs::new();
+        // Create content just over MAX_FILE_SIZE (50 MB + 1 byte)
+        let content = vec![b'x'; MAX_FILE_SIZE + 1];
+        fs.add_file("/tmp/massive.txt", content);
+        let tool = ReadTool::new(Arc::new(fs));
+        let r = tool
+            .execute(json!({"file_path": "/tmp/massive.txt"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("too large"));
+    }
+
+    #[tokio::test]
+    async fn file_at_limit_succeeds() {
+        let mut fs = MockFs::new();
+        // Exactly at MAX_FILE_SIZE — should succeed (not >)
+        let content = vec![b'a'; MAX_FILE_SIZE];
+        fs.add_file("/tmp/at_limit.txt", content);
+        let tool = ReadTool::new(Arc::new(fs));
+        let r = tool
+            .execute(json!({"file_path": "/tmp/at_limit.txt"}), &make_ctx())
+            .await
+            .unwrap();
+        assert!(r.is_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn file_just_over_limit_fails() {
+        let mut fs = MockFs::new();
+        let content = vec![b'b'; MAX_FILE_SIZE + 1];
+        fs.add_file("/tmp/over.txt", content);
+        let tool = ReadTool::new(Arc::new(fs));
+        let r = tool
+            .execute(json!({"file_path": "/tmp/over.txt"}), &make_ctx())
+            .await
+            .unwrap();
+        assert_eq!(r.is_error, Some(true));
+        assert!(extract_text(&r).contains("50 MB"));
     }
 }

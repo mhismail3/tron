@@ -270,7 +270,7 @@ fn finalize_tool_call(
 fn build_message(
     text: &str,
     thinking: &str,
-    _thinking_signature: Option<&str>,
+    thinking_signature: Option<&str>,
     tool_calls: &[ToolCall],
 ) -> AssistantMessage {
     let mut content: Vec<AssistantContent> = Vec::with_capacity(3);
@@ -278,7 +278,7 @@ fn build_message(
     if !thinking.is_empty() {
         content.push(AssistantContent::Thinking {
             thinking: thinking.to_owned(),
-            signature: None,
+            signature: thinking_signature.map(String::from),
         });
     }
 
@@ -748,6 +748,61 @@ mod tests {
             assert_eq!(text, "line1\n\nline2");
         } else {
             panic!("Expected text content");
+        }
+    }
+
+    #[test]
+    fn build_message_preserves_thinking_signature() {
+        let msg = build_message("answer", "thinking", Some("sig-abc"), &[]);
+        assert_eq!(msg.content.len(), 2);
+        if let AssistantContent::Thinking { signature, .. } = &msg.content[0] {
+            assert_eq!(signature.as_deref(), Some("sig-abc"));
+        } else {
+            panic!("Expected thinking content");
+        }
+    }
+
+    #[test]
+    fn build_message_thinking_signature_none_when_absent() {
+        let msg = build_message("answer", "thinking", None, &[]);
+        if let AssistantContent::Thinking { signature, .. } = &msg.content[0] {
+            assert!(signature.is_none());
+        } else {
+            panic!("Expected thinking content");
+        }
+    }
+
+    #[tokio::test]
+    async fn abort_mid_thinking_preserves_signature() {
+        let cancel = CancellationToken::new();
+        let cancel_clone = cancel.clone();
+
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            yield Ok(StreamEvent::ThinkingStart);
+            yield Ok(StreamEvent::ThinkingDelta { delta: "deep thought".into() });
+            yield Ok(StreamEvent::ThinkingEnd { thinking: "deep thought".into(), signature: Some("sig-xyz".into()) });
+            yield Ok(StreamEvent::TextStart);
+            yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
+            cancel_clone.cancel();
+            yield Ok(StreamEvent::TextDelta { delta: " more".into() });
+            yield Ok(StreamEvent::Done {
+                message: AssistantMessage { content: vec![], token_usage: None },
+                stop_reason: "end_turn".into(),
+            });
+        };
+
+        let emitter = make_emitter();
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+            .await
+            .unwrap();
+
+        assert!(result.interrupted);
+        // The thinking signature must be preserved on the message
+        let thinking_block = result.message.content.iter().find(|c| matches!(c, AssistantContent::Thinking { .. }));
+        assert!(thinking_block.is_some(), "should have thinking block");
+        if let AssistantContent::Thinking { signature, .. } = thinking_block.unwrap() {
+            assert_eq!(signature.as_deref(), Some("sig-xyz"));
         }
     }
 }

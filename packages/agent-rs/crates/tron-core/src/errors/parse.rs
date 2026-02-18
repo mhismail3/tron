@@ -81,6 +81,8 @@ pub enum ErrorSeverity {
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct ErrorPattern {
+    /// Check function receives the **already-lowercased** error string.
+    /// All literal comparisons must use lowercase.
     check: fn(&str) -> bool,
     category: ErrorCategory,
     message: &'static str,
@@ -89,14 +91,16 @@ struct ErrorPattern {
 }
 
 /// All known error patterns, checked in order.
+///
+/// **Important:** Every `check` closure receives a pre-lowercased string.
+/// All literal substrings must be lowercase — no `to_lowercase()` /
+/// `to_uppercase()` calls inside closures.
 #[allow(clippy::too_many_lines)]
 fn patterns() -> &'static [ErrorPattern] {
     static PATTERNS: &[ErrorPattern] = &[
         // Authentication
         ErrorPattern {
-            check: |s| {
-                s.to_lowercase().contains("invalid") && s.to_lowercase().contains("x-api-key")
-            },
+            check: |s| s.contains("invalid") && s.contains("x-api-key"),
             category: ErrorCategory::Authentication,
             message: "Invalid API key",
             suggestion: Some(
@@ -105,7 +109,7 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: false,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("authentication_error"),
+            check: |s| s.contains("authentication_error"),
             category: ErrorCategory::Authentication,
             message: "Authentication failed",
             suggestion: Some("Run \"tron login\" to re-authenticate"),
@@ -119,7 +123,7 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: false,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("invalid") && s.to_lowercase().contains("token"),
+            check: |s| s.contains("invalid") && s.contains("token"),
             category: ErrorCategory::Authentication,
             message: "Invalid or expired token",
             suggestion: Some("Run \"tron login\" to get a new token"),
@@ -134,7 +138,7 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: false,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("permission_denied"),
+            check: |s| s.contains("permission_denied"),
             category: ErrorCategory::Authorization,
             message: "Permission denied",
             suggestion: Some("Your account may not have access to this feature"),
@@ -149,17 +153,14 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: true,
         },
         ErrorPattern {
-            check: |s| {
-                let lower = s.to_lowercase();
-                lower.contains("rate") && lower.contains("limit")
-            },
+            check: |s| s.contains("rate") && s.contains("limit"),
             category: ErrorCategory::RateLimit,
             message: "Rate limit exceeded",
             suggestion: Some("Wait a moment and try again"),
             is_retryable: true,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("too many requests"),
+            check: |s| s.contains("too many requests"),
             category: ErrorCategory::RateLimit,
             message: "Too many requests",
             suggestion: Some("Wait a moment and try again"),
@@ -167,16 +168,14 @@ fn patterns() -> &'static [ErrorPattern] {
         },
         // Quota
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("quota"),
+            check: |s| s.contains("quota"),
             category: ErrorCategory::Quota,
             message: "Usage quota exceeded",
             suggestion: Some("Check your account billing or upgrade your plan"),
             is_retryable: false,
         },
         ErrorPattern {
-            check: |s| {
-                s.to_lowercase().contains("insufficient") && s.to_lowercase().contains("credits")
-            },
+            check: |s| s.contains("insufficient") && s.contains("credits"),
             category: ErrorCategory::Quota,
             message: "Insufficient credits",
             suggestion: Some("Add credits to your account"),
@@ -184,28 +183,28 @@ fn patterns() -> &'static [ErrorPattern] {
         },
         // Network
         ErrorPattern {
-            check: |s| s.to_uppercase().contains("ECONNREFUSED"),
+            check: |s| s.contains("econnrefused"),
             category: ErrorCategory::Network,
             message: "Connection refused",
             suggestion: Some("Check your internet connection"),
             is_retryable: true,
         },
         ErrorPattern {
-            check: |s| s.to_uppercase().contains("ETIMEDOUT"),
+            check: |s| s.contains("etimedout"),
             category: ErrorCategory::Network,
             message: "Connection timed out",
             suggestion: Some("Check your internet connection and try again"),
             is_retryable: true,
         },
         ErrorPattern {
-            check: |s| s.to_uppercase().contains("ENOTFOUND"),
+            check: |s| s.contains("enotfound"),
             category: ErrorCategory::Network,
             message: "Could not reach server",
             suggestion: Some("Check your internet connection"),
             is_retryable: true,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("network"),
+            check: |s| s.contains("network"),
             category: ErrorCategory::Network,
             message: "Network error",
             suggestion: Some("Check your internet connection"),
@@ -234,7 +233,7 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: true,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("overloaded"),
+            check: |s| s.contains("overloaded"),
             category: ErrorCategory::Server,
             message: "API is overloaded",
             suggestion: Some("Try again in a moment"),
@@ -249,10 +248,7 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: false,
         },
         ErrorPattern {
-            check: |s| {
-                let lower = s.to_lowercase();
-                lower.contains("invalid") && lower.contains("request")
-            },
+            check: |s| s.contains("invalid") && s.contains("request"),
             category: ErrorCategory::InvalidRequest,
             message: "Invalid request",
             suggestion: None,
@@ -274,8 +270,11 @@ pub fn extract_error_string(error: &dyn std::fmt::Display) -> String {
 /// Parse an error string into a user-friendly [`ParsedError`].
 #[must_use]
 pub fn parse_error(error_string: &str) -> ParsedError {
+    // Normalize once — all pattern checks receive this lowercase version.
+    let lowered = error_string.to_lowercase();
+
     for pattern in patterns() {
-        if (pattern.check)(error_string) {
+        if (pattern.check)(&lowered) {
             return ParsedError {
                 category: pattern.category,
                 message: pattern.message.to_owned(),
@@ -593,5 +592,40 @@ mod tests {
         assert_eq!(ErrorCategory::Authentication.to_string(), "authentication");
         assert_eq!(ErrorCategory::RateLimit.to_string(), "rate_limit");
         assert_eq!(ErrorCategory::Unknown.to_string(), "unknown");
+    }
+
+    #[test]
+    fn classify_error_case_insensitive_econnrefused() {
+        // Uppercase (typical)
+        assert_eq!(
+            parse_error("connect ECONNREFUSED 127.0.0.1:443").category,
+            ErrorCategory::Network
+        );
+        // Lowercase (atypical but possible from different providers)
+        assert_eq!(
+            parse_error("connect econnrefused 127.0.0.1:443").category,
+            ErrorCategory::Network
+        );
+        // Mixed case
+        assert_eq!(
+            parse_error("Econnrefused from proxy").category,
+            ErrorCategory::Network
+        );
+    }
+
+    #[test]
+    fn classify_error_mixed_case_api_key() {
+        assert_eq!(
+            parse_error("Invalid X-Api-Key header").category,
+            ErrorCategory::Authentication
+        );
+        assert_eq!(
+            parse_error("invalid x-api-key header").category,
+            ErrorCategory::Authentication
+        );
+        assert_eq!(
+            parse_error("INVALID X-API-KEY HEADER").category,
+            ErrorCategory::Authentication
+        );
     }
 }

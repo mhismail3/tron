@@ -41,7 +41,7 @@ pub async fn run_ws_session(
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Create the client connection and send channel
-    let (send_tx, mut send_rx) = mpsc::channel::<Arc<String>>(1024);
+    let (send_tx, mut send_rx) = mpsc::channel::<Arc<String>>(4096);
     let connection = Arc::new(ClientConnection::new(client_id.clone(), send_tx));
 
     let connection_start = std::time::Instant::now();
