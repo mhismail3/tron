@@ -4848,7 +4848,6 @@ dependencies = [
  "tokenizers",
  "tokio",
  "tracing",
- "tron-core",
  "tron-events",
  "tron-settings",
 ]

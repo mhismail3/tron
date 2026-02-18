@@ -16,7 +16,11 @@ pub enum EmbeddingError {
     #[error("Inference failed: {0}")]
     Inference(String),
 
-    /// Vector storage operation failed.
+    /// `SQLite` error (preserves source chain).
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    /// Vector storage operation failed (non-SQLite).
     #[error("Storage failed: {0}")]
     Storage(String),
 
@@ -39,6 +43,7 @@ pub type Result<T> = std::result::Result<T, EmbeddingError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
 
     #[test]
     fn error_display_variants() {
@@ -84,5 +89,31 @@ mod tests {
         }
         assert_eq!(returns_ok().unwrap(), 42);
         assert!(returns_err().is_err());
+    }
+
+    #[test]
+    fn error_from_rusqlite() {
+        let sqlite_err = rusqlite::Error::QueryReturnedNoRows;
+        let err: EmbeddingError = sqlite_err.into();
+        assert!(matches!(err, EmbeddingError::Sqlite(_)));
+        assert!(err.to_string().contains("SQLite error"));
+    }
+
+    #[test]
+    fn error_source_chain_preserved() {
+        let sqlite_err = rusqlite::Error::QueryReturnedNoRows;
+        let err: EmbeddingError = sqlite_err.into();
+        let source = err.source().expect("should have source");
+        assert!(source.to_string().contains("Query returned no rows"));
+    }
+
+    #[test]
+    fn sqlite_variant_display() {
+        let err = EmbeddingError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some("unable to open database".into()),
+        ));
+        let msg = err.to_string();
+        assert!(msg.starts_with("SQLite error:"));
     }
 }

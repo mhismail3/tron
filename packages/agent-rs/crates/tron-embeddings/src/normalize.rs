@@ -27,17 +27,20 @@ pub fn matryoshka_truncate(v: &[f32], target_dims: usize) -> Vec<f32> {
 
 /// Cosine similarity between two L2-normalized vectors (dot product).
 ///
+/// Returns `None` if the vectors have different dimensions.
 /// For non-normalized vectors, this computes the dot product divided by
 /// the product of their norms.
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    assert_eq!(a.len(), b.len(), "vectors must have equal dimensions");
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> Option<f32> {
+    if a.len() != b.len() {
+        return None;
+    }
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a = l2_norm(a);
     let norm_b = l2_norm(b);
     if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
+        return Some(0.0);
     }
-    dot / (norm_a * norm_b)
+    Some(dot / (norm_a * norm_b))
 }
 
 /// Euclidean distance between two vectors.
@@ -151,21 +154,21 @@ mod tests {
     #[test]
     fn cosine_identical() {
         let v = vec![0.6, 0.8];
-        assert!(approx_eq(cosine_similarity(&v, &v), 1.0));
+        assert!(approx_eq(cosine_similarity(&v, &v).unwrap(), 1.0));
     }
 
     #[test]
     fn cosine_orthogonal() {
         let a = vec![1.0, 0.0];
         let b = vec![0.0, 1.0];
-        assert!(approx_eq(cosine_similarity(&a, &b), 0.0));
+        assert!(approx_eq(cosine_similarity(&a, &b).unwrap(), 0.0));
     }
 
     #[test]
     fn cosine_opposite() {
         let a = vec![1.0, 0.0];
         let b = vec![-1.0, 0.0];
-        assert!(approx_eq(cosine_similarity(&a, &b), -1.0));
+        assert!(approx_eq(cosine_similarity(&a, &b).unwrap(), -1.0));
     }
 
     #[test]
@@ -176,7 +179,14 @@ mod tests {
         let norm_a = (1.0 + 4.0 + 9.0_f32).sqrt(); // sqrt(14)
         let norm_b = (16.0 + 25.0 + 36.0_f32).sqrt(); // sqrt(77)
         let expected = dot / (norm_a * norm_b);
-        assert!(approx_eq(cosine_similarity(&a, &b), expected));
+        assert!(approx_eq(cosine_similarity(&a, &b).unwrap(), expected));
+    }
+
+    #[test]
+    fn cosine_dimension_mismatch_returns_none() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0, 2.0, 3.0];
+        assert!(cosine_similarity(&a, &b).is_none());
     }
 
     #[test]
@@ -251,8 +261,8 @@ mod tests {
                 let len = a.len().min(b.len());
                 let a = &a[..len];
                 let b = &b[..len];
-                let ab = cosine_similarity(a, b);
-                let ba = cosine_similarity(b, a);
+                let ab = cosine_similarity(a, b).unwrap();
+                let ba = cosine_similarity(b, a).unwrap();
                 prop_assert!((ab - ba).abs() < 1e-5);
             }
 

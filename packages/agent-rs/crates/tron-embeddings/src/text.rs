@@ -39,9 +39,9 @@ pub fn build_embedding_text(payload: &MemoryLedgerPayload) -> String {
 /// Build embedding text from a JSON value.
 ///
 /// Deserializes to [`MemoryLedgerPayload`] and calls [`build_embedding_text`].
-/// Returns an empty string on parse failure.
-pub fn build_embedding_text_from_json(value: &serde_json::Value) -> String {
-    match serde_json::from_value::<MemoryLedgerPayload>(value.clone()) {
+/// Returns an empty string on parse failure. Takes ownership to avoid cloning.
+pub fn build_embedding_text_from_json(value: serde_json::Value) -> String {
+    match serde_json::from_value::<MemoryLedgerPayload>(value) {
         Ok(payload) => build_embedding_text(&payload),
         Err(_) => String::new(),
     }
@@ -176,7 +176,7 @@ mod tests {
         let payload = make_payload();
         let value = serde_json::to_value(&payload).unwrap();
         let from_struct = build_embedding_text(&payload);
-        let from_json = build_embedding_text_from_json(&value);
+        let from_json = build_embedding_text_from_json(value);
         assert_eq!(from_struct, from_json);
     }
 }

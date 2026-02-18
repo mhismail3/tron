@@ -43,10 +43,12 @@ pub struct BackfillEntry {
     pub payload: serde_json::Value,
 }
 
+type SharedRepo = Arc<Mutex<VectorRepository>>;
+
 /// Orchestrates embedding service and vector repository.
 pub struct EmbeddingController {
     service: Option<Arc<dyn EmbeddingService>>,
-    vector_repo: Option<Arc<Mutex<VectorRepository>>>,
+    vector_repo: Option<SharedRepo>,
     config: EmbeddingConfig,
 }
 
@@ -66,7 +68,7 @@ impl EmbeddingController {
     }
 
     /// Set the vector repository.
-    pub fn set_vector_repo(&mut self, repo: Arc<Mutex<VectorRepository>>) {
+    pub fn set_vector_repo(&mut self, repo: SharedRepo) {
         self.vector_repo = Some(repo);
     }
 
@@ -80,6 +82,16 @@ impl EmbeddingController {
         &self.config
     }
 
+    /// Returns the service and repo refs, or `NotReady` if either is missing/unready.
+    fn ready_parts(&self) -> Result<(&Arc<dyn EmbeddingService>, &SharedRepo)> {
+        let service = self.service.as_ref().ok_or(EmbeddingError::NotReady)?;
+        if !service.is_ready() {
+            return Err(EmbeddingError::NotReady);
+        }
+        let repo = self.vector_repo.as_ref().ok_or(EmbeddingError::NotReady)?;
+        Ok((service, repo))
+    }
+
     /// Embed a memory ledger entry and store its vector.
     pub async fn embed_memory(
         &self,
@@ -87,22 +99,22 @@ impl EmbeddingController {
         workspace_id: &str,
         payload: &serde_json::Value,
     ) -> Result<()> {
-        let service = self.service.as_ref().ok_or(EmbeddingError::NotReady)?;
-        if !service.is_ready() {
-            return Err(EmbeddingError::NotReady);
-        }
-        let repo = self.vector_repo.as_ref().ok_or(EmbeddingError::NotReady)?;
+        let (service, repo) = self.ready_parts()?;
 
-        let text = build_embedding_text_from_json(payload);
+        let text = build_embedding_text_from_json(payload.clone());
         if text.is_empty() {
             debug!(event_id, "skipping embedding: empty text");
             return Ok(());
         }
 
         let embedding = service.embed_single(&text).await?;
-        repo.lock().store(event_id, workspace_id, &embedding)?;
-        debug!(event_id, "embedded memory entry");
-        Ok(())
+
+        let repo = Arc::clone(repo);
+        let event_id = event_id.to_owned();
+        let workspace_id = workspace_id.to_owned();
+        tokio::task::spawn_blocking(move || repo.lock().store(&event_id, &workspace_id, &embedding))
+            .await
+            .map_err(|e| EmbeddingError::Internal(format!("join: {e}")))?
     }
 
     /// Search for similar vectors.
@@ -111,18 +123,19 @@ impl EmbeddingController {
         query_text: &str,
         opts: &SearchOptions,
     ) -> Result<Vec<VectorSearchResult>> {
-        let service = self.service.as_ref().ok_or(EmbeddingError::NotReady)?;
-        if !service.is_ready() {
-            return Err(EmbeddingError::NotReady);
-        }
-        let repo = self.vector_repo.as_ref().ok_or(EmbeddingError::NotReady)?;
+        let (service, repo) = self.ready_parts()?;
 
         if query_text.is_empty() {
             return Ok(vec![]);
         }
 
         let query_embedding = service.embed_single(query_text).await?;
-        repo.lock().search(&query_embedding, opts)
+
+        let repo = Arc::clone(repo);
+        let opts = opts.clone();
+        tokio::task::spawn_blocking(move || repo.lock().search(&query_embedding, &opts))
+            .await
+            .map_err(|e| EmbeddingError::Internal(format!("join: {e}")))?
     }
 
     /// Load workspace memory from ledger entries for injection into system prompt.
@@ -156,7 +169,13 @@ impl EmbeddingController {
         // Reverse so oldest entries come first (chronological reading order)
         let mut entries: Vec<serde_json::Value> = events
             .iter()
-            .filter_map(|e| serde_json::from_str(&e.payload).ok())
+            .filter_map(|e| {
+                serde_json::from_str(&e.payload)
+                    .map_err(|err| {
+                        warn!(event_id = %e.id, error = %err, "failed to parse ledger payload");
+                    })
+                    .ok()
+            })
             .collect();
         entries.reverse();
 
@@ -175,7 +194,6 @@ impl EmbeddingController {
 
             let mut section = format!("\n### {title}");
 
-            // Lessons
             if let Some(lessons) = entry.get("lessons").and_then(serde_json::Value::as_array) {
                 for lesson in lessons {
                     if let Some(text) = lesson.as_str() {
@@ -186,7 +204,6 @@ impl EmbeddingController {
                 }
             }
 
-            // Decisions
             if let Some(decisions) = entry.get("decisions").and_then(serde_json::Value::as_array) {
                 for decision in decisions {
                     let choice = decision
@@ -206,10 +223,21 @@ impl EmbeddingController {
             sections.push(section);
         }
 
-        let content = sections.join("\n");
+        // Truncate to max_workspace_lessons_tokens budget
+        let max_tokens = self.config.max_workspace_lessons_tokens as u64;
+        let mut content = sections.join("\n");
         #[allow(clippy::cast_possible_truncation)]
-        let tokens = (content.len() as u64) / 4;
-        let entry_count = entries.len();
+        let mut tokens = (content.len() as u64) / 4;
+
+        if tokens > max_tokens && sections.len() > 2 {
+            while tokens > max_tokens && sections.len() > 2 {
+                let _ = sections.remove(2);
+                content = sections.join("\n");
+                tokens = (content.len() as u64) / 4;
+            }
+        }
+
+        let entry_count = sections.len().saturating_sub(1); // exclude header
 
         Some(WorkspaceMemory {
             content,
@@ -220,11 +248,7 @@ impl EmbeddingController {
 
     /// Backfill embeddings for entries that don't have vectors yet.
     pub async fn backfill(&self, entries: Vec<BackfillEntry>) -> Result<BackfillResult> {
-        let service = self.service.as_ref().ok_or(EmbeddingError::NotReady)?;
-        if !service.is_ready() {
-            return Err(EmbeddingError::NotReady);
-        }
-        let repo = self.vector_repo.as_ref().ok_or(EmbeddingError::NotReady)?;
+        let (service, repo) = self.ready_parts()?;
 
         let mut result = BackfillResult {
             succeeded: 0,
@@ -233,7 +257,7 @@ impl EmbeddingController {
         };
 
         for entry in entries {
-            let text = build_embedding_text_from_json(&entry.payload);
+            let text = build_embedding_text_from_json(entry.payload);
             if text.is_empty() {
                 result.skipped += 1;
                 continue;
@@ -688,5 +712,69 @@ mod tests {
         let ctrl = EmbeddingController::new(config.clone());
         assert_eq!(ctrl.config().dimensions, 256);
         assert_eq!(ctrl.config().model, "test-model");
+    }
+
+    #[test]
+    fn ready_parts_not_ready_without_service() {
+        let ctrl = make_controller(512);
+        assert!(ctrl.ready_parts().is_err());
+    }
+
+    #[test]
+    fn ready_parts_not_ready_without_repo() {
+        let mut ctrl = make_controller(512);
+        ctrl.set_service(make_service(512));
+        assert!(ctrl.ready_parts().is_err());
+    }
+
+    #[test]
+    fn ready_parts_ok_when_both_set() {
+        let mut ctrl = make_controller(512);
+        ctrl.set_service(make_service(512));
+        ctrl.set_vector_repo(make_repo(512));
+        assert!(ctrl.ready_parts().is_ok());
+    }
+
+    #[test]
+    fn load_workspace_memory_respects_token_limit() {
+        // Use a low token limit to force truncation
+        let config = EmbeddingConfig {
+            dimensions: 512,
+            max_workspace_lessons_tokens: 100,
+            ..EmbeddingConfig::default()
+        };
+        let ctrl = EmbeddingController::new(config);
+        let store = make_event_store();
+
+        let result = store
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"))
+            .unwrap();
+        let sid = result.root_event.session_id;
+        let ws_id = store
+            .get_workspace_by_path("/tmp/project")
+            .unwrap()
+            .unwrap()
+            .id;
+
+        for i in 0..20 {
+            let _ = store.append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: serde_json::json!({
+                    "title": format!("Entry {i} with some long title to increase token count"),
+                    "lessons": [
+                        format!("This is a fairly long lesson from entry {i} designed to take up tokens"),
+                        format!("Another lesson from entry {i} to push the token count higher"),
+                    ],
+                    "decisions": [{"choice": format!("Decision {i}"), "reason": "some reason"}],
+                }),
+                parent_id: None,
+            });
+        }
+
+        let wm = ctrl.load_workspace_memory(&store, &ws_id, 20).unwrap();
+        // Token limit should have kicked in, reducing entries below 20
+        assert!(wm.tokens <= 100, "tokens {} should be <= 100", wm.tokens);
+        assert!(wm.count < 20, "count {} should be < 20", wm.count);
     }
 }

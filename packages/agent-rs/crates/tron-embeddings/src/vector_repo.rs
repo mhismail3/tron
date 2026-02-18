@@ -1,6 +1,7 @@
 //! Vector repository with `SQLite` BLOB storage and brute-force KNN search.
 
 use rusqlite::{Connection, params};
+use tracing::warn;
 
 use crate::errors::{EmbeddingError, Result};
 use crate::normalize::cosine_similarity;
@@ -18,7 +19,7 @@ pub fn blob_to_f32_vec(blob: &[u8]) -> Vec<f32> {
 }
 
 /// Options for vector search.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SearchOptions {
     /// Maximum number of results to return.
     pub limit: usize,
@@ -26,6 +27,19 @@ pub struct SearchOptions {
     pub workspace_id: Option<String>,
     /// Exclude a specific workspace.
     pub exclude_workspace_id: Option<String>,
+    /// Minimum similarity threshold (results below this are excluded).
+    pub min_similarity: f32,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            limit: 0,
+            workspace_id: None,
+            exclude_workspace_id: None,
+            min_similarity: -1.0,
+        }
+    }
 }
 
 /// A single search result.
@@ -53,15 +67,14 @@ impl VectorRepository {
 
     /// Create the `memory_vectors` table if it doesn't exist.
     pub fn ensure_table(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS memory_vectors (
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_vectors (
                     event_id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL,
                     embedding BLOB NOT NULL
                 )",
-            )
-            .map_err(|e| EmbeddingError::Storage(e.to_string()))
+        )?;
+        Ok(())
     }
 
     /// Check if the `memory_vectors` table exists.
@@ -85,32 +98,23 @@ impl VectorRepository {
             )));
         }
         let blob = f32_slice_to_blob(embedding);
-        let _ = self
-            .conn
-            .execute(
-                "DELETE FROM memory_vectors WHERE event_id = ?1",
-                params![event_id],
-            )
-            .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
-        let _ = self
-            .conn
-            .execute(
-                "INSERT INTO memory_vectors (event_id, workspace_id, embedding) VALUES (?1, ?2, ?3)",
-                params![event_id, workspace_id, blob],
-            )
-            .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
+        let _ = self.conn.execute(
+            "DELETE FROM memory_vectors WHERE event_id = ?1",
+            params![event_id],
+        )?;
+        let _ = self.conn.execute(
+            "INSERT INTO memory_vectors (event_id, workspace_id, embedding) VALUES (?1, ?2, ?3)",
+            params![event_id, workspace_id, blob],
+        )?;
         Ok(())
     }
 
     /// Delete a vector by event ID.
     pub fn delete(&self, event_id: &str) -> Result<()> {
-        let _ = self
-            .conn
-            .execute(
-                "DELETE FROM memory_vectors WHERE event_id = ?1",
-                params![event_id],
-            )
-            .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
+        let _ = self.conn.execute(
+            "DELETE FROM memory_vectors WHERE event_id = ?1",
+            params![event_id],
+        )?;
         Ok(())
     }
 
@@ -119,8 +123,7 @@ impl VectorRepository {
     pub fn count(&self) -> Result<usize> {
         let count: i64 = self
             .conn
-            .query_row("SELECT count(*) FROM memory_vectors", [], |row| row.get(0))
-            .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
+            .query_row("SELECT count(*) FROM memory_vectors", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 
@@ -138,57 +141,48 @@ impl VectorRepository {
         }
         let limit = if opts.limit == 0 { 10 } else { opts.limit };
         let rows = self.load_vectors(opts)?;
-        Ok(Self::rank_results(query, rows, limit))
+        Ok(Self::rank_results(query, rows, limit, opts.min_similarity))
     }
 
     fn load_vectors(&self, opts: &SearchOptions) -> Result<Vec<(String, String, Vec<u8>)>> {
-        let extract_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(String, String, Vec<u8>)> {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Vec<u8>>(2)?,
-            ))
-        };
+        let mut sql =
+            String::from("SELECT event_id, workspace_id, embedding FROM memory_vectors");
+        let mut conditions = Vec::new();
+        let mut param_values: Vec<String> = Vec::new();
 
-        let rows = match (&opts.workspace_id, &opts.exclude_workspace_id) {
-            (Some(ws), Some(excl)) => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT event_id, workspace_id, embedding FROM memory_vectors WHERE workspace_id = ?1 AND workspace_id != ?2",
-                ).map_err(|e| EmbeddingError::Storage(e.to_string()))?;
-                stmt.query_map(params![ws, excl], extract_row)
-                    .map_err(|e| EmbeddingError::Storage(e.to_string()))?
-                    .filter_map(std::result::Result::ok)
-                    .collect()
-            }
-            (Some(ws), None) => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT event_id, workspace_id, embedding FROM memory_vectors WHERE workspace_id = ?1",
-                ).map_err(|e| EmbeddingError::Storage(e.to_string()))?;
-                stmt.query_map(params![ws], extract_row)
-                    .map_err(|e| EmbeddingError::Storage(e.to_string()))?
-                    .filter_map(std::result::Result::ok)
-                    .collect()
-            }
-            (None, Some(excl)) => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT event_id, workspace_id, embedding FROM memory_vectors WHERE workspace_id != ?1",
-                ).map_err(|e| EmbeddingError::Storage(e.to_string()))?;
-                stmt.query_map(params![excl], extract_row)
-                    .map_err(|e| EmbeddingError::Storage(e.to_string()))?
-                    .filter_map(std::result::Result::ok)
-                    .collect()
-            }
-            (None, None) => {
-                let mut stmt = self
-                    .conn
-                    .prepare("SELECT event_id, workspace_id, embedding FROM memory_vectors")
-                    .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
-                stmt.query_map([], extract_row)
-                    .map_err(|e| EmbeddingError::Storage(e.to_string()))?
-                    .filter_map(std::result::Result::ok)
-                    .collect()
-            }
-        };
+        if let Some(ws) = &opts.workspace_id {
+            conditions.push(format!("workspace_id = ?{}", param_values.len() + 1));
+            param_values.push(ws.clone());
+        }
+        if let Some(excl) = &opts.exclude_workspace_id {
+            conditions.push(format!("workspace_id != ?{}", param_values.len() + 1));
+            param_values.push(excl.clone());
+        }
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
+
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
+            })?
+            .filter_map(|row_result| match row_result {
+                Ok(row) => Some(row),
+                Err(e) => {
+                    warn!(error = %e, "failed to deserialize vector row");
+                    None
+                }
+            })
+            .collect();
 
         Ok(rows)
     }
@@ -197,20 +191,21 @@ impl VectorRepository {
         query: &[f32],
         rows: Vec<(String, String, Vec<u8>)>,
         limit: usize,
+        min_similarity: f32,
     ) -> Vec<VectorSearchResult> {
         let mut results: Vec<VectorSearchResult> = rows
             .into_iter()
-            .map(|(event_id, workspace_id, blob)| {
+            .filter_map(|(event_id, workspace_id, blob)| {
                 let embedding = blob_to_f32_vec(&blob);
-                let similarity = cosine_similarity(query, &embedding);
-                VectorSearchResult {
+                cosine_similarity(query, &embedding).map(|similarity| VectorSearchResult {
                     event_id,
                     workspace_id,
                     similarity,
-                }
+                })
             })
             .collect();
 
+        results.retain(|r| r.similarity >= min_similarity);
         results.sort_by(|a, b| {
             b.similarity
                 .partial_cmp(&a.similarity)
@@ -601,5 +596,54 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Empty"));
+    }
+
+    #[test]
+    fn search_min_similarity_filters() {
+        let repo = make_repo(4);
+        let query = random_vector(4, 0);
+        let different = random_vector(4, 100);
+
+        repo.store("exact", "ws1", &query).unwrap();
+        repo.store("different", "ws1", &different).unwrap();
+
+        let results = repo
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 10,
+                    min_similarity: 0.99,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // Only the exact match should pass the threshold
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].event_id, "exact");
+    }
+
+    #[test]
+    fn search_default_min_similarity_returns_all() {
+        let repo = make_repo(4);
+        repo.store("e1", "ws1", &random_vector(4, 1)).unwrap();
+        repo.store("e2", "ws1", &random_vector(4, 2)).unwrap();
+
+        // Default min_similarity (-1.0) returns everything including negative similarities
+        let results = repo
+            .search(
+                &random_vector(4, 0),
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn search_options_default_min_similarity() {
+        let opts = SearchOptions::default();
+        assert_eq!(opts.min_similarity, -1.0);
     }
 }
