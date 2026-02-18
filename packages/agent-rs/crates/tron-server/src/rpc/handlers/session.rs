@@ -92,7 +92,7 @@ fn emit_optimistic_context_events(
     working_dir: &str,
 ) {
     let settings = tron_settings::get_settings();
-    let artifacts = load_session_context_artifacts(event_store.as_ref(), working_dir, settings);
+    let artifacts = load_session_context_artifacts(event_store.as_ref(), working_dir, &settings);
 
     let files_json: Vec<serde_json::Value> = artifacts
         .rules

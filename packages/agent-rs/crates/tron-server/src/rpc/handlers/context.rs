@@ -62,7 +62,7 @@ fn build_context_manager_for_session(
     let artifacts = load_session_context_artifacts(
         ctx.event_store.as_ref(),
         &session.working_directory,
-        settings,
+        &settings,
     );
 
     // 6. Get tool definitions

@@ -383,16 +383,19 @@ struct ContextAuditView: View {
         isLoading = true
 
         do {
-            // Load detailed context snapshot and events in parallel
+            // Load detailed context snapshot, settings, and events in parallel
             async let snapshotTask = rpcClient.context.getDetailedSnapshot(sessionId: sessionId)
+            async let settingsTask = rpcClient.settings.get()
             let events = try eventStoreManager.getSessionEvents(sessionId)
 
             detailedSnapshot = try await snapshotTask
             sessionEvents = events
 
-            // Check if auto-ledger is enabled
-            if let settings = try? await rpcClient.settings.get() {
+            do {
+                let settings = try await settingsTask
                 isAutoLedgerEnabled = settings.memory.ledger.enabled
+            } catch {
+                logger.warning("Failed to load settings for context sheet, defaulting auto-ledger to true: \(error)", category: .general)
             }
         } catch {
             errorMessage = error.localizedDescription

@@ -79,7 +79,13 @@ impl MethodHandler for UpdateSettingsHandler {
             // Deep merge updates over current
             let merged = tron_settings::deep_merge(current, updates);
 
-            write_settings_json(&settings_path, &merged)
+            write_settings_json(&settings_path, &merged)?;
+
+            // Reload the global settings cache so all subsequent
+            // get_settings() calls return the updated values.
+            tron_settings::reload_settings_from_path(&settings_path);
+
+            Ok(())
         })
         .await
         .map_err(|e| RpcError::Internal {
@@ -265,5 +271,84 @@ mod tests {
             .await
             .unwrap();
         assert!(nested_path.exists());
+    }
+
+    #[tokio::test]
+    async fn update_settings_reloads_cached_singleton() {
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+
+        // Prime the cache with defaults pointing at temp path
+        tron_settings::reload_settings_from_path(&ctx.settings_path);
+        assert!(
+            tron_settings::get_settings()
+                .context
+                .memory
+                .auto_inject
+                .enabled,
+            "auto_inject should default to true"
+        );
+
+        // Simulate iOS toggling auto-inject off via settings.update RPC
+        let _ = UpdateSettingsHandler
+            .handle(
+                Some(json!({
+                    "settings": {
+                        "context": {
+                            "memory": {
+                                "autoInject": {"enabled": false}
+                            }
+                        }
+                    }
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        // The cached singleton should now reflect the update
+        let settings = tron_settings::get_settings();
+        assert!(
+            !settings.context.memory.auto_inject.enabled,
+            "auto_inject should be false after settings.update RPC"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_settings_reloads_ledger_toggle() {
+        let (ctx, _dir) = make_ctx_with_temp_settings();
+
+        // Prime the cache
+        tron_settings::reload_settings_from_path(&ctx.settings_path);
+        assert!(
+            tron_settings::get_settings()
+                .context
+                .memory
+                .ledger
+                .enabled,
+            "ledger should default to true"
+        );
+
+        // Toggle ledger off
+        let _ = UpdateSettingsHandler
+            .handle(
+                Some(json!({
+                    "settings": {
+                        "context": {
+                            "memory": {
+                                "ledger": {"enabled": false}
+                            }
+                        }
+                    }
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let settings = tron_settings::get_settings();
+        assert!(
+            !settings.context.memory.ledger.enabled,
+            "ledger should be false after settings.update RPC"
+        );
     }
 }
