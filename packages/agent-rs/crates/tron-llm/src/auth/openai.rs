@@ -37,11 +37,7 @@ pub async fn refresh_token_with_client(
         "refresh_token": refresh_token,
     });
 
-    let resp = client
-        .post(TOKEN_URL)
-        .json(&body)
-        .send()
-        .await?;
+    let resp = client.post(TOKEN_URL).json(&body).send().await?;
 
     let status = resp.status().as_u16();
     if status != 200 {
@@ -106,7 +102,9 @@ pub async fn load_server_auth_with_client(
                     if refreshed {
                         tracing::info!("persisting refreshed OpenAI tokens");
                         let _ = super::storage::save_provider_oauth_tokens(
-                            auth_path, PROVIDER_KEY, &tokens,
+                            auth_path,
+                            PROVIDER_KEY,
+                            &tokens,
                         );
                     }
                     return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
@@ -146,11 +144,13 @@ async fn maybe_refresh_tokens(
     tracing::info!("`OpenAI` OAuth token expired, refreshing...");
     match refresh_token_with_client(&tokens.refresh_token, client).await {
         Ok(new_tokens) => {
-            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "success").increment(1);
+            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "success")
+                .increment(1);
             Ok((new_tokens, true))
         }
         Err(e) => {
-            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "failure").increment(1);
+            metrics::counter!("auth_refresh_total", "provider" => "openai", "status" => "failure")
+                .increment(1);
             Err(e)
         }
     }

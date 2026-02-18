@@ -9,7 +9,9 @@ use tron_core::events::ActivatedRuleInfo;
 use tron_core::messages::Message;
 
 use super::compaction_engine::{CompactionDeps, CompactionEngine};
-use super::constants::{CHARS_PER_TOKEN, Thresholds, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS};
+use super::constants::{
+    CHARS_PER_TOKEN, TOOL_RESULT_MAX_CHARS, TOOL_RESULT_MIN_TOKENS, Thresholds,
+};
 use super::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
 use super::message_store::MessageStore;
 use super::rules_index::RulesIndex;
@@ -298,10 +300,7 @@ impl ContextManager {
     #[must_use]
     /// Get the working directory (for file operations and tool context).
     pub fn get_working_directory(&self) -> &str {
-        self.config
-            .working_directory
-            .as_deref()
-            .unwrap_or("/tmp")
+        self.config.working_directory.as_deref().unwrap_or("/tmp")
     }
 
     // ── Token estimation ────────────────────────────────────────────────
@@ -309,7 +308,10 @@ impl ContextManager {
     #[must_use]
     /// Estimate system prompt token count.
     pub fn estimate_system_prompt_tokens(&self) -> u64 {
-        u64::from(token_estimator::estimate_system_prompt_tokens(&self.system_prompt, None))
+        u64::from(token_estimator::estimate_system_prompt_tokens(
+            &self.system_prompt,
+            None,
+        ))
     }
 
     #[must_use]
@@ -321,10 +323,12 @@ impl ContextManager {
     #[must_use]
     /// Estimate combined static + dynamic rules token count.
     pub fn estimate_rules_tokens(&self) -> u64 {
-        let static_rules =
-            u64::from(token_estimator::estimate_rules_tokens(self.rules_content.as_deref()));
-        let dynamic_rules =
-            u64::from(token_estimator::estimate_rules_tokens(self.dynamic_rules_content.as_deref()));
+        let static_rules = u64::from(token_estimator::estimate_rules_tokens(
+            self.rules_content.as_deref(),
+        ));
+        let dynamic_rules = u64::from(token_estimator::estimate_rules_tokens(
+            self.dynamic_rules_content.as_deref(),
+        ));
         static_rules + dynamic_rules
     }
 
@@ -452,11 +456,7 @@ impl ContextManager {
 
     /// Process a tool result, truncating if necessary.
     #[must_use]
-    pub fn process_tool_result(
-        &self,
-        tool_call_id: &str,
-        content: &str,
-    ) -> ProcessedToolResult {
+    pub fn process_tool_result(&self, tool_call_id: &str, content: &str) -> ProcessedToolResult {
         let max_size = self.get_max_tool_result_size();
 
         if content.len() <= max_size {
@@ -793,10 +793,11 @@ mod tests {
         assert!(cm.get_dynamic_rules_content().is_none());
         let _ = cm.touch_file_path("src/context/loader.rs");
         assert!(cm.get_dynamic_rules_content().is_some());
-        assert!(cm
-            .get_dynamic_rules_content()
-            .unwrap()
-            .contains("# Context rules"));
+        assert!(
+            cm.get_dynamic_rules_content()
+                .unwrap()
+                .contains("# Context rules")
+        );
     }
 
     #[test]
@@ -866,10 +867,11 @@ mod tests {
 
         assert!(cm.pre_activate_rule("src/context/.claude/CLAUDE.md"));
         cm.finalize_rule_activations();
-        assert!(cm
-            .get_dynamic_rules_content()
-            .unwrap()
-            .contains("# Context rules"));
+        assert!(
+            cm.get_dynamic_rules_content()
+                .unwrap()
+                .contains("# Context rules")
+        );
     }
 
     #[test]
@@ -1102,7 +1104,10 @@ mod tests {
 
         // remaining=5k, reserve=8k → saturating_sub yields 0 before margin
         // Falls back to TOOL_RESULT_MIN_TOKENS (2500) * 4 = 10000 chars
-        assert_eq!(max_size, (TOOL_RESULT_MIN_TOKENS as usize) * (CHARS_PER_TOKEN as usize));
+        assert_eq!(
+            max_size,
+            (TOOL_RESULT_MIN_TOKENS as usize) * (CHARS_PER_TOKEN as usize)
+        );
     }
 
     // -- model switching --

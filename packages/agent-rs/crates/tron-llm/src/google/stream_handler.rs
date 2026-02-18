@@ -81,7 +81,10 @@ fn rand_u32() -> u32 {
 ///
 /// Returns a vec of `StreamEvent` values to emit. Most lines produce 0-2 events;
 /// the `response.done` / finish reason line produces the final `Done` event.
-pub fn process_stream_chunk(chunk: &GeminiStreamChunk, state: &mut StreamState) -> Vec<StreamEvent> {
+pub fn process_stream_chunk(
+    chunk: &GeminiStreamChunk,
+    state: &mut StreamState,
+) -> Vec<StreamEvent> {
     let mut events = Vec::new();
 
     // Check for API-level error
@@ -271,10 +274,7 @@ fn handle_finish(
             if !blocked.is_empty() {
                 events.push(StreamEvent::SafetyBlock {
                     blocked_categories: blocked.clone(),
-                    error: format!(
-                        "Response blocked by safety filter: {}",
-                        blocked.join(", ")
-                    ),
+                    error: format!("Response blocked by safety filter: {}", blocked.join(", ")),
                 });
             }
         }
@@ -501,7 +501,9 @@ mod tests {
         let mut state = create_stream_state();
         let events = process_stream_chunk(&chunk, &mut state);
         assert!(matches!(events[0], StreamEvent::ThinkingStart));
-        assert!(matches!(&events[1], StreamEvent::ThinkingDelta { delta } if delta == "thinking..."));
+        assert!(
+            matches!(&events[1], StreamEvent::ThinkingDelta { delta } if delta == "thinking...")
+        );
     }
 
     #[test]
@@ -525,7 +527,9 @@ mod tests {
         state.thinking_started = true;
         state.accumulated_thinking = "prior thinking".into();
         let events = process_stream_chunk(&chunk, &mut state);
-        assert!(matches!(&events[0], StreamEvent::ThinkingEnd { thinking, .. } if thinking == "prior thinking"));
+        assert!(
+            matches!(&events[0], StreamEvent::ThinkingEnd { thinking, .. } if thinking == "prior thinking")
+        );
         assert!(matches!(events[1], StreamEvent::TextStart));
     }
 
@@ -593,7 +597,9 @@ mod tests {
         state.text_started = true;
         state.accumulated_text = "hello".into();
         let events = process_stream_chunk(&chunk, &mut state);
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         assert!(done.is_some());
         match done.unwrap() {
             StreamEvent::Done { stop_reason, .. } => assert_eq!(stop_reason, "end_turn"),
@@ -636,7 +642,9 @@ mod tests {
         state.accumulated_text = "answer".into();
         state.text_started = true;
         let events = handle_finish("STOP", None, &mut state);
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         match done.unwrap() {
             StreamEvent::Done { message, .. } => {
                 assert_eq!(message.content.len(), 2); // thinking + text
@@ -663,11 +671,8 @@ mod tests {
         match events.last().unwrap() {
             StreamEvent::Done { message, .. } => {
                 // Tool calls appear in the content as ToolUse blocks
-                let tool_uses: Vec<_> = message
-                    .content
-                    .iter()
-                    .filter(|c| c.is_tool_use())
-                    .collect();
+                let tool_uses: Vec<_> =
+                    message.content.iter().filter(|c| c.is_tool_use()).collect();
                 assert_eq!(tool_uses.len(), 1);
                 match &tool_uses[0] {
                     AssistantContent::ToolUse {

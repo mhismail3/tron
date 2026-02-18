@@ -155,10 +155,7 @@ pub fn is_complete(questions: &[AskUserQuestion], answers: &[QuestionAnswer]) ->
             None => return false,
             Some(a) => {
                 let has_selected = !a.selected_values.is_empty();
-                let has_other = a
-                    .other_value
-                    .as_ref()
-                    .is_some_and(|v| !v.is_empty());
+                let has_other = a.other_value.as_ref().is_some_and(|v| !v.is_empty());
                 if !has_selected && !has_other {
                     return false;
                 }

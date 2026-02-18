@@ -71,10 +71,7 @@ impl EmbeddingController {
 
     /// Whether both the service and repo are ready.
     pub fn is_ready(&self) -> bool {
-        self.service
-            .as_ref()
-            .is_some_and(|s| s.is_ready())
-            && self.vector_repo.is_some()
+        self.service.as_ref().is_some_and(|s| s.is_ready()) && self.vector_repo.is_some()
     }
 
     /// Get the config.
@@ -390,7 +387,13 @@ mod tests {
             .await
             .unwrap();
         let results = ctrl
-            .search("test query", &SearchOptions { limit: 5, ..Default::default() })
+            .search(
+                "test query",
+                &SearchOptions {
+                    limit: 5,
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
@@ -400,7 +403,13 @@ mod tests {
     async fn search_not_ready_error() {
         let ctrl = make_controller(512);
         let result = ctrl
-            .search("test", &SearchOptions { limit: 5, ..Default::default() })
+            .search(
+                "test",
+                &SearchOptions {
+                    limit: 5,
+                    ..Default::default()
+                },
+            )
             .await;
         assert!(matches!(result, Err(EmbeddingError::NotReady)));
     }
@@ -413,7 +422,13 @@ mod tests {
         ctrl.set_vector_repo(make_repo(dims));
 
         let results = ctrl
-            .search("", &SearchOptions { limit: 5, ..Default::default() })
+            .search(
+                "",
+                &SearchOptions {
+                    limit: 5,
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert!(results.is_empty());
@@ -506,7 +521,13 @@ mod tests {
             .unwrap();
 
         let results = ctrl
-            .search("Test entry", &SearchOptions { limit: 5, ..Default::default() })
+            .search(
+                "Test entry",
+                &SearchOptions {
+                    limit: 5,
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
@@ -529,7 +550,13 @@ mod tests {
         ctrl.embed_memory("evt2", "ws1", &payload2).await.unwrap();
 
         let results = ctrl
-            .search("Test entry", &SearchOptions { limit: 10, ..Default::default() })
+            .search(
+                "Test entry",
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -556,10 +583,7 @@ mod tests {
     // ── Workspace memory tests ──
 
     fn make_event_store() -> Arc<tron_events::EventStore> {
-        let pool = tron_events::new_in_memory(
-            &tron_events::ConnectionConfig::default(),
-        )
-        .unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
@@ -611,9 +635,7 @@ mod tests {
             parent_id: None,
         });
 
-        let wm = ctrl
-            .load_workspace_memory(&store, &ws_id, 5)
-            .unwrap();
+        let wm = ctrl.load_workspace_memory(&store, &ws_id, 5).unwrap();
         assert_eq!(wm.count, 1);
         assert!(wm.content.contains("# Memory"));
         assert!(wm.content.contains("### Added auth system"));
@@ -651,9 +673,7 @@ mod tests {
         }
 
         // Request only 2
-        let wm = ctrl
-            .load_workspace_memory(&store, &ws_id, 2)
-            .unwrap();
+        let wm = ctrl.load_workspace_memory(&store, &ws_id, 2).unwrap();
         assert_eq!(wm.count, 2);
     }
 

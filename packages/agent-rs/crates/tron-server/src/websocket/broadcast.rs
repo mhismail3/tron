@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::rpc::types::RpcEvent;
 use metrics::counter;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
-use crate::rpc::types::RpcEvent;
 
 use super::connection::ClientConnection;
 
@@ -59,9 +59,7 @@ impl BroadcastManager {
         }
         debug!(
             event_type = event.event_type,
-            session_id,
-            recipients,
-            "broadcast event to session"
+            session_id, recipients, "broadcast event to session"
         );
     }
 

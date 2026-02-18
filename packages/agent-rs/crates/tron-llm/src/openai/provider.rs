@@ -21,25 +21,25 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use base64::Engine as _;
 use futures::stream::{self, StreamExt};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument, warn};
 
-use tron_core::events::StreamEvent;
-use tron_core::messages::{Context, Message};
 use crate::compose_context_parts;
 use crate::models::types::ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::sse::parse_sse_lines;
+use tron_core::events::StreamEvent;
+use tron_core::messages::{Context, Message};
 
 use super::message_converter::{
     convert_to_responses_input, convert_tools, generate_tool_clarification_message,
 };
 use super::stream_handler::{create_stream_state, process_stream_event};
 use super::types::{
-    get_openai_model, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIConfig,
-    ReasoningConfig, ResponsesInputItem, ResponsesRequest, ResponsesSseEvent, DEFAULT_BASE_URL,
+    DEFAULT_BASE_URL, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, ReasoningConfig,
+    ResponsesInputItem, ResponsesRequest, ResponsesSseEvent, get_openai_model,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,8 +86,8 @@ pub fn extract_account_id(token: &str) -> String {
         return String::new();
     }
 
-    let Ok(payload_bytes) = base64::engine::general_purpose::STANDARD
-        .decode(to_standard_base64(parts[1]))
+    let Ok(payload_bytes) =
+        base64::engine::general_purpose::STANDARD.decode(to_standard_base64(parts[1]))
     else {
         return String::new();
     };
@@ -154,14 +154,8 @@ async fn refresh_tokens(
     settings: &OpenAIApiSettings,
     client: &reqwest::Client,
 ) -> ProviderResult<crate::auth::OAuthTokens> {
-    let token_url = settings
-        .token_url
-        .as_deref()
-        .unwrap_or(DEFAULT_TOKEN_URL);
-    let client_id = settings
-        .client_id
-        .as_deref()
-        .unwrap_or(DEFAULT_CLIENT_ID);
+    let token_url = settings.token_url.as_deref().unwrap_or(DEFAULT_TOKEN_URL);
+    let client_id = settings.client_id.as_deref().unwrap_or(DEFAULT_CLIENT_ID);
 
     info!("Refreshing OpenAI OAuth tokens");
 
@@ -516,7 +510,10 @@ fn parse_api_error(body: &str, status: u16) -> (String, Option<String>, bool) {
 
         // Alternative formats: {"detail": "..."} or {"message": "..."}
         if let Some(msg) = json["detail"].as_str().or_else(|| json["message"].as_str()) {
-            let code = json["code"].as_str().or_else(|| json["type"].as_str()).map(String::from);
+            let code = json["code"]
+                .as_str()
+                .or_else(|| json["type"].as_str())
+                .map(String::from);
             return (msg.to_string(), code, retryable);
         }
 
@@ -952,11 +949,13 @@ mod tests {
 
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/oauth/token"))
-            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "new-access-token",
-                "refresh_token": "new-refresh-token",
-                "expires_in": 3600
-            })))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "access_token": "new-access-token",
+                    "refresh_token": "new-refresh-token",
+                    "expires_in": 3600
+                })),
+            )
             .mount(&server)
             .await;
 

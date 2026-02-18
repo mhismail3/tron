@@ -57,10 +57,9 @@ impl ApnsService {
             reason: e.to_string(),
         })?;
 
-        let encoding_key =
-            EncodingKey::from_ec_pem(&key_pem).map_err(|e| ApnsError::KeyParse {
-                reason: e.to_string(),
-            })?;
+        let encoding_key = EncodingKey::from_ec_pem(&key_pem).map_err(|e| ApnsError::KeyParse {
+            reason: e.to_string(),
+        })?;
 
         // APNs requires HTTP/2. Force it via http2_prior_knowledge — ALPN
         // alone isn't enough because reqwest defaults to HTTP/1.1 unless told otherwise.
@@ -228,7 +227,10 @@ impl ApnsService {
 
     /// Get a cached JWT or generate a new one.
     fn get_or_refresh_token(&self) -> Result<String, ApnsError> {
-        let mut cached = self.cached_token.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cached = self
+            .cached_token
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(ref token) = *cached {
             if token.created_at.elapsed() < TOKEN_VALIDITY {
@@ -255,10 +257,8 @@ impl ApnsService {
             iat: chrono::Utc::now().timestamp(),
         };
 
-        jsonwebtoken::encode(&header, &claims, &self.encoding_key).map_err(|e| {
-            ApnsError::JwtSign {
-                reason: e.to_string(),
-            }
+        jsonwebtoken::encode(&header, &claims, &self.encoding_key).map_err(|e| ApnsError::JwtSign {
+            reason: e.to_string(),
         })
     }
 

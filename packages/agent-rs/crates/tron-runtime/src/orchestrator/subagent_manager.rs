@@ -6,17 +6,17 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::guardrails::GuardrailEngine;
+use crate::hooks::engine::HookEngine;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, info_span, Instrument};
+use tracing::{Instrument, info, info_span};
 use tron_core::events::{BaseEvent, TronEvent};
 use tron_events::{EventStore, EventType};
-use crate::guardrails::GuardrailEngine;
-use crate::hooks::engine::HookEngine;
 use tron_llm::provider::ProviderFactory;
 use tron_tools::errors::ToolError;
 use tron_tools::registry::ToolRegistry;
@@ -155,10 +155,7 @@ impl SubagentManager {
     }
 
     /// Set the tool factory (breaks circular dependency with tool registry).
-    pub fn set_tool_factory(
-        &self,
-        factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>,
-    ) {
+    pub fn set_tool_factory(&self, factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync>) {
         let _ = self.tool_factory.set(factory);
     }
 
@@ -180,9 +177,7 @@ impl SubagentManager {
                 entry.value().spawn_type == SpawnType::Subsession
                     && entry.value().result.lock().is_none()
             })
-            .map(|entry| {
-                (entry.key().clone(), entry.value().task.clone())
-            })
+            .map(|entry| (entry.key().clone(), entry.value().task.clone()))
             .collect()
     }
 
@@ -513,7 +508,11 @@ impl SubagentSpawner for SubagentManager {
                 model,
                 workspace,
                 Some(&title),
-                if parent_sid.is_empty() { "parent-placeholder" } else { &parent_sid },
+                if parent_sid.is_empty() {
+                    "parent-placeholder"
+                } else {
+                    &parent_sid
+                },
                 "inProcess",
                 &task,
             )
@@ -535,7 +534,8 @@ impl SubagentSpawner for SubagentManager {
             cancel: cancel.clone(),
         });
 
-        let _ = self.subagents
+        let _ = self
+            .subagents
             .insert(child_session_id.clone(), tracker.clone());
 
         // 3. Emit SubagentSpawned on broadcast (routed to parent session for iOS)
@@ -993,8 +993,7 @@ impl SubagentSpawner for SubagentManager {
             "status" => {
                 if let Some(tracker) = self.subagents.get(session_id) {
                     let result = tracker.result.lock().clone();
-                    let duration_ms =
-                        tracker.started_at.elapsed().as_millis() as u64;
+                    let duration_ms = tracker.started_at.elapsed().as_millis() as u64;
                     let status = if result.is_some() {
                         result.as_ref().map_or("unknown", |r| r.status.as_str())
                     } else {
@@ -1010,12 +1009,11 @@ impl SubagentSpawner for SubagentManager {
                     }))
                 } else {
                     // Fall back to DB
-                    let session = self
-                        .event_store
-                        .get_session(session_id)
-                        .map_err(|e| ToolError::Internal {
+                    let session = self.event_store.get_session(session_id).map_err(|e| {
+                        ToolError::Internal {
                             message: format!("Failed to query session: {e}"),
-                        })?;
+                        }
+                    })?;
                     if let Some(s) = session {
                         Ok(json!({
                             "sessionId": s.id,
@@ -1092,11 +1090,12 @@ impl SubagentSpawner for SubagentManager {
             WaitMode::All => {
                 let mut results = Vec::with_capacity(session_ids.len());
                 for sid in session_ids {
-                    let tracker = self.subagents.get(sid).ok_or_else(|| {
-                        ToolError::Validation {
+                    let tracker = self
+                        .subagents
+                        .get(sid)
+                        .ok_or_else(|| ToolError::Validation {
                             message: format!("Unknown subagent session: {sid}"),
-                        }
-                    })?;
+                        })?;
 
                     // Check if already done
                     {
@@ -1117,15 +1116,17 @@ impl SubagentSpawner for SubagentManager {
                         return Err(ToolError::Timeout { timeout_ms });
                     }
 
-                    let result = tracker.result.lock().clone().unwrap_or_else(|| {
-                        SubagentResult {
+                    let result = tracker
+                        .result
+                        .lock()
+                        .clone()
+                        .unwrap_or_else(|| SubagentResult {
                             session_id: sid.clone(),
                             output: String::new(),
                             token_usage: None,
                             duration_ms: 0,
                             status: "unknown".into(),
-                        }
-                    });
+                        });
                     results.push(result);
                 }
                 Ok(results)
@@ -1134,11 +1135,7 @@ impl SubagentSpawner for SubagentManager {
                 // Build futures for all trackers
                 let trackers: Vec<_> = session_ids
                     .iter()
-                    .map(|sid| {
-                        self.subagents
-                            .get(sid)
-                            .map(|t| (sid.clone(), t.clone()))
-                    })
+                    .map(|sid| self.subagents.get(sid).map(|t| (sid.clone(), t.clone())))
                     .collect::<Option<Vec<_>>>()
                     .ok_or_else(|| ToolError::Validation {
                         message: "One or more unknown subagent sessions".into(),
@@ -1161,15 +1158,17 @@ impl SubagentSpawner for SubagentManager {
                     let _ = tokio::spawn(async move {
                         tracker.done.notified().await;
                         let result =
-                            tracker.result.lock().clone().unwrap_or_else(|| {
-                                SubagentResult {
+                            tracker
+                                .result
+                                .lock()
+                                .clone()
+                                .unwrap_or_else(|| SubagentResult {
                                     session_id: sid,
                                     output: String::new(),
                                     token_usage: None,
                                     duration_ms: 0,
                                     status: "unknown".into(),
-                                }
-                            });
+                                });
                         let _ = tx.send(result).await;
                     });
                 }
@@ -1201,7 +1200,9 @@ mod tests {
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
     use tron_llm::models::types::ProviderType;
-    use tron_llm::provider::{Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream};
+    use tron_llm::provider::{
+        Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+    };
 
     struct MockProvider;
     #[async_trait]
@@ -1259,8 +1260,7 @@ mod tests {
     }
 
     fn make_manager_and_store() -> (Arc<SessionManager>, Arc<EventStore>, Arc<EventEmitter>) {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
@@ -1279,10 +1279,7 @@ mod tests {
     }
     #[async_trait]
     impl<P: Provider + Default + 'static> ProviderFactory for MockProviderFactoryFor<P> {
-        async fn create_for_model(
-            &self,
-            _model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(Arc::new(P::default()))
         }
     }
@@ -1460,11 +1457,7 @@ mod tests {
         let h2 = manager.spawn(c2).await.unwrap();
 
         let results = manager
-            .wait_for_agents(
-                &[h1.session_id, h2.session_id],
-                WaitMode::All,
-                30_000,
-            )
+            .wait_for_agents(&[h1.session_id, h2.session_id], WaitMode::All, 30_000)
             .await
             .unwrap();
 
@@ -1484,11 +1477,7 @@ mod tests {
         let h2 = manager.spawn(c2).await.unwrap();
 
         let results = manager
-            .wait_for_agents(
-                &[h1.session_id, h2.session_id],
-                WaitMode::Any,
-                30_000,
-            )
+            .wait_for_agents(&[h1.session_id, h2.session_id], WaitMode::Any, 30_000)
             .await
             .unwrap();
 
@@ -1758,7 +1747,11 @@ mod tests {
         let events = store
             .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
             .unwrap();
-        assert_eq!(events.len(), 1, "expected one notification event in parent session");
+        assert_eq!(
+            events.len(),
+            1,
+            "expected one notification event in parent session"
+        );
 
         let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
         assert_eq!(payload["parentSessionId"], parent_sid);
@@ -1827,7 +1820,10 @@ mod tests {
         let events = store
             .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
             .unwrap();
-        assert!(events.is_empty(), "blocking subagents should not persist notification events");
+        assert!(
+            events.is_empty(),
+            "blocking subagents should not persist notification events"
+        );
     }
 
     #[tokio::test]
@@ -1846,7 +1842,11 @@ mod tests {
         let spawned = store
             .get_events_by_type(&parent_sid, &["subagent.spawned"], None)
             .unwrap();
-        assert_eq!(spawned.len(), 1, "expected subagent.spawned in parent session");
+        assert_eq!(
+            spawned.len(),
+            1,
+            "expected subagent.spawned in parent session"
+        );
         let payload: serde_json::Value = serde_json::from_str(&spawned[0].payload).unwrap();
         assert_eq!(payload["task"], "lifecycle task");
 
@@ -1854,7 +1854,11 @@ mod tests {
         let completed = store
             .get_events_by_type(&parent_sid, &["subagent.completed"], None)
             .unwrap();
-        assert_eq!(completed.len(), 1, "expected subagent.completed in parent session");
+        assert_eq!(
+            completed.len(),
+            1,
+            "expected subagent.completed in parent session"
+        );
         let payload: serde_json::Value = serde_json::from_str(&completed[0].payload).unwrap();
         assert!(payload["subagentSessionId"].is_string());
         assert!(payload["totalTurns"].is_number());
@@ -1902,7 +1906,10 @@ mod tests {
         let events = store
             .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
             .unwrap();
-        assert!(events.is_empty(), "subsessions should not persist notification events");
+        assert!(
+            events.is_empty(),
+            "subsessions should not persist notification events"
+        );
     }
 
     // ── message.user persistence tests ──
@@ -1953,6 +1960,9 @@ mod tests {
         let events = store
             .get_events_by_type(&handle.session_id, &["message.assistant"], None)
             .unwrap();
-        assert!(!events.is_empty(), "expected message.assistant events after end_session flush");
+        assert!(
+            !events.is_empty(),
+            "expected message.assistant events after end_session flush"
+        );
     }
 }

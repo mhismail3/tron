@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
@@ -159,10 +159,7 @@ mod tests {
     async fn clone_missing_target_path() {
         let ctx = make_test_context();
         let err = CloneHandler
-            .handle(
-                Some(json!({"url": "https://github.com/user/repo"})),
-                &ctx,
-            )
+            .handle(Some(json!({"url": "https://github.com/user/repo"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");

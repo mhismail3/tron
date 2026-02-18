@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -42,15 +42,25 @@ impl TronTool for SendMessageTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "send_message".into(),
-            description: "Send a message to another agent session. Can optionally wait for a reply.".into(),
+            description:
+                "Send a message to another agent session. Can optionally wait for a reply.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
                     let mut m = serde_json::Map::new();
                     let _ = m.insert("targetSessionId".into(), json!({"type": "string", "description": "Session ID to send the message to"}));
-                    let _ = m.insert("messageType".into(), json!({"type": "string", "description": "Type of message for routing"}));
-                    let _ = m.insert("payload".into(), json!({"type": "object", "description": "Message content/data"}));
-                    let _ = m.insert("waitForReply".into(), json!({"type": "boolean", "description": "Whether to wait for a reply"}));
+                    let _ = m.insert(
+                        "messageType".into(),
+                        json!({"type": "string", "description": "Type of message for routing"}),
+                    );
+                    let _ = m.insert(
+                        "payload".into(),
+                        json!({"type": "object", "description": "Message content/data"}),
+                    );
+                    let _ = m.insert(
+                        "waitForReply".into(),
+                        json!({"type": "boolean", "description": "Whether to wait for a reply"}),
+                    );
                     let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in ms when waiting for reply (default: 30000)"}));
                     m
                 }),
@@ -70,7 +80,8 @@ impl TronTool for SendMessageTool {
         params: Value,
         _ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
-        let target = match validate_required_string(&params, "targetSessionId", "target session ID") {
+        let target = match validate_required_string(&params, "targetSessionId", "target session ID")
+        {
             Ok(t) => t,
             Err(e) => return Ok(e),
         };
@@ -160,7 +171,10 @@ mod tests {
 
     #[async_trait]
     impl MessageBus for MockBus {
-        async fn send_message(&self, _msg: &OutgoingMessage) -> Result<MessageSendResult, ToolError> {
+        async fn send_message(
+            &self,
+            _msg: &OutgoingMessage,
+        ) -> Result<MessageSendResult, ToolError> {
             if self.should_fail {
                 return Err(ToolError::Internal {
                     message: "bus error".into(),
@@ -290,7 +304,10 @@ mod tests {
     async fn missing_payload_error() {
         let tool = SendMessageTool::new(Arc::new(MockBus::success()));
         let r = tool
-            .execute(json!({"targetSessionId": "t", "messageType": "m"}), &make_ctx())
+            .execute(
+                json!({"targetSessionId": "t", "messageType": "m"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));

@@ -58,10 +58,7 @@ impl ProviderWindow {
             return 0.0;
         }
         let count = self.outcomes.len().min(self.total);
-        let failures = self.outcomes[..count]
-            .iter()
-            .filter(|&&ok| !ok)
-            .count();
+        let failures = self.outcomes[..count].iter().filter(|&&ok| !ok).count();
         failures as f64 / count as f64
     }
 }
@@ -101,7 +98,10 @@ impl ProviderHealthTracker {
 
     /// Check if a provider is currently degraded (error rate above threshold).
     pub fn is_degraded(&self, provider: &str) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner
             .providers
             .get(provider)
@@ -110,7 +110,10 @@ impl ProviderHealthTracker {
 
     /// Get the current error rate for a provider (0.0–1.0).
     pub fn error_rate(&self, provider: &str) -> f64 {
-        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner
             .providers
             .get(provider)
@@ -118,7 +121,10 @@ impl ProviderHealthTracker {
     }
 
     fn record(&self, provider: &str, success: bool) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let window = inner
             .providers
             .entry(provider.to_string())

@@ -78,7 +78,11 @@ impl RpcResponse {
     }
 
     /// Build an error response.
-    pub fn error(id: impl Into<String>, code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn error(
+        id: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             success: false,

@@ -18,27 +18,27 @@
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::auth::{calculate_expires_at, should_refresh, OAuthTokens};
-use tron_core::events::StreamEvent;
-use tron_core::messages::Context;
+use crate::auth::{OAuthTokens, calculate_expires_at, should_refresh};
 use crate::compose_context_parts;
 use crate::models::types::ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::sse::parse_sse_lines;
+use tron_core::events::StreamEvent;
+use tron_core::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{create_stream_state, process_stream_chunk};
 use super::types::{
-    default_safety_settings, get_gemini_model, is_gemini_3_model, map_to_antigravity_model,
+    ANTIGRAVITY_ENDPOINT, ANTIGRAVITY_VERSION, CLOUD_CODE_ASSIST_ENDPOINT,
+    CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS,
     GenerationConfig, GoogleApiSettings, GoogleAuth, GoogleConfig, GoogleOAuthEndpoint,
-    SystemInstruction, SystemPart, ThinkingConfig, ANTIGRAVITY_ENDPOINT, ANTIGRAVITY_VERSION,
-    CLOUD_CODE_ASSIST_ENDPOINT, CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL,
-    DEFAULT_MAX_OUTPUT_TOKENS,
+    SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings, get_gemini_model,
+    is_gemini_3_model, map_to_antigravity_model,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,10 +78,7 @@ async fn refresh_tokens(
     settings: &GoogleApiSettings,
     client: &reqwest::Client,
 ) -> ProviderResult<OAuthTokens> {
-    let token_url = settings
-        .token_url
-        .as_deref()
-        .unwrap_or(DEFAULT_TOKEN_URL);
+    let token_url = settings.token_url.as_deref().unwrap_or(DEFAULT_TOKEN_URL);
 
     let client_id = settings.client_id.as_deref().ok_or(ProviderError::Auth {
         message: "Google OAuth client_id required for token refresh".into(),
@@ -369,20 +366,14 @@ impl GoogleProvider {
             let level = if let Some(ref level_str) = options.thinking_level {
                 level_str.clone()
             } else {
-                self.config
-                    .thinking_level
-                    .as_ref()
-                    .map_or_else(
-                        || {
-                            model_info
-                                .and_then(|m| m.default_thinking_level.as_ref())
-                                .map_or_else(
-                                    || "HIGH".to_string(),
-                                    |l| l.to_api_string().to_string(),
-                                )
-                        },
-                        |l| l.to_api_string().to_string(),
-                    )
+                self.config.thinking_level.as_ref().map_or_else(
+                    || {
+                        model_info
+                            .and_then(|m| m.default_thinking_level.as_ref())
+                            .map_or_else(|| "HIGH".to_string(), |l| l.to_api_string().to_string())
+                    },
+                    |l| l.to_api_string().to_string(),
+                )
             };
             Some(ThinkingConfig {
                 include_thoughts: Some(true),
@@ -905,7 +896,10 @@ mod tests {
         let provider = GoogleProvider::new(config);
         let opts = ProviderStreamOptions::default();
         let tc = provider.build_thinking_config(true, &opts);
-        assert!(tc.is_none(), "gemini-3-flash-preview should not send thinkingConfig");
+        assert!(
+            tc.is_none(),
+            "gemini-3-flash-preview should not send thinkingConfig"
+        );
     }
 
     // ── System instruction ────────────────────────────────────────────

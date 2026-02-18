@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -57,7 +57,8 @@ impl TronTool for NotifyAppTool {
 - Keep titles concise (max 50 chars)\n\
 - Keep body text brief (max 200 chars)\n\
 - Use high priority sparingly (only for urgent notifications)\n\
-- Include relevant context in the body to help user understand why they're being notified".into(),
+- Include relevant context in the body to help user understand why they're being notified"
+                .into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -65,9 +66,18 @@ impl TronTool for NotifyAppTool {
                     let _ = m.insert("title".into(), json!({"type": "string", "description": "Notification title (max 50 chars)"}));
                     let _ = m.insert("body".into(), json!({"type": "string", "description": "Notification body (max 200 chars)"}));
                     let _ = m.insert("priority".into(), json!({"type": "string", "enum": ["high", "normal"], "description": "Notification priority"}));
-                    let _ = m.insert("badge".into(), json!({"type": "number", "description": "Badge count on app icon"}));
-                    let _ = m.insert("sheetContent".into(), json!({"type": "string", "description": "Markdown content shown on tap"}));
-                    let _ = m.insert("data".into(), json!({"type": "object", "description": "Custom data payload"}));
+                    let _ = m.insert(
+                        "badge".into(),
+                        json!({"type": "number", "description": "Badge count on app icon"}),
+                    );
+                    let _ = m.insert(
+                        "sheetContent".into(),
+                        json!({"type": "string", "description": "Markdown content shown on tap"}),
+                    );
+                    let _ = m.insert(
+                        "data".into(),
+                        json!({"type": "object", "description": "Custom data payload"}),
+                    );
                     m
                 }),
                 required: Some(vec!["title".into(), "body".into()]),
@@ -113,12 +123,15 @@ impl TronTool for NotifyAppTool {
         match self.delegate.send_notification(&notification).await {
             Ok(result) => {
                 let msg = if result.success {
-                    result.message.as_deref()
-                        .map_or_else(|| "Notification sent successfully".to_string(), String::from)
+                    result.message.as_deref().map_or_else(
+                        || "Notification sent successfully".to_string(),
+                        String::from,
+                    )
                 } else {
-                    result.message.as_deref()
-                        .map_or_else(|| "Notification delivery failed".to_string(),
-                            |m| format!("Notification delivery failed. {m}"))
+                    result.message.as_deref().map_or_else(
+                        || "Notification delivery failed".to_string(),
+                        |m| format!("Notification delivery failed. {m}"),
+                    )
                 };
                 Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
@@ -150,13 +163,21 @@ mod tests {
 
     impl MockNotify {
         fn success() -> Self {
-            Self { result: NotifyResult { success: true, message: None } }
+            Self {
+                result: NotifyResult {
+                    success: true,
+                    message: None,
+                },
+            }
         }
     }
 
     #[async_trait]
     impl NotifyDelegate for MockNotify {
-        async fn send_notification(&self, _notification: &Notification) -> Result<NotifyResult, ToolError> {
+        async fn send_notification(
+            &self,
+            _notification: &Notification,
+        ) -> Result<NotifyResult, ToolError> {
             Ok(self.result.clone())
         }
         async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
@@ -178,17 +199,24 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
     #[tokio::test]
     async fn valid_notification_success() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"title": "Hello", "body": "World"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"title": "Hello", "body": "World"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         assert!(extract_text(&r).contains("successfully"));
     }
@@ -197,7 +225,10 @@ mod tests {
     async fn title_truncated() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
         let long_title = "x".repeat(100);
-        let r = tool.execute(json!({"title": long_title, "body": "b"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"title": long_title, "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         assert!(d["title"].as_str().unwrap().len() <= MAX_TITLE_LENGTH);
     }
@@ -206,7 +237,10 @@ mod tests {
     async fn body_truncated() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
         let long_body = "x".repeat(500);
-        let r = tool.execute(json!({"title": "t", "body": long_body}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"title": "t", "body": long_body}), &make_ctx())
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         assert!(d["body"].as_str().unwrap().len() <= MAX_BODY_LENGTH);
     }
@@ -214,35 +248,53 @@ mod tests {
     #[tokio::test]
     async fn priority_high() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"title": "t", "body": "b", "priority": "high"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"title": "t", "body": "b", "priority": "high"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.details.unwrap()["priority"], "high");
     }
 
     #[tokio::test]
     async fn priority_default_normal() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"title": "t", "body": "b"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"title": "t", "body": "b"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.details.unwrap()["priority"], "normal");
     }
 
     #[tokio::test]
     async fn badge_passed() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"title": "t", "body": "b", "badge": 5}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"title": "t", "body": "b", "badge": 5}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
     #[tokio::test]
     async fn missing_title_error() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"body": "b"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"body": "b"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn missing_body_error() {
         let tool = NotifyAppTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"title": "t"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"title": "t"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 }

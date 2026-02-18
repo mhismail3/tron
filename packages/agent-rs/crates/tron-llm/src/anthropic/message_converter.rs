@@ -10,19 +10,17 @@
 
 use std::collections::HashMap;
 
-use serde_json::{json, Value};
-use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
-use tron_core::messages::{
-    Context, Message, ToolResultMessageContent, UserMessageContent,
-};
 use crate::{
-    build_tool_call_id_mapping, compose_context_parts, compose_context_parts_grouped,
-    remap_tool_call_id, IdFormat,
+    IdFormat, build_tool_call_id_mapping, compose_context_parts, compose_context_parts_grouped,
+    remap_tool_call_id,
 };
+use serde_json::{Value, json};
+use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
+use tron_core::messages::{Context, Message, ToolResultMessageContent, UserMessageContent};
 
 use super::types::{
-    AnthropicMessageParam, AnthropicTool, CacheControl, SystemPromptBlock,
-    OAUTH_SYSTEM_PROMPT_PREFIX,
+    AnthropicMessageParam, AnthropicTool, CacheControl, OAUTH_SYSTEM_PROMPT_PREFIX,
+    SystemPromptBlock,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +36,11 @@ use super::types::{
 pub fn convert_context(
     context: &Context,
     is_oauth: bool,
-) -> (Option<Value>, Vec<AnthropicMessageParam>, Option<Vec<AnthropicTool>>) {
+) -> (
+    Option<Value>,
+    Vec<AnthropicMessageParam>,
+    Option<Vec<AnthropicTool>>,
+) {
     // Build tool call ID mapping for cross-provider compatibility
     let id_mapping = build_id_mapping(&context.messages);
 
@@ -157,7 +159,9 @@ fn convert_user_content(content: &UserContent) -> Value {
                 "data": data,
             }
         }),
-        UserContent::Document { data, mime_type, .. } => json!({
+        UserContent::Document {
+            data, mime_type, ..
+        } => json!({
             "type": "document",
             "source": {
                 "type": "base64",
@@ -365,10 +369,7 @@ fn build_system_prompt_plain(context: &Context) -> Option<Value> {
 /// Convert context tools to Anthropic format with optional cache control.
 ///
 /// For OAuth: the last tool gets a 1h cache control breakpoint.
-fn convert_tools(
-    tools: &[tron_core::tools::Tool],
-    is_oauth: bool,
-) -> Vec<AnthropicTool> {
+fn convert_tools(tools: &[tron_core::tools::Tool], is_oauth: bool) -> Vec<AnthropicTool> {
     let mut result: Vec<AnthropicTool> = tools
         .iter()
         .map(|t| AnthropicTool {
@@ -647,15 +648,15 @@ mod tests {
         let has_1h = blocks
             .iter()
             .any(|b| b["cache_control"]["ttl"].as_str() == Some("1h"));
-        let has_default = blocks
-            .iter()
-            .any(|b| {
-                b.get("cache_control").is_some()
-                    && (b["cache_control"].get("ttl").is_none()
-                        || b["cache_control"]["ttl"].is_null())
-            });
+        let has_default = blocks.iter().any(|b| {
+            b.get("cache_control").is_some()
+                && (b["cache_control"].get("ttl").is_none() || b["cache_control"]["ttl"].is_null())
+        });
         assert!(has_1h, "Should have 1h cache on stable content");
-        assert!(has_default, "Should have default (5m) cache on volatile content");
+        assert!(
+            has_default,
+            "Should have default (5m) cache on volatile content"
+        );
     }
 
     // ── Tool conversion ──────────────────────────────────────────────────
@@ -677,7 +678,10 @@ mod tests {
         let result = convert_tools(&tools, true);
         assert!(result[0].cache_control.is_none());
         assert!(result[1].cache_control.is_some());
-        assert_eq!(result[1].cache_control.as_ref().unwrap().ttl.as_deref(), Some("1h"));
+        assert_eq!(
+            result[1].cache_control.as_ref().unwrap().ttl.as_deref(),
+            Some("1h")
+        );
     }
 
     #[test]
@@ -769,15 +773,21 @@ mod tests {
         let messages = vec![
             AnthropicMessageParam {
                 role: "user".into(),
-                content: vec![json!({"type": "tool_result", "tool_use_id": "tc-1", "content": [{"type": "text", "text": "out1"}]})],
+                content: vec![
+                    json!({"type": "tool_result", "tool_use_id": "tc-1", "content": [{"type": "text", "text": "out1"}]}),
+                ],
             },
             AnthropicMessageParam {
                 role: "user".into(),
-                content: vec![json!({"type": "tool_result", "tool_use_id": "tc-2", "content": [{"type": "text", "text": "out2"}]})],
+                content: vec![
+                    json!({"type": "tool_result", "tool_use_id": "tc-2", "content": [{"type": "text", "text": "out2"}]}),
+                ],
             },
             AnthropicMessageParam {
                 role: "user".into(),
-                content: vec![json!({"type": "tool_result", "tool_use_id": "tc-3", "content": [{"type": "text", "text": "out3"}]})],
+                content: vec![
+                    json!({"type": "tool_result", "tool_use_id": "tc-3", "content": [{"type": "text", "text": "out3"}]}),
+                ],
             },
         ];
         let merged = merge_consecutive_roles(messages);

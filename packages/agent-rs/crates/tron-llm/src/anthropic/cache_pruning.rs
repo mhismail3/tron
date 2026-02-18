@@ -49,10 +49,7 @@ pub fn prune_tool_results_for_recache(
     recent_turns: usize,
 ) -> Vec<AnthropicMessageParam> {
     // Count assistant messages to determine turn boundaries
-    let assistant_count = messages
-        .iter()
-        .filter(|m| m.role == "assistant")
-        .count();
+    let assistant_count = messages.iter().filter(|m| m.role == "assistant").count();
 
     if assistant_count <= recent_turns {
         return messages.to_vec(); // Not enough turns to prune
@@ -103,8 +100,10 @@ fn prune_user_message_tool_results(msg: &AnthropicMessageParam) -> AnthropicMess
             }
             // Prune: replace content with placeholder
             let mut pruned = block.clone();
-            pruned["content"] =
-                Value::String(format!("[pruned {} chars for cache efficiency]", content_str.len()));
+            pruned["content"] = Value::String(format!(
+                "[pruned {} chars for cache efficiency]",
+                content_str.len()
+            ));
             pruned
         })
         .collect();

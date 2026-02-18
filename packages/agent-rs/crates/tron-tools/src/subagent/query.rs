@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -96,8 +96,8 @@ impl TronTool for QueryAgentTool {
             .await
         {
             Ok(result) => {
-                let output = serde_json::to_string_pretty(&result)
-                    .unwrap_or_else(|_| result.to_string());
+                let output =
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
                 Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
                         tron_core::content::ToolResultContent::text(output),
@@ -201,7 +201,10 @@ mod tests {
     async fn status_query() {
         let tool = QueryAgentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"sessionId": "sub-1", "queryType": "status"}), &make_ctx())
+            .execute(
+                json!({"sessionId": "sub-1", "queryType": "status"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -212,7 +215,10 @@ mod tests {
     async fn events_query() {
         let tool = QueryAgentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"sessionId": "sub-1", "queryType": "events"}), &make_ctx())
+            .execute(
+                json!({"sessionId": "sub-1", "queryType": "events"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -222,7 +228,10 @@ mod tests {
     async fn logs_query() {
         let tool = QueryAgentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"sessionId": "sub-1", "queryType": "logs"}), &make_ctx())
+            .execute(
+                json!({"sessionId": "sub-1", "queryType": "logs"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -232,7 +241,10 @@ mod tests {
     async fn output_query() {
         let tool = QueryAgentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"sessionId": "sub-1", "queryType": "output"}), &make_ctx())
+            .execute(
+                json!({"sessionId": "sub-1", "queryType": "output"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -262,7 +274,10 @@ mod tests {
     async fn invalid_query_type_error() {
         let tool = QueryAgentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"sessionId": "sub-1", "queryType": "invalid"}), &make_ctx())
+            .execute(
+                json!({"sessionId": "sub-1", "queryType": "invalid"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -286,7 +301,10 @@ mod tests {
     async fn query_failure() {
         let tool = QueryAgentTool::new(Arc::new(MockSpawner::failing()));
         let r = tool
-            .execute(json!({"sessionId": "sub-1", "queryType": "status"}), &make_ctx())
+            .execute(
+                json!({"sessionId": "sub-1", "queryType": "status"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));

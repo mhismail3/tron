@@ -9,7 +9,15 @@ use std::path::Path;
 
 use regex::RegexBuilder;
 
-const SKIP_DIRS: &[&str] = &["node_modules", ".git", "dist", "build", ".next", "coverage", "__pycache__"];
+const SKIP_DIRS: &[&str] = &[
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    "__pycache__",
+];
 const DEFAULT_MAX_RESULTS: usize = 100;
 const MAX_OUTPUT_TOKENS: usize = 15_000;
 
@@ -83,7 +91,10 @@ pub fn text_search(
             continue;
         }
 
-        let rel_path = entry.path().strip_prefix(search_root).unwrap_or(entry.path());
+        let rel_path = entry
+            .path()
+            .strip_prefix(search_root)
+            .unwrap_or(entry.path());
 
         // Apply file pattern filter
         if let Some(ref glob) = file_glob {
@@ -94,7 +105,9 @@ pub fn text_search(
         }
 
         // Read file, skip binary
-        let Ok(bytes) = std::fs::read(entry.path()) else { continue };
+        let Ok(bytes) = std::fs::read(entry.path()) else {
+            continue;
+        };
         let check_len = bytes.len().min(8192);
         if bytes[..check_len].contains(&0) {
             continue;
@@ -167,11 +180,27 @@ mod tests {
 
     fn setup_test_dir() -> TempDir {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("main.rs"), "fn main() {\n    println!(\"hello world\");\n}\n").unwrap();
-        std::fs::write(dir.path().join("lib.rs"), "pub fn greet() {\n    println!(\"greetings\");\n}\n").unwrap();
-        std::fs::write(dir.path().join("test.ts"), "function test() {\n  console.log('test');\n}\n").unwrap();
+        std::fs::write(
+            dir.path().join("main.rs"),
+            "fn main() {\n    println!(\"hello world\");\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("lib.rs"),
+            "pub fn greet() {\n    println!(\"greetings\");\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("test.ts"),
+            "function test() {\n  console.log('test');\n}\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/utils.rs"), "pub fn helper() {\n    println!(\"helper\");\n}\n").unwrap();
+        std::fs::write(
+            dir.path().join("src/utils.rs"),
+            "pub fn helper() {\n    println!(\"helper\");\n}\n",
+        )
+        .unwrap();
         dir
     }
 
@@ -210,7 +239,11 @@ mod tests {
     fn skip_directories() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
-        std::fs::write(dir.path().join("node_modules/pkg.js"), "function hidden() {}").unwrap();
+        std::fs::write(
+            dir.path().join("node_modules/pkg.js"),
+            "function hidden() {}",
+        )
+        .unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join(".git/config"), "hidden").unwrap();
         std::fs::write(dir.path().join("visible.js"), "function visible() {}").unwrap();
@@ -273,7 +306,11 @@ mod tests {
     #[test]
     fn output_format_file_line_content() {
         let dir = TempDir::new().unwrap();
-        std::fs::write(dir.path().join("test.txt"), "line one\nline two\nline three\n").unwrap();
+        std::fs::write(
+            dir.path().join("test.txt"),
+            "line one\nline two\nline three\n",
+        )
+        .unwrap();
         let r = text_search(dir.path(), "two", None, None, None).unwrap();
         assert!(r.output.contains("test.txt:2:"));
         assert!(r.output.contains("line two"));

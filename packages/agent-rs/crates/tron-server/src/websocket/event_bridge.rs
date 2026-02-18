@@ -1006,10 +1006,11 @@ mod tests {
         let handle = tokio::spawn(bridge.run());
 
         // Send event with empty session_id (global)
-        let _ = tx.send(TronEvent::AgentReady {
-            base: BaseEvent::now(""),
-        })
-        .unwrap();
+        let _ = tx
+            .send(TronEvent::AgentReady {
+                base: BaseEvent::now(""),
+            })
+            .unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -1943,12 +1944,13 @@ mod tests {
         let handle = tokio::spawn(bridge.run());
 
         // Send CompactionStart
-        let _ = tx.send(TronEvent::CompactionStart {
-            base: BaseEvent::now("s1"),
-            reason: tron_core::events::CompactionReason::ThresholdExceeded,
-            tokens_before: 80_000,
-        })
-        .unwrap();
+        let _ = tx
+            .send(TronEvent::CompactionStart {
+                base: BaseEvent::now("s1"),
+                reason: tron_core::events::CompactionReason::ThresholdExceeded,
+                tokens_before: 80_000,
+            })
+            .unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -1958,17 +1960,18 @@ mod tests {
         assert_eq!(parsed["data"]["tokensBefore"], 80_000);
 
         // Send CompactionComplete
-        let _ = tx.send(TronEvent::CompactionComplete {
-            base: BaseEvent::now("s1"),
-            success: true,
-            tokens_before: 80_000,
-            tokens_after: 25_000,
-            compression_ratio: 0.3125,
-            reason: None,
-            summary: Some("Summary text".into()),
-            estimated_context_tokens: None,
-        })
-        .unwrap();
+        let _ = tx
+            .send(TronEvent::CompactionComplete {
+                base: BaseEvent::now("s1"),
+                success: true,
+                tokens_before: 80_000,
+                tokens_after: 25_000,
+                compression_ratio: 0.3125,
+                reason: None,
+                summary: Some("Summary text".into()),
+                estimated_context_tokens: None,
+            })
+            .unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

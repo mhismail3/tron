@@ -164,10 +164,7 @@ mod tests {
 
     #[test]
     fn log_level_serde() {
-        assert_eq!(
-            serde_json::to_string(&LogLevel::Warn).unwrap(),
-            "\"warn\""
-        );
+        assert_eq!(serde_json::to_string(&LogLevel::Warn).unwrap(), "\"warn\"");
         let back: LogLevel = serde_json::from_str("\"error\"").unwrap();
         assert_eq!(back, LogLevel::Error);
     }

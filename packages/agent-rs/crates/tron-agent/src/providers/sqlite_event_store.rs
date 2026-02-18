@@ -6,17 +6,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
-use tron_events::sqlite::repositories::event::ListEventsOptions;
+use serde_json::{Value, json};
 use tron_events::EventStore;
+use tron_events::sqlite::repositories::event::ListEventsOptions;
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
 
 /// Real event store query backed by `SQLite` via `EventStore`.
 pub struct SqliteEventStoreQuery {
     store: Arc<EventStore>,
-    embedding_controller:
-        Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 }
 
 impl SqliteEventStoreQuery {
@@ -45,11 +44,7 @@ fn tool_err(msg: impl std::fmt::Display) -> ToolError {
 
 #[async_trait]
 impl EventStoreQuery for SqliteEventStoreQuery {
-    async fn recall_memory(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError> {
+    async fn recall_memory(&self, query: &str, limit: u32) -> Result<Vec<MemoryEntry>, ToolError> {
         if query.is_empty() {
             return Ok(Vec::new());
         }
@@ -67,13 +62,8 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                         let entries: Vec<MemoryEntry> = results
                             .into_iter()
                             .filter_map(|r| {
-                                let event = self
-                                    .store
-                                    .get_event(&r.event_id)
-                                    .ok()
-                                    .flatten()?;
-                                let payload: Value =
-                                    serde_json::from_str(&event.payload).ok()?;
+                                let event = self.store.get_event(&r.event_id).ok().flatten()?;
+                                let payload: Value = serde_json::from_str(&event.payload).ok()?;
                                 let title = payload
                                     .get("title")
                                     .and_then(Value::as_str)
@@ -93,10 +83,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
                                 } else {
                                     format!("{title}: {lessons}")
                                 };
-                                #[allow(
-                                    clippy::cast_possible_truncation,
-                                    clippy::cast_sign_loss
-                                )]
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                                 let score = (r.similarity * 100.0).round() as u32;
                                 Some(MemoryEntry {
                                     content,
@@ -157,11 +144,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             .collect())
     }
 
-    async fn list_sessions(
-        &self,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<SessionInfo>, ToolError> {
+    async fn list_sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>, ToolError> {
         let opts = tron_events::sqlite::repositories::session::ListSessionsOptions {
             workspace_id: None,
             ended: None,
@@ -239,11 +222,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         Ok(filtered)
     }
 
-    async fn get_messages(
-        &self,
-        session_id: &str,
-        limit: u32,
-    ) -> Result<Vec<Value>, ToolError> {
+    async fn get_messages(&self, session_id: &str, limit: u32) -> Result<Vec<Value>, ToolError> {
         let types: Vec<&str> = vec!["message.user", "message.assistant"];
         let rows = self
             .store
@@ -253,8 +232,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         Ok(rows
             .into_iter()
             .map(|r| {
-                let payload: Value =
-                    serde_json::from_str(&r.payload).unwrap_or(Value::Null);
+                let payload: Value = serde_json::from_str(&r.payload).unwrap_or(Value::Null);
                 json!({
                     "type": r.event_type,
                     "turn": r.turn,
@@ -265,11 +243,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             .collect())
     }
 
-    async fn get_tool_calls(
-        &self,
-        session_id: &str,
-        limit: u32,
-    ) -> Result<Vec<Value>, ToolError> {
+    async fn get_tool_calls(&self, session_id: &str, limit: u32) -> Result<Vec<Value>, ToolError> {
         let types: Vec<&str> = vec!["tool_use_batch"];
         let rows = self
             .store
@@ -279,8 +253,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         Ok(rows
             .into_iter()
             .map(|r| {
-                let payload: Value =
-                    serde_json::from_str(&r.payload).unwrap_or(Value::Null);
+                let payload: Value = serde_json::from_str(&r.payload).unwrap_or(Value::Null);
                 json!({
                     "toolName": r.tool_name,
                     "turn": r.turn,
@@ -363,8 +336,7 @@ mod tests {
     use tron_events::{ConnectionConfig, EventStore};
 
     fn setup_store() -> Arc<EventStore> {
-        let pool =
-            tron_events::new_in_memory(&ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();

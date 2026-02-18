@@ -83,10 +83,7 @@ mod tests {
     #[tokio::test]
     async fn send_missing_channel() {
         let ctx = make_test_context();
-        let err = SendHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
+        let err = SendHandler.handle(Some(json!({})), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 

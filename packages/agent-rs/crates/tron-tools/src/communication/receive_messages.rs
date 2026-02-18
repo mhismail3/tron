@@ -6,10 +6,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult,
-};
+use serde_json::{Value, json};
+use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult};
 
 use crate::errors::ToolError;
 use crate::traits::{MessageBus, MessageFilter, ToolContext, TronTool};
@@ -60,11 +58,7 @@ impl TronTool for ReceiveMessagesTool {
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let message_type = get_optional_string(&params, "type");
         let from_session_id = get_optional_string(&params, "fromSessionId");
         let mark_as_read = get_optional_bool(&params, "markAsRead").unwrap_or(true);
@@ -97,11 +91,9 @@ impl TronTool for ReceiveMessagesTool {
                 let summary = messages
                     .iter()
                     .map(|m| {
-                        let payload_str = serde_json::to_string(&m.payload)
-                            .unwrap_or_default();
-                        let truncated = tron_core::text::truncate_with_suffix(
-                            &payload_str, 103, "...",
-                        );
+                        let payload_str = serde_json::to_string(&m.payload).unwrap_or_default();
+                        let truncated =
+                            tron_core::text::truncate_with_suffix(&payload_str, 103, "...");
                         format!(
                             "- [{}] from {}: {}",
                             m.message_type, m.from_session_id, truncated
@@ -251,9 +243,8 @@ mod tests {
 
     #[tokio::test]
     async fn with_messages() {
-        let tool = ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![
-            sample_message(),
-        ])));
+        let tool =
+            ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![sample_message()])));
         let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
@@ -264,9 +255,8 @@ mod tests {
 
     #[tokio::test]
     async fn type_filter() {
-        let tool = ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![
-            sample_message(),
-        ])));
+        let tool =
+            ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![sample_message()])));
         let r = tool
             .execute(json!({"type": "task"}), &make_ctx())
             .await
@@ -276,9 +266,8 @@ mod tests {
 
     #[tokio::test]
     async fn from_session_filter() {
-        let tool = ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![
-            sample_message(),
-        ])));
+        let tool =
+            ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![sample_message()])));
         let r = tool
             .execute(json!({"fromSessionId": "other-sess"}), &make_ctx())
             .await
@@ -305,9 +294,8 @@ mod tests {
 
     #[tokio::test]
     async fn limit_respected() {
-        let tool = ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![
-            sample_message(),
-        ])));
+        let tool =
+            ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![sample_message()])));
         let r = tool
             .execute(json!({"limit": 5}), &make_ctx())
             .await
@@ -325,9 +313,8 @@ mod tests {
 
     #[tokio::test]
     async fn message_details_included() {
-        let tool = ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![
-            sample_message(),
-        ])));
+        let tool =
+            ReceiveMessagesTool::new(Arc::new(MockBus::with_messages(vec![sample_message()])));
         let r = tool.execute(json!({}), &make_ctx()).await.unwrap();
         let d = r.details.unwrap();
         let msgs = d["messages"].as_array().unwrap();

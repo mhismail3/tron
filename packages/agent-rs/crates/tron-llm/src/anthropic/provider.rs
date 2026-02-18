@@ -9,29 +9,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use serde_json::{json, Value};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use serde_json::{Value, json};
 use tracing::{debug, error, info, instrument, warn};
 
-use tron_core::events::StreamEvent;
-use tron_core::messages::Context;
 use crate::models::types::ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::{compose_context_parts, compose_context_parts_grouped};
 use crate::sse::parse_sse_lines;
+use crate::{compose_context_parts, compose_context_parts_grouped};
+use tron_core::events::StreamEvent;
+use tron_core::messages::Context;
 
 use super::cache_pruning::{
-    is_cache_cold, prune_tool_results_for_recache, DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS,
+    DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_tool_results_for_recache,
 };
 use super::message_converter::convert_messages;
 use super::message_sanitizer::sanitize_messages;
 use super::stream_handler::{create_stream_state, process_sse_event};
 use super::types::{
-    get_claude_model, AnthropicAuth, AnthropicConfig, AnthropicMessageParam,
-    AnthropicRequest, AnthropicSseEvent, AnthropicTool, CacheControl,
-    SystemPromptBlock, DEFAULT_MAX_OUTPUT_TOKENS, OAUTH_SYSTEM_PROMPT_PREFIX,
+    AnthropicAuth, AnthropicConfig, AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent,
+    AnthropicTool, CacheControl, DEFAULT_MAX_OUTPUT_TOKENS, OAUTH_SYSTEM_PROMPT_PREFIX,
+    SystemPromptBlock, get_claude_model,
 };
 
 /// Default base URL for the Anthropic API.
@@ -91,10 +91,7 @@ impl AnthropicProvider {
     fn build_headers(&self) -> ProviderResult<HeaderMap> {
         let mut headers = HeaderMap::new();
         let _ = headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let _ = headers.insert(
-            "anthropic-version",
-            HeaderValue::from_static(API_VERSION),
-        );
+        let _ = headers.insert("anthropic-version", HeaderValue::from_static(API_VERSION));
 
         match &self.config.auth {
             AnthropicAuth::ApiKey { api_key } => {
@@ -280,8 +277,7 @@ impl AnthropicProvider {
             Some(json!({ "type": "adaptive" }))
         } else {
             let budget = options.thinking_budget.unwrap_or_else(|| {
-                model_info
-                    .map_or(DEFAULT_MAX_OUTPUT_TOKENS / 4, |m| m.max_output / 4)
+                model_info.map_or(DEFAULT_MAX_OUTPUT_TOKENS / 4, |m| m.max_output / 4)
             });
             Some(json!({
                 "type": "enabled",
@@ -316,10 +312,7 @@ impl AnthropicProvider {
             if msg.role == "user" && !msg.content.is_empty() {
                 if let Some(last_block) = msg.content.last_mut() {
                     if let Some(obj) = last_block.as_object_mut() {
-                        let _ = obj.insert(
-                            "cache_control".into(),
-                            json!({"type": "ephemeral"}),
-                        );
+                        let _ = obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
                     }
                 }
                 break;
@@ -382,11 +375,7 @@ impl AnthropicProvider {
 
         let request = self.build_request(context, options, messages);
 
-        let base_url = self
-            .config
-            .base_url
-            .as_deref()
-            .unwrap_or(DEFAULT_BASE_URL);
+        let base_url = self.config.base_url.as_deref().unwrap_or(DEFAULT_BASE_URL);
         let url = format!("{base_url}/v1/messages");
 
         let headers = self.build_headers()?;
@@ -626,7 +615,11 @@ mod tests {
         let provider = AnthropicProvider::new(api_key_config());
         let headers = provider.build_headers().unwrap();
         assert!(headers.get("anthropic-beta").is_none());
-        assert!(headers.get("anthropic-dangerous-direct-browser-access").is_none());
+        assert!(
+            headers
+                .get("anthropic-dangerous-direct-browser-access")
+                .is_none()
+        );
     }
 
     #[test]
@@ -636,11 +629,12 @@ mod tests {
         cfg.model = "claude-haiku-4-5-20251001".into();
         let provider = AnthropicProvider::new(cfg);
         let headers = provider.build_headers().unwrap();
-        assert_eq!(
-            headers["anthropic-beta"],
-            "interleaved-thinking-2025-05-14"
+        assert_eq!(headers["anthropic-beta"], "interleaved-thinking-2025-05-14");
+        assert!(
+            headers
+                .get("anthropic-dangerous-direct-browser-access")
+                .is_none()
         );
-        assert!(headers.get("anthropic-dangerous-direct-browser-access").is_none());
     }
 
     #[test]
@@ -655,10 +649,7 @@ mod tests {
     fn headers_oauth_has_browser_access() {
         let provider = AnthropicProvider::new(oauth_config());
         let headers = provider.build_headers().unwrap();
-        assert_eq!(
-            headers["anthropic-dangerous-direct-browser-access"],
-            "true"
-        );
+        assert_eq!(headers["anthropic-dangerous-direct-browser-access"], "true");
     }
 
     #[test]
@@ -710,8 +701,7 @@ mod tests {
     fn headers_oauth_custom_beta_from_settings() {
         let mut cfg = oauth_config();
         cfg.model = "claude-haiku-4-5-20251001".into();
-        cfg.provider_settings.oauth_beta_headers =
-            "oauth-2025-04-20,custom-beta-2025-06-01".into();
+        cfg.provider_settings.oauth_beta_headers = "oauth-2025-04-20,custom-beta-2025-06-01".into();
         let provider = AnthropicProvider::new(cfg);
         let headers = provider.build_headers().unwrap();
         assert_eq!(
@@ -744,10 +734,7 @@ mod tests {
         let param = provider.build_system_param(&ctx).unwrap();
         let blocks: Vec<Value> = serde_json::from_value(param).unwrap();
         assert!(blocks.len() >= 2);
-        assert!(blocks[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Claude Code"));
+        assert!(blocks[0]["text"].as_str().unwrap().contains("Claude Code"));
     }
 
     #[test]
@@ -772,8 +759,10 @@ mod tests {
 
         // Breakpoint 3: last volatile block (index 3 = skills) → ephemeral (no ttl)
         assert_eq!(blocks[3]["cache_control"]["type"], "ephemeral");
-        assert!(blocks[3]["cache_control"].get("ttl").is_none()
-            || blocks[3]["cache_control"]["ttl"].is_null());
+        assert!(
+            blocks[3]["cache_control"].get("ttl").is_none()
+                || blocks[3]["cache_control"]["ttl"].is_null()
+        );
     }
 
     #[test]
@@ -855,7 +844,10 @@ mod tests {
         };
         let tools = provider.build_tools(&ctx).unwrap();
         assert!(tools[0].cache_control.is_none()); // First tool: no cache
-        assert_eq!(tools[1].cache_control.as_ref().unwrap().ttl.as_deref(), Some("1h"));
+        assert_eq!(
+            tools[1].cache_control.as_ref().unwrap().ttl.as_deref(),
+            Some("1h")
+        );
     }
 
     // ── Thinking config ─────────────────────────────────────────────────

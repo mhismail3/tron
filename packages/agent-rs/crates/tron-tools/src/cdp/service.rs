@@ -50,10 +50,14 @@ impl BrowserService {
             return Ok(Arc::clone(session.value()));
         }
 
-        let session = Arc::new(BrowserSession::launch(&self.chrome_path).await.map_err(|e| {
-            tracing::error!(session_id, error = %e, "browser session creation failed");
-            e
-        })?);
+        let session = Arc::new(
+            BrowserSession::launch(&self.chrome_path)
+                .await
+                .map_err(|e| {
+                    tracing::error!(session_id, error = %e, "browser session creation failed");
+                    e
+                })?,
+        );
         let _ = self
             .sessions
             .insert(session_id.to_string(), Arc::clone(&session));
@@ -236,13 +240,10 @@ mod integration_tests {
         let _ = svc.get_or_create("s1").await.unwrap();
         svc.close_session("s1").await.unwrap();
 
-        let event = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            rx.recv(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
         match event {
             BrowserEvent::Closed { session_id } => assert_eq!(session_id, "s1"),
             other => panic!("expected Closed, got: {other:?}"),

@@ -67,11 +67,7 @@ pub async fn exchange_code_for_tokens_with_client(
         body["state"] = serde_json::Value::String(s.to_string());
     }
 
-    let resp = client
-        .post(&config.token_url)
-        .json(&body)
-        .send()
-        .await?;
+    let resp = client.post(&config.token_url).json(&body).send().await?;
 
     let status = resp.status().as_u16();
     if status != 200 {
@@ -86,10 +82,7 @@ pub async fn exchange_code_for_tokens_with_client(
     Ok(OAuthTokens {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
-        expires_at: calculate_expires_at(
-            data.expires_in,
-            config.token_expiry_buffer_seconds,
-        ),
+        expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
     })
 }
 
@@ -115,11 +108,7 @@ pub async fn refresh_token_with_client(
         "refresh_token": refresh_token,
     });
 
-    let resp = client
-        .post(&config.token_url)
-        .json(&body)
-        .send()
-        .await?;
+    let resp = client.post(&config.token_url).json(&body).send().await?;
 
     let status = resp.status().as_u16();
     if status != 200 {
@@ -134,10 +123,7 @@ pub async fn refresh_token_with_client(
     Ok(OAuthTokens {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
-        expires_at: calculate_expires_at(
-            data.expires_in,
-            config.token_expiry_buffer_seconds,
-        ),
+        expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
     })
 }
 
@@ -162,7 +148,14 @@ pub async fn load_server_auth(
     env_token: Option<&str>,
     preferred_account: Option<&str>,
 ) -> Result<Option<ServerAuth>, AuthError> {
-    load_server_auth_with_client(auth_path, config, env_token, preferred_account, &reqwest::Client::new()).await
+    load_server_auth_with_client(
+        auth_path,
+        config,
+        env_token,
+        preferred_account,
+        &reqwest::Client::new(),
+    )
+    .await
 }
 
 /// Load server auth using a shared HTTP client for token refresh.
@@ -199,12 +192,14 @@ pub async fn load_server_auth_with_client(
             .or_else(|| accounts.first());
 
             if let Some(acct) = account {
-                let (tokens, refreshed) =
-                    maybe_refresh_tokens(&acct.oauth, config, client).await?;
+                let (tokens, refreshed) = maybe_refresh_tokens(&acct.oauth, config, client).await?;
                 if refreshed {
                     tracing::info!(account = %acct.label, "persisting refreshed account tokens");
                     let _ = super::storage::save_account_oauth_tokens(
-                        auth_path, "anthropic", &acct.label, &tokens,
+                        auth_path,
+                        "anthropic",
+                        &acct.label,
+                        &tokens,
                     );
                 }
                 return Ok(Some(ServerAuth::from_oauth(
@@ -221,9 +216,8 @@ pub async fn load_server_auth_with_client(
             Ok((tokens, refreshed)) => {
                 if refreshed {
                     tracing::info!("persisting refreshed provider tokens");
-                    let _ = super::storage::save_provider_oauth_tokens(
-                        auth_path, "anthropic", &tokens,
-                    );
+                    let _ =
+                        super::storage::save_provider_oauth_tokens(auth_path, "anthropic", &tokens);
                 }
                 return Ok(Some(ServerAuth::from_oauth(&tokens, None)));
             }
@@ -348,9 +342,7 @@ mod tests {
         crate::auth::storage::save_provider_api_key(&path, "anthropic", "sk-123").unwrap();
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None, None)
-            .await
-            .unwrap();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
         let auth = result.unwrap();
         assert!(!auth.is_oauth());
         assert_eq!(auth.token(), "sk-123");
@@ -362,9 +354,7 @@ mod tests {
         let path = dir.path().join("auth.json");
         let cfg = default_config();
 
-        let result = load_server_auth(&path, &cfg, None, None)
-            .await
-            .unwrap();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -382,9 +372,7 @@ mod tests {
         crate::auth::storage::save_provider_oauth_tokens(&path, "anthropic", &tokens).unwrap();
 
         let cfg = default_config();
-        let result = load_server_auth(&path, &cfg, None, None)
-            .await
-            .unwrap();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
         let auth = result.unwrap();
         assert!(auth.is_oauth());
         assert_eq!(auth.token(), "fresh-tok");
@@ -406,7 +394,8 @@ mod tests {
             refresh_token: "ref2".to_string(),
             expires_at: now_ms() + 3_600_000,
         };
-        crate::auth::storage::save_account_oauth_tokens(&path, "anthropic", "work", &tokens1).unwrap();
+        crate::auth::storage::save_account_oauth_tokens(&path, "anthropic", "work", &tokens1)
+            .unwrap();
         crate::auth::storage::save_account_oauth_tokens(&path, "anthropic", "personal", &tokens2)
             .unwrap();
 
@@ -420,9 +409,7 @@ mod tests {
         assert_eq!(auth.token(), "personal-tok");
 
         // No preference → first account
-        let result = load_server_auth(&path, &cfg, None, None)
-            .await
-            .unwrap();
+        let result = load_server_auth(&path, &cfg, None, None).await.unwrap();
         let auth = result.unwrap();
         assert_eq!(auth.token(), "work-tok");
     }

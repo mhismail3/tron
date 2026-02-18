@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
+use crate::hooks::engine::HookEngine;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::{BaseEvent, TronEvent};
-use crate::hooks::engine::HookEngine;
 
 use tracing::{debug, info, instrument, warn};
 
@@ -74,12 +74,9 @@ pub async fn run_agent(
     // Signal the forward task to drain remaining buffered events and exit
     forward_cancel.cancel();
     // Wait for it to finish draining (bounded timeout as safety net)
-    if tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        forward_handle,
-    )
-    .await
-    .is_err()
+    if tokio::time::timeout(std::time::Duration::from_millis(100), forward_handle)
+        .await
+        .is_err()
     {
         warn!(session_id, "forward task did not drain within 100ms");
     }
@@ -102,11 +99,11 @@ pub async fn run_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use crate::errors::StopReason;
-    use futures::stream;
     use crate::context::context_manager::ContextManager;
     use crate::context::types::ContextManagerConfig;
+    use crate::errors::StopReason;
+    use async_trait::async_trait;
+    use futures::stream;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
@@ -119,17 +116,30 @@ mod tests {
     struct MockProvider;
     #[async_trait]
     impl tron_llm::provider::Provider for MockProvider {
-        fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-        fn model(&self) -> &str { "mock" }
-        async fn stream(&self, _c: &tron_core::messages::Context, _o: &ProviderStreamOptions)
-            -> Result<StreamEventStream, ProviderError> {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
             let s = stream::iter(vec![
                 Ok(StreamEvent::Start),
-                Ok(StreamEvent::TextDelta { delta: "Hello".into() }),
+                Ok(StreamEvent::TextDelta {
+                    delta: "Hello".into(),
+                }),
                 Ok(StreamEvent::Done {
                     message: AssistantMessage {
                         content: vec![AssistantContent::text("Hello")],
-                        token_usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5, ..Default::default() }),
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            ..Default::default()
+                        }),
                     },
                     stop_reason: "end_turn".into(),
                 }),
@@ -254,11 +264,20 @@ mod tests {
         struct ErrorProvider;
         #[async_trait]
         impl tron_llm::provider::Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
-            async fn stream(&self, _c: &tron_core::messages::Context, _o: &ProviderStreamOptions)
-                -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth { message: "expired".into() })
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
+            async fn stream(
+                &self,
+                _c: &tron_core::messages::Context,
+                _o: &ProviderStreamOptions,
+            ) -> Result<StreamEventStream, ProviderError> {
+                Err(ProviderError::Auth {
+                    message: "expired".into(),
+                })
             }
         }
 
@@ -301,10 +320,17 @@ mod tests {
         struct MultiEventProvider;
         #[async_trait]
         impl tron_llm::provider::Provider for MultiEventProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
-            async fn stream(&self, _c: &tron_core::messages::Context, _o: &ProviderStreamOptions)
-                -> Result<StreamEventStream, ProviderError> {
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
+            async fn stream(
+                &self,
+                _c: &tron_core::messages::Context,
+                _o: &ProviderStreamOptions,
+            ) -> Result<StreamEventStream, ProviderError> {
                 let s = stream::iter(vec![
                     Ok(StreamEvent::Start),
                     Ok(StreamEvent::TextDelta { delta: "a".into() }),
@@ -315,7 +341,11 @@ mod tests {
                     Ok(StreamEvent::Done {
                         message: AssistantMessage {
                             content: vec![AssistantContent::text("abcde")],
-                            token_usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5, ..Default::default() }),
+                            token_usage: Some(TokenUsage {
+                                input_tokens: 10,
+                                output_tokens: 5,
+                                ..Default::default()
+                            }),
                         },
                         stop_reason: "end_turn".into(),
                     }),
@@ -365,7 +395,10 @@ mod tests {
             "agent_ready must be the last event"
         );
         // All message_update deltas should be forwarded
-        let update_count = event_types.iter().filter(|t| *t == "message_update").count();
+        let update_count = event_types
+            .iter()
+            .filter(|t| *t == "message_update")
+            .count();
         assert_eq!(update_count, 5, "all 5 text deltas must be forwarded");
     }
 }

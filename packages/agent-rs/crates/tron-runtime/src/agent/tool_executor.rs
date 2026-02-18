@@ -3,13 +3,13 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::guardrails::{EvaluationContext, GuardrailEngine};
+use crate::hooks::engine::HookEngine;
+use crate::hooks::types::{HookAction, HookContext};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::{BaseEvent, HookResult as EventHookResult, TronEvent};
 use tron_core::messages::ToolCall;
-use crate::guardrails::{EvaluationContext, GuardrailEngine};
-use crate::hooks::engine::HookEngine;
-use crate::hooks::types::{HookAction, HookContext};
 use tron_tools::registry::ToolRegistry;
 use tron_tools::traits::ToolContext;
 
@@ -22,7 +22,11 @@ use crate::types::ToolExecutionResult;
 /// Execute a single tool call through the full pipeline.
 ///
 /// Pipeline: guardrails → pre-hooks → execute → post-hooks → result
-#[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::cast_possible_truncation)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation
+)]
 #[instrument(skip_all, fields(tool_name = tool_call.name, session_id))]
 pub async fn execute_tool(
     tool_call: &ToolCall,
@@ -45,9 +49,7 @@ pub async fn execute_tool(
         error!(tool_name, "tool not found");
         return ToolExecutionResult {
             tool_call_id,
-            result: tron_core::tools::error_result(format!(
-                "Tool not found: {tool_name}"
-            )),
+            result: tron_core::tools::error_result(format!("Tool not found: {tool_name}")),
             duration_ms: start.elapsed().as_millis() as u64,
             blocked_by_hook: false,
             blocked_by_guardrail: false,
@@ -152,7 +154,10 @@ pub async fn execute_tool(
         tool_name: tool_name.clone(),
         arguments: effective_args.as_object().cloned(),
     });
-    debug!(tool_name, tool_call_id, session_id, "tool execution started");
+    debug!(
+        tool_name,
+        tool_call_id, session_id, "tool execution started"
+    );
 
     // 5. Execute tool
     let ctx = ToolContext {
@@ -251,7 +256,9 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::{Map, json};
     use tron_core::content::ToolResultContent;
-    use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, text_result};
+    use tron_core::tools::{
+        Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, text_result,
+    };
     use tron_tools::traits::TronTool;
 
     // ── Test tool implementations ──
@@ -270,7 +277,13 @@ mod tests {
             Tool {
                 name: "echo".into(),
                 description: "Echoes input".into(),
-                parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() },
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
             }
         }
         async fn execute(
@@ -306,7 +319,13 @@ mod tests {
             Tool {
                 name: "ask_user".into(),
                 description: "Ask user".into(),
-                parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() },
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
             }
         }
         async fn execute(
@@ -418,7 +437,16 @@ mod tests {
         let tc = make_tool_call("echo", args);
 
         let result = execute_tool(
-            &tc, &registry, &guardrails, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc,
+            &registry,
+            &guardrails,
+            &None,
+            "s1",
+            "/tmp",
+            &emitter,
+            &cancel,
+            0,
+            0,
         )
         .await;
 
@@ -494,17 +522,21 @@ mod tests {
 
     #[tokio::test]
     async fn pre_tool_use_hook_emits_triggered_and_completed() {
-        use crate::hooks::registry::HookRegistry;
-        use crate::hooks::handler::HookHandler;
-        use crate::hooks::types::{HookType, HookResult as HookExecResult};
         use crate::hooks::errors::HookError;
+        use crate::hooks::handler::HookHandler;
+        use crate::hooks::registry::HookRegistry;
+        use crate::hooks::types::{HookResult as HookExecResult, HookType};
 
         struct ContinueHandler;
 
         #[async_trait]
         impl HookHandler for ContinueHandler {
-            fn name(&self) -> &str { "test-continue" }
-            fn hook_type(&self) -> HookType { HookType::PreToolUse }
+            fn name(&self) -> &str {
+                "test-continue"
+            }
+            fn hook_type(&self) -> HookType {
+                HookType::PreToolUse
+            }
             async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
                 Ok(HookExecResult::continue_())
             }
@@ -524,7 +556,16 @@ mod tests {
         let tc = make_tool_call("echo", args);
 
         let _ = execute_tool(
-            &tc, &registry, &None, &Some(hook_engine), "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc,
+            &registry,
+            &None,
+            &Some(hook_engine),
+            "s1",
+            "/tmp",
+            &emitter,
+            &cancel,
+            0,
+            0,
         )
         .await;
 
@@ -547,18 +588,24 @@ mod tests {
 
     #[tokio::test]
     async fn post_tool_use_hook_emits_triggered() {
-        use crate::hooks::registry::HookRegistry;
-        use crate::hooks::handler::HookHandler;
-        use crate::hooks::types::{HookType, HookExecutionMode, HookResult as HookExecResult};
         use crate::hooks::errors::HookError;
+        use crate::hooks::handler::HookHandler;
+        use crate::hooks::registry::HookRegistry;
+        use crate::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
 
         struct BgHandler;
 
         #[async_trait]
         impl HookHandler for BgHandler {
-            fn name(&self) -> &str { "test-bg" }
-            fn hook_type(&self) -> HookType { HookType::PostToolUse }
-            fn execution_mode(&self) -> HookExecutionMode { HookExecutionMode::Background }
+            fn name(&self) -> &str {
+                "test-bg"
+            }
+            fn hook_type(&self) -> HookType {
+                HookType::PostToolUse
+            }
+            fn execution_mode(&self) -> HookExecutionMode {
+                HookExecutionMode::Background
+            }
             async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
                 Ok(HookExecResult::continue_())
             }
@@ -578,7 +625,16 @@ mod tests {
         let tc = make_tool_call("echo", args);
 
         let _ = execute_tool(
-            &tc, &registry, &None, &Some(hook_engine), "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc,
+            &registry,
+            &None,
+            &Some(hook_engine),
+            "s1",
+            "/tmp",
+            &emitter,
+            &cancel,
+            0,
+            0,
         )
         .await;
 

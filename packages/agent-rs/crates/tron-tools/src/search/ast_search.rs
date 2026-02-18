@@ -77,9 +77,14 @@ pub async fn ast_search(
     }
 
     // Parse JSON output
-    let stdout = if output.stdout.is_empty() { "[]" } else { &output.stdout };
-    let results: Vec<Value> = serde_json::from_str(stdout)
-        .map_err(|e| ToolError::Internal { message: format!("Failed to parse ast-grep output: {e}") })?;
+    let stdout = if output.stdout.is_empty() {
+        "[]"
+    } else {
+        &output.stdout
+    };
+    let results: Vec<Value> = serde_json::from_str(stdout).map_err(|e| ToolError::Internal {
+        message: format!("Failed to parse ast-grep output: {e}"),
+    })?;
 
     let total_matches = results.len();
 
@@ -99,7 +104,8 @@ pub async fn ast_search(
     for m in shown {
         let file = m.get("file").and_then(Value::as_str).unwrap_or("");
         let line = m.get("line").and_then(Value::as_u64).unwrap_or(0);
-        let code = m.get("code")
+        let code = m
+            .get("code")
             .or_else(|| m.get("text"))
             .and_then(Value::as_str)
             .unwrap_or("");
@@ -110,7 +116,10 @@ pub async fn ast_search(
 
     let truncated = total_matches > max_results;
     if truncated {
-        let _ = writeln!(formatted, "\n[Showing {match_count} of {total_matches} results]");
+        let _ = writeln!(
+            formatted,
+            "\n[Showing {match_count} of {total_matches} results]"
+        );
     }
 
     Ok(AstSearchResult {
@@ -129,8 +138,8 @@ fn shell_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::traits::ProcessOutput;
+    use async_trait::async_trait;
 
     struct MockRunner {
         handler: Box<dyn Fn(&str) -> ProcessOutput + Send + Sync>,
@@ -138,7 +147,11 @@ mod tests {
 
     #[async_trait]
     impl ProcessRunner for MockRunner {
-        async fn run_command(&self, command: &str, _opts: &ProcessOptions) -> Result<ProcessOutput, ToolError> {
+        async fn run_command(
+            &self,
+            command: &str,
+            _opts: &ProcessOptions,
+        ) -> Result<ProcessOutput, ToolError> {
             Ok((self.handler)(command))
         }
     }
@@ -146,17 +159,21 @@ mod tests {
     #[tokio::test]
     async fn valid_ast_pattern_formats_results() {
         let runner: Arc<dyn ProcessRunner> = Arc::new(MockRunner {
-            handler: Box::new(|_| ProcessOutput {
+            handler: Box::new(|_| {
+                ProcessOutput {
                 stdout: r#"[{"file":"src/main.rs","line":5,"code":"fn main() {}"},{"file":"src/lib.rs","line":1,"code":"fn test() {}"}]"#.into(),
                 stderr: String::new(),
                 exit_code: 0,
                 duration_ms: 100,
                 timed_out: false,
                 interrupted: false,
+            }
             }),
         });
 
-        let r = ast_search(&runner, ".", "$FN() {}", None, None, "/tmp").await.unwrap();
+        let r = ast_search(&runner, ".", "$FN() {}", None, None, "/tmp")
+            .await
+            .unwrap();
         assert_eq!(r.matches, 2);
         assert!(r.output.contains("src/main.rs:5:"));
         assert!(r.output.contains("fn main()"));
@@ -175,7 +192,9 @@ mod tests {
             }),
         });
 
-        let r = ast_search(&runner, ".", "$X", None, None, "/tmp").await.unwrap();
+        let r = ast_search(&runner, ".", "$X", None, None, "/tmp")
+            .await
+            .unwrap();
         assert!(r.output.contains("not installed"));
         assert!(r.output.contains("brew install"));
     }
@@ -193,7 +212,9 @@ mod tests {
             }),
         });
 
-        let r = ast_search(&runner, ".", "$X", None, None, "/tmp").await.unwrap();
+        let r = ast_search(&runner, ".", "$X", None, None, "/tmp")
+            .await
+            .unwrap();
         assert_eq!(r.matches, 0);
         assert!(r.output.contains("No AST matches"));
     }
@@ -241,7 +262,9 @@ mod tests {
             }),
         });
 
-        let r = ast_search(&runner, ".", "$X", None, Some(5), "/tmp").await.unwrap();
+        let r = ast_search(&runner, ".", "$X", None, Some(5), "/tmp")
+            .await
+            .unwrap();
         assert_eq!(r.matches, 5);
         assert_eq!(r.total_matches, 20);
         assert!(r.truncated);
@@ -261,7 +284,9 @@ mod tests {
             }),
         });
 
-        let r = ast_search(&runner, ".", "$X", None, None, "/tmp").await.unwrap();
+        let r = ast_search(&runner, ".", "$X", None, None, "/tmp")
+            .await
+            .unwrap();
         assert_eq!(r.matches, 0);
         assert!(r.output.contains("No AST matches"));
     }

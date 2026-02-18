@@ -94,10 +94,14 @@ fn patterns() -> &'static [ErrorPattern] {
     static PATTERNS: &[ErrorPattern] = &[
         // Authentication
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("invalid") && s.to_lowercase().contains("x-api-key"),
+            check: |s| {
+                s.to_lowercase().contains("invalid") && s.to_lowercase().contains("x-api-key")
+            },
             category: ErrorCategory::Authentication,
             message: "Invalid API key",
-            suggestion: Some("Run \"tron login\" to re-authenticate or check your ANTHROPIC_API_KEY"),
+            suggestion: Some(
+                "Run \"tron login\" to re-authenticate or check your ANTHROPIC_API_KEY",
+            ),
             is_retryable: false,
         },
         ErrorPattern {
@@ -170,7 +174,9 @@ fn patterns() -> &'static [ErrorPattern] {
             is_retryable: false,
         },
         ErrorPattern {
-            check: |s| s.to_lowercase().contains("insufficient") && s.to_lowercase().contains("credits"),
+            check: |s| {
+                s.to_lowercase().contains("insufficient") && s.to_lowercase().contains("credits")
+            },
             category: ErrorCategory::Quota,
             message: "Insufficient credits",
             suggestion: Some("Add credits to your account"),
@@ -280,9 +286,8 @@ pub fn parse_error(error_string: &str) -> ParsedError {
         }
     }
 
-    let details = extract_details(error_string).or_else(|| {
-        Some(error_string[..error_string.len().min(200)].to_owned())
-    });
+    let details = extract_details(error_string)
+        .or_else(|| Some(error_string[..error_string.len().min(200)].to_owned()));
 
     ParsedError {
         category: ErrorCategory::Unknown,

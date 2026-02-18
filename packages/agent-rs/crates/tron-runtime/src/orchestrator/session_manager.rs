@@ -109,7 +109,8 @@ impl SessionManager {
             state,
         });
 
-        let _ = self.active_sessions
+        let _ = self
+            .active_sessions
             .insert(session_id.to_owned(), active.clone());
         debug!(session_id, "session resumed");
         Ok(active)
@@ -217,8 +218,16 @@ impl SessionManager {
         use tron_events::sqlite::repositories::session::ListSessionsOptions;
         let opts = ListSessionsOptions {
             workspace_id: None,
-            ended: if filter.include_archived { None } else { Some(false) },
-            exclude_subagents: if filter.exclude_subagents { Some(true) } else { None },
+            ended: if filter.include_archived {
+                None
+            } else {
+                Some(false)
+            },
+            exclude_subagents: if filter.exclude_subagents {
+                Some(true)
+            } else {
+                None
+            },
             #[allow(clippy::cast_possible_wrap)]
             limit: filter.limit.map(|l| l as i64),
             offset: None,
@@ -241,7 +250,8 @@ impl SessionManager {
     ) -> Result<String, RuntimeError> {
         let session_id = self.create_session(model, workspace_path, title)?;
 
-        let _ = self.event_store
+        let _ = self
+            .event_store
             .update_spawn_info(&session_id, spawning_session_id, spawn_type, spawn_task)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
@@ -278,9 +288,7 @@ impl SessionManager {
 
     /// Check if a session is in plan mode.
     pub fn is_plan_mode(&self, session_id: &str) -> bool {
-        self.plan_mode
-            .get(session_id)
-            .is_some_and(|v| *v)
+        self.plan_mode.get(session_id).is_some_and(|v| *v)
     }
 }
 
@@ -300,7 +308,9 @@ mod tests {
     #[tokio::test]
     async fn create_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
         assert!(!sid.is_empty());
         assert!(mgr.is_active(&sid));
         assert_eq!(mgr.active_count(), 1);
@@ -309,7 +319,9 @@ mod tests {
     #[tokio::test]
     async fn resume_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         // Drop from active
         let _ = mgr.active_sessions.remove(&sid);
@@ -324,7 +336,9 @@ mod tests {
     #[tokio::test]
     async fn resume_already_active() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         // Resume when already active should return existing
         let active = mgr.resume_session(&sid).unwrap();
@@ -335,7 +349,9 @@ mod tests {
     #[tokio::test]
     async fn end_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         mgr.end_session(&sid).await.unwrap();
         assert!(!mgr.is_active(&sid));
@@ -344,7 +360,9 @@ mod tests {
     #[tokio::test]
     async fn fork_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         let result = mgr.fork_session(&sid, None, Some("forked")).unwrap();
         assert!(!result.new_session_id.is_empty());
@@ -356,7 +374,9 @@ mod tests {
     #[tokio::test]
     async fn archive_and_unarchive() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         mgr.archive_session(&sid).unwrap();
         assert!(!mgr.is_active(&sid));
@@ -369,7 +389,9 @@ mod tests {
     #[tokio::test]
     async fn delete_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         mgr.delete_session(&sid).unwrap();
         assert!(!mgr.is_active(&sid));
@@ -388,7 +410,9 @@ mod tests {
     #[tokio::test]
     async fn get_session() {
         let mgr = make_manager();
-        let sid = mgr.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let sid = mgr
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         let session = mgr.get_session(&sid).unwrap();
         assert!(session.is_some());

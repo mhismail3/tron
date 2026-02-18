@@ -35,8 +35,7 @@ impl PathRule {
         let homedir = home_dir();
 
         for arg_name in &self.path_arguments {
-            let Some(serde_json::Value::String(value)) =
-                ctx.tool_arguments.get(arg_name.as_str())
+            let Some(serde_json::Value::String(value)) = ctx.tool_arguments.get(arg_name.as_str())
             else {
                 continue;
             };
@@ -60,7 +59,9 @@ impl PathRule {
                         self.base.severity,
                         format!("{}: Hidden paths not allowed", self.base.name),
                     )
-                    .with_details(serde_json::json!({ "command": tron_core::text::truncate_str(value, 200) }));
+                    .with_details(
+                        serde_json::json!({ "command": tron_core::text::truncate_str(value, 200) }),
+                    );
                 }
                 continue;
             }
@@ -259,7 +260,10 @@ mod tests {
 
     #[test]
     fn test_is_path_within_exact() {
-        assert!(is_path_within("/Users/test/.tron/app", "/Users/test/.tron/app"));
+        assert!(is_path_within(
+            "/Users/test/.tron/app",
+            "/Users/test/.tron/app"
+        ));
     }
 
     #[test]

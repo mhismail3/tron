@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -54,7 +54,8 @@ and dismiss it when done. This is a fire-and-forget action — you don't need to
 for the user to close the browser.\n\n\
 Examples:\n\
 - Open documentation: { \"url\": \"https://docs.swift.org/swift-book/\" }\n\
-- Show a reference: { \"url\": \"https://developer.apple.com/documentation/swiftui\" }".into(),
+- Show a reference: { \"url\": \"https://developer.apple.com/documentation/swiftui\" }"
+                .into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -105,9 +106,9 @@ Examples:\n\
         }
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(format!("Opening {trimmed} in Safari")),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                format!("Opening {trimmed} in Safari"),
+            )]),
             details: Some(json!({
                 "url": trimmed,
                 "action": "open_safari",
@@ -143,7 +144,10 @@ mod tests {
             &self,
             _notification: &Notification,
         ) -> Result<NotifyResult, ToolError> {
-            Ok(NotifyResult { success: true, message: None })
+            Ok(NotifyResult {
+                success: true,
+                message: None,
+            })
         }
 
         async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
@@ -232,10 +236,7 @@ mod tests {
     async fn invalid_protocol_javascript() {
         let tool = OpenURLTool::new(Arc::new(MockNotify::success()));
         let r = tool
-            .execute(
-                json!({"url": "javascript:alert(1)"}),
-                &make_ctx(),
-            )
+            .execute(json!({"url": "javascript:alert(1)"}), &make_ctx())
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -251,7 +252,10 @@ mod tests {
     #[tokio::test]
     async fn empty_url_error() {
         let tool = OpenURLTool::new(Arc::new(MockNotify::success()));
-        let r = tool.execute(json!({"url": "  "}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"url": "  "}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -287,10 +291,7 @@ mod tests {
     async fn whitespace_trimmed() {
         let tool = OpenURLTool::new(Arc::new(MockNotify::success()));
         let r = tool
-            .execute(
-                json!({"url": "  https://example.com  "}),
-                &make_ctx(),
-            )
+            .execute(json!({"url": "  https://example.com  "}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());

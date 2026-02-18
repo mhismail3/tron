@@ -3,10 +3,10 @@
 //! Handles text, images, PDFs, tool calls (with `thoughtSignature`), and tool results.
 //! Sanitizes JSON schemas by removing unsupported properties (`additionalProperties`, `$schema`).
 
+use crate::id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 use tron_core::content::{AssistantContent, UserContent};
 use tron_core::messages::{Context, Message, ToolResultMessageContent, UserMessageContent};
 use tron_core::tools::Tool;
-use crate::id_remapping::{build_tool_call_id_mapping, remap_tool_call_id, IdFormat};
 
 use super::types::{
     FunctionCallData, FunctionDeclaration, FunctionResponseData, GeminiContent, GeminiPart,
@@ -87,8 +87,7 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
                             thought_signature,
                             ..
                         } => {
-                            let args =
-                                serde_json::Value::Object(arguments.clone());
+                            let args = serde_json::Value::Object(arguments.clone());
 
                             let thought_sig = thought_signature
                                 .clone()
@@ -380,10 +379,7 @@ mod tests {
             GeminiPart::FunctionCall {
                 thought_signature, ..
             } => {
-                assert_eq!(
-                    thought_signature.as_deref(),
-                    Some(SKIP_THOUGHT_SIGNATURE)
-                );
+                assert_eq!(thought_signature.as_deref(), Some(SKIP_THOUGHT_SIGNATURE));
             }
             _ => panic!("Expected function call"),
         }
@@ -452,10 +448,7 @@ mod tests {
     #[test]
     fn converts_tools_to_gemini_format() {
         let mut props = serde_json::Map::new();
-        props.insert(
-            "command".into(),
-            serde_json::json!({"type": "string"}),
-        );
+        props.insert("command".into(), serde_json::json!({"type": "string"}));
         let tools = vec![Tool {
             name: "bash".into(),
             description: "Run a command".into(),
@@ -515,9 +508,11 @@ mod tests {
             }
         });
         let sanitized = sanitize_schema_for_gemini(&schema);
-        assert!(sanitized["properties"]["nested"]
-            .get("additionalProperties")
-            .is_none());
+        assert!(
+            sanitized["properties"]["nested"]
+                .get("additionalProperties")
+                .is_none()
+        );
     }
 
     // ── truncate_tool_result ─────────────────────────────────────────

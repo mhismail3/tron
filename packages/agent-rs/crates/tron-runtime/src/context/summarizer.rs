@@ -109,7 +109,9 @@ impl Summarizer for KeywordSummarizer {
                 Message::Assistant { content, .. } => {
                     for block in content {
                         match block {
-                            AssistantContent::ToolUse { name, arguments, .. } => {
+                            AssistantContent::ToolUse {
+                                name, arguments, ..
+                            } => {
                                 if !tool_names.contains(name) {
                                     tool_names.push(name.clone());
                                 }
@@ -144,10 +146,7 @@ impl Summarizer for KeywordSummarizer {
             format!("({} messages summarized)", messages.len())
         } else {
             let mut parts = Vec::new();
-            parts.push(format!(
-                "The user made {} requests.",
-                user_messages.len()
-            ));
+            parts.push(format!("The user made {} requests.", user_messages.len()));
             parts.push(format!("Key requests: {}", user_messages.join("; ")));
             if !tool_names.is_empty() {
                 parts.push(format!("Tools used: {}", tool_names.join(", ")));
@@ -344,9 +343,10 @@ fn tool_result_content_text(content: &ToolResultMessageContent) -> String {
 pub fn parse_summarizer_response(response: &str) -> Result<SummaryResult, SummarizerError> {
     let cleaned = strip_code_fences(response);
 
-    let parsed: Value = serde_json::from_str(&cleaned).map_err(|e| SummarizerError::ParseError {
-        reason: format!("invalid JSON: {e}"),
-    })?;
+    let parsed: Value =
+        serde_json::from_str(&cleaned).map_err(|e| SummarizerError::ParseError {
+            reason: format!("invalid JSON: {e}"),
+        })?;
 
     let narrative = parsed
         .get("narrative")
@@ -424,15 +424,9 @@ fn parse_extracted_data(value: &Value) -> ExtractedData {
 fn strip_code_fences(s: &str) -> String {
     let trimmed = s.trim();
     if let Some(rest) = trimmed.strip_prefix("```json") {
-        rest.strip_suffix("```")
-            .unwrap_or(rest)
-            .trim()
-            .to_string()
+        rest.strip_suffix("```").unwrap_or(rest).trim().to_string()
     } else if let Some(rest) = trimmed.strip_prefix("```") {
-        rest.strip_suffix("```")
-            .unwrap_or(rest)
-            .trim()
-            .to_string()
+        rest.strip_suffix("```").unwrap_or(rest).trim().to_string()
     } else {
         trimmed.to_string()
     }
@@ -776,10 +770,12 @@ mod tests {
             },
         ];
         let result = summarizer.summarize(&messages).await.unwrap();
-        assert!(result
-            .extracted_data
-            .files_modified
-            .contains(&"/src/login.rs".to_string()));
+        assert!(
+            result
+                .extracted_data
+                .files_modified
+                .contains(&"/src/login.rs".to_string())
+        );
     }
 
     #[tokio::test]
@@ -819,10 +815,8 @@ mod tests {
 
     #[test]
     fn user_content_text_from_blocks() {
-        let content = UserMessageContent::Blocks(vec![
-            UserContent::text("one"),
-            UserContent::text("two"),
-        ]);
+        let content =
+            UserMessageContent::Blocks(vec![UserContent::text("one"), UserContent::text("two")]);
         assert_eq!(user_content_text(&content), "one\ntwo");
     }
 

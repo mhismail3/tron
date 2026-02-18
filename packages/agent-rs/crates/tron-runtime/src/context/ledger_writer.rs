@@ -91,8 +91,7 @@ pub enum LedgerParseResult {
 pub fn parse_ledger_response(output: &str) -> Result<LedgerParseResult, String> {
     let cleaned = extract_json(output);
 
-    let parsed: Value =
-        serde_json::from_str(&cleaned).map_err(|e| format!("invalid JSON: {e}"))?;
+    let parsed: Value = serde_json::from_str(&cleaned).map_err(|e| format!("invalid JSON: {e}"))?;
 
     // Check for skip
     if parsed.get("skip").and_then(Value::as_bool) == Some(true) {
@@ -141,14 +140,17 @@ fn extract_json(s: &str) -> String {
 /// Try to extract JSON content from inside code fences.
 fn extract_from_code_fence(s: &str) -> Option<String> {
     // Find opening fence: ```json\n or ```\n
-    let fence_start = s.find("```json\n").map(|i| i + 8) // skip "```json\n"
+    let fence_start = s
+        .find("```json\n")
+        .map(|i| i + 8) // skip "```json\n"
         .or_else(|| s.find("```json\r\n").map(|i| i + 9))
         .or_else(|| s.find("```\n").map(|i| i + 4))
         .or_else(|| s.find("```\r\n").map(|i| i + 5))?;
 
     // Find closing fence: \n``` (newline followed by triple backtick)
     let remaining = &s[fence_start..];
-    let fence_end = remaining.find("\n```")
+    let fence_end = remaining
+        .find("\n```")
         .or_else(|| remaining.find("\r\n```"))?;
 
     Some(remaining[..fence_end].trim().to_string())
@@ -413,7 +415,8 @@ mod tests {
 
     #[test]
     fn parse_bare_json_with_trailing_text() {
-        let input = "{\"title\": \"Test\", \"entryType\": \"feature\"}\n\nLet me know if you need changes!";
+        let input =
+            "{\"title\": \"Test\", \"entryType\": \"feature\"}\n\nLet me know if you need changes!";
         let result = parse_ledger_response(input).unwrap();
         assert!(matches!(result, LedgerParseResult::Entry(_)));
     }

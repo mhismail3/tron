@@ -175,8 +175,8 @@ pub fn with_provider_retry(
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use tron_core::events::AssistantMessage;
 
     fn success_factory() -> StreamFactory {
@@ -192,20 +192,15 @@ mod tests {
                         stop_reason: "end_turn".to_string(),
                     }),
                 ]);
-                Ok(
-                    Box::pin(stream)
-                        as Pin<
-                            Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>,
-                        >,
-                )
+                Ok(Box::pin(stream)
+                    as Pin<
+                        Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>,
+                    >)
             })
         })
     }
 
-    fn failing_factory(
-        fail_count: u32,
-        attempt_counter: Arc<AtomicU32>,
-    ) -> StreamFactory {
+    fn failing_factory(fail_count: u32, attempt_counter: Arc<AtomicU32>) -> StreamFactory {
         Box::new(move || {
             let counter = attempt_counter.clone();
             let fail_count = fail_count;
@@ -229,15 +224,10 @@ mod tests {
                             stop_reason: "end_turn".to_string(),
                         }),
                     ]);
-                    Ok(
-                        Box::pin(stream)
-                            as Pin<
-                                Box<
-                                    dyn Stream<Item = Result<StreamEvent, ProviderError>>
-                                        + Send,
-                                >,
-                            >,
-                    )
+                    Ok(Box::pin(stream)
+                        as Pin<
+                            Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>,
+                        >)
                 }
             })
         })
@@ -394,9 +384,9 @@ mod tests {
 
         // Next should be cancelled
         let remaining: Vec<_> = stream.collect().await;
-        let has_cancel = remaining.iter().any(|e| {
-            matches!(e, Err(ProviderError::Cancelled))
-        });
+        let has_cancel = remaining
+            .iter()
+            .any(|e| matches!(e, Err(ProviderError::Cancelled)));
         assert!(has_cancel);
     }
 
@@ -407,7 +397,9 @@ mod tests {
         let stream = with_provider_retry(factory, quick_retry_config());
         let events: Vec<_> = stream.collect().await;
 
-        let retry_event = events.iter().find(|e| matches!(e, Ok(StreamEvent::Retry { .. })));
+        let retry_event = events
+            .iter()
+            .find(|e| matches!(e, Ok(StreamEvent::Retry { .. })));
         if let Some(Ok(StreamEvent::Retry {
             attempt,
             max_retries,
@@ -449,15 +441,10 @@ mod tests {
                             stop_reason: "end_turn".to_string(),
                         }),
                     ]);
-                    Ok(
-                        Box::pin(stream)
-                            as Pin<
-                                Box<
-                                    dyn Stream<Item = Result<StreamEvent, ProviderError>>
-                                        + Send,
-                                >,
-                            >,
-                    )
+                    Ok(Box::pin(stream)
+                        as Pin<
+                            Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>,
+                        >)
                 }
             })
         });
@@ -481,11 +468,20 @@ mod tests {
         // Should have retried once, then succeeded
         assert_eq!(counter.load(Ordering::SeqCst), 2);
         // Delay should be at least 50ms (from retry_after_ms)
-        assert!(elapsed.as_millis() >= 50, "expected >=50ms, got {}ms", elapsed.as_millis());
+        assert!(
+            elapsed.as_millis() >= 50,
+            "expected >=50ms, got {}ms",
+            elapsed.as_millis()
+        );
 
         // Verify retry event has rate_limit category
-        let retry_event = events.iter().find(|e| matches!(e, Ok(StreamEvent::Retry { .. })));
-        if let Some(Ok(StreamEvent::Retry { delay_ms, error, .. })) = retry_event {
+        let retry_event = events
+            .iter()
+            .find(|e| matches!(e, Ok(StreamEvent::Retry { .. })));
+        if let Some(Ok(StreamEvent::Retry {
+            delay_ms, error, ..
+        })) = retry_event
+        {
             assert!(*delay_ms >= 50);
             assert_eq!(error.category, "rate_limit");
         } else {
@@ -493,7 +489,10 @@ mod tests {
         }
 
         // Should have Start + Done
-        let done_count = events.iter().filter(|e| matches!(e, Ok(StreamEvent::Done { .. }))).count();
+        let done_count = events
+            .iter()
+            .filter(|e| matches!(e, Ok(StreamEvent::Done { .. })))
+            .count();
         assert_eq!(done_count, 1);
     }
 }

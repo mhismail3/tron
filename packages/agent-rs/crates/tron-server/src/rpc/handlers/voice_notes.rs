@@ -232,10 +232,7 @@ mod tests {
     async fn save_voice_note_success() {
         let ctx = make_test_context();
         let result = SaveHandler
-            .handle(
-                Some(json!({"audioBase64": "SGVsbG8gV29ybGQ="})),
-                &ctx,
-            )
+            .handle(Some(json!({"audioBase64": "SGVsbG8gV29ybGQ="})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["success"], true);
@@ -258,10 +255,7 @@ mod tests {
     async fn save_voice_note_writes_transcript_to_file() {
         let ctx = make_test_context();
         let result = SaveHandler
-            .handle(
-                Some(json!({"audioBase64": "SGVsbG8gV29ybGQ="})),
-                &ctx,
-            )
+            .handle(Some(json!({"audioBase64": "SGVsbG8gV29ybGQ="})), &ctx)
             .await
             .unwrap();
         let fp = result["filepath"].as_str().unwrap();
@@ -276,10 +270,7 @@ mod tests {
     async fn save_voice_note_invalid_base64() {
         let ctx = make_test_context();
         let err = SaveHandler
-            .handle(
-                Some(json!({"audioBase64": "!!!not-valid!!!"})),
-                &ctx,
-            )
+            .handle(Some(json!({"audioBase64": "!!!not-valid!!!"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
@@ -288,10 +279,7 @@ mod tests {
     #[tokio::test]
     async fn save_voice_note_missing_audio() {
         let ctx = make_test_context();
-        let err = SaveHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap_err();
+        let err = SaveHandler.handle(Some(json!({})), &ctx).await.unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 

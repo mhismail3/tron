@@ -13,7 +13,7 @@ pub mod types;
 
 // Re-export main public API
 pub use audit::AuditLogger;
-pub use core_rules::{default_rules, is_core_rule, CORE_RULE_IDS};
+pub use core_rules::{CORE_RULE_IDS, default_rules, is_core_rule};
 pub use engine::GuardrailEngine;
 pub use errors::GuardrailError;
 pub use rules::GuardrailRule;
@@ -25,11 +25,11 @@ pub use types::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guardrails::rules::RuleBase;
     use crate::guardrails::rules::composite::{CompositeOperator, CompositeRule};
     use crate::guardrails::rules::context::ContextRule;
     use crate::guardrails::rules::pattern::PatternRule;
     use crate::guardrails::rules::resource::ResourceRule;
-    use crate::guardrails::rules::RuleBase;
     use std::collections::HashMap;
 
     fn make_bash_ctx(command: &str) -> EvaluationContext {
@@ -102,10 +102,7 @@ mod tests {
 
     #[test]
     fn scope_serde_roundtrip() {
-        for (variant, expected) in [
-            (Scope::Global, "\"global\""),
-            (Scope::Tool, "\"tool\""),
-        ] {
+        for (variant, expected) in [(Scope::Global, "\"global\""), (Scope::Tool, "\"tool\"")] {
             let json = serde_json::to_string(&variant).unwrap();
             assert_eq!(json, expected);
             let back: Scope = serde_json::from_str(&json).unwrap();
@@ -216,7 +213,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_bash_ctx("rm -rf /"));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "core.destructive-commands"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.destructive-commands")
+        );
     }
 
     #[test]
@@ -301,7 +302,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_bash_ctx("rm -rf ~/.tron/skills/test"));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "core.tron-no-delete"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.tron-no-delete")
+        );
     }
 
     #[test]
@@ -321,7 +326,12 @@ mod tests {
         };
         let mut engine = default_engine();
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "core.destructive-commands"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.destructive-commands")
+        );
     }
 
     #[test]
@@ -330,7 +340,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/app/server.js")));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "core.tron-app-protection"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.tron-app-protection")
+        );
     }
 
     #[test]
@@ -339,7 +353,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_edit_ctx(&format!("{home}/.tron/database/prod.db")));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "core.tron-db-protection"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.tron-db-protection")
+        );
     }
 
     #[test]
@@ -348,7 +366,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/auth.json")));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "core.tron-auth-protection"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.tron-auth-protection")
+        );
     }
 
     #[test]
@@ -363,7 +385,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_read_ctx("../../etc/passwd"));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "path.traversal"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "path.traversal")
+        );
     }
 
     #[test]
@@ -385,7 +411,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_bash_ctx("mkdir .hidden"));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "path.hidden-mkdir"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "path.hidden-mkdir")
+        );
     }
 
     #[test]
@@ -440,7 +470,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&ctx);
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "bash.timeout"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "bash.timeout")
+        );
     }
 
     #[test]
@@ -453,7 +487,12 @@ mod tests {
         };
         let mut engine = default_engine();
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "bash.timeout"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "bash.timeout")
+        );
     }
 
     #[test]
@@ -466,7 +505,12 @@ mod tests {
         };
         let mut engine = default_engine();
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "bash.timeout"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "bash.timeout")
+        );
     }
 
     #[test]
@@ -479,7 +523,12 @@ mod tests {
         };
         let mut engine = default_engine();
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "bash.timeout"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "bash.timeout")
+        );
     }
 
     #[test]
@@ -492,7 +541,12 @@ mod tests {
         };
         let mut engine = default_engine();
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "bash.timeout"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "bash.timeout")
+        );
     }
 
     #[test]
@@ -595,7 +649,10 @@ mod tests {
         };
         let result = rule.evaluate(&ctx);
         assert!(result.triggered);
-        assert_eq!(result.reason.as_deref(), Some("DangerousTool is not allowed"));
+        assert_eq!(
+            result.reason.as_deref(),
+            Some("DangerousTool is not allowed")
+        );
     }
 
     #[test]
@@ -683,7 +740,11 @@ mod tests {
 
         let ctx = make_bash_ctx("test command");
         let eval = engine.evaluate(&ctx);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "composite.and" && r.triggered));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.and" && r.triggered)
+        );
     }
 
     #[test]
@@ -743,7 +804,12 @@ mod tests {
 
         let ctx = make_bash_ctx("test command");
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "composite.and"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.and")
+        );
     }
 
     #[test]
@@ -803,7 +869,11 @@ mod tests {
 
         let ctx = make_bash_ctx("test command");
         let eval = engine.evaluate(&ctx);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "composite.or" && r.triggered));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.or" && r.triggered)
+        );
     }
 
     #[test]
@@ -863,7 +933,12 @@ mod tests {
 
         let ctx = make_bash_ctx("safe command");
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "composite.or"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.or")
+        );
     }
 
     #[test]
@@ -907,7 +982,11 @@ mod tests {
 
         let ctx = make_bash_ctx("safe command");
         let eval = engine.evaluate(&ctx);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "composite.not" && r.triggered));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.not" && r.triggered)
+        );
     }
 
     #[test]
@@ -951,7 +1030,12 @@ mod tests {
 
         let ctx = make_bash_ctx("test command");
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "composite.not"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.not")
+        );
     }
 
     #[test]
@@ -979,7 +1063,12 @@ mod tests {
 
         let ctx = make_bash_ctx("test");
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "composite.bad"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "composite.bad")
+        );
     }
 
     #[test]
@@ -1078,7 +1167,11 @@ mod tests {
         let eval = engine.evaluate(&make_bash_ctx("audit-trigger"));
         assert!(!eval.blocked);
         assert!(!eval.has_warnings);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "test.audit" && r.triggered));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "test.audit" && r.triggered)
+        );
     }
 
     #[test]
@@ -1161,7 +1254,12 @@ mod tests {
             tool_call_id: None,
         };
         let eval = engine.evaluate(&ctx);
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "special.only"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "special.only")
+        );
 
         let ctx2 = EvaluationContext {
             tool_name: "SpecialTool".into(),
@@ -1170,7 +1268,12 @@ mod tests {
             tool_call_id: None,
         };
         let eval2 = engine.evaluate(&ctx2);
-        assert!(eval2.triggered_rules.iter().any(|r| r.rule_id == "special.only"));
+        assert!(
+            eval2
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "special.only")
+        );
     }
 
     #[test]
@@ -1179,14 +1282,24 @@ mod tests {
             enable_audit: Some(false),
             rule_overrides: {
                 let mut m = HashMap::new();
-                let _ = m.insert("path.traversal".into(), RuleOverride { enabled: Some(false) });
+                let _ = m.insert(
+                    "path.traversal".into(),
+                    RuleOverride {
+                        enabled: Some(false),
+                    },
+                );
                 m
             },
             ..Default::default()
         });
 
         let eval = engine.evaluate(&make_read_ctx("../../etc/passwd"));
-        assert!(!eval.triggered_rules.iter().any(|r| r.rule_id == "path.traversal"));
+        assert!(
+            !eval
+                .triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "path.traversal")
+        );
     }
 
     #[test]
@@ -1197,7 +1310,9 @@ mod tests {
                 let mut m = HashMap::new();
                 let _ = m.insert(
                     "core.destructive-commands".into(),
-                    RuleOverride { enabled: Some(false) },
+                    RuleOverride {
+                        enabled: Some(false),
+                    },
                 );
                 m
             },
@@ -1335,9 +1450,11 @@ mod tests {
             evaluation: GuardrailEvaluation {
                 blocked: true,
                 block_reason: Some("test".into()),
-                triggered_rules: vec![
-                    RuleEvaluationResult::triggered("rule-a", Severity::Block, "blocked"),
-                ],
+                triggered_rules: vec![RuleEvaluationResult::triggered(
+                    "rule-a",
+                    Severity::Block,
+                    "blocked",
+                )],
                 has_warnings: false,
                 warnings: vec![],
                 timestamp: "t".into(),
@@ -1437,9 +1554,11 @@ mod tests {
             evaluation: GuardrailEvaluation {
                 blocked: true,
                 block_reason: Some("test".into()),
-                triggered_rules: vec![
-                    RuleEvaluationResult::triggered("rule-a", Severity::Block, "blocked"),
-                ],
+                triggered_rules: vec![RuleEvaluationResult::triggered(
+                    "rule-a",
+                    Severity::Block,
+                    "blocked",
+                )],
                 has_warnings: false,
                 warnings: vec![],
                 timestamp: "t".into(),
@@ -1454,9 +1573,11 @@ mod tests {
             evaluation: GuardrailEvaluation {
                 blocked: false,
                 block_reason: None,
-                triggered_rules: vec![
-                    RuleEvaluationResult::triggered("rule-b", Severity::Warn, "warned"),
-                ],
+                triggered_rules: vec![RuleEvaluationResult::triggered(
+                    "rule-b",
+                    Severity::Warn,
+                    "warned",
+                )],
                 has_warnings: true,
                 warnings: vec!["test warning".into()],
                 timestamp: "t".into(),
@@ -1528,7 +1649,11 @@ mod tests {
         let mut engine = default_engine();
         let eval = engine.evaluate(&make_bash_ctx("rm -rf ~/.tron"));
         assert!(eval.blocked);
-        assert!(eval.triggered_rules.iter().any(|r| r.rule_id == "core.tron-no-delete"));
+        assert!(
+            eval.triggered_rules
+                .iter()
+                .any(|r| r.rule_id == "core.tron-no-delete")
+        );
     }
 
     #[test]
@@ -1542,7 +1667,9 @@ mod tests {
     fn integration_write_to_tron_skills_allowed() {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
         let mut engine = default_engine();
-        let eval = engine.evaluate(&make_write_ctx(&format!("{home}/.tron/skills/test/SKILL.md")));
+        let eval = engine.evaluate(&make_write_ctx(&format!(
+            "{home}/.tron/skills/test/SKILL.md"
+        )));
         assert!(!eval.blocked);
     }
 

@@ -401,7 +401,10 @@ impl EventType {
     /// Whether this is an error event (`error.*`).
     #[must_use]
     pub fn is_error_type(self) -> bool {
-        matches!(self, Self::ErrorAgent | Self::ErrorTool | Self::ErrorProvider)
+        matches!(
+            self,
+            Self::ErrorAgent | Self::ErrorTool | Self::ErrorProvider
+        )
     }
 
     /// Whether this is a config event (`config.*`).
@@ -553,8 +556,14 @@ mod tests {
         (EventType::ConfigModelSwitch, "config.model_switch"),
         (EventType::ConfigPromptUpdate, "config.prompt_update"),
         (EventType::ConfigReasoningLevel, "config.reasoning_level"),
-        (EventType::NotificationInterrupted, "notification.interrupted"),
-        (EventType::NotificationSubagentResult, "notification.subagent_result"),
+        (
+            EventType::NotificationInterrupted,
+            "notification.interrupted",
+        ),
+        (
+            EventType::NotificationSubagentResult,
+            "notification.subagent_result",
+        ),
         (EventType::CompactBoundary, "compact.boundary"),
         (EventType::CompactSummary, "compact.summary"),
         (EventType::ContextCleared, "context.cleared"),
@@ -579,7 +588,10 @@ mod tests {
         (EventType::SubagentStatusUpdate, "subagent.status_update"),
         (EventType::SubagentCompleted, "subagent.completed"),
         (EventType::SubagentFailed, "subagent.failed"),
-        (EventType::SubagentResultsConsumed, "subagent.results_consumed"),
+        (
+            EventType::SubagentResultsConsumed,
+            "subagent.results_consumed",
+        ),
         (EventType::TodoWrite, "todo.write"),
         (EventType::TaskCreated, "task.created"),
         (EventType::TaskUpdated, "task.updated"),
@@ -594,7 +606,10 @@ mod tests {
         (EventType::HookTriggered, "hook.triggered"),
         (EventType::HookCompleted, "hook.completed"),
         (EventType::HookBackgroundStarted, "hook.background_started"),
-        (EventType::HookBackgroundCompleted, "hook.background_completed"),
+        (
+            EventType::HookBackgroundCompleted,
+            "hook.background_completed",
+        ),
         (EventType::MemoryLedger, "memory.ledger"),
         (EventType::MemoryLoaded, "memory.loaded"),
     ];
@@ -615,7 +630,11 @@ mod tests {
     #[test]
     fn as_str_matches_expected() {
         for (variant, expected) in &EXPECTED {
-            assert_eq!(variant.as_str(), *expected, "as_str mismatch for {variant:?}");
+            assert_eq!(
+                variant.as_str(),
+                *expected,
+                "as_str mismatch for {variant:?}"
+            );
         }
     }
 
@@ -630,8 +649,11 @@ mod tests {
     fn serde_roundtrip_all_variants() {
         for (variant, expected_str) in &EXPECTED {
             let json = serde_json::to_value(variant).unwrap();
-            assert_eq!(json, serde_json::Value::String(expected_str.to_string()),
-                "serialize mismatch for {variant:?}");
+            assert_eq!(
+                json,
+                serde_json::Value::String(expected_str.to_string()),
+                "serialize mismatch for {variant:?}"
+            );
 
             let back: EventType = serde_json::from_value(json).unwrap();
             assert_eq!(*variant, back, "roundtrip mismatch for {variant:?}");

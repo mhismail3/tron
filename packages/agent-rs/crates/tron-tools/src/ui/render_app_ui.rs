@@ -3,14 +3,14 @@
 //! Accepts a UI component tree and renders it as a sheet in the app.
 //! This is an interactive, turn-stopping tool.
 
-use async_trait::async_trait;
-use serde_json::{json, Value};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
 use crate::errors::ToolError;
 use crate::traits::{ToolContext, TronTool};
 use crate::utils::validation::get_optional_string;
+use async_trait::async_trait;
+use serde_json::{Value, json};
+use tron_core::tools::{
+    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
+};
 
 /// The `RenderAppUI` tool renders custom UI components in the iOS app.
 pub struct RenderAppUITool;
@@ -67,15 +67,25 @@ The UI renders as a native SwiftUI sheet on iOS with liquid glass styling.\n\n\
 - Keep UIs simple and focused on the task\n\
 - Use Sections to group related controls\n\n\
 IMPORTANT: After calling this tool, do NOT output additional text. The UI will be \
-presented to the user, and their response will come back as a new message.".into(),
+presented to the user, and their response will come back as a new message."
+                .into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
                     let mut m = serde_json::Map::new();
-                    let _ = m.insert("ui".into(), json!({"type": "object", "description": "Root UI component tree"}));
+                    let _ = m.insert(
+                        "ui".into(),
+                        json!({"type": "object", "description": "Root UI component tree"}),
+                    );
                     let _ = m.insert("canvasId".into(), json!({"type": "string", "description": "Canvas ID (auto-generated if omitted)"}));
-                    let _ = m.insert("title".into(), json!({"type": "string", "description": "Sheet toolbar title"}));
-                    let _ = m.insert("state".into(), json!({"type": "object", "description": "Initial binding values"}));
+                    let _ = m.insert(
+                        "title".into(),
+                        json!({"type": "string", "description": "Sheet toolbar title"}),
+                    );
+                    let _ = m.insert(
+                        "state".into(),
+                        json!({"type": "object", "description": "Initial binding values"}),
+                    );
                     m
                 }),
                 required: Some(vec!["ui".into()]),
@@ -92,7 +102,11 @@ presented to the user, and their response will come back as a new message.".into
     ) -> Result<TronToolResult, ToolError> {
         let ui = match params.get("ui") {
             Some(u) if u.is_object() => u,
-            _ => return Ok(error_result("Missing required parameter: ui (must be an object)")),
+            _ => {
+                return Ok(error_result(
+                    "Missing required parameter: ui (must be an object)",
+                ));
+            }
         };
 
         let title = get_optional_string(&params, "title");
@@ -103,14 +117,12 @@ presented to the user, and their response will come back as a new message.".into
         // Count interactive components
         let component_counts = count_components(ui);
 
-        let summary = format!(
-            "Rendered UI (canvas: {canvas_id}): {component_counts} components"
-        );
+        let summary = format!("Rendered UI (canvas: {canvas_id}): {component_counts} components");
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(summary),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                summary,
+            )]),
             details: Some(json!({
                 "canvasId": canvas_id,
                 "title": title,
@@ -179,7 +191,13 @@ mod tests {
     #[tokio::test]
     async fn valid_ui_returns_stop_turn() {
         let tool = RenderAppUITool::new();
-        let r = tool.execute(json!({"ui": {"type": "VStack", "children": []}}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"ui": {"type": "VStack", "children": []}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.stop_turn, Some(true));
         assert!(r.is_error.is_none());
     }
@@ -199,7 +217,10 @@ mod tests {
     #[tokio::test]
     async fn canvas_id_auto_generated() {
         let tool = RenderAppUITool::new();
-        let r = tool.execute(json!({"ui": {"type": "VStack"}}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"ui": {"type": "VStack"}}), &make_ctx())
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         let canvas_id = d["canvasId"].as_str().unwrap();
         assert!(canvas_id.starts_with("canvas-"));
@@ -209,14 +230,26 @@ mod tests {
     #[tokio::test]
     async fn canvas_id_preserved() {
         let tool = RenderAppUITool::new();
-        let r = tool.execute(json!({"ui": {"type": "VStack"}, "canvasId": "my-canvas"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"ui": {"type": "VStack"}, "canvasId": "my-canvas"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.details.unwrap()["canvasId"], "my-canvas");
     }
 
     #[tokio::test]
     async fn title_extracted() {
         let tool = RenderAppUITool::new();
-        let r = tool.execute(json!({"ui": {"type": "VStack"}, "title": "My Form"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"ui": {"type": "VStack"}, "title": "My Form"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         assert_eq!(d["title"], "My Form");
         let canvas_id = d["canvasId"].as_str().unwrap();
@@ -233,7 +266,13 @@ mod tests {
     #[tokio::test]
     async fn state_forwarded() {
         let tool = RenderAppUITool::new();
-        let r = tool.execute(json!({"ui": {"type": "VStack"}, "state": {"count": 0}}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"ui": {"type": "VStack"}, "state": {"count": 0}}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         assert_eq!(d["state"]["count"], 0);
     }
@@ -241,12 +280,18 @@ mod tests {
     #[tokio::test]
     async fn component_count_in_details() {
         let tool = RenderAppUITool::new();
-        let r = tool.execute(json!({
-            "ui": {"type": "VStack", "children": [
-                {"type": "Button"},
-                {"type": "TextField"}
-            ]}
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "ui": {"type": "VStack", "children": [
+                        {"type": "Button"},
+                        {"type": "TextField"}
+                    ]}
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         assert_eq!(d["componentCount"], 3); // VStack + 2 children
     }

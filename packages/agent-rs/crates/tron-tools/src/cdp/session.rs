@@ -6,19 +6,19 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use base64::Engine as _;
 use futures::{SinkExt, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::error::BrowserError;
 use super::types::{BrowserEvent, ScreencastOptions};
@@ -49,11 +49,10 @@ impl BrowserSession {
     /// Launch a headless Chrome, connect via CDP WebSocket.
     pub async fn launch(chrome_path: &std::path::Path) -> Result<Self, BrowserError> {
         // Find a free port
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| {
-            BrowserError::LaunchFailed {
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| BrowserError::LaunchFailed {
                 context: format!("bind port: {e}"),
-            }
-        })?;
+            })?;
         let port = listener
             .local_addr()
             .map_err(|e| BrowserError::LaunchFailed {
@@ -113,11 +112,7 @@ impl BrowserSession {
 
     // ─── CDP command helper ──────────────────────────────────────────────
 
-    async fn send_cdp(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, BrowserError> {
+    async fn send_cdp(&self, method: &str, params: Value) -> Result<Value, BrowserError> {
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
             .send(CdpCommand {
@@ -164,9 +159,7 @@ impl BrowserSession {
             .await?;
         let idx = history["currentIndex"].as_u64().unwrap_or(0) as usize;
         if idx > 0 {
-            let entry_id = history["entries"][idx - 1]["id"]
-                .as_i64()
-                .unwrap_or(0);
+            let entry_id = history["entries"][idx - 1]["id"].as_i64().unwrap_or(0);
             let _ = self
                 .send_cdp(
                     "Page.navigateToHistoryEntry",
@@ -340,10 +333,7 @@ impl BrowserSession {
     /// Take a screenshot (PNG, base64-encoded).
     pub async fn screenshot(&self) -> Result<String, BrowserError> {
         let result = self
-            .send_cdp(
-                "Page.captureScreenshot",
-                json!({ "format": "png" }),
-            )
+            .send_cdp("Page.captureScreenshot", json!({ "format": "png" }))
             .await?;
         result["data"]
             .as_str()
@@ -424,19 +414,16 @@ impl BrowserSession {
             sel = serde_json::to_string(selector).unwrap_or_default(),
             t = timeout_ms,
         );
-        let _ = tokio::time::timeout(
-            Duration::from_millis(timeout_ms + 1000),
-            self.evaluate(&js),
-        )
-        .await
-        .map_err(|_| BrowserError::Timeout {
-            timeout_ms,
-            context: format!("waiting for {selector}"),
-        })?
-        .map_err(|e| BrowserError::Timeout {
-            timeout_ms,
-            context: e.to_string(),
-        })?;
+        let _ = tokio::time::timeout(Duration::from_millis(timeout_ms + 1000), self.evaluate(&js))
+            .await
+            .map_err(|_| BrowserError::Timeout {
+                timeout_ms,
+                context: format!("waiting for {selector}"),
+            })?
+            .map_err(|e| BrowserError::Timeout {
+                timeout_ms,
+                context: e.to_string(),
+            })?;
         Ok(())
     }
 
@@ -457,12 +444,12 @@ impl BrowserSession {
     /// Export the page as PDF.
     pub async fn pdf(&self, path: &str) -> Result<(), BrowserError> {
         let result = self.send_cdp("Page.printToPDF", json!({})).await?;
-        let b64 = result["data"].as_str().ok_or_else(|| {
-            BrowserError::ActionFailed {
+        let b64 = result["data"]
+            .as_str()
+            .ok_or_else(|| BrowserError::ActionFailed {
                 action: "pdf".into(),
                 reason: "no data".into(),
-            }
-        })?;
+            })?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .map_err(|e| BrowserError::ActionFailed {
@@ -636,10 +623,7 @@ async fn wait_for_ws_url(port: u16, child: &mut Child) -> Result<String, Browser
 ///
 /// Receives commands from `BrowserSession`, sends them over WS, and routes
 /// responses back. Also handles CDP events (like screencast frames).
-async fn cdp_handler_loop(
-    ws: WsStream,
-    mut cmd_rx: mpsc::Receiver<CdpCommand>,
-) {
+async fn cdp_handler_loop(ws: WsStream, mut cmd_rx: mpsc::Receiver<CdpCommand>) {
     let (mut ws_tx, mut ws_rx) = ws.split();
     let mut pending: HashMap<u64, PendingTx> = HashMap::new();
     let next_id = AtomicU64::new(1);

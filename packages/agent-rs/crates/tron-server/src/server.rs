@@ -4,20 +4,22 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::extract::ws::WebSocketUpgrade;
+use crate::rpc::context::RpcContext;
+use crate::rpc::registry::MethodRegistry;
+use axum::Router;
 use axum::extract::State;
+use axum::extract::ws::WebSocketUpgrade;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
-use axum::Router;
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::request_id::{MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer};
+use tower_http::request_id::{
+    MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
+};
 use tower_http::timeout::TimeoutLayer;
-use crate::rpc::context::RpcContext;
-use crate::rpc::registry::MethodRegistry;
 
 use tracing::{info, instrument};
 
@@ -34,10 +36,7 @@ use crate::websocket::session::run_ws_session;
 struct UuidV7RequestId;
 
 impl MakeRequestId for UuidV7RequestId {
-    fn make_request_id<B>(
-        &mut self,
-        _request: &axum::http::Request<B>,
-    ) -> Option<RequestId> {
+    fn make_request_id<B>(&mut self, _request: &axum::http::Request<B>) -> Option<RequestId> {
         let id = uuid::Uuid::now_v7().to_string();
         axum::http::HeaderValue::from_str(&id)
             .ok()
@@ -115,7 +114,10 @@ impl TronServer {
             .layer(CatchPanicLayer::new())
             .layer(CompressionLayer::new())
             .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MB
-            .layer(TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(30)))
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                Duration::from_secs(30),
+            ))
             .layer(SetRequestIdLayer::x_request_id(UuidV7RequestId))
             .layer(PropagateRequestIdLayer::x_request_id())
     }
@@ -223,8 +225,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn make_test_rpc_context() -> RpcContext {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
@@ -258,12 +259,18 @@ mod tests {
 
     fn make_metrics_handle() -> PrometheusHandle {
         metrics_exporter_prometheus::PrometheusBuilder::new()
-            .build_recorder().handle()
+            .build_recorder()
+            .handle()
     }
 
     fn make_server() -> TronServer {
         let ctx = make_test_rpc_context();
-        TronServer::new(ServerConfig::default(), MethodRegistry::new(), ctx, make_metrics_handle())
+        TronServer::new(
+            ServerConfig::default(),
+            MethodRegistry::new(),
+            ctx,
+            make_metrics_handle(),
+        )
     }
 
     #[tokio::test]
@@ -326,10 +333,7 @@ mod tests {
         let app = server.router();
 
         // GET /ws without WebSocket upgrade headers → should return an error
-        let req = Request::builder()
-            .uri("/ws")
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri("/ws").body(Body::empty()).unwrap();
 
         let resp = app.oneshot(req).await.unwrap();
         // Without upgrade headers, axum returns a non-success status
@@ -438,9 +442,7 @@ mod tests {
         let server = make_server();
         let (addr, handle) = server.listen().await.unwrap();
 
-        let resp = reqwest::get(format!("http://{addr}/health"))
-            .await
-            .unwrap();
+        let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
         assert!(resp.status().is_success());
 
         let body: serde_json::Value = resp.json().await.unwrap();

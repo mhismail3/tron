@@ -287,8 +287,7 @@ mod tests {
             output_tokens: Some(200),
             cached_tokens: Some(800),
         };
-        let source =
-            extract_openai(Some(&usage), &test_meta(), ProviderType::OpenAi).unwrap();
+        let source = extract_openai(Some(&usage), &test_meta(), ProviderType::OpenAi).unwrap();
         assert_eq!(source.provider, ProviderType::OpenAi);
         assert_eq!(source.raw_input_tokens, 1000);
         assert_eq!(source.raw_output_tokens, 200);
@@ -303,8 +302,7 @@ mod tests {
             output_tokens: Some(100),
             cached_tokens: None,
         };
-        let source =
-            extract_openai(Some(&usage), &test_meta(), ProviderType::OpenAiCodex).unwrap();
+        let source = extract_openai(Some(&usage), &test_meta(), ProviderType::OpenAiCodex).unwrap();
         assert_eq!(source.provider, ProviderType::OpenAiCodex);
         assert_eq!(source.raw_cache_read_tokens, 0);
     }

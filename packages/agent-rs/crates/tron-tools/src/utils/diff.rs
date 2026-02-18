@@ -33,9 +33,9 @@ pub fn generate_unified_diff(old: &str, new: &str, context_lines: usize) -> Stri
 /// Edit operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum EditOp {
-    Equal(usize, usize),  // old_idx, new_idx
-    Delete(usize),         // old_idx
-    Insert(usize),         // new_idx
+    Equal(usize, usize), // old_idx, new_idx
+    Delete(usize),       // old_idx
+    Insert(usize),       // new_idx
 }
 
 /// Compute edit operations using the Myers diff algorithm (simplified).
@@ -77,12 +77,7 @@ fn compute_edit_ops(old: &[&str], new: &[&str]) -> Vec<EditOp> {
 }
 
 /// Format edit operations into unified diff hunks.
-fn format_hunks(
-    old: &[&str],
-    new: &[&str],
-    ops: &[EditOp],
-    context_lines: usize,
-) -> String {
+fn format_hunks(old: &[&str], new: &[&str], ops: &[EditOp], context_lines: usize) -> String {
     // Find change ranges (groups of non-Equal ops)
     let mut changes: Vec<(usize, usize)> = Vec::new(); // (start_idx, end_idx) in ops
     let mut i = 0;
@@ -132,7 +127,11 @@ fn format_hunks(
                 EditOp::Delete(oi) => {
                     if first {
                         old_start = oi + 1;
-                        new_start = if *oi < new.len() { oi + 1 } else { new.len() + 1 };
+                        new_start = if *oi < new.len() {
+                            oi + 1
+                        } else {
+                            new.len() + 1
+                        };
                         first = false;
                     }
                     old_count += 1;
@@ -140,7 +139,11 @@ fn format_hunks(
                 }
                 EditOp::Insert(ni) => {
                     if first {
-                        old_start = if *ni < old.len() { ni + 1 } else { old.len() + 1 };
+                        old_start = if *ni < old.len() {
+                            ni + 1
+                        } else {
+                            old.len() + 1
+                        };
                         new_start = ni + 1;
                         first = false;
                     }

@@ -181,14 +181,8 @@ mod tests {
         let scoped = make_scoped("packages/agent", "packages/agent/.claude/CLAUDE.md");
         let index = RulesIndex::new(vec![scoped]);
 
-        assert_eq!(
-            index.match_path("packages/agent/src/loader.ts").len(),
-            1
-        );
-        assert_eq!(
-            index.match_path("packages/agent/package.json").len(),
-            1
-        );
+        assert_eq!(index.match_path("packages/agent/src/loader.ts").len(), 1);
+        assert_eq!(index.match_path("packages/agent/package.json").len(), 1);
     }
 
     #[test]
@@ -196,9 +190,11 @@ mod tests {
         let scoped = make_scoped("packages/agent", "packages/agent/.claude/CLAUDE.md");
         let index = RulesIndex::new(vec![scoped]);
 
-        assert!(index
-            .match_path("packages/ios-app/src/main.swift")
-            .is_empty());
+        assert!(
+            index
+                .match_path("packages/ios-app/src/main.swift")
+                .is_empty()
+        );
         assert!(index.match_path("src/tools/fs/read.ts").is_empty());
     }
 
@@ -208,9 +204,7 @@ mod tests {
         let index = RulesIndex::new(vec![scoped]);
 
         // "packages/agent-tools" should NOT match "packages/agent"
-        assert!(index
-            .match_path("packages/agent-tools/index.ts")
-            .is_empty());
+        assert!(index.match_path("packages/agent-tools/index.ts").is_empty());
     }
 
     #[test]
@@ -273,10 +267,7 @@ mod tests {
         let ios_rule = make_scoped("packages/ios-app", "packages/ios-app/.claude/CLAUDE.md");
         let index = RulesIndex::new(vec![agent_rule, ios_rule]);
 
-        assert_eq!(
-            index.match_path("packages/agent/src/loader.ts").len(),
-            1
-        );
+        assert_eq!(index.match_path("packages/agent/src/loader.ts").len(), 1);
         assert_eq!(
             index
                 .match_path("packages/ios-app/Sources/main.swift")
@@ -325,9 +316,11 @@ mod tests {
                 .len(),
             1
         );
-        assert!(index
-            .match_path("packages/agent/src/runtime/agent.ts")
-            .is_empty());
+        assert!(
+            index
+                .match_path("packages/agent/src/runtime/agent.ts")
+                .is_empty()
+        );
     }
 
     // -- path_starts_with unit tests --
@@ -349,6 +342,9 @@ mod tests {
 
     #[test]
     fn path_starts_with_partial_name_does_not_match() {
-        assert!(!path_starts_with("packages/foo-extra/bar.ts", "packages/foo"));
+        assert!(!path_starts_with(
+            "packages/foo-extra/bar.ts",
+            "packages/foo"
+        ));
     }
 }

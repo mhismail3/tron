@@ -12,10 +12,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::{ToolCallContext, parse_tool_call_arguments};
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
 use tron_core::messages::TokenUsage;
-use crate::{parse_tool_call_arguments, ToolCallContext};
 
 use super::types::ResponsesSseEvent;
 
@@ -431,7 +431,9 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use crate::openai::types::{OutputContent, ResponsesOutputItem, ResponsesResponse, ResponsesUsage};
+    use crate::openai::types::{
+        OutputContent, ResponsesOutputItem, ResponsesResponse, ResponsesUsage,
+    };
 
     fn text_delta_event(delta: &str) -> ResponsesSseEvent {
         ResponsesSseEvent {
@@ -482,7 +484,10 @@ mod tests {
         }
     }
 
-    fn completed_event(output: Vec<ResponsesOutputItem>, usage: Option<ResponsesUsage>) -> ResponsesSseEvent {
+    fn completed_event(
+        output: Vec<ResponsesOutputItem>,
+        usage: Option<ResponsesUsage>,
+    ) -> ResponsesSseEvent {
         ResponsesSseEvent {
             event_type: "response.completed".into(),
             response: Some(ResponsesResponse {
@@ -561,8 +566,10 @@ mod tests {
     #[test]
     fn emits_toolcall_start_on_function_call_added() {
         let mut state = create_stream_state();
-        let events =
-            process_stream_event(&function_call_added_event("call_123", "read_file"), &mut state);
+        let events = process_stream_event(
+            &function_call_added_event("call_123", "read_file"),
+            &mut state,
+        );
 
         assert_eq!(events.len(), 1);
         assert_eq!(
@@ -600,17 +607,16 @@ mod tests {
                 arguments_delta: r#"{"path":"/test.txt"}"#.into(),
             }
         );
-        assert_eq!(
-            state.tool_calls["call_123"].args,
-            r#"{"path":"/test.txt"}"#
-        );
+        assert_eq!(state.tool_calls["call_123"].args, r#"{"path":"/test.txt"}"#);
     }
 
     #[test]
     fn ignores_args_delta_for_unknown_call_id() {
         let mut state = create_stream_state();
-        let events =
-            process_stream_event(&function_args_delta_event("call_unknown", "data"), &mut state);
+        let events = process_stream_event(
+            &function_args_delta_event("call_unknown", "data"),
+            &mut state,
+        );
         assert!(events.is_empty());
     }
 
@@ -672,11 +678,14 @@ mod tests {
         };
 
         let events = process_stream_event(&event, &mut state);
-        let types: Vec<_> = events.iter().map(|e| match e {
-            StreamEvent::ThinkingStart => "thinking_start",
-            StreamEvent::ThinkingDelta { .. } => "thinking_delta",
-            _ => "other",
-        }).collect();
+        let types: Vec<_> = events
+            .iter()
+            .map(|e| match e {
+                StreamEvent::ThinkingStart => "thinking_start",
+                StreamEvent::ThinkingDelta { .. } => "thinking_delta",
+                _ => "other",
+            })
+            .collect();
         assert_eq!(types, vec!["thinking_start", "thinking_delta"]);
         assert_eq!(state.accumulated_thinking, "The approach is correct.");
     }
@@ -739,8 +748,14 @@ mod tests {
         assert!(types.contains(&"text_end"));
         assert!(types.contains(&"done"));
 
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
-        if let Some(StreamEvent::Done { message, stop_reason }) = done {
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
+        if let Some(StreamEvent::Done {
+            message,
+            stop_reason,
+        }) = done
+        {
             assert_eq!(message.content.len(), 1);
             assert_eq!(message.token_usage.as_ref().unwrap().input_tokens, 100);
             assert_eq!(message.token_usage.as_ref().unwrap().output_tokens, 50);
@@ -775,10 +790,14 @@ mod tests {
         );
 
         let events = process_stream_event(&event, &mut state);
-        let tool_end = events.iter().find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+        let tool_end = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
         assert!(tool_end.is_some());
 
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
             assert_eq!(stop_reason, "tool_calls");
         }
@@ -822,7 +841,9 @@ mod tests {
         assert!(thinking_idx < done_idx);
 
         // Done message should have both thinking and text
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { message, .. }) = done {
             assert_eq!(message.content.len(), 2);
         }
@@ -857,13 +878,17 @@ mod tests {
         );
 
         let events = process_stream_event(&event, &mut state);
-        let tool_end = events.iter().find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
+        let tool_end = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::ToolCallEnd { .. }));
         assert!(tool_end.is_some());
         if let Some(StreamEvent::ToolCallEnd { tool_call }) = tool_end {
             assert_eq!(tool_call.name, "write_file");
         }
 
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
             assert_eq!(stop_reason, "tool_calls");
         }
@@ -925,7 +950,9 @@ mod tests {
         );
 
         let events = process_stream_event(&event, &mut state);
-        let done = events.iter().find(|e| matches!(e, StreamEvent::Done { .. }));
+        let done = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }));
         if let Some(StreamEvent::Done { message, .. }) = done {
             assert_eq!(
                 message.token_usage.as_ref().unwrap().provider_type,
@@ -997,16 +1024,11 @@ mod tests {
     fn summary_skipped_when_reasoning_text_active() {
         let mut state = create_stream_state();
         // Receive full reasoning text first
-        let _ = process_stream_event(
-            &reasoning_text_delta_event("Full reasoning..."),
-            &mut state,
-        );
+        let _ = process_stream_event(&reasoning_text_delta_event("Full reasoning..."), &mut state);
 
         // Summary delta should be ignored
-        let events = process_stream_event(
-            &reasoning_summary_delta_event("**Summary**"),
-            &mut state,
-        );
+        let events =
+            process_stream_event(&reasoning_summary_delta_event("**Summary**"), &mut state);
         assert!(events.is_empty());
         assert_eq!(state.accumulated_thinking, "Full reasoning...");
     }
@@ -1014,14 +1036,8 @@ mod tests {
     #[test]
     fn reasoning_text_accumulates_multiple_deltas() {
         let mut state = create_stream_state();
-        let _ = process_stream_event(
-            &reasoning_text_delta_event("First part. "),
-            &mut state,
-        );
-        let _ = process_stream_event(
-            &reasoning_text_delta_event("Second part."),
-            &mut state,
-        );
+        let _ = process_stream_event(&reasoning_text_delta_event("First part. "), &mut state);
+        let _ = process_stream_event(&reasoning_text_delta_event("Second part."), &mut state);
         assert_eq!(state.accumulated_thinking, "First part. Second part.");
     }
 }

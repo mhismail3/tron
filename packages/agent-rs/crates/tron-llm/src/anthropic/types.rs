@@ -186,201 +186,231 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
     let mut m = HashMap::new();
 
     // Claude Opus 4.6 — latest and most capable
-    let _ = m.insert("claude-opus-4-6", ClaudeModelInfo {
-        name: "Claude Opus 4.6",
-        short_name: "Opus 4.6",
-        family: "Claude 4.6",
-        context_window: 200_000,
-        max_output: 128_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: false,
-        supports_adaptive_thinking: true,
-        supports_effort: true,
-        supports_tools: true,
-        input_cost_per_million: 5.0,
-        output_cost_per_million: 25.0,
-        cache_read_cost_per_million: 0.5,
-        description: "Most capable Claude model — adaptive thinking, effort levels",
-        recommended: true,
-        legacy: false,
-    });
+    let _ = m.insert(
+        "claude-opus-4-6",
+        ClaudeModelInfo {
+            name: "Claude Opus 4.6",
+            short_name: "Opus 4.6",
+            family: "Claude 4.6",
+            context_window: 200_000,
+            max_output: 128_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: true,
+            supports_effort: true,
+            supports_tools: true,
+            input_cost_per_million: 5.0,
+            output_cost_per_million: 25.0,
+            cache_read_cost_per_million: 0.5,
+            description: "Most capable Claude model — adaptive thinking, effort levels",
+            recommended: true,
+            legacy: false,
+        },
+    );
 
     // Claude Sonnet 4.6
-    let _ = m.insert("claude-sonnet-4-6", ClaudeModelInfo {
-        name: "Claude Sonnet 4.6",
-        short_name: "Sonnet 4.6",
-        family: "Claude 4.6",
-        context_window: 200_000,
-        max_output: 64_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: false,
-        supports_adaptive_thinking: true,
-        supports_effort: true,
-        supports_tools: true,
-        input_cost_per_million: 3.0,
-        output_cost_per_million: 15.0,
-        cache_read_cost_per_million: 0.3,
-        description: "Best combination of speed and intelligence — adaptive thinking",
-        recommended: true,
-        legacy: false,
-    });
+    let _ = m.insert(
+        "claude-sonnet-4-6",
+        ClaudeModelInfo {
+            name: "Claude Sonnet 4.6",
+            short_name: "Sonnet 4.6",
+            family: "Claude 4.6",
+            context_window: 200_000,
+            max_output: 64_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: true,
+            supports_effort: true,
+            supports_tools: true,
+            input_cost_per_million: 3.0,
+            output_cost_per_million: 15.0,
+            cache_read_cost_per_million: 0.3,
+            description: "Best combination of speed and intelligence — adaptive thinking",
+            recommended: true,
+            legacy: false,
+        },
+    );
 
     // Claude 4.5 family
-    let _ = m.insert("claude-opus-4-5-20251101", ClaudeModelInfo {
-        name: "Claude Opus 4.5",
-        short_name: "Opus 4.5",
-        family: "Claude 4.5",
-        context_window: 200_000,
-        max_output: 64_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 5.0,
-        output_cost_per_million: 25.0,
-        cache_read_cost_per_million: 0.5,
-        description: "Opus-tier intelligence with extended thinking",
-        recommended: false,
-        legacy: false,
-    });
+    let _ = m.insert(
+        "claude-opus-4-5-20251101",
+        ClaudeModelInfo {
+            name: "Claude Opus 4.5",
+            short_name: "Opus 4.5",
+            family: "Claude 4.5",
+            context_window: 200_000,
+            max_output: 64_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 5.0,
+            output_cost_per_million: 25.0,
+            cache_read_cost_per_million: 0.5,
+            description: "Opus-tier intelligence with extended thinking",
+            recommended: false,
+            legacy: false,
+        },
+    );
 
-    let _ = m.insert("claude-sonnet-4-5-20250929", ClaudeModelInfo {
-        name: "Claude Sonnet 4.5",
-        short_name: "Sonnet 4.5",
-        family: "Claude 4.5",
-        context_window: 200_000,
-        max_output: 64_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 3.0,
-        output_cost_per_million: 15.0,
-        cache_read_cost_per_million: 0.3,
-        description: "Best balance of speed and intelligence",
-        recommended: false,
-        legacy: true,
-    });
+    let _ = m.insert(
+        "claude-sonnet-4-5-20250929",
+        ClaudeModelInfo {
+            name: "Claude Sonnet 4.5",
+            short_name: "Sonnet 4.5",
+            family: "Claude 4.5",
+            context_window: 200_000,
+            max_output: 64_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 3.0,
+            output_cost_per_million: 15.0,
+            cache_read_cost_per_million: 0.3,
+            description: "Best balance of speed and intelligence",
+            recommended: false,
+            legacy: true,
+        },
+    );
 
-    let _ = m.insert("claude-haiku-4-5-20251001", ClaudeModelInfo {
-        name: "Claude Haiku 4.5",
-        short_name: "Haiku 4.5",
-        family: "Claude 4.5",
-        context_window: 200_000,
-        max_output: 64_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 1.0,
-        output_cost_per_million: 5.0,
-        cache_read_cost_per_million: 0.1,
-        description: "Fast and affordable",
-        recommended: false,
-        legacy: false,
-    });
+    let _ = m.insert(
+        "claude-haiku-4-5-20251001",
+        ClaudeModelInfo {
+            name: "Claude Haiku 4.5",
+            short_name: "Haiku 4.5",
+            family: "Claude 4.5",
+            context_window: 200_000,
+            max_output: 64_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 1.0,
+            output_cost_per_million: 5.0,
+            cache_read_cost_per_million: 0.1,
+            description: "Fast and affordable",
+            recommended: false,
+            legacy: false,
+        },
+    );
 
     // Claude 4.1 (Legacy — August 2025)
-    let _ = m.insert("claude-opus-4-1-20250805", ClaudeModelInfo {
-        name: "Claude Opus 4.1",
-        short_name: "Opus 4.1",
-        family: "Claude 4.1",
-        context_window: 200_000,
-        max_output: 32_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 15.0,
-        output_cost_per_million: 75.0,
-        cache_read_cost_per_million: 1.5,
-        description: "Previous Opus with enhanced agentic capabilities",
-        recommended: false,
-        legacy: true,
-    });
+    let _ = m.insert(
+        "claude-opus-4-1-20250805",
+        ClaudeModelInfo {
+            name: "Claude Opus 4.1",
+            short_name: "Opus 4.1",
+            family: "Claude 4.1",
+            context_window: 200_000,
+            max_output: 32_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 15.0,
+            output_cost_per_million: 75.0,
+            cache_read_cost_per_million: 1.5,
+            description: "Previous Opus with enhanced agentic capabilities",
+            recommended: false,
+            legacy: true,
+        },
+    );
 
     // Claude 4 (Legacy — May 2025)
-    let _ = m.insert("claude-opus-4-20250514", ClaudeModelInfo {
-        name: "Claude Opus 4",
-        short_name: "Opus 4",
-        family: "Claude 4",
-        context_window: 200_000,
-        max_output: 32_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 15.0,
-        output_cost_per_million: 75.0,
-        cache_read_cost_per_million: 1.5,
-        description: "Previous generation Opus",
-        recommended: false,
-        legacy: true,
-    });
+    let _ = m.insert(
+        "claude-opus-4-20250514",
+        ClaudeModelInfo {
+            name: "Claude Opus 4",
+            short_name: "Opus 4",
+            family: "Claude 4",
+            context_window: 200_000,
+            max_output: 32_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 15.0,
+            output_cost_per_million: 75.0,
+            cache_read_cost_per_million: 1.5,
+            description: "Previous generation Opus",
+            recommended: false,
+            legacy: true,
+        },
+    );
 
-    let _ = m.insert("claude-sonnet-4-20250514", ClaudeModelInfo {
-        name: "Claude Sonnet 4",
-        short_name: "Sonnet 4",
-        family: "Claude 4",
-        context_window: 200_000,
-        max_output: 64_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 3.0,
-        output_cost_per_million: 15.0,
-        cache_read_cost_per_million: 0.3,
-        description: "Fast and capable",
-        recommended: false,
-        legacy: true,
-    });
+    let _ = m.insert(
+        "claude-sonnet-4-20250514",
+        ClaudeModelInfo {
+            name: "Claude Sonnet 4",
+            short_name: "Sonnet 4",
+            family: "Claude 4",
+            context_window: 200_000,
+            max_output: 64_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 3.0,
+            output_cost_per_million: 15.0,
+            cache_read_cost_per_million: 0.3,
+            description: "Fast and capable",
+            recommended: false,
+            legacy: true,
+        },
+    );
 
     // Claude 3.7 (Legacy — February 2025)
-    let _ = m.insert("claude-3-7-sonnet-20250219", ClaudeModelInfo {
-        name: "Claude 3.7 Sonnet",
-        short_name: "Sonnet 3.7",
-        family: "Claude 3.7",
-        context_window: 200_000,
-        max_output: 64_000,
-        supports_thinking: true,
-        supports_thinking_beta_headers: true,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 3.0,
-        output_cost_per_million: 15.0,
-        cache_read_cost_per_million: 0.3,
-        description: "Legacy Sonnet with extended thinking",
-        recommended: false,
-        legacy: true,
-    });
+    let _ = m.insert(
+        "claude-3-7-sonnet-20250219",
+        ClaudeModelInfo {
+            name: "Claude 3.7 Sonnet",
+            short_name: "Sonnet 3.7",
+            family: "Claude 3.7",
+            context_window: 200_000,
+            max_output: 64_000,
+            supports_thinking: true,
+            supports_thinking_beta_headers: true,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 3.0,
+            output_cost_per_million: 15.0,
+            cache_read_cost_per_million: 0.3,
+            description: "Legacy Sonnet with extended thinking",
+            recommended: false,
+            legacy: true,
+        },
+    );
 
     // Claude 3 (Legacy — oldest)
-    let _ = m.insert("claude-3-haiku-20240307", ClaudeModelInfo {
-        name: "Claude 3 Haiku",
-        short_name: "Haiku 3",
-        family: "Claude 3",
-        context_window: 200_000,
-        max_output: 4_096,
-        supports_thinking: false,
-        supports_thinking_beta_headers: false,
-        supports_adaptive_thinking: false,
-        supports_effort: false,
-        supports_tools: true,
-        input_cost_per_million: 0.25,
-        output_cost_per_million: 1.25,
-        cache_read_cost_per_million: 0.025,
-        description: "Legacy — fast and affordable",
-        recommended: false,
-        legacy: true,
-    });
+    let _ = m.insert(
+        "claude-3-haiku-20240307",
+        ClaudeModelInfo {
+            name: "Claude 3 Haiku",
+            short_name: "Haiku 3",
+            family: "Claude 3",
+            context_window: 200_000,
+            max_output: 4_096,
+            supports_thinking: false,
+            supports_thinking_beta_headers: false,
+            supports_adaptive_thinking: false,
+            supports_effort: false,
+            supports_tools: true,
+            input_cost_per_million: 0.25,
+            output_cost_per_million: 1.25,
+            cache_read_cost_per_million: 0.025,
+            description: "Legacy — fast and affordable",
+            recommended: false,
+            legacy: true,
+        },
+    );
 
     m
 });
@@ -898,7 +928,10 @@ mod tests {
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicSseEvent::ContentBlockStart { index, content_block } => {
+            AnthropicSseEvent::ContentBlockStart {
+                index,
+                content_block,
+            } => {
                 assert_eq!(index, 0);
                 assert!(matches!(content_block, SseContentBlock::Text { .. }));
             }
@@ -931,15 +964,13 @@ mod tests {
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicSseEvent::ContentBlockStart { content_block, .. } => {
-                match content_block {
-                    SseContentBlock::ToolUse { id, name } => {
-                        assert_eq!(id, "toolu_01abc");
-                        assert_eq!(name, "bash");
-                    }
-                    _ => panic!("expected ToolUse"),
+            AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
+                SseContentBlock::ToolUse { id, name } => {
+                    assert_eq!(id, "toolu_01abc");
+                    assert_eq!(name, "bash");
                 }
-            }
+                _ => panic!("expected ToolUse"),
+            },
             _ => panic!("expected ContentBlockStart"),
         }
     }
@@ -953,12 +984,10 @@ mod tests {
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
-                match delta {
-                    SseDelta::TextDelta { text } => assert_eq!(text, "Hello"),
-                    _ => panic!("expected TextDelta"),
-                }
-            }
+            AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
+                SseDelta::TextDelta { text } => assert_eq!(text, "Hello"),
+                _ => panic!("expected TextDelta"),
+            },
             _ => panic!("expected ContentBlockDelta"),
         }
     }
@@ -972,14 +1001,12 @@ mod tests {
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
-                match delta {
-                    SseDelta::ThinkingDelta { thinking } => {
-                        assert_eq!(thinking, "Let me consider");
-                    }
-                    _ => panic!("expected ThinkingDelta"),
+            AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
+                SseDelta::ThinkingDelta { thinking } => {
+                    assert_eq!(thinking, "Let me consider");
                 }
-            }
+                _ => panic!("expected ThinkingDelta"),
+            },
             _ => panic!("expected ContentBlockDelta"),
         }
     }
@@ -993,14 +1020,12 @@ mod tests {
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
-                match delta {
-                    SseDelta::SignatureDelta { signature } => {
-                        assert_eq!(signature, "sig123");
-                    }
-                    _ => panic!("expected SignatureDelta"),
+            AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
+                SseDelta::SignatureDelta { signature } => {
+                    assert_eq!(signature, "sig123");
                 }
-            }
+                _ => panic!("expected SignatureDelta"),
+            },
             _ => panic!("expected ContentBlockDelta"),
         }
     }
@@ -1014,14 +1039,12 @@ mod tests {
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
-            AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
-                match delta {
-                    SseDelta::InputJsonDelta { partial_json } => {
-                        assert_eq!(partial_json, r#"{"cmd":"ls"}"#);
-                    }
-                    _ => panic!("expected InputJsonDelta"),
+            AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
+                SseDelta::InputJsonDelta { partial_json } => {
+                    assert_eq!(partial_json, r#"{"cmd":"ls"}"#);
                 }
-            }
+                _ => panic!("expected InputJsonDelta"),
+            },
             _ => panic!("expected ContentBlockDelta"),
         }
     }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -51,7 +51,8 @@ impl TronTool for SearchTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Search".into(),
-            description: "Search code using text or AST patterns. Automatically detects search mode.\n\n\
+            description:
+                "Search code using text or AST patterns. Automatically detects search mode.\n\n\
 Text search (default):\n\
 - Fast regex-based content search\n\
 - Works for any text pattern\n\n\
@@ -68,7 +69,8 @@ Parameters:\n\
 Examples:\n\
 - Text: { \"pattern\": \"TODO.*bug\" }\n\
 - AST: { \"pattern\": \"function $NAME() {}\" }\n\
-- Force: { \"pattern\": \"test\", \"type\": \"ast\" }".into(),
+- Force: { \"pattern\": \"test\", \"type\": \"ast\" }"
+                    .into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -88,11 +90,7 @@ Examples:\n\
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let pattern = match validate_required_string(&params, "pattern", "a search pattern") {
             Ok(p) => p,
             Err(e) => return Ok(e),
@@ -105,8 +103,10 @@ Examples:\n\
         #[allow(clippy::cast_possible_truncation)]
         let context = get_optional_u64(&params, "context").map(|v| v as usize);
 
-        let search_path = get_optional_string(&params, "path")
-            .map_or_else(|| resolve_path(".", &ctx.working_directory), |p| resolve_path(&p, &ctx.working_directory));
+        let search_path = get_optional_string(&params, "path").map_or_else(
+            || resolve_path(".", &ctx.working_directory),
+            |p| resolve_path(&p, &ctx.working_directory),
+        );
 
         let use_ast = match force_type.as_deref() {
             Some("ast") => true,
@@ -123,12 +123,13 @@ Examples:\n\
                 file_pattern.as_deref(),
                 max_results,
                 &ctx.working_directory,
-            ).await?;
+            )
+            .await?;
 
             Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![
-                    tron_core::content::ToolResultContent::text(result.output),
-                ]),
+                content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                    result.output,
+                )]),
                 details: Some(json!({
                     "mode": "ast",
                     "matches": result.matches,
@@ -178,7 +179,11 @@ mod tests {
 
     #[async_trait]
     impl ProcessRunner for MockRunner {
-        async fn run_command(&self, command: &str, _opts: &crate::traits::ProcessOptions) -> Result<ProcessOutput, ToolError> {
+        async fn run_command(
+            &self,
+            command: &str,
+            _opts: &crate::traits::ProcessOptions,
+        ) -> Result<ProcessOutput, ToolError> {
             Ok((self.handler)(command))
         }
     }
@@ -210,10 +215,14 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
@@ -244,7 +253,10 @@ mod tests {
 
         let tool = SearchTool::new(ast_runner());
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "$NAME", "type": "text"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "$NAME", "type": "text"}), &ctx)
+            .await
+            .unwrap();
         let details = r.details.unwrap();
         assert_eq!(details["mode"], "text");
     }
@@ -253,7 +265,10 @@ mod tests {
     async fn forced_ast_mode_ignores_text_pattern() {
         let tool = SearchTool::new(ast_runner());
         let ctx = make_ctx("/tmp");
-        let r = tool.execute(json!({"pattern": "simple_text", "type": "ast"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "simple_text", "type": "ast"}), &ctx)
+            .await
+            .unwrap();
         let details = r.details.unwrap();
         assert_eq!(details["mode"], "ast");
     }
@@ -284,7 +299,10 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let tool = SearchTool::new(ast_runner());
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "[invalid", "type": "text"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "[invalid", "type": "text"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Invalid regex"));
     }
@@ -297,7 +315,10 @@ mod tests {
 
         let tool = SearchTool::new(ast_runner());
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "match", "maxResults": 3}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "match", "maxResults": 3}), &ctx)
+            .await
+            .unwrap();
         let details = r.details.unwrap();
         assert_eq!(details["matches"], 3);
     }

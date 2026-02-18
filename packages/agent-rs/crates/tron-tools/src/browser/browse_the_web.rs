@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -120,11 +120,7 @@ Browser sessions are persistent — once created, you can perform multiple actio
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let action_name = match validate_required_string(&params, "action", "browser action") {
             Ok(a) => a,
             Err(e) => return Ok(e),
@@ -164,9 +160,9 @@ Browser sessions are persistent — once created, you can perform multiple actio
             .await
         {
             Ok(result) => Ok(TronToolResult {
-                content: ToolResultBody::Blocks(vec![
-                    tron_core::content::ToolResultContent::text(&result.content),
-                ]),
+                content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                    &result.content,
+                )]),
                 details: result.details,
                 is_error: None,
                 stop_turn: None,
@@ -279,7 +275,10 @@ mod tests {
             .await
             .unwrap();
         assert!(r.is_error.is_none());
-        assert_eq!(*delegate.last_action.lock().unwrap(), Some("navigate".into()));
+        assert_eq!(
+            *delegate.last_action.lock().unwrap(),
+            Some("navigate".into())
+        );
     }
 
     #[tokio::test]
@@ -372,10 +371,7 @@ mod tests {
     async fn press_key_action() {
         let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
         let r = tool
-            .execute(
-                json!({"action": "pressKey", "key": "Enter"}),
-                &make_ctx(),
-            )
+            .execute(json!({"action": "pressKey", "key": "Enter"}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -411,10 +407,7 @@ mod tests {
     async fn get_text_action() {
         let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::success()));
         let r = tool
-            .execute(
-                json!({"action": "getText", "selector": "h1"}),
-                &make_ctx(),
-            )
+            .execute(json!({"action": "getText", "selector": "h1"}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -493,7 +486,10 @@ mod tests {
     async fn delegate_error() {
         let tool = BrowseTheWebTool::new(Arc::new(MockBrowser::failing()));
         let r = tool
-            .execute(json!({"action": "navigate", "url": "https://example.com"}), &make_ctx())
+            .execute(
+                json!({"action": "navigate", "url": "https://example.com"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));

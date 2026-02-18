@@ -24,13 +24,22 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
 
     let mut hint = Hint::new();
     match mime_type {
-        "audio/wav" | "audio/wave" | "audio/x-wav" => { let _ = hint.with_extension("wav"); }
-        "audio/m4a" | "audio/mp4" | "audio/x-m4a" | "audio/aac" => { let _ = hint.with_extension("m4a"); }
+        "audio/wav" | "audio/wave" | "audio/x-wav" => {
+            let _ = hint.with_extension("wav");
+        }
+        "audio/m4a" | "audio/mp4" | "audio/x-m4a" | "audio/aac" => {
+            let _ = hint.with_extension("m4a");
+        }
         _ => {}
     }
 
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .map_err(|e| TranscriptionError::AudioDecode(format!("probe failed: {e}")))?;
 
     let mut format = probed.format;
@@ -90,7 +99,9 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
     }
 
     if all_samples.is_empty() {
-        return Err(TranscriptionError::AudioDecode("no audio samples decoded".into()));
+        return Err(TranscriptionError::AudioDecode(
+            "no audio samples decoded".into(),
+        ));
     }
 
     // Resample if needed
@@ -102,12 +113,10 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
 }
 
 /// Resample mono audio from `from_rate` to `to_rate` using rubato.
-fn resample(
-    samples: &[f32],
-    from_rate: u32,
-    to_rate: u32,
-) -> Result<Vec<f32>, TranscriptionError> {
-    use rubato::{SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction, Resampler};
+fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>, TranscriptionError> {
+    use rubato::{
+        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    };
 
     let params = SincInterpolationParameters {
         sinc_len: 256,

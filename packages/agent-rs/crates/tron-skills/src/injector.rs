@@ -137,10 +137,7 @@ pub fn build_skill_context(skills: &[&SkillMetadata]) -> String {
 ///
 /// Extracts `@skill-name` references, looks them up in the registry,
 /// removes references from the prompt, and builds a `<skills>` XML block.
-pub fn process_prompt_for_skills(
-    prompt: &str,
-    registry: &SkillRegistry,
-) -> SkillInjectionResult {
+pub fn process_prompt_for_skills(prompt: &str, registry: &SkillRegistry) -> SkillInjectionResult {
     let references = extract_skill_references(prompt);
 
     if references.is_empty() {
@@ -402,12 +399,8 @@ mod tests {
 
     #[test]
     fn test_build_context_with_denied_tools() {
-        let skill = make_skill_with_tools(
-            "safe",
-            "Safe skill.",
-            None,
-            Some(vec!["Bash".to_string()]),
-        );
+        let skill =
+            make_skill_with_tools("safe", "Safe skill.", None, Some(vec!["Bash".to_string()]));
         let context = build_skill_context(&[&skill]);
         assert!(context.contains("<skill-tool-restrictions>"));
         assert!(context.contains("Bash"));

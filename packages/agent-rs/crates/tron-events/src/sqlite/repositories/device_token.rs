@@ -3,7 +3,7 @@
 //! Manages APNS device token registrations for push notifications.
 //! Tokens are uniquely identified by `(device_token, platform)`.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::errors::Result;
@@ -62,7 +62,16 @@ impl DeviceTokenRepo {
                 "INSERT INTO device_tokens (id, device_token, session_id, workspace_id,
                      platform, environment, created_at, last_used_at, is_active)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)",
-                params![id, device_token, session_id, workspace_id, platform, environment, now, now],
+                params![
+                    id,
+                    device_token,
+                    session_id,
+                    workspace_id,
+                    platform,
+                    environment,
+                    now,
+                    now
+                ],
             )?;
             Ok(RegisterTokenResult { id, created: true })
         }
@@ -239,7 +248,9 @@ mod tests {
         // Re-register should reactivate
         let result = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
         assert!(!result.created); // existing row
-        let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap().unwrap();
+        let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
+            .unwrap()
+            .unwrap();
         assert!(row.is_active);
     }
 
@@ -263,8 +274,7 @@ mod tests {
     fn get_by_id_found() {
         let conn = setup();
         let token = "f".repeat(64);
-        let result =
-            DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
+        let result = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
         let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap();
         assert!(row.is_some());
         let row = row.unwrap();
@@ -323,7 +333,9 @@ mod tests {
         let result = DeviceTokenRepo::register(&conn, &token, None, None, "production").unwrap();
         DeviceTokenRepo::mark_invalid(&conn, &token).unwrap();
 
-        let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap().unwrap();
+        let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
+            .unwrap()
+            .unwrap();
         assert!(!row.is_active);
     }
 
@@ -339,7 +351,9 @@ mod tests {
         let conn = setup();
         let token = "h".repeat(64);
         let result = DeviceTokenRepo::register(&conn, &token, None, None, "sandbox").unwrap();
-        let row = DeviceTokenRepo::get_by_id(&conn, &result.id).unwrap().unwrap();
+        let row = DeviceTokenRepo::get_by_id(&conn, &result.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(row.platform, "ios");
         assert_eq!(row.environment, "sandbox");
     }

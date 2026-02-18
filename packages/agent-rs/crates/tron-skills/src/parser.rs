@@ -149,10 +149,7 @@ fn parse_array_value(value: &str, lines: &[&str], i: &mut usize) -> Vec<String> 
 
 /// Parse an inline array like `[item1, item2, item3]`.
 fn parse_inline_array(value: &str) -> Vec<String> {
-    let inner = value
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .trim();
+    let inner = value.trim_start_matches('[').trim_end_matches(']').trim();
 
     if inner.is_empty() {
         return Vec::new();
@@ -439,9 +436,6 @@ This is the body."#;
             result.frontmatter.allowed_tools,
             Some(vec!["Read".to_string()])
         );
-        assert_eq!(
-            result.frontmatter.subagent_model.as_deref(),
-            Some("haiku")
-        );
+        assert_eq!(result.frontmatter.subagent_model.as_deref(), Some("haiku"));
     }
 }

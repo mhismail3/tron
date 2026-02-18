@@ -4,8 +4,8 @@
 //! Provides [`drain_all`](BackgroundTracker::drain_all) to wait for all
 //! pending background tasks to complete (used at session boundaries).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;

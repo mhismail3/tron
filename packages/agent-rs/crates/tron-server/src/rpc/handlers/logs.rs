@@ -31,10 +31,7 @@ impl MethodHandler for ExportLogsHandler {
 
         let _ = std::fs::create_dir_all(&logs_dir);
 
-        let filename = format!(
-            "ios-log-{}.txt",
-            chrono::Utc::now().format("%Y%m%d-%H%M%S")
-        );
+        let filename = format!("ios-log-{}.txt", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
         let path = logs_dir.join(&filename);
 
         let bytes_written = content.len();
@@ -79,7 +76,10 @@ mod tests {
 
         // Verify file was actually written
         let path = result["path"].as_str().unwrap();
-        assert!(path.contains("artifacts/ios-logs/"), "path should use artifacts/ios-logs, got: {path}");
+        assert!(
+            path.contains("artifacts/ios-logs/"),
+            "path should use artifacts/ios-logs, got: {path}"
+        );
         let content = std::fs::read_to_string(path).unwrap();
         assert_eq!(content, "test log data");
 

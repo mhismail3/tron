@@ -10,10 +10,10 @@
 //! - Tool results → `function_call_output` items (truncated at 16k)
 //! - Documents → placeholder text (`OpenAI` doesn't support documents directly)
 
+use crate::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
 use tron_core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use tron_core::tools::Tool;
-use crate::{build_tool_call_id_mapping, remap_tool_call_id, IdFormat};
 
 use super::types::{MessageContent, ResponsesInputItem, ResponsesTool, TOOL_RESULT_MAX_LENGTH};
 
@@ -90,7 +90,10 @@ pub fn generate_tool_clarification_message(
                     })
                 })
                 .unwrap_or_else(|| "none".into());
-            format!("- **{}**: {} (required params: {required})", t.name, t.description)
+            format!(
+                "- **{}**: {} (required params: {required})",
+                t.name, t.description
+            )
         })
         .collect();
 
@@ -164,9 +167,7 @@ fn convert_user_message(content: &UserMessageContent, input: &mut Vec<ResponsesI
             let content_parts: Vec<MessageContent> = blocks
                 .iter()
                 .map(|block| match block {
-                    UserContent::Text { text } => {
-                        MessageContent::InputText { text: text.clone() }
-                    }
+                    UserContent::Text { text } => MessageContent::InputText { text: text.clone() },
                     UserContent::Image { data, mime_type } => MessageContent::InputImage {
                         image_url: format!("data:{mime_type};base64,{data}"),
                         detail: Some("auto".into()),
@@ -224,7 +225,10 @@ fn convert_assistant_message(
     // Convert tool calls to function_call items
     for block in content {
         if let AssistantContent::ToolUse {
-            id, name, arguments, ..
+            id,
+            name,
+            arguments,
+            ..
         } = block
         {
             let remapped_id = remap_tool_call_id(id, id_mapping).to_string();
@@ -419,10 +423,7 @@ mod tests {
 
         let result = convert_to_responses_input(&messages);
         assert_eq!(result.len(), 1);
-        if let ResponsesInputItem::Message {
-            role, content, ..
-        } = &result[0]
-        {
+        if let ResponsesInputItem::Message { role, content, .. } = &result[0] {
             assert_eq!(role, "assistant");
             match &content[0] {
                 MessageContent::OutputText { text } => assert_eq!(text, "Response"),
@@ -453,7 +454,10 @@ mod tests {
             .iter()
             .find(|item| matches!(item, ResponsesInputItem::FunctionCall { .. }));
         assert!(func_call.is_some());
-        if let ResponsesInputItem::FunctionCall { name, arguments, .. } = func_call.unwrap() {
+        if let ResponsesInputItem::FunctionCall {
+            name, arguments, ..
+        } = func_call.unwrap()
+        {
             assert_eq!(name, "read_file");
             assert!(arguments.contains("path"));
         }
@@ -567,10 +571,16 @@ mod tests {
             .find(|item| matches!(item, ResponsesInputItem::FunctionCallOutput { .. }));
 
         if let Some(ResponsesInputItem::FunctionCall { call_id, .. }) = func_call {
-            assert!(call_id.starts_with("call_"), "expected call_ prefix, got: {call_id}");
+            assert!(
+                call_id.starts_with("call_"),
+                "expected call_ prefix, got: {call_id}"
+            );
         }
         if let Some(ResponsesInputItem::FunctionCallOutput { call_id, .. }) = func_output {
-            assert!(call_id.starts_with("call_"), "expected call_ prefix, got: {call_id}");
+            assert!(
+                call_id.starts_with("call_"),
+                "expected call_ prefix, got: {call_id}"
+            );
         }
     }
 
@@ -659,10 +669,7 @@ mod tests {
 
     #[test]
     fn converts_multiple_tools() {
-        let tools = vec![
-            make_tool("tool_a", "Tool A"),
-            make_tool("tool_b", "Tool B"),
-        ];
+        let tools = vec![make_tool("tool_a", "Tool A"), make_tool("tool_b", "Tool B")];
         let result = convert_tools(&tools);
         assert_eq!(result.len(), 2);
     }
@@ -671,7 +678,11 @@ mod tests {
 
     #[test]
     fn clarification_includes_tool_names() {
-        let tools = vec![make_tool_with_required("Bash", "Run bash commands", vec!["command"])];
+        let tools = vec![make_tool_with_required(
+            "Bash",
+            "Run bash commands",
+            vec!["command"],
+        )];
         let result = generate_tool_clarification_message(&tools, None);
 
         assert!(result.contains("Bash"));

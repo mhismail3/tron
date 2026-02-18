@@ -96,10 +96,7 @@ mod tests {
     async fn tool_result_missing_result_param() {
         let ctx = make_test_context();
         let err = ToolResultHandler
-            .handle(
-                Some(json!({"sessionId": "s1", "toolUseId": "tc_1"})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": "s1", "toolUseId": "tc_1"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");

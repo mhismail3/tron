@@ -6,14 +6,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
 
 use crate::errors::ToolError;
 use crate::traits::{SubagentConfig, SubagentMode, SubagentSpawner, ToolContext, TronTool};
-use crate::utils::validation::{get_optional_bool, get_optional_string, get_optional_u64, validate_required_string};
+use crate::utils::validation::{
+    get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
+};
 
 const DEFAULT_TIMEOUT_MS: u64 = 1_800_000; // 30 minutes
 const DEFAULT_MAX_TURNS_IN_PROCESS: u32 = 50;
@@ -90,11 +92,7 @@ Returns (when mode=inProcess and blocking=true):\n\
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let task = match validate_required_string(&params, "task", "task description") {
             Ok(t) => t,
             Err(e) => return Ok(e),
@@ -104,12 +102,15 @@ Returns (when mode=inProcess and blocking=true):\n\
         let mode = match mode_str.as_str() {
             "inProcess" => SubagentMode::InProcess,
             "tmux" => SubagentMode::Tmux,
-            _ => return Ok(error_result(format!(
-                "Invalid mode: \"{mode_str}\". Must be \"inProcess\" or \"tmux\"."
-            ))),
+            _ => {
+                return Ok(error_result(format!(
+                    "Invalid mode: \"{mode_str}\". Must be \"inProcess\" or \"tmux\"."
+                )));
+            }
         };
 
-        let blocking = get_optional_bool(&params, "blocking").unwrap_or(mode == SubagentMode::InProcess);
+        let blocking =
+            get_optional_bool(&params, "blocking").unwrap_or(mode == SubagentMode::InProcess);
         let timeout_ms = get_optional_u64(&params, "timeout").unwrap_or(DEFAULT_TIMEOUT_MS);
         let default_turns = if mode == SubagentMode::Tmux {
             DEFAULT_MAX_TURNS_TMUX
@@ -117,23 +118,19 @@ Returns (when mode=inProcess and blocking=true):\n\
             DEFAULT_MAX_TURNS_IN_PROCESS
         };
         #[allow(clippy::cast_possible_truncation)]
-        let max_turns = get_optional_u64(&params, "maxTurns")
-            .map_or(default_turns, |v| v as u32);
+        let max_turns = get_optional_u64(&params, "maxTurns").map_or(default_turns, |v| v as u32);
 
         let model = get_optional_string(&params, "model");
         let system_prompt = get_optional_string(&params, "systemPrompt");
         let working_directory = get_optional_string(&params, "workingDirectory")
             .unwrap_or_else(|| ctx.working_directory.clone());
         let tool_denials = params.get("toolDenials").cloned();
-        let skills = params
-            .get("skills")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            });
+        let skills = params.get("skills").and_then(Value::as_array).map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        });
 
         // Remaining depth budget from context
         let remaining_depth = ctx.subagent_max_depth.saturating_sub(1);
@@ -178,9 +175,10 @@ Returns (when mode=inProcess and blocking=true):\n\
                 } else {
                     Ok(TronToolResult {
                         content: ToolResultBody::Blocks(vec![
-                            tron_core::content::ToolResultContent::text(
-                                format!("Subagent spawned (session: {})", handle.session_id),
-                            ),
+                            tron_core::content::ToolResultContent::text(format!(
+                                "Subagent spawned (session: {})",
+                                handle.session_id
+                            )),
                         ]),
                         details: Some(json!({
                             "sessionId": handle.session_id,
@@ -302,7 +300,10 @@ mod tests {
     async fn non_blocking_returns_session_id() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "do something", "blocking": false}), &make_ctx())
+            .execute(
+                json!({"task": "do something", "blocking": false}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -317,7 +318,10 @@ mod tests {
     async fn tmux_mode() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "do something", "mode": "tmux", "blocking": false}), &make_ctx())
+            .execute(
+                json!({"task": "do something", "mode": "tmux", "blocking": false}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -327,7 +331,10 @@ mod tests {
     async fn invalid_mode_error() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "do something", "mode": "invalid"}), &make_ctx())
+            .execute(
+                json!({"task": "do something", "mode": "invalid"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
@@ -358,7 +365,10 @@ mod tests {
     async fn system_prompt_forwarded() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "t", "systemPrompt": "Be helpful"}), &make_ctx())
+            .execute(
+                json!({"task": "t", "systemPrompt": "Be helpful"}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -378,7 +388,10 @@ mod tests {
     async fn skills_forwarded() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "t", "skills": ["skill1", "skill2"]}), &make_ctx())
+            .execute(
+                json!({"task": "t", "skills": ["skill1", "skill2"]}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -388,7 +401,10 @@ mod tests {
     async fn tool_denials_forwarded() {
         let tool = SpawnSubagentTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(json!({"task": "t", "toolDenials": {"denyAll": true}}), &make_ctx())
+            .execute(
+                json!({"task": "t", "toolDenials": {"denyAll": true}}),
+                &make_ctx(),
+            )
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -439,14 +455,23 @@ mod tests {
             *self.captured.lock().unwrap() = Some(config.clone());
             Ok(SubagentHandle {
                 session_id: "sub-cap".into(),
-                output: if config.blocking { Some("done".into()) } else { None },
+                output: if config.blocking {
+                    Some("done".into())
+                } else {
+                    None
+                },
                 token_usage: None,
             })
         }
         async fn query_agent(&self, _: &str, _: &str, _: Option<u32>) -> Result<Value, ToolError> {
             Ok(json!({}))
         }
-        async fn wait_for_agents(&self, _: &[String], _: WaitMode, _: u64) -> Result<Vec<SubagentResult>, ToolError> {
+        async fn wait_for_agents(
+            &self,
+            _: &[String],
+            _: WaitMode,
+            _: u64,
+        ) -> Result<Vec<SubagentResult>, ToolError> {
             Ok(vec![])
         }
     }

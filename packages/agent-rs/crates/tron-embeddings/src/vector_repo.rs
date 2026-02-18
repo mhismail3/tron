@@ -1,6 +1,6 @@
 //! Vector repository with `SQLite` BLOB storage and brute-force KNN search.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::errors::{EmbeddingError, Result};
 use crate::normalize::cosine_similarity;
@@ -87,7 +87,10 @@ impl VectorRepository {
         let blob = f32_slice_to_blob(embedding);
         let _ = self
             .conn
-            .execute("DELETE FROM memory_vectors WHERE event_id = ?1", params![event_id])
+            .execute(
+                "DELETE FROM memory_vectors WHERE event_id = ?1",
+                params![event_id],
+            )
             .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
         let _ = self
             .conn
@@ -122,20 +125,13 @@ impl VectorRepository {
     }
 
     /// Search for nearest neighbors using brute-force cosine similarity.
-    pub fn search(
-        &self,
-        query: &[f32],
-        opts: &SearchOptions,
-    ) -> Result<Vec<VectorSearchResult>> {
+    pub fn search(&self, query: &[f32], opts: &SearchOptions) -> Result<Vec<VectorSearchResult>> {
         let limit = if opts.limit == 0 { 10 } else { opts.limit };
         let rows = self.load_vectors(opts)?;
         Ok(Self::rank_results(query, rows, limit))
     }
 
-    fn load_vectors(
-        &self,
-        opts: &SearchOptions,
-    ) -> Result<Vec<(String, String, Vec<u8>)>> {
+    fn load_vectors(&self, opts: &SearchOptions) -> Result<Vec<(String, String, Vec<u8>)>> {
         let extract_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<(String, String, Vec<u8>)> {
             Ok((
                 row.get::<_, String>(0)?,
@@ -173,9 +169,10 @@ impl VectorRepository {
                     .collect()
             }
             (None, None) => {
-                let mut stmt = self.conn.prepare(
-                    "SELECT event_id, workspace_id, embedding FROM memory_vectors",
-                ).map_err(|e| EmbeddingError::Storage(e.to_string()))?;
+                let mut stmt = self
+                    .conn
+                    .prepare("SELECT event_id, workspace_id, embedding FROM memory_vectors")
+                    .map_err(|e| EmbeddingError::Storage(e.to_string()))?;
                 stmt.query_map([], extract_row)
                     .map_err(|e| EmbeddingError::Storage(e.to_string()))?
                     .filter_map(std::result::Result::ok)
@@ -215,7 +212,11 @@ impl VectorRepository {
 }
 
 #[cfg(test)]
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 mod tests {
     use super::*;
     use crate::normalize::l2_normalize;
@@ -317,7 +318,13 @@ mod tests {
         let repo = make_repo(4);
         let query = random_vector(4, 0);
         let results = repo
-            .search(&query, &SearchOptions { limit: 10, ..Default::default() })
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert!(results.is_empty());
     }
@@ -328,7 +335,13 @@ mod tests {
         let v = random_vector(4, 1);
         repo.store("e1", "ws1", &v).unwrap();
         let results = repo
-            .search(&v, &SearchOptions { limit: 10, ..Default::default() })
+            .search(
+                &v,
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].event_id, "e1");
@@ -344,7 +357,13 @@ mod tests {
         }
         let query = random_vector(4, 0);
         let results = repo
-            .search(&query, &SearchOptions { limit: 2, ..Default::default() })
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 2,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(results.len(), 2);
     }
@@ -359,7 +378,13 @@ mod tests {
         repo.store("different", "ws1", &different).unwrap();
 
         let results = repo
-            .search(&query, &SearchOptions { limit: 10, ..Default::default() })
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(results[0].event_id, "exact");
         assert!(results[0].similarity > results[1].similarity);
@@ -414,7 +439,10 @@ mod tests {
         let results = repo
             .search(
                 &random_vector(4, 0),
-                &SearchOptions { limit: 10, ..Default::default() },
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -427,7 +455,13 @@ mod tests {
         repo.store("same", "ws1", &query).unwrap();
 
         let results = repo
-            .search(&query, &SearchOptions { limit: 10, ..Default::default() })
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert!((results[0].similarity - 1.0).abs() < 1e-5);
     }
@@ -460,7 +494,13 @@ mod tests {
         repo.store("exact", "ws1", &query).unwrap();
 
         let results = repo
-            .search(&query, &SearchOptions { limit: 3, ..Default::default() })
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 3,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(results[0].event_id, "exact");
     }
@@ -480,7 +520,13 @@ mod tests {
 
         let query = random_vector(64, 0);
         let results = repo
-            .search(&query, &SearchOptions { limit: 5, ..Default::default() })
+            .search(
+                &query,
+                &SearchOptions {
+                    limit: 5,
+                    ..Default::default()
+                },
+            )
             .unwrap();
         assert_eq!(results.len(), 5);
     }

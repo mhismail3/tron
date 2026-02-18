@@ -263,7 +263,10 @@ mod tests {
         assert_eq!(grouped.stable[0], "You are a helpful assistant.");
         assert!(grouped.stable[1].contains("Always use Rust."));
         assert_eq!(grouped.stable[2], "User prefers concise responses.");
-        assert_eq!(grouped.stable[3], "Current working directory: /Users/test/project");
+        assert_eq!(
+            grouped.stable[3],
+            "Current working directory: /Users/test/project"
+        );
 
         // Volatile: dynamic_rules, skill, task (subagent_results is None)
         assert_eq!(grouped.volatile.len(), 3);

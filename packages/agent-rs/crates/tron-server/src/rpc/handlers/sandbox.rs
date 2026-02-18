@@ -29,10 +29,9 @@ impl MethodHandler for ListContainersHandler {
     async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let path = containers_json_path();
         let containers = if path.exists() {
-            let content =
-                std::fs::read_to_string(&path).map_err(|e| RpcError::Internal {
-                    message: format!("Failed to read containers.json: {e}"),
-                })?;
+            let content = std::fs::read_to_string(&path).map_err(|e| RpcError::Internal {
+                message: format!("Failed to read containers.json: {e}"),
+            })?;
             match serde_json::from_str::<Value>(&content) {
                 Ok(v) if v.is_array() => v,
                 _ => serde_json::json!([]),

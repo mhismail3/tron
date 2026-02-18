@@ -78,7 +78,9 @@ pub fn truncate_output(
     // If we have preserve directives and enough lines
     if (options.preserve_start_lines > 0 || options.preserve_end_lines > 0) && lines.len() > 1 {
         let start_count = options.preserve_start_lines.min(lines.len());
-        let end_count = options.preserve_end_lines.min(lines.len().saturating_sub(start_count));
+        let end_count = options
+            .preserve_end_lines
+            .min(lines.len().saturating_sub(start_count));
 
         let start_part = lines[..start_count].join("\n");
         let end_part = if end_count > 0 {

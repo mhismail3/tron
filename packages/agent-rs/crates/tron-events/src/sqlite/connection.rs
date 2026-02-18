@@ -86,12 +86,12 @@ pub fn new_file(path: &str, config: &ConnectionConfig) -> Result<ConnectionPool>
 
 /// Verify pragmas are set correctly on a connection.
 pub fn verify_pragmas(conn: &Connection) -> Result<PragmaState> {
-    let journal_mode: String =
-        conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))
-            .map_err(EventStoreError::Sqlite)?;
-    let foreign_keys: i32 =
-        conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))
-            .map_err(EventStoreError::Sqlite)?;
+    let journal_mode: String = conn
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .map_err(EventStoreError::Sqlite)?;
+    let foreign_keys: i32 = conn
+        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+        .map_err(EventStoreError::Sqlite)?;
     Ok(PragmaState {
         journal_mode,
         foreign_keys_enabled: foreign_keys == 1,

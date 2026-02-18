@@ -21,7 +21,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::errors::parse::{parse_error, ErrorCategory, ErrorSeverity};
+use crate::errors::parse::{ErrorCategory, ErrorSeverity, parse_error};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TronError — top-level error enum
@@ -792,9 +792,8 @@ mod tests {
     #[test]
     fn session_error_with_source() {
         let cause = std::io::Error::new(std::io::ErrorKind::Other, "disk error");
-        let err =
-            SessionError::new("sess-1", SessionOperation::Resume, "database read failed")
-                .with_source(cause);
+        let err = SessionError::new("sess-1", SessionOperation::Resume, "database read failed")
+            .with_source(cause);
         assert!(err.source.is_some());
     }
 
@@ -849,8 +848,7 @@ mod tests {
 
     #[test]
     fn provider_error_basic() {
-        let err =
-            ProviderError::new(ProviderName::Anthropic, "claude-opus-4-6", "server error");
+        let err = ProviderError::new(ProviderName::Anthropic, "claude-opus-4-6", "server error");
         assert_eq!(err.provider, ProviderName::Anthropic);
         assert_eq!(err.model, "claude-opus-4-6");
         assert_eq!(err.code, "PROVIDER_ANTHROPIC_ERROR");
@@ -867,8 +865,8 @@ mod tests {
 
     #[test]
     fn provider_error_with_429_status() {
-        let err = ProviderError::new(ProviderName::Openai, "gpt-4", "rate limited")
-            .with_status(429);
+        let err =
+            ProviderError::new(ProviderName::Openai, "gpt-4", "rate limited").with_status(429);
         assert_eq!(err.category, ErrorCategory::RateLimit);
         assert!(err.retryable);
     }
@@ -910,8 +908,8 @@ mod tests {
 
     #[test]
     fn provider_error_explicit_retryable() {
-        let err = ProviderError::new(ProviderName::Openai, "gpt-4", "temporary")
-            .with_retryable(true);
+        let err =
+            ProviderError::new(ProviderName::Openai, "gpt-4", "temporary").with_retryable(true);
         assert!(err.retryable);
     }
 
@@ -1043,11 +1041,7 @@ mod tests {
 
     #[test]
     fn has_error_code_from_session() {
-        let err = TronError::from(SessionError::new(
-            "s1",
-            SessionOperation::Create,
-            "failed",
-        ));
+        let err = TronError::from(SessionError::new("s1", SessionOperation::Create, "failed"));
         assert!(has_error_code(&err, "SESSION_CREATE_ERROR"));
     }
 
@@ -1101,8 +1095,7 @@ mod tests {
 
     #[test]
     fn tron_error_severity_from_persistence() {
-        let persistence_err =
-            PersistenceError::new("events", PersistenceOperation::Write, "err");
+        let persistence_err = PersistenceError::new("events", PersistenceOperation::Write, "err");
         let err = TronError::from(persistence_err);
         assert_eq!(err.severity(), ErrorSeverity::Error);
     }
@@ -1110,24 +1103,22 @@ mod tests {
     #[test]
     fn tron_error_severity_from_provider_retryable() {
         let provider_err =
-            ProviderError::new(ProviderName::Anthropic, "model", "overloaded")
-                .with_retryable(true);
+            ProviderError::new(ProviderName::Anthropic, "model", "overloaded").with_retryable(true);
         let err = TronError::from(provider_err);
         assert_eq!(err.severity(), ErrorSeverity::Transient);
     }
 
     #[test]
     fn tron_error_severity_from_tool() {
-        let tool_err =
-            ToolError::new("bash", "c1", "timeout").with_severity(ErrorSeverity::Fatal);
+        let tool_err = ToolError::new("bash", "c1", "timeout").with_severity(ErrorSeverity::Fatal);
         let err = TronError::from(tool_err);
         assert_eq!(err.severity(), ErrorSeverity::Fatal);
     }
 
     #[test]
     fn tron_error_category_from_provider_status() {
-        let provider_err = ProviderError::new(ProviderName::Openai, "gpt-4", "forbidden")
-            .with_status(403);
+        let provider_err =
+            ProviderError::new(ProviderName::Openai, "gpt-4", "forbidden").with_status(403);
         let err = TronError::from(provider_err);
         assert_eq!(err.category(), ErrorCategory::Authorization);
     }

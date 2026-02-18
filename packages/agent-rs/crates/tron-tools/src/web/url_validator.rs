@@ -31,8 +31,13 @@ impl std::fmt::Display for UrlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidFormat(msg) => write!(f, "Invalid URL: {msg}"),
-            Self::TooLong => write!(f, "URL exceeds maximum length of {MAX_URL_LENGTH} characters"),
-            Self::InvalidProtocol(p) => write!(f, "Invalid protocol: {p} (only http/https allowed)"),
+            Self::TooLong => write!(
+                f,
+                "URL exceeds maximum length of {MAX_URL_LENGTH} characters"
+            ),
+            Self::InvalidProtocol(p) => {
+                write!(f, "Invalid protocol: {p} (only http/https allowed)")
+            }
             Self::CredentialsInUrl => write!(f, "URL must not contain credentials"),
             Self::InternalAddress(host) => write!(f, "Internal/private address blocked: {host}"),
             Self::DomainBlocked(d) => write!(f, "Domain blocked: {d}"),
@@ -63,8 +68,7 @@ pub fn validate_url(raw_url: &str, config: &UrlValidatorConfig) -> Result<String
         return Err(UrlError::TooLong);
     }
 
-    let parsed = Url::parse(trimmed)
-        .map_err(|e| UrlError::InvalidFormat(e.to_string()))?;
+    let parsed = Url::parse(trimmed).map_err(|e| UrlError::InvalidFormat(e.to_string()))?;
 
     // Protocol check
     match parsed.scheme() {
@@ -78,7 +82,8 @@ pub fn validate_url(raw_url: &str, config: &UrlValidatorConfig) -> Result<String
     }
 
     // Host check
-    let host = parsed.host_str()
+    let host = parsed
+        .host_str()
         .ok_or_else(|| UrlError::InvalidFormat("no host in URL".into()))?;
 
     // Internal address check
@@ -126,9 +131,9 @@ fn is_internal_address(host: &str) -> bool {
         r"\.internal$",
     ];
     let host_lower = host.to_lowercase();
-    patterns.iter().any(|p| {
-        Regex::new(p).is_ok_and(|re| re.is_match(&host_lower))
-    })
+    patterns
+        .iter()
+        .any(|p| Regex::new(p).is_ok_and(|re| re.is_match(&host_lower)))
 }
 
 #[cfg(test)]

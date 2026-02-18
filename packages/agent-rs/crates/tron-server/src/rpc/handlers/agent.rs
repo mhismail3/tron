@@ -97,7 +97,10 @@ fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
     );
 
     for (_event_id, payload) in results {
-        let success = payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let success = payload
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let icon = if success { "+" } else { "x" };
         let subagent_id = payload
             .get("subagentSessionId")
@@ -107,8 +110,14 @@ fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
             .get("task")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
-        let total_turns = payload.get("totalTurns").and_then(|v| v.as_i64()).unwrap_or(0);
-        let duration = payload.get("duration").and_then(|v| v.as_i64()).unwrap_or(0);
+        let total_turns = payload
+            .get("totalTurns")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let duration = payload
+            .get("duration")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
 
         ctx.push_str(&format!("## [{icon}] Sub-Agent: `{subagent_id}`\n\n"));
         ctx.push_str(&format!("**Task**: {task}\n"));
@@ -191,11 +200,7 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             let spawner = SubagentManagerSpawner {
                 manager: manager.clone(),
                 parent_session_id: self.session_id.clone(),
-                working_directory: state
-                    .state
-                    .working_directory
-                    .clone()
-                    .unwrap_or_default(),
+                working_directory: state.state.working_directory.clone().unwrap_or_default(),
                 system_prompt: tron_runtime::context::system_prompts::COMPACTION_SUMMARIZER_PROMPT
                     .to_string(),
                 model: None, // Use session's model
@@ -224,16 +229,18 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         });
 
         // Broadcast compaction complete
-        let _ = self.broadcast.emit(tron_core::events::TronEvent::CompactionComplete {
-            base: tron_core::events::BaseEvent::now(&self.session_id),
-            success: result.success,
-            tokens_before: result.tokens_before,
-            tokens_after: result.tokens_after,
-            compression_ratio: result.compression_ratio,
-            reason: Some(tron_core::events::CompactionReason::ThresholdExceeded),
-            summary: Some(result.summary),
-            estimated_context_tokens: None,
-        });
+        let _ = self
+            .broadcast
+            .emit(tron_core::events::TronEvent::CompactionComplete {
+                base: tron_core::events::BaseEvent::now(&self.session_id),
+                success: result.success,
+                tokens_before: result.tokens_before,
+                tokens_after: result.tokens_after,
+                compression_ratio: result.compression_ratio,
+                reason: Some(tron_core::events::CompactionReason::ThresholdExceeded),
+                summary: Some(result.summary),
+                estimated_context_tokens: None,
+            });
 
         // Invalidate cached session
         self.session_manager.invalidate_session(&self.session_id);
@@ -266,9 +273,11 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
     }
 
     fn emit_memory_updating(&self, _session_id: &str) {
-        let _ = self.broadcast.emit(tron_core::events::TronEvent::MemoryUpdating {
-            base: tron_core::events::BaseEvent::now(&self.session_id),
-        });
+        let _ = self
+            .broadcast
+            .emit(tron_core::events::TronEvent::MemoryUpdating {
+                base: tron_core::events::BaseEvent::now(&self.session_id),
+            });
     }
 
     fn emit_memory_updated(
@@ -278,12 +287,14 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
         entry_type: Option<&str>,
         event_id: Option<&str>,
     ) {
-        let _ = self.broadcast.emit(tron_core::events::TronEvent::MemoryUpdated {
-            base: tron_core::events::BaseEvent::now(&self.session_id),
-            title: title.map(String::from),
-            entry_type: entry_type.map(String::from),
-            event_id: event_id.map(String::from),
-        });
+        let _ = self
+            .broadcast
+            .emit(tron_core::events::TronEvent::MemoryUpdated {
+                base: tron_core::events::BaseEvent::now(&self.session_id),
+                title: title.map(String::from),
+                entry_type: entry_type.map(String::from),
+                event_id: event_id.map(String::from),
+            });
     }
 
     fn on_memory_written(&self, _payload: &serde_json::Value, _title: &str) {
@@ -444,11 +455,12 @@ impl MethodHandler for PromptHandler {
                     Ok(active) => (active.state.clone(), active.context.persister.clone()),
                     Err(e) => {
                         warn!(session_id = %session_id_clone, error = %e, "failed to resume session, starting fresh");
-                        let fresh_state = tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
-                            model: model.clone(),
-                            working_directory: Some(working_dir.clone()),
-                            ..Default::default()
-                        };
+                        let fresh_state =
+                            tron_runtime::orchestrator::session_reconstructor::ReconstructedState {
+                                model: model.clone(),
+                                working_directory: Some(working_dir.clone()),
+                                ..Default::default()
+                            };
                         let fresh_persister = std::sync::Arc::new(
                             tron_runtime::orchestrator::event_persister::EventPersister::new(
                                 event_store.clone(),
@@ -474,7 +486,11 @@ impl MethodHandler for PromptHandler {
                         },
                     );
                     loader.load(wd).ok().and_then(|ctx| {
-                        if ctx.merged.is_empty() { None } else { Some(ctx.merged) }
+                        if ctx.merged.is_empty() {
+                            None
+                        } else {
+                            Some(ctx.merged)
+                        }
                     })
                 };
 
@@ -485,7 +501,8 @@ impl MethodHandler for PromptHandler {
                     .and_then(tron_runtime::context::loader::load_global_rules);
 
                 // 4. Merge rules (global first, then project)
-                let combined_rules = tron_runtime::context::loader::merge_rules(global_rules, project_rules);
+                let combined_rules =
+                    tron_runtime::context::loader::merge_rules(global_rules, project_rules);
 
                 // 4b. Discover scoped rules for dynamic path-based activation
                 let rules_index = {
@@ -500,11 +517,14 @@ impl MethodHandler for PromptHandler {
                         exclude_root_level: true,
                         ..Default::default()
                     };
-                    let discovered = tron_runtime::context::rules_discovery::discover_rules_files(&config);
+                    let discovered =
+                        tron_runtime::context::rules_discovery::discover_rules_files(&config);
                     if discovered.is_empty() {
                         None
                     } else {
-                        Some(tron_runtime::context::rules_index::RulesIndex::new(discovered))
+                        Some(tron_runtime::context::rules_index::RulesIndex::new(
+                            discovered,
+                        ))
                     }
                 };
 
@@ -514,7 +534,12 @@ impl MethodHandler for PromptHandler {
                     let events = event_store
                         .get_events_by_type(
                             &session_id_clone,
-                            &["rules.activated", "compact.boundary", "compact.summary", "context.cleared"],
+                            &[
+                                "rules.activated",
+                                "compact.boundary",
+                                "compact.summary",
+                                "context.cleared",
+                            ],
                             None,
                         )
                         .unwrap_or_default();
@@ -524,10 +549,15 @@ impl MethodHandler for PromptHandler {
                         if boundary_types.contains(&event.event_type.as_str()) {
                             activated.clear();
                         } else if event.event_type == "rules.activated" {
-                            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
-                                if let Some(rules) = payload.get("rules").and_then(|r| r.as_array()) {
+                            if let Ok(payload) =
+                                serde_json::from_str::<serde_json::Value>(&event.payload)
+                            {
+                                if let Some(rules) = payload.get("rules").and_then(|r| r.as_array())
+                                {
                                     for rule in rules {
-                                        if let Some(p) = rule.get("relativePath").and_then(|v| v.as_str()) {
+                                        if let Some(p) =
+                                            rule.get("relativePath").and_then(|v| v.as_str())
+                                        {
                                             if !activated.contains(&p.to_owned()) {
                                                 activated.push(p.to_owned());
                                             }
@@ -696,7 +726,10 @@ impl MethodHandler for PromptHandler {
                                     att.get("data").and_then(|v| v.as_str()),
                                     att.get("mimeType").and_then(|v| v.as_str()),
                                 ) {
-                                    let file_name = att.get("fileName").and_then(|v| v.as_str()).map(String::from);
+                                    let file_name = att
+                                        .get("fileName")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from);
                                     if mime.starts_with("image/") {
                                         blocks.push(tron_core::content::UserContent::Image {
                                             data: data.to_string(),
@@ -763,7 +796,8 @@ impl MethodHandler for PromptHandler {
                             None
                         } else {
                             let registry = skill_registry.read();
-                            let name_refs: Vec<&str> = all_names.iter().map(String::as_str).collect();
+                            let name_refs: Vec<&str> =
+                                all_names.iter().map(String::as_str).collect();
                             let (found, _not_found) = registry.get_many(&name_refs);
                             if found.is_empty() {
                                 None
@@ -772,10 +806,16 @@ impl MethodHandler for PromptHandler {
                                 let existing = event_store
                                     .get_events_by_type(&session_id_clone, &["skill.added"], None)
                                     .unwrap_or_default();
-                                let existing_names: std::collections::HashSet<String> = existing.iter()
+                                let existing_names: std::collections::HashSet<String> = existing
+                                    .iter()
                                     .filter_map(|e| {
-                                        serde_json::from_str::<serde_json::Value>(&e.payload).ok()
-                                            .and_then(|p| p.get("skillName").and_then(|n| n.as_str()).map(String::from))
+                                        serde_json::from_str::<serde_json::Value>(&e.payload)
+                                            .ok()
+                                            .and_then(|p| {
+                                                p.get("skillName")
+                                                    .and_then(|n| n.as_str())
+                                                    .map(String::from)
+                                            })
                                     })
                                     .collect();
                                 for skill in &found {
@@ -804,28 +844,24 @@ impl MethodHandler for PromptHandler {
                     ..Default::default()
                 };
 
-                let result = run_agent(
-                    &mut agent,
-                    &prompt,
-                    run_context,
-                    &hooks,
-                    &broadcast,
-                )
-                .await;
+                let result = run_agent(&mut agent, &prompt, run_context, &hooks, &broadcast).await;
 
                 // 8. Flush persister to ensure all inline-persisted events are written
                 let _ = persister.flush().await;
 
                 // 8a. Persist notification.interrupted if the run was interrupted
                 if result.interrupted {
-                    if let Err(e) = persister.append(
-                        &session_id_clone,
-                        tron_events::EventType::NotificationInterrupted,
-                        serde_json::json!({
-                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                            "turn": result.turns_executed,
-                        }),
-                    ).await {
+                    if let Err(e) = persister
+                        .append(
+                            &session_id_clone,
+                            tron_events::EventType::NotificationInterrupted,
+                            serde_json::json!({
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                "turn": result.turns_executed,
+                            }),
+                        )
+                        .await
+                    {
                         tracing::error!(session_id = %session_id_clone, error = %e,
                             "failed to persist notification.interrupted");
                     }
@@ -935,9 +971,7 @@ impl MethodHandler for PromptHandler {
                         cost: updated_session.total_cost,
                         last_activity: updated_session.last_activity_at.clone(),
                         is_active: false,
-                        last_user_prompt: preview
-                            .as_ref()
-                            .and_then(|p| p.last_user_prompt.clone()),
+                        last_user_prompt: preview.as_ref().and_then(|p| p.last_user_prompt.clone()),
                         last_assistant_response: preview
                             .as_ref()
                             .and_then(|p| p.last_assistant_response.clone()),
@@ -996,19 +1030,26 @@ impl MethodHandler for GetAgentStateHandler {
         let run_id = ctx.orchestrator.get_run_id(&session_id);
 
         // Try to get session metadata for model/turn/message info
-        let (model, current_turn, message_count, total_input, total_output, cache_read, cache_creation) =
-            if let Ok(Some(session)) = ctx.session_manager.get_session(&session_id) {
-                let model = session.latest_model.clone();
-                let input = session.total_input_tokens;
-                let output = session.total_output_tokens;
-                let turn = session.turn_count;
-                let msg = session.message_count;
-                let cr = session.total_cache_read_tokens;
-                let cc = session.total_cache_creation_tokens;
-                (model, turn, msg, input, output, cr, cc)
-            } else {
-                (String::new(), 0, 0, 0, 0, 0, 0)
-            };
+        let (
+            model,
+            current_turn,
+            message_count,
+            total_input,
+            total_output,
+            cache_read,
+            cache_creation,
+        ) = if let Ok(Some(session)) = ctx.session_manager.get_session(&session_id) {
+            let model = session.latest_model.clone();
+            let input = session.total_input_tokens;
+            let output = session.total_output_tokens;
+            let turn = session.turn_count;
+            let msg = session.message_count;
+            let cr = session.total_cache_read_tokens;
+            let cc = session.total_cache_creation_tokens;
+            (model, turn, msg, input, output, cr, cc)
+        } else {
+            (String::new(), 0, 0, 0, 0, 0, 0)
+        };
 
         // Get tool names from the tool factory (if configured)
         let tool_names: Vec<String> = ctx
@@ -1053,11 +1094,11 @@ impl MethodHandler for GetAgentStateHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::rpc::context::AgentDeps;
-    use crate::rpc::handlers::test_helpers::{make_test_context, FixedProviderFactory};
+    use crate::rpc::handlers::test_helpers::{FixedProviderFactory, make_test_context};
     use futures::stream;
     use serde_json::json;
+    use std::sync::Arc;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::TokenUsage;
@@ -1945,14 +1986,20 @@ mod tests {
         struct ErrorProvider;
         #[async_trait]
         impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _c: &tron_core::messages::Context,
                 _o: &ProviderStreamOptions,
             ) -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth { message: "authentication_error: invalid key".into() })
+                Err(ProviderError::Auth {
+                    message: "authentication_error: invalid key".into(),
+                })
             }
         }
 
@@ -1964,7 +2011,10 @@ mod tests {
             hooks: None,
         });
 
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
         let mut rx = ctx.orchestrator.subscribe();
 
         let _ = PromptHandler
@@ -2001,8 +2051,12 @@ mod tests {
         struct RateLimitProvider;
         #[async_trait]
         impl Provider for RateLimitProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _c: &tron_core::messages::Context,
@@ -2023,7 +2077,10 @@ mod tests {
             hooks: None,
         });
 
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
         let mut rx = ctx.orchestrator.subscribe();
 
         let _ = PromptHandler
@@ -2048,13 +2105,19 @@ mod tests {
                 found_error = true;
             }
         }
-        assert!(found_error, "expected TronEvent::Error with rate_limit category");
+        assert!(
+            found_error,
+            "expected TronEvent::Error with rate_limit category"
+        );
     }
 
     #[tokio::test]
     async fn prompt_success_no_agent_error() {
         let ctx = make_text_context("Hello!");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
         let mut rx = ctx.orchestrator.subscribe();
 
         let _ = PromptHandler
@@ -2281,7 +2344,10 @@ mod tests {
             .unwrap();
 
         let result = PromptHandler
-            .handle(Some(json!({"sessionId": sid, "prompt": "first message"})), &ctx)
+            .handle(
+                Some(json!({"sessionId": sid, "prompt": "first message"})),
+                &ctx,
+            )
             .await
             .unwrap();
         assert_eq!(result["acknowledged"], true);
@@ -2330,7 +2396,10 @@ mod tests {
     async fn prompt_with_registered_skill_loads_content() {
         let ctx = make_text_context("Done.");
         register_test_skill(&ctx, "web-search", "Search the web using Bing API.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2348,7 +2417,10 @@ mod tests {
     #[tokio::test]
     async fn prompt_with_unknown_skill_still_works() {
         let ctx = make_text_context("Done.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2367,7 +2439,10 @@ mod tests {
     async fn prompt_with_spells_runs_successfully() {
         let ctx = make_text_context("Done.");
         register_test_skill(&ctx, "auto-commit", "Auto commit changes.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2387,7 +2462,10 @@ mod tests {
         let ctx = make_text_context("Done.");
         register_test_skill(&ctx, "web-search", "Search the web.");
         register_test_skill(&ctx, "auto-commit", "Auto commit.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2411,7 +2489,10 @@ mod tests {
     async fn prompt_with_duplicate_skill_and_spell_deduplicates() {
         let ctx = make_text_context("Done.");
         register_test_skill(&ctx, "web-search", "Search the web.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2436,7 +2517,10 @@ mod tests {
     #[tokio::test]
     async fn prompt_with_pdf_attachment_runs_successfully() {
         let ctx = make_text_context("Received your PDF.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2462,7 +2546,10 @@ mod tests {
     #[tokio::test]
     async fn prompt_with_image_attachment_uses_image_block() {
         let ctx = make_text_context("Nice image.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2487,7 +2574,10 @@ mod tests {
     #[tokio::test]
     async fn prompt_with_text_attachment_uses_document_block() {
         let ctx = make_text_context("Read your text.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2513,7 +2603,10 @@ mod tests {
     #[tokio::test]
     async fn prompt_with_mixed_images_and_attachments() {
         let ctx = make_text_context("Got both.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2536,7 +2629,10 @@ mod tests {
     #[tokio::test]
     async fn prompt_attachment_without_data_skipped() {
         let ctx = make_text_context("No attachment data.");
-        let sid = ctx.session_manager.create_session("mock", "/tmp", None).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
 
         let result = PromptHandler
             .handle(
@@ -2642,7 +2738,11 @@ mod tests {
 
         let (types, _calls) = super::gather_recent_events(&ctx.event_store, &sid);
         // session.created + message.user + message.assistant = 3
-        assert!(types.len() >= 2, "expected at least 2 events, got {}", types.len());
+        assert!(
+            types.len() >= 2,
+            "expected at least 2 events, got {}",
+            types.len()
+        );
         assert!(types.contains(&"message.user".to_string()));
         assert!(types.contains(&"message.assistant".to_string()));
     }
@@ -2705,7 +2805,10 @@ mod tests {
             .event_store
             .get_events_by_type(&sid, &["message.assistant"], None)
             .unwrap();
-        assert!(!events.is_empty(), "expected at least one message.assistant event");
+        assert!(
+            !events.is_empty(),
+            "expected at least one message.assistant event"
+        );
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
         assert!(
             payload["tokenRecord"]["source"]["rawInputTokens"].is_number(),
@@ -2745,7 +2848,11 @@ mod tests {
             .event_store
             .get_events_by_type(&sid, &["notification.interrupted"], None)
             .unwrap();
-        assert_eq!(events.len(), 1, "expected one notification.interrupted event");
+        assert_eq!(
+            events.len(),
+            1,
+            "expected one notification.interrupted event"
+        );
 
         let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
         assert!(payload.get("timestamp").is_some());
@@ -2816,8 +2923,7 @@ mod tests {
     // ── get_pending_subagent_results tests ──
 
     fn make_event_store() -> Arc<tron_events::EventStore> {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
@@ -2828,7 +2934,11 @@ mod tests {
     #[test]
     fn get_pending_no_notifications_returns_empty() {
         let store = make_event_store();
-        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+        let sid = store
+            .create_session("mock", "/tmp", None)
+            .unwrap()
+            .session
+            .id;
 
         let results = get_pending_subagent_results(&store, &sid);
         assert!(results.is_empty());
@@ -2837,7 +2947,11 @@ mod tests {
     #[test]
     fn get_pending_with_notification_returns_it() {
         let store = make_event_store();
-        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+        let sid = store
+            .create_session("mock", "/tmp", None)
+            .unwrap()
+            .session
+            .id;
 
         let _ = store
             .append(&tron_events::AppendOptions {
@@ -2867,7 +2981,11 @@ mod tests {
     #[test]
     fn get_pending_skips_consumed() {
         let store = make_event_store();
-        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+        let sid = store
+            .create_session("mock", "/tmp", None)
+            .unwrap()
+            .session
+            .id;
 
         let notification = store
             .append(&tron_events::AppendOptions {
@@ -2909,7 +3027,11 @@ mod tests {
     #[test]
     fn get_pending_partial_consumed() {
         let store = make_event_store();
-        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+        let sid = store
+            .create_session("mock", "/tmp", None)
+            .unwrap()
+            .session
+            .id;
 
         let n1 = store
             .append(&tron_events::AppendOptions {
@@ -2970,7 +3092,11 @@ mod tests {
     #[test]
     fn get_pending_multiple_consumption_events() {
         let store = make_event_store();
-        let sid = store.create_session("mock", "/tmp", None).unwrap().session.id;
+        let sid = store
+            .create_session("mock", "/tmp", None)
+            .unwrap()
+            .session
+            .id;
 
         // Three notifications
         let n1 = store

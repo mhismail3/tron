@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tokio::sync::{broadcast, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
 use tokio_util::sync::CancellationToken;
 use tron_core::events::TronEvent;
 
@@ -251,7 +251,8 @@ mod tests {
         let orch = make_orchestrator();
         let mut rx = orch.subscribe();
 
-        let _ = orch.broadcast()
+        let _ = orch
+            .broadcast()
             .emit(tron_core::events::agent_start_event("s1"));
 
         let event = rx.try_recv().unwrap();
@@ -399,7 +400,9 @@ mod tests {
 
         // Fill to capacity
         for i in 0..10 {
-            let _t = orch.start_run(&format!("s{i}"), &format!("run_{i}")).unwrap();
+            let _t = orch
+                .start_run(&format!("s{i}"), &format!("run_{i}"))
+                .unwrap();
         }
         assert_eq!(orch.active_run_count(), 10);
 
@@ -414,7 +417,9 @@ mod tests {
 
         // Fill to capacity
         for i in 0..10 {
-            let _t = orch.start_run(&format!("s{i}"), &format!("run_{i}")).unwrap();
+            let _t = orch
+                .start_run(&format!("s{i}"), &format!("run_{i}"))
+                .unwrap();
         }
 
         // At capacity — can't start another

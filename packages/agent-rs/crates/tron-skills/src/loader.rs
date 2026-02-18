@@ -118,9 +118,7 @@ fn load_skill(
     if size > MAX_SKILL_FILE_SIZE {
         return Err(SkillScanError {
             path: path_str,
-            message: format!(
-                "File too large: {size} bytes (max {MAX_SKILL_FILE_SIZE} bytes)"
-            ),
+            message: format!("File too large: {size} bytes (max {MAX_SKILL_FILE_SIZE} bytes)"),
             recoverable: true,
         });
     }
@@ -288,7 +286,11 @@ mod tests {
         let skill = &result.skills[0];
         assert!(skill.additional_files.contains(&"helper.sh".to_string()));
         assert!(skill.additional_files.contains(&"config.json".to_string()));
-        assert!(!skill.additional_files.contains(&SKILL_MD_FILENAME.to_string()));
+        assert!(
+            !skill
+                .additional_files
+                .contains(&SKILL_MD_FILENAME.to_string())
+        );
     }
 
     #[test]

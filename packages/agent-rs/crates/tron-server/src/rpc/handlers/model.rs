@@ -197,7 +197,6 @@ fn known_models() -> Vec<Value> {
             "isLegacy": true,
             "releaseDate": "2024-03-07",
         }),
-
         // ── OpenAI Codex Models ──
         serde_json::json!({
             "id": "gpt-5.3-codex",
@@ -294,7 +293,6 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": false,
         }),
-
         // ── Google Gemini Models ──
         // Pricing: TS uses inputCostPer1k, we multiply by 1000 for per-million
         serde_json::json!({
@@ -442,7 +440,8 @@ impl MethodHandler for SwitchModelHandler {
             });
         }
 
-        let _ = ctx.event_store
+        let _ = ctx
+            .event_store
             .update_latest_model(&session_id, &model)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
@@ -464,8 +463,10 @@ impl MethodHandler for SwitchModelHandler {
 
         // Emit session.updated event via broadcast
         let is_active = ctx.session_manager.is_active(&session_id);
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::SessionUpdated {
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(tron_core::events::TronEvent::SessionUpdated {
                 base: tron_core::events::BaseEvent::now(&session_id),
                 title: session.title.clone(),
                 model: model.clone(),
@@ -481,8 +482,7 @@ impl MethodHandler for SwitchModelHandler {
                 last_user_prompt: None,
                 last_assistant_response: None,
                 parent_session_id: session.parent_session_id.clone(),
-            },
-        );
+            });
 
         Ok(serde_json::json!({
             "previousModel": previous_model,
@@ -513,14 +513,29 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-6"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-6"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-5-20251101"));
-        assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-5-20250929"));
-        assert!(models.iter().any(|m| m["id"] == "claude-haiku-4-5-20251001"));
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "claude-sonnet-4-5-20250929")
+        );
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "claude-haiku-4-5-20251001")
+        );
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-1-20250805"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-20250514"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-20250514"));
-        assert!(models.iter().any(|m| m["id"] == "claude-3-7-sonnet-20250219"));
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "claude-3-7-sonnet-20250219")
+        );
         assert!(models.iter().any(|m| m["id"] == "claude-3-haiku-20240307"));
-        let anthropic_count = models.iter().filter(|m| m["provider"] == "anthropic").count();
+        let anthropic_count = models
+            .iter()
+            .filter(|m| m["provider"] == "anthropic")
+            .count();
         assert_eq!(anthropic_count, 10);
     }
 
@@ -534,7 +549,10 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.1-codex-max"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.1-codex-mini"));
-        let openai_count = models.iter().filter(|m| m["provider"] == "openai-codex").count();
+        let openai_count = models
+            .iter()
+            .filter(|m| m["provider"] == "openai-codex")
+            .count();
         assert_eq!(openai_count, 5);
     }
 
@@ -592,7 +610,10 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
-        let opus = models.iter().find(|m| m["id"] == "claude-opus-4-6").unwrap();
+        let opus = models
+            .iter()
+            .find(|m| m["id"] == "claude-opus-4-6")
+            .unwrap();
         assert_eq!(opus["tier"], "opus");
         assert_eq!(opus["family"], "Claude 4.6");
         assert!(opus["description"].is_string());
@@ -607,7 +628,10 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
-        let opus = models.iter().find(|m| m["id"] == "claude-opus-4-6").unwrap();
+        let opus = models
+            .iter()
+            .find(|m| m["id"] == "claude-opus-4-6")
+            .unwrap();
         assert_eq!(opus["supportsReasoning"], true);
         assert!(opus["reasoningLevels"].is_array());
         assert!(opus["defaultReasoningLevel"].is_string());

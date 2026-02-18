@@ -31,7 +31,10 @@ const USER_HOOK_DIR: &str = ".config/tron/hooks";
 pub fn discover_hooks(config: &DiscoveryConfig) -> Vec<DiscoveredHook> {
     let mut discovered = Vec::new();
     let extensions = if config.extensions.is_empty() {
-        DEFAULT_EXTENSIONS.iter().map(|s| (*s).to_string()).collect()
+        DEFAULT_EXTENSIONS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
     } else {
         config.extensions.clone()
     };
@@ -98,7 +101,9 @@ fn scan_directory(
         };
 
         // Check extension
-        let has_valid_ext = extensions.iter().any(|ext| filename.ends_with(ext.as_str()));
+        let has_valid_ext = extensions
+            .iter()
+            .any(|ext| filename.ends_with(ext.as_str()));
         if !has_valid_ext {
             continue;
         }
@@ -121,14 +126,8 @@ fn scan_directory(
 /// Supports formats:
 /// - `pre-tool-use.sh` → type=PreToolUse, priority=None
 /// - `100-pre-tool-use.sh` → type=PreToolUse, priority=Some(100)
-fn parse_hook_filename(
-    filename: &str,
-    path: &Path,
-    source: HookSource,
-) -> Option<DiscoveredHook> {
-    let stem = Path::new(filename)
-        .file_stem()?
-        .to_str()?;
+fn parse_hook_filename(filename: &str, path: &Path, source: HookSource) -> Option<DiscoveredHook> {
+    let stem = Path::new(filename).file_stem()?.to_str()?;
 
     let is_shell = std::path::Path::new(filename)
         .extension()
@@ -269,8 +268,7 @@ mod tests {
     #[test]
     fn test_parse_filename_with_priority() {
         let path = PathBuf::from("/hooks/100-session-start.sh");
-        let hook =
-            parse_hook_filename("100-session-start.sh", &path, HookSource::User).unwrap();
+        let hook = parse_hook_filename("100-session-start.sh", &path, HookSource::User).unwrap();
         assert_eq!(hook.hook_type, HookType::SessionStart);
         assert_eq!(hook.priority, Some(100));
         assert_eq!(hook.name, "user:session-start");
@@ -279,8 +277,7 @@ mod tests {
     #[test]
     fn test_parse_js_filename() {
         let path = PathBuf::from("/hooks/post-tool-use.js");
-        let hook =
-            parse_hook_filename("post-tool-use.js", &path, HookSource::Custom).unwrap();
+        let hook = parse_hook_filename("post-tool-use.js", &path, HookSource::Custom).unwrap();
         assert_eq!(hook.hook_type, HookType::PostToolUse);
         assert!(!hook.is_shell_script);
     }

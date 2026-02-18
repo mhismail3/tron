@@ -114,7 +114,12 @@ mod tests {
 
     #[test]
     fn model_dir_structure() {
-        let expected = ["nemo128.onnx", "encoder-model.onnx", "decoder_joint-model.onnx", "vocab.txt"];
+        let expected = [
+            "nemo128.onnx",
+            "encoder-model.onnx",
+            "decoder_joint-model.onnx",
+            "vocab.txt",
+        ];
         let files = model_files(PathBuf::from("/tmp/test"));
         for name in &expected {
             assert!(files.contains_key(*name), "Missing model file: {name}");

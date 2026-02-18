@@ -57,8 +57,7 @@ pub const SUMMARIZER_SUBAGENT_TIMEOUT_MS: u64 = 30_000;
 // =============================================================================
 
 /// Prefix for the compacted summary user message.
-pub const COMPACTION_SUMMARY_PREFIX: &str =
-    "[Context from earlier in this conversation]";
+pub const COMPACTION_SUMMARY_PREFIX: &str = "[Context from earlier in this conversation]";
 
 /// Assistant acknowledgment text after compaction.
 pub const COMPACTION_ACK_TEXT: &str =

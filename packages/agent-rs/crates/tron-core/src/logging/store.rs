@@ -194,13 +194,21 @@ mod tests {
         conn
     }
 
-    fn insert_log(conn: &Connection, level: &str, level_num: i32, component: &str, msg: &str, session_id: Option<&str>) {
-        let _ = conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, session_id) \
+    fn insert_log(
+        conn: &Connection,
+        level: &str,
+        level_num: i32,
+        component: &str,
+        msg: &str,
+        session_id: Option<&str>,
+    ) {
+        let _ = conn
+            .execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, session_id) \
              VALUES (datetime('now'), ?, ?, ?, ?, ?)",
-            rusqlite::params![level, level_num, component, msg, session_id],
-        )
-        .unwrap();
+                rusqlite::params![level, level_num, component, msg, session_id],
+            )
+            .unwrap();
     }
 
     #[test]
@@ -224,7 +232,10 @@ mod tests {
         let store = LogStore::new(&conn);
         let logs = store.get_session_logs("sess_1");
         assert_eq!(logs.len(), 2);
-        assert!(logs.iter().all(|l| l.session_id.as_deref() == Some("sess_1")));
+        assert!(
+            logs.iter()
+                .all(|l| l.session_id.as_deref() == Some("sess_1"))
+        );
     }
 
     #[test]
@@ -281,18 +292,20 @@ mod tests {
     #[test]
     fn prune_old_logs() {
         let conn = create_test_db();
-        let _ = conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message) \
+        let _ = conn
+            .execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message) \
              VALUES ('2024-01-01T00:00:00Z', 'info', 30, 'a', 'old')",
-            [],
-        )
-        .unwrap();
-        let _ = conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message) \
+                [],
+            )
+            .unwrap();
+        let _ = conn
+            .execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message) \
              VALUES ('2025-01-01T00:00:00Z', 'info', 30, 'a', 'new')",
-            [],
-        )
-        .unwrap();
+                [],
+            )
+            .unwrap();
 
         let store = LogStore::new(&conn);
         let deleted = store.prune_old_logs("2024-06-01T00:00:00Z");
@@ -306,24 +319,26 @@ mod tests {
     #[test]
     fn trace_tree_query() {
         let conn = create_test_db();
-        let _ = conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id) \
+        let _ = conn
+            .execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id) \
              VALUES ('2024-01-01T00:00:00Z', 'info', 30, 'a', 'root', 'trace_1')",
-            [],
-        )
-        .unwrap();
+                [],
+            )
+            .unwrap();
         let _ = conn.execute(
             "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id, parent_trace_id) \
              VALUES ('2024-01-01T00:00:01Z', 'info', 30, 'b', 'child', 'trace_2', 'trace_1')",
             [],
         )
         .unwrap();
-        let _ = conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id) \
+        let _ = conn
+            .execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id) \
              VALUES ('2024-01-01T00:00:02Z', 'info', 30, 'c', 'unrelated', 'trace_3')",
-            [],
-        )
-        .unwrap();
+                [],
+            )
+            .unwrap();
 
         let store = LogStore::new(&conn);
         let tree = store.get_trace_tree("trace_1");

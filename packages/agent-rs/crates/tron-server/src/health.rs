@@ -17,11 +17,7 @@ pub struct HealthResponse {
 }
 
 /// Build a health response from live counters.
-pub fn health_check(
-    start_time: Instant,
-    connections: usize,
-    sessions: usize,
-) -> HealthResponse {
+pub fn health_check(start_time: Instant, connections: usize, sessions: usize) -> HealthResponse {
     HealthResponse {
         status: "ok".into(),
         uptime_secs: start_time.elapsed().as_secs(),

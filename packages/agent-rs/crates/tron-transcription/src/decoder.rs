@@ -159,8 +159,10 @@ pub fn run_encoder(
 ) -> Result<(Array2<f32>, i64), TranscriptionError> {
     let shape = features.shape();
     let flat: Vec<f32> = features.iter().copied().collect();
-    let audio_signal = Tensor::from_array(([shape[0] as i64, shape[1] as i64, shape[2] as i64], flat))
-        .map_err(|e| TranscriptionError::Inference(format!("encoder audio_signal tensor: {e}")))?;
+    let audio_signal =
+        Tensor::from_array(([shape[0] as i64, shape[1] as i64, shape[2] as i64], flat)).map_err(
+            |e| TranscriptionError::Inference(format!("encoder audio_signal tensor: {e}")),
+        )?;
     let length = Tensor::from_array(([1i64], vec![features_len]))
         .map_err(|e| TranscriptionError::Inference(format!("encoder length tensor: {e}")))?;
 
@@ -223,8 +225,15 @@ pub fn run_preprocessor(
     let feat_len = feat_len_data[0];
 
     // Clone into Array3 [1, 128, T]
-    let out = Array3::from_shape_vec((feat_shape[0] as usize, feat_shape[1] as usize, feat_shape[2] as usize), feat_data.to_vec())
-        .map_err(|e| TranscriptionError::Inference(format!("reshape features: {e}")))?;
+    let out = Array3::from_shape_vec(
+        (
+            feat_shape[0] as usize,
+            feat_shape[1] as usize,
+            feat_shape[2] as usize,
+        ),
+        feat_data.to_vec(),
+    )
+    .map_err(|e| TranscriptionError::Inference(format!("reshape features: {e}")))?;
 
     Ok((out, feat_len))
 }

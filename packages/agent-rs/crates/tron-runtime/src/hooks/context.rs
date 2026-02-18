@@ -31,11 +31,7 @@ pub trait HookContextFactory: Send + Sync {
     ) -> HookContext;
 
     /// Create a [`HookContext::Stop`] context.
-    fn create_stop_context(
-        &self,
-        stop_reason: &str,
-        final_message: Option<&str>,
-    ) -> HookContext;
+    fn create_stop_context(&self, stop_reason: &str, final_message: Option<&str>) -> HookContext;
 
     /// Create a [`HookContext::SessionStart`] context.
     fn create_session_start_context(
@@ -45,11 +41,7 @@ pub trait HookContextFactory: Send + Sync {
     ) -> HookContext;
 
     /// Create a [`HookContext::SessionEnd`] context.
-    fn create_session_end_context(
-        &self,
-        message_count: u64,
-        tool_call_count: u64,
-    ) -> HookContext;
+    fn create_session_end_context(&self, message_count: u64, tool_call_count: u64) -> HookContext;
 
     /// Create a [`HookContext::UserPromptSubmit`] context.
     fn create_user_prompt_submit_context(&self, prompt: &str) -> HookContext;
@@ -63,11 +55,7 @@ pub trait HookContextFactory: Send + Sync {
     ) -> HookContext;
 
     /// Create a [`HookContext::PreCompact`] context.
-    fn create_pre_compact_context(
-        &self,
-        current_tokens: u64,
-        target_tokens: u64,
-    ) -> HookContext;
+    fn create_pre_compact_context(&self, current_tokens: u64, target_tokens: u64) -> HookContext;
 
     /// Create a [`HookContext::Notification`] context.
     fn create_notification_context(
@@ -133,11 +121,7 @@ impl HookContextFactory for DefaultContextFactory {
         }
     }
 
-    fn create_stop_context(
-        &self,
-        stop_reason: &str,
-        final_message: Option<&str>,
-    ) -> HookContext {
+    fn create_stop_context(&self, stop_reason: &str, final_message: Option<&str>) -> HookContext {
         HookContext::Stop {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
@@ -159,11 +143,7 @@ impl HookContextFactory for DefaultContextFactory {
         }
     }
 
-    fn create_session_end_context(
-        &self,
-        message_count: u64,
-        tool_call_count: u64,
-    ) -> HookContext {
+    fn create_session_end_context(&self, message_count: u64, tool_call_count: u64) -> HookContext {
         HookContext::SessionEnd {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
@@ -195,11 +175,7 @@ impl HookContextFactory for DefaultContextFactory {
         }
     }
 
-    fn create_pre_compact_context(
-        &self,
-        current_tokens: u64,
-        target_tokens: u64,
-    ) -> HookContext {
+    fn create_pre_compact_context(&self, current_tokens: u64, target_tokens: u64) -> HookContext {
         HookContext::PreCompact {
             session_id: self.session_id.clone(),
             timestamp: Self::now(),
@@ -236,11 +212,8 @@ mod tests {
     #[test]
     fn test_pre_tool_context() {
         let factory = make_factory();
-        let ctx = factory.create_pre_tool_context(
-            "Bash",
-            serde_json::json!({"command": "ls"}),
-            "tc-1",
-        );
+        let ctx =
+            factory.create_pre_tool_context("Bash", serde_json::json!({"command": "ls"}), "tc-1");
         assert_eq!(ctx.hook_type(), HookType::PreToolUse);
         assert_eq!(ctx.session_id(), "session-123");
         assert!(!ctx.timestamp().is_empty());

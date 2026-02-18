@@ -18,11 +18,11 @@
 
 use regex::Regex;
 
+use super::rules::GuardrailRule;
+use super::rules::RuleBase;
 use super::rules::path::PathRule;
 use super::rules::pattern::PatternRule;
 use super::rules::resource::ResourceRule;
-use super::rules::GuardrailRule;
-use super::rules::RuleBase;
 use super::types::{RuleTier, Scope, Severity};
 
 /// IDs of all core rules (cannot be disabled).
@@ -330,7 +330,8 @@ mod tests {
         for rule in &rules {
             if rule.base().tier == RuleTier::Core {
                 assert_eq!(
-                    rule.base().priority, 1000,
+                    rule.base().priority,
+                    1000,
                     "Core rule {} should have priority 1000",
                     rule.base().id
                 );

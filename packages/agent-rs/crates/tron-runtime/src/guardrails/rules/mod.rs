@@ -10,7 +10,9 @@ pub mod path;
 pub mod pattern;
 pub mod resource;
 
-use crate::guardrails::types::{EvaluationContext, RuleEvaluationResult, RuleTier, Scope, Severity};
+use crate::guardrails::types::{
+    EvaluationContext, RuleEvaluationResult, RuleTier, Scope, Severity,
+};
 
 /// Common base fields shared by all rule types.
 #[derive(Debug, Clone)]

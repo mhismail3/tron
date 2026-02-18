@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
+use crate::context::types::CompactionConfig;
 use serde::{Deserialize, Serialize};
 use tron_core::messages::TokenUsage;
-use crate::context::types::CompactionConfig;
 use tron_llm::ProviderHealthTracker;
 
 use crate::errors::StopReason;
@@ -565,7 +565,10 @@ mod tests {
     fn reasoning_level_as_openai_reasoning_effort() {
         assert_eq!(ReasoningLevel::None.as_openai_reasoning_effort(), "low");
         assert_eq!(ReasoningLevel::Low.as_openai_reasoning_effort(), "low");
-        assert_eq!(ReasoningLevel::Medium.as_openai_reasoning_effort(), "medium");
+        assert_eq!(
+            ReasoningLevel::Medium.as_openai_reasoning_effort(),
+            "medium"
+        );
         assert_eq!(ReasoningLevel::High.as_openai_reasoning_effort(), "high");
         // XHigh and Max clamp to high for OpenAI
         assert_eq!(ReasoningLevel::XHigh.as_openai_reasoning_effort(), "high");

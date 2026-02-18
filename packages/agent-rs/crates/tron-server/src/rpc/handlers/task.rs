@@ -19,9 +19,7 @@ fn get_u32_param(params: Option<&Value>, key: &str, default: u32) -> u32 {
         .unwrap_or(default)
 }
 
-fn get_task_conn(
-    ctx: &RpcContext,
-) -> Result<tron_events::PooledConnection, RpcError> {
+fn get_task_conn(ctx: &RpcContext) -> Result<tron_events::PooledConnection, RpcError> {
     ctx.task_pool
         .as_ref()
         .ok_or_else(|| RpcError::NotAvailable {
@@ -112,7 +110,11 @@ impl MethodHandler for UpdateTaskHandler {
 
         let mut updates = tron_runtime::tasks::TaskUpdateParams::default();
 
-        if let Some(title) = params.as_ref().and_then(|p| p.get("title")).and_then(Value::as_str) {
+        if let Some(title) = params
+            .as_ref()
+            .and_then(|p| p.get("title"))
+            .and_then(Value::as_str)
+        {
             updates.title = Some(title.to_string());
         }
         if let Some(status_str) = params
@@ -151,7 +153,8 @@ impl MethodHandler for ListTasksHandler {
             .and_then(|p| p.get("status"))
             .and_then(Value::as_str)
             .and_then(|s| {
-                serde_json::from_value::<tron_runtime::tasks::TaskStatus>(Value::String(s.into())).ok()
+                serde_json::from_value::<tron_runtime::tasks::TaskStatus>(Value::String(s.into()))
+                    .ok()
             });
 
         let project_id = params
@@ -308,11 +311,9 @@ impl MethodHandler for GetProjectHandler {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let conn = get_task_conn(ctx)?;
 
-        let project =
-            tron_runtime::tasks::TaskRepository::get_project(&conn, &project_id).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
+        let project = tron_runtime::tasks::TaskRepository::get_project(&conn, &project_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
             })?;
 
         match project {
@@ -351,8 +352,9 @@ impl MethodHandler for UpdateProjectHandler {
             updates.description = Some(desc.to_string());
         }
 
-        let project = tron_runtime::tasks::TaskService::update_project(&conn, &project_id, &updates)
-            .map_err(|e| task_error_to_rpc(&e, "Project", &project_id))?;
+        let project =
+            tron_runtime::tasks::TaskService::update_project(&conn, &project_id, &updates)
+                .map_err(|e| task_error_to_rpc(&e, "Project", &project_id))?;
 
         Ok(serde_json::to_value(&project).unwrap_or_default())
     }
@@ -387,11 +389,9 @@ impl MethodHandler for GetProjectDetailsHandler {
         let project_id = require_string_param(params.as_ref(), "projectId")?;
         let conn = get_task_conn(ctx)?;
 
-        let project =
-            tron_runtime::tasks::TaskRepository::get_project(&conn, &project_id).map_err(|e| {
-                RpcError::Internal {
-                    message: e.to_string(),
-                }
+        let project = tron_runtime::tasks::TaskRepository::get_project(&conn, &project_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
             })?;
 
         let project = project.ok_or_else(|| RpcError::NotFound {
@@ -546,9 +546,11 @@ impl MethodHandler for DeleteAreaHandler {
         let area_id = require_string_param(params.as_ref(), "areaId")?;
         let conn = get_task_conn(ctx)?;
 
-        let deleted = tron_runtime::tasks::TaskRepository::delete_area(&conn, &area_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
+        let deleted =
+            tron_runtime::tasks::TaskRepository::delete_area(&conn, &area_id).map_err(|e| {
+                RpcError::Internal {
+                    message: e.to_string(),
+                }
             })?;
 
         Ok(serde_json::json!({ "deleted": deleted }))
@@ -761,17 +763,11 @@ mod tests {
 
         // Create tasks under the project
         let _ = CreateTaskHandler
-            .handle(
-                Some(json!({"title": "t1", "projectId": pid})),
-                &ctx,
-            )
+            .handle(Some(json!({"title": "t1", "projectId": pid})), &ctx)
             .await
             .unwrap();
         let _ = CreateTaskHandler
-            .handle(
-                Some(json!({"title": "t2", "projectId": pid})),
-                &ctx,
-            )
+            .handle(Some(json!({"title": "t2", "projectId": pid})), &ctx)
             .await
             .unwrap();
 

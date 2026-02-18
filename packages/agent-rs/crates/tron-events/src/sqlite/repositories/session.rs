@@ -3,7 +3,7 @@
 //! Sessions are pointers into the event tree with denormalized counters
 //! (event count, token usage, cost) for efficient queries.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::errors::Result;
@@ -113,9 +113,10 @@ impl SessionRepo {
     pub fn create(conn: &Connection, opts: &CreateSessionOptions<'_>) -> Result<SessionRow> {
         let id = format!("sess_{}", Uuid::now_v7());
         let now = chrono::Utc::now().to_rfc3339();
-        let tags_json = opts
-            .tags
-            .map_or_else(|| "[]".to_string(), |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()));
+        let tags_json = opts.tags.map_or_else(
+            || "[]".to_string(),
+            |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()),
+        );
 
         let _ = conn.execute(
             "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory,
@@ -257,11 +258,7 @@ impl SessionRepo {
     }
 
     /// Update the latest model used.
-    pub fn update_latest_model(
-        conn: &Connection,
-        session_id: &str,
-        model: &str,
-    ) -> Result<bool> {
+    pub fn update_latest_model(conn: &Connection, session_id: &str, model: &str) -> Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
         let changed = conn.execute(
             "UPDATE sessions SET latest_model = ?1, last_activity_at = ?2 WHERE id = ?3",
@@ -326,10 +323,7 @@ impl SessionRepo {
         let now = chrono::Utc::now().to_rfc3339();
         updates.push(format!("last_activity_at = '{now}'"));
 
-        let sql = format!(
-            "UPDATE sessions SET {} WHERE id = ?1",
-            updates.join(", ")
-        );
+        let sql = format!("UPDATE sessions SET {} WHERE id = ?1", updates.join(", "));
         let changed = conn.execute(&sql, params![session_id])?;
         Ok(changed > 0)
     }
@@ -346,8 +340,7 @@ impl SessionRepo {
 
     /// Delete a session.
     pub fn delete(conn: &Connection, session_id: &str) -> Result<bool> {
-        let changed =
-            conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
+        let changed = conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
         Ok(changed > 0)
     }
 
@@ -520,10 +513,7 @@ mod tests {
         (conn, ws.id)
     }
 
-    fn create_default_session<'a>(
-        conn: &Connection,
-        ws_id: &'a str,
-    ) -> SessionRow {
+    fn create_default_session<'a>(conn: &Connection, ws_id: &'a str) -> SessionRow {
         SessionRepo::create(
             conn,
             &CreateSessionOptions {
@@ -906,7 +896,14 @@ mod tests {
 
     // ── Message previews ─────────────────────────────────────────────
 
-    fn insert_event(conn: &Connection, session_id: &str, ws_id: &str, seq: i64, event_type: &str, payload: &str) {
+    fn insert_event(
+        conn: &Connection,
+        session_id: &str,
+        ws_id: &str,
+        seq: i64,
+        event_type: &str,
+        payload: &str,
+    ) {
         conn.execute(
             "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
              VALUES (?1, ?2, ?3, ?4, datetime('now'), ?5, ?6)",
@@ -927,14 +924,31 @@ mod tests {
         let (conn, ws_id) = setup();
         let s1 = create_default_session(&conn, &ws_id);
 
-        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "Hello world"}"#);
-        insert_event(&conn, &s1.id, &ws_id, 2, "message.assistant", r#"{"content": "Hi there!"}"#);
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            1,
+            "message.user",
+            r#"{"content": "Hello world"}"#,
+        );
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            2,
+            "message.assistant",
+            r#"{"content": "Hi there!"}"#,
+        );
 
         let ids = [s1.id.as_str()];
         let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
         let preview = previews.get(&s1.id).unwrap();
         assert_eq!(preview.last_user_prompt.as_deref(), Some("Hello world"));
-        assert_eq!(preview.last_assistant_response.as_deref(), Some("Hi there!"));
+        assert_eq!(
+            preview.last_assistant_response.as_deref(),
+            Some("Hi there!")
+        );
     }
 
     #[test]
@@ -942,7 +956,14 @@ mod tests {
         let (conn, ws_id) = setup();
         let s1 = create_default_session(&conn, &ws_id);
 
-        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "Hello"}"#);
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            1,
+            "message.user",
+            r#"{"content": "Hello"}"#,
+        );
         insert_event(
             &conn,
             &s1.id,
@@ -955,7 +976,10 @@ mod tests {
         let ids = [s1.id.as_str()];
         let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
         let preview = previews.get(&s1.id).unwrap();
-        assert_eq!(preview.last_assistant_response.as_deref(), Some("Part 1 Part 2"));
+        assert_eq!(
+            preview.last_assistant_response.as_deref(),
+            Some("Part 1 Part 2")
+        );
     }
 
     #[test]
@@ -963,8 +987,22 @@ mod tests {
         let (conn, ws_id) = setup();
         let s1 = create_default_session(&conn, &ws_id);
 
-        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "First"}"#);
-        insert_event(&conn, &s1.id, &ws_id, 2, "message.user", r#"{"content": "Second"}"#);
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            1,
+            "message.user",
+            r#"{"content": "First"}"#,
+        );
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            2,
+            "message.user",
+            r#"{"content": "Second"}"#,
+        );
 
         let ids = [s1.id.as_str()];
         let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
@@ -997,13 +1035,33 @@ mod tests {
         let s1 = create_default_session(&conn, &ws_id);
         let s2 = create_default_session(&conn, &ws_id);
 
-        insert_event(&conn, &s1.id, &ws_id, 1, "message.user", r#"{"content": "S1 user"}"#);
-        insert_event(&conn, &s2.id, &ws_id, 1, "message.user", r#"{"content": "S2 user"}"#);
+        insert_event(
+            &conn,
+            &s1.id,
+            &ws_id,
+            1,
+            "message.user",
+            r#"{"content": "S1 user"}"#,
+        );
+        insert_event(
+            &conn,
+            &s2.id,
+            &ws_id,
+            1,
+            "message.user",
+            r#"{"content": "S2 user"}"#,
+        );
 
         let ids = [s1.id.as_str(), s2.id.as_str()];
         let previews = SessionRepo::get_message_previews(&conn, &ids).unwrap();
-        assert_eq!(previews.get(&s1.id).unwrap().last_user_prompt.as_deref(), Some("S1 user"));
-        assert_eq!(previews.get(&s2.id).unwrap().last_user_prompt.as_deref(), Some("S2 user"));
+        assert_eq!(
+            previews.get(&s1.id).unwrap().last_user_prompt.as_deref(),
+            Some("S1 user")
+        );
+        assert_eq!(
+            previews.get(&s2.id).unwrap().last_user_prompt.as_deref(),
+            Some("S2 user")
+        );
     }
 
     // ── Text extraction helper ───────────────────────────────────────

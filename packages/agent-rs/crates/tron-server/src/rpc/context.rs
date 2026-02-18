@@ -5,18 +5,18 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use parking_lot::RwLock;
+use tron_embeddings::EmbeddingController;
 use tron_events::{ConnectionPool, EventStore};
+use tron_llm::ProviderHealthTracker;
+use tron_llm::provider::ProviderFactory;
 use tron_runtime::guardrails::GuardrailEngine;
 use tron_runtime::hooks::engine::HookEngine;
-use tron_llm::provider::ProviderFactory;
-use tron_llm::ProviderHealthTracker;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
-use tron_runtime::orchestrator::subagent_manager::SubagentManager;
-use tron_embeddings::EmbeddingController;
-use tron_transcription::TranscriptionEngine;
 use tron_runtime::orchestrator::session_manager::SessionManager;
+use tron_runtime::orchestrator::subagent_manager::SubagentManager;
 use tron_skills::registry::SkillRegistry;
 use tron_tools::registry::ToolRegistry;
+use tron_transcription::TranscriptionEngine;
 
 /// Dependencies needed to create and run agents.
 pub struct AgentDeps {
@@ -64,8 +64,8 @@ pub struct RpcContext {
 mod tests {
     use super::*;
     use crate::rpc::handlers::test_helpers::{
-        make_test_agent_deps, make_test_context, make_test_context_with_tasks,
-        ModelAwareMockFactory, StrictMockFactory,
+        ModelAwareMockFactory, StrictMockFactory, make_test_agent_deps, make_test_context,
+        make_test_context_with_tasks,
     };
 
     #[test]

@@ -92,7 +92,10 @@ impl Default for RulesDiscoveryConfig {
             discover_standalone_files: true,
             exclude_root_level: true,
             max_depth: DEFAULT_MAX_DEPTH,
-            exclude_dirs: DEFAULT_EXCLUDE_DIRS.iter().map(|s| (*s).to_owned()).collect(),
+            exclude_dirs: DEFAULT_EXCLUDE_DIRS
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
         }
     }
 }
@@ -160,13 +163,7 @@ fn scan_directory(
                 if is_root && exclude_root_level {
                     continue;
                 }
-                try_add_file(
-                    &entry.path(),
-                    project_root,
-                    false,
-                    results,
-                    seen_real_paths,
-                );
+                try_add_file(&entry.path(), project_root, false, results, seen_real_paths);
             }
         }
     }
@@ -187,13 +184,7 @@ fn scan_directory(
                 if is_root && exclude_root_level {
                     continue;
                 }
-                try_add_file(
-                    &entry.path(),
-                    project_root,
-                    true,
-                    results,
-                    seen_real_paths,
-                );
+                try_add_file(&entry.path(), project_root, true, results, seen_real_paths);
             }
         }
     }
@@ -266,9 +257,7 @@ fn try_add_file(
         return;
     };
 
-    let relative = file_path
-        .strip_prefix(project_root)
-        .unwrap_or(file_path);
+    let relative = file_path.strip_prefix(project_root).unwrap_or(file_path);
     // Always use forward slashes for relative paths
     let relative_path = relative
         .components()
@@ -424,10 +413,7 @@ mod tests {
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 1);
-        assert_eq!(
-            results[0].relative_path,
-            "packages/agent/.claude/CLAUDE.md"
-        );
+        assert_eq!(results[0].relative_path, "packages/agent/.claude/CLAUDE.md");
         assert_eq!(results[0].scope_dir, "packages/agent");
         assert!(!results[0].is_global);
         assert!(!results[0].is_standalone);
@@ -459,11 +445,7 @@ mod tests {
     #[test]
     fn computes_correct_scope_dir_for_nested() {
         let tmp = setup();
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            "# Foo rules",
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Foo rules");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results[0].scope_dir, "packages/foo");
@@ -521,20 +503,13 @@ mod tests {
         };
         let results = discover_rules_files(&config);
         assert_eq!(results.len(), 1);
-        assert_eq!(
-            results[0].relative_path,
-            "packages/foo/.claude/CLAUDE.md"
-        );
+        assert_eq!(results[0].relative_path, "packages/foo/.claude/CLAUDE.md");
     }
 
     #[test]
     fn discovers_both_agent_dir_and_standalone() {
         let tmp = setup();
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            "# Agent dir",
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Agent dir");
         write_file(tmp.path(), "packages/bar/AGENTS.md", "# Standalone");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
@@ -555,21 +530,14 @@ mod tests {
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 1);
-        assert_eq!(
-            results[0].relative_path,
-            "packages/foo/.claude/CLAUDE.md"
-        );
+        assert_eq!(results[0].relative_path, "packages/foo/.claude/CLAUDE.md");
     }
 
     #[test]
     fn includes_root_when_not_excluded() {
         let tmp = setup();
         write_file(tmp.path(), ".claude/CLAUDE.md", "# Root");
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            "# Nested",
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Nested");
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -609,10 +577,7 @@ mod tests {
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 1);
-        assert_eq!(
-            results[0].relative_path,
-            "packages/foo/.claude/CLAUDE.md"
-        );
+        assert_eq!(results[0].relative_path, "packages/foo/.claude/CLAUDE.md");
     }
 
     #[test]
@@ -632,7 +597,11 @@ mod tests {
     fn does_not_discover_rules_md() {
         let tmp = setup();
         write_file(tmp.path(), ".claude/RULES.md", "# Should not find");
-        write_file(tmp.path(), "packages/foo/.claude/RULES.md", "# Should not find");
+        write_file(
+            tmp.path(),
+            "packages/foo/.claude/RULES.md",
+            "# Should not find",
+        );
 
         let results = discover_rules_files(&make_config(tmp.path()));
         assert_eq!(results.len(), 0);
@@ -660,11 +629,7 @@ mod tests {
     #[test]
     fn respects_max_depth() {
         let tmp = setup();
-        write_file(
-            tmp.path(),
-            "a/b/c/d/e/.claude/CLAUDE.md",
-            "# Very deep",
-        );
+        write_file(tmp.path(), "a/b/c/d/e/.claude/CLAUDE.md", "# Very deep");
         write_file(tmp.path(), "a/.claude/CLAUDE.md", "# Shallow");
 
         let config = RulesDiscoveryConfig {
@@ -681,11 +646,7 @@ mod tests {
     fn populates_file_metadata_correctly() {
         let tmp = setup();
         let content = "# Rule content\n\nSome body text.";
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            content,
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", content);
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 1);
@@ -701,11 +662,7 @@ mod tests {
     fn raw_content_no_frontmatter_stripping() {
         let tmp = setup();
         let content = "---\nkey: value\n---\n\n# Rule title\n\nRule body";
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            content,
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", content);
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results[0].content, content);
@@ -715,16 +672,8 @@ mod tests {
     #[test]
     fn discovers_multiple_files_in_same_agent_dir() {
         let tmp = setup();
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            "# Claude",
-        );
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/AGENTS.md",
-            "# Agents",
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Claude");
+        write_file(tmp.path(), "packages/foo/.claude/AGENTS.md", "# Agents");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -733,16 +682,8 @@ mod tests {
     #[test]
     fn discovers_files_across_multiple_agent_dirs() {
         let tmp = setup();
-        write_file(
-            tmp.path(),
-            "packages/foo/.claude/CLAUDE.md",
-            "# Claude",
-        );
-        write_file(
-            tmp.path(),
-            "packages/foo/.tron/AGENTS.md",
-            "# Tron Agents",
-        );
+        write_file(tmp.path(), "packages/foo/.claude/CLAUDE.md", "# Claude");
+        write_file(tmp.path(), "packages/foo/.tron/AGENTS.md", "# Tron Agents");
 
         let results = discover_rules_files(&make_config_exclude_root(tmp.path()));
         assert_eq!(results.len(), 2);
@@ -776,10 +717,7 @@ mod tests {
 
     #[test]
     fn scope_dir_deeply_nested_agent_dir() {
-        assert_eq!(
-            compute_scope_dir("a/b/c/.tron/AGENTS.md", false),
-            "a/b/c"
-        );
+        assert_eq!(compute_scope_dir("a/b/c/.tron/AGENTS.md", false), "a/b/c");
     }
 
     #[test]
@@ -789,6 +727,9 @@ mod tests {
 
     #[test]
     fn scope_dir_standalone_nested() {
-        assert_eq!(compute_scope_dir("packages/foo/CLAUDE.md", true), "packages/foo");
+        assert_eq!(
+            compute_scope_dir("packages/foo/CLAUDE.md", true),
+            "packages/foo"
+        );
     }
 }

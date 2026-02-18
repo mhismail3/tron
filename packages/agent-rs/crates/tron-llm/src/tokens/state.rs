@@ -254,7 +254,10 @@ mod tests {
         assert!(state.current.is_some());
 
         // First record should still be accessible
-        assert_eq!(state.history[0].source.raw_input_tokens, record1.source.raw_input_tokens);
+        assert_eq!(
+            state.history[0].source.raw_input_tokens,
+            record1.source.raw_input_tokens
+        );
     }
 
     #[test]

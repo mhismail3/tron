@@ -1,7 +1,7 @@
 //! Browser-specific error types.
 
-use thiserror::Error;
 use crate::errors::ToolError;
+use thiserror::Error;
 
 /// Errors from browser automation operations.
 #[derive(Debug, Error)]

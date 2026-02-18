@@ -52,7 +52,10 @@ impl GuardrailEngine {
             engine.register_rule(rule);
         }
 
-        debug!(rule_count = engine.rules.len(), "GuardrailEngine initialized");
+        debug!(
+            rule_count = engine.rules.len(),
+            "GuardrailEngine initialized"
+        );
 
         engine
     }
@@ -141,9 +144,10 @@ impl GuardrailEngine {
                 if result.severity == Some(super::types::Severity::Block) {
                     blocked = true;
                     if block_reason.is_none() {
-                        block_reason = result.reason.clone().or_else(|| {
-                            Some(format!("Blocked by rule: {rule_id}"))
-                        });
+                        block_reason = result
+                            .reason
+                            .clone()
+                            .or_else(|| Some(format!("Blocked by rule: {rule_id}")));
                     }
                 } else if result.severity == Some(super::types::Severity::Warn) {
                     let warning = result

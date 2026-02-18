@@ -55,10 +55,7 @@ impl ResourceRule {
                 return RuleEvaluationResult::triggered(
                     &self.base.id,
                     self.base.severity,
-                    format!(
-                        "{}: Value {} below minimum {}",
-                        self.base.name, value, min
-                    ),
+                    format!("{}: Value {} below minimum {}", self.base.name, value, min),
                 )
                 .with_details(serde_json::json!({
                     "value": value,

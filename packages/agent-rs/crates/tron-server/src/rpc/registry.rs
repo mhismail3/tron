@@ -71,7 +71,11 @@ impl MethodRegistry {
             .record(duration.as_secs_f64());
 
         if duration.as_secs() >= 5 {
-            warn!(method, duration_secs = duration.as_secs_f64(), "slow RPC request");
+            warn!(
+                method,
+                duration_secs = duration.as_secs_f64(),
+                "slow RPC request"
+            );
         }
 
         response
@@ -108,7 +112,11 @@ mod tests {
 
     #[async_trait]
     impl MethodHandler for EchoHandler {
-        async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        async fn handle(
+            &self,
+            params: Option<Value>,
+            _ctx: &RpcContext,
+        ) -> Result<Value, RpcError> {
             Ok(params.unwrap_or(json!(null)))
         }
     }
@@ -117,8 +125,14 @@ mod tests {
 
     #[async_trait]
     impl MethodHandler for FailHandler {
-        async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-            Err(RpcError::Internal { message: "boom".into() })
+        async fn handle(
+            &self,
+            _params: Option<Value>,
+            _ctx: &RpcContext,
+        ) -> Result<Value, RpcError> {
+            Err(RpcError::Internal {
+                message: "boom".into(),
+            })
         }
     }
 
@@ -126,15 +140,20 @@ mod tests {
 
     #[async_trait]
     impl MethodHandler for ParamCheckHandler {
-        async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
+        async fn handle(
+            &self,
+            params: Option<Value>,
+            _ctx: &RpcContext,
+        ) -> Result<Value, RpcError> {
             let p = params.ok_or_else(|| RpcError::InvalidParams {
                 message: "params required".into(),
             })?;
-            let name = p.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
-                RpcError::InvalidParams {
-                    message: "Missing 'name'".into(),
-                }
-            })?;
+            let name =
+                p.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| RpcError::InvalidParams {
+                        message: "Missing 'name'".into(),
+                    })?;
             Ok(json!({ "hello": name }))
         }
     }
@@ -186,9 +205,7 @@ mod tests {
         let mut reg = MethodRegistry::new();
         reg.register("fail", FailHandler);
 
-        let resp = reg
-            .dispatch(make_request("r3", "fail", None), &ctx)
-            .await;
+        let resp = reg.dispatch(make_request("r3", "fail", None), &ctx).await;
 
         assert!(!resp.success);
         assert_eq!(resp.error.unwrap().code, "INTERNAL_ERROR");
@@ -225,9 +242,7 @@ mod tests {
             .await;
         assert!(r1.success);
 
-        let r2 = reg
-            .dispatch(make_request("r2", "fail", None), &ctx)
-            .await;
+        let r2 = reg.dispatch(make_request("r2", "fail", None), &ctx).await;
         assert!(!r2.success);
     }
 
@@ -238,9 +253,7 @@ mod tests {
         reg.register("greet", ParamCheckHandler);
 
         // Missing params
-        let r1 = reg
-            .dispatch(make_request("r1", "greet", None), &ctx)
-            .await;
+        let r1 = reg.dispatch(make_request("r1", "greet", None), &ctx).await;
         assert!(!r1.success);
         assert_eq!(r1.error.unwrap().code, "INVALID_PARAMS");
 
@@ -309,9 +322,7 @@ mod tests {
         reg.register("test", EchoHandler);
         reg.register("test", FailHandler);
 
-        let resp = reg
-            .dispatch(make_request("r1", "test", None), &ctx)
-            .await;
+        let resp = reg.dispatch(make_request("r1", "test", None), &ctx).await;
         // FailHandler should have replaced EchoHandler
         assert!(!resp.success);
     }

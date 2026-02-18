@@ -117,7 +117,10 @@ mod tests {
     fn resolved_cache_dir_expands_tilde() {
         let config = EmbeddingConfig::default();
         let resolved = config.resolved_cache_dir();
-        assert!(!resolved.starts_with('~'), "tilde should be expanded: {resolved}");
+        assert!(
+            !resolved.starts_with('~'),
+            "tilde should be expanded: {resolved}"
+        );
         assert!(resolved.ends_with("/.tron/mods/models"));
     }
 

@@ -160,9 +160,7 @@ pub enum SystemPromptSource {
 /// Returns `None` if not found or if the file exceeds the size limit.
 #[must_use]
 pub fn load_system_prompt_from_file(working_directory: &str) -> Option<LoadedSystemPrompt> {
-    let project_path = Path::new(working_directory)
-        .join(".tron")
-        .join("SYSTEM.md");
+    let project_path = Path::new(working_directory).join(".tron").join("SYSTEM.md");
 
     let Ok(metadata) = fs::metadata(&project_path) else {
         return None;
@@ -216,10 +214,7 @@ pub fn build_system_prompt(config: &SystemPromptConfig) -> String {
         // Tron context goes via tool clarification message.
         String::new()
     } else {
-        let base = config
-            .custom_prompt
-            .as_deref()
-            .unwrap_or(TRON_CORE_PROMPT);
+        let base = config.custom_prompt.as_deref().unwrap_or(TRON_CORE_PROMPT);
         let suffix =
             WORKING_DIRECTORY_SUFFIX.replace("{workingDirectory}", &config.working_directory);
         format!("{base}{suffix}")
@@ -233,10 +228,7 @@ pub fn build_system_prompt(config: &SystemPromptConfig) -> String {
 /// of the conversation.
 #[must_use]
 pub fn build_codex_tool_clarification(config: &SystemPromptConfig) -> String {
-    let base = config
-        .custom_prompt
-        .as_deref()
-        .unwrap_or(TRON_CORE_PROMPT);
+    let base = config.custom_prompt.as_deref().unwrap_or(TRON_CORE_PROMPT);
 
     format!(
         "[TRON CONTEXT]\n\

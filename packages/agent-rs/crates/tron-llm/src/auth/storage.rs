@@ -76,9 +76,7 @@ pub fn get_google_provider_auth(path: &Path) -> Option<GoogleProviderAuth> {
 
 /// Get service auth from storage file.
 pub fn get_service_auth(path: &Path, service: &str) -> Option<ServiceAuth> {
-    load_auth_storage(path)?
-        .get_service_auth(service)
-        .cloned()
+    load_auth_storage(path)?.get_service_auth(service).cloned()
 }
 
 /// Get service API keys from storage file.
@@ -104,11 +102,7 @@ pub fn save_provider_oauth_tokens(
 }
 
 /// Save an API key for a provider.
-pub fn save_provider_api_key(
-    path: &Path,
-    provider: &str,
-    api_key: &str,
-) -> Result<(), AuthError> {
+pub fn save_provider_api_key(path: &Path, provider: &str, api_key: &str) -> Result<(), AuthError> {
     let mut storage = load_auth_storage(path).unwrap_or_default();
     let mut pa = storage.get_provider_auth(provider).unwrap_or_default();
     pa.api_key = Some(api_key.to_string());
@@ -151,10 +145,7 @@ pub fn get_account_labels(path: &Path, provider: &str) -> Vec<String> {
 }
 
 /// Save Google-specific provider auth.
-pub fn save_google_provider_auth(
-    path: &Path,
-    auth: &GoogleProviderAuth,
-) -> Result<(), AuthError> {
+pub fn save_google_provider_auth(path: &Path, auth: &GoogleProviderAuth) -> Result<(), AuthError> {
     let mut storage = load_auth_storage(path).unwrap_or_default();
     storage.set_google_auth(auth);
     save_auth_storage(path, &mut storage)
@@ -397,10 +388,7 @@ mod tests {
         save_google_provider_auth(&path, &gpa).unwrap();
 
         let loaded = get_google_provider_auth(&path).unwrap();
-        assert_eq!(
-            loaded.endpoint,
-            Some(GoogleOAuthEndpoint::Antigravity)
-        );
+        assert_eq!(loaded.endpoint, Some(GoogleOAuthEndpoint::Antigravity));
         assert_eq!(loaded.project_id.as_deref(), Some("proj-123"));
     }
 }

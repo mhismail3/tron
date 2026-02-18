@@ -38,16 +38,23 @@ impl TranscriptionEngine {
     }
 
     fn load_sessions(model_dir: &Path) -> Result<Self, TranscriptionError> {
-        info!("loading transcription model from {}...", model_dir.display());
+        info!(
+            "loading transcription model from {}...",
+            model_dir.display()
+        );
         let files = model::model_files(model_dir);
 
-        let preprocessor_path = files.get("nemo128.onnx")
-            .ok_or_else(|| TranscriptionError::ModelNotAvailable("nemo128.onnx not found".into()))?;
-        let encoder_path = files.get("encoder-model.onnx")
-            .ok_or_else(|| TranscriptionError::ModelNotAvailable("encoder-model.onnx not found".into()))?;
-        let decoder_path = files.get("decoder_joint-model.onnx")
-            .ok_or_else(|| TranscriptionError::ModelNotAvailable("decoder_joint-model.onnx not found".into()))?;
-        let vocab_path = files.get("vocab.txt")
+        let preprocessor_path = files.get("nemo128.onnx").ok_or_else(|| {
+            TranscriptionError::ModelNotAvailable("nemo128.onnx not found".into())
+        })?;
+        let encoder_path = files.get("encoder-model.onnx").ok_or_else(|| {
+            TranscriptionError::ModelNotAvailable("encoder-model.onnx not found".into())
+        })?;
+        let decoder_path = files.get("decoder_joint-model.onnx").ok_or_else(|| {
+            TranscriptionError::ModelNotAvailable("decoder_joint-model.onnx not found".into())
+        })?;
+        let vocab_path = files
+            .get("vocab.txt")
             .ok_or_else(|| TranscriptionError::ModelNotAvailable("vocab.txt not found".into()))?;
 
         // Load ONNX sessions
@@ -104,15 +111,18 @@ impl TranscriptionEngine {
         // Step 1: Decode audio to 16kHz mono f32
         let data = audio_data.to_vec();
         let mime = mime_type.to_string();
-        let (samples, _source_rate) = tokio::task::spawn_blocking(move || {
-            audio::decode_audio(&data, &mime)
-        })
-        .await
-        .map_err(|e| TranscriptionError::Inference(format!("audio decode task: {e}")))??;
+        let (samples, _source_rate) =
+            tokio::task::spawn_blocking(move || audio::decode_audio(&data, &mime))
+                .await
+                .map_err(|e| TranscriptionError::Inference(format!("audio decode task: {e}")))??;
 
         #[allow(clippy::cast_precision_loss)]
         let duration_seconds = samples.len() as f64 / f64::from(audio::TARGET_SAMPLE_RATE);
-        debug!("decoded {:.1}s of audio ({} samples)", duration_seconds, samples.len());
+        debug!(
+            "decoded {:.1}s of audio ({} samples)",
+            duration_seconds,
+            samples.len()
+        );
 
         // Steps 2-4: Run ONNX inference on blocking thread
         let engine = Arc::clone(self);
@@ -131,7 +141,9 @@ impl TranscriptionEngine {
     fn run_inference(&self, samples: &[f32]) -> Result<String, TranscriptionError> {
         // Step 2: Mel features via preprocessor
         let (features, features_len) = {
-            let mut preprocessor = self.preprocessor.lock()
+            let mut preprocessor = self
+                .preprocessor
+                .lock()
                 .map_err(|e| TranscriptionError::Inference(format!("preprocessor lock: {e}")))?;
             decoder::run_preprocessor(&mut preprocessor, samples)?
         };
@@ -139,7 +151,9 @@ impl TranscriptionEngine {
 
         // Step 3: Encoder
         let (encoder_out, _enc_len) = {
-            let mut encoder = self.encoder.lock()
+            let mut encoder = self
+                .encoder
+                .lock()
                 .map_err(|e| TranscriptionError::Inference(format!("encoder lock: {e}")))?;
             decoder::run_encoder(&mut encoder, &features, features_len)?
         };
@@ -147,9 +161,16 @@ impl TranscriptionEngine {
 
         // Step 4: TDT greedy decode
         let text = {
-            let mut decoder_joint = self.decoder_joint.lock()
+            let mut decoder_joint = self
+                .decoder_joint
+                .lock()
                 .map_err(|e| TranscriptionError::Inference(format!("decoder lock: {e}")))?;
-            decoder::greedy_decode(&encoder_out, &mut decoder_joint, &self.vocab, self.blank_idx)?
+            decoder::greedy_decode(
+                &encoder_out,
+                &mut decoder_joint,
+                &self.vocab,
+                self.blank_idx,
+            )?
         };
 
         Ok(text)

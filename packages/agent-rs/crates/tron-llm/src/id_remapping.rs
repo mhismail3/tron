@@ -75,7 +75,10 @@ pub fn build_tool_call_id_mapping(
 /// Remap a tool call ID using a previously built mapping.
 ///
 /// Returns the mapped ID if found, or the original ID unchanged.
-pub fn remap_tool_call_id<'a, S: std::hash::BuildHasher>(id: &'a str, mapping: &'a HashMap<String, String, S>) -> &'a str {
+pub fn remap_tool_call_id<'a, S: std::hash::BuildHasher>(
+    id: &'a str,
+    mapping: &'a HashMap<String, String, S>,
+) -> &'a str {
     mapping.get(id).map_or(id, |v| v.as_str())
 }
 

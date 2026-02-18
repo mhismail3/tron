@@ -13,9 +13,7 @@ use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
 use tron_core::messages::{ProviderType, TokenUsage, ToolCall};
 
-use super::types::{
-    AnthropicSseEvent, SseContentBlock, SseDelta,
-};
+use super::types::{AnthropicSseEvent, SseContentBlock, SseDelta};
 
 /// Stream state accumulated across SSE events.
 #[derive(Clone, Debug, Default)]
@@ -98,27 +96,25 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             vec![]
         }
 
-        AnthropicSseEvent::ContentBlockStart { content_block, .. } => {
-            match content_block {
-                SseContentBlock::Text { .. } => {
-                    state.current_block_type = Some(BlockType::Text);
-                    vec![StreamEvent::TextStart]
-                }
-                SseContentBlock::Thinking { .. } => {
-                    state.current_block_type = Some(BlockType::Thinking);
-                    vec![StreamEvent::ThinkingStart]
-                }
-                SseContentBlock::ToolUse { id, name } => {
-                    state.current_block_type = Some(BlockType::ToolUse);
-                    state.current_tool_call_id = Some(id.clone());
-                    state.current_tool_name = Some(name.clone());
-                    vec![StreamEvent::ToolCallStart {
-                        tool_call_id: id.clone(),
-                        name: name.clone(),
-                    }]
-                }
+        AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
+            SseContentBlock::Text { .. } => {
+                state.current_block_type = Some(BlockType::Text);
+                vec![StreamEvent::TextStart]
             }
-        }
+            SseContentBlock::Thinking { .. } => {
+                state.current_block_type = Some(BlockType::Thinking);
+                vec![StreamEvent::ThinkingStart]
+            }
+            SseContentBlock::ToolUse { id, name } => {
+                state.current_block_type = Some(BlockType::ToolUse);
+                state.current_tool_call_id = Some(id.clone());
+                state.current_tool_name = Some(name.clone());
+                vec![StreamEvent::ToolCallStart {
+                    tool_call_id: id.clone(),
+                    name: name.clone(),
+                }]
+            }
+        },
 
         AnthropicSseEvent::ContentBlockDelta { delta, .. } => {
             match delta {
@@ -188,9 +184,9 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
     match state.current_block_type.take() {
         Some(BlockType::Text) => {
             let text = std::mem::take(&mut state.accumulated_text);
-            state.content_blocks.push(AssistantContent::Text {
-                text: text.clone(),
-            });
+            state
+                .content_blocks
+                .push(AssistantContent::Text { text: text.clone() });
             vec![StreamEvent::TextEnd {
                 text,
                 signature: None,
@@ -294,7 +290,9 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::anthropic::types::{SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta, SseCacheCreation};
+    use crate::anthropic::types::{
+        SseCacheCreation, SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta,
+    };
 
     fn usage(input: u64, output: u64, cache_create: u64, cache_read: u64) -> SseUsage {
         SseUsage {
@@ -359,7 +357,9 @@ mod tests {
         let mut state = create_stream_state();
         let event = AnthropicSseEvent::ContentBlockStart {
             index: 0,
-            content_block: SseContentBlock::Text { text: String::new() },
+            content_block: SseContentBlock::Text {
+                text: String::new(),
+            },
         };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
@@ -372,7 +372,9 @@ mod tests {
         let mut state = create_stream_state();
         let event = AnthropicSseEvent::ContentBlockStart {
             index: 0,
-            content_block: SseContentBlock::Thinking { thinking: String::new() },
+            content_block: SseContentBlock::Thinking {
+                thinking: String::new(),
+            },
         };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
@@ -411,7 +413,9 @@ mod tests {
         state.current_block_type = Some(BlockType::Text);
         let event = AnthropicSseEvent::ContentBlockDelta {
             index: 0,
-            delta: SseDelta::TextDelta { text: "Hello ".into() },
+            delta: SseDelta::TextDelta {
+                text: "Hello ".into(),
+            },
         };
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
@@ -424,7 +428,9 @@ mod tests {
         // Second delta
         let event2 = AnthropicSseEvent::ContentBlockDelta {
             index: 0,
-            delta: SseDelta::TextDelta { text: "world".into() },
+            delta: SseDelta::TextDelta {
+                text: "world".into(),
+            },
         };
         let _ = process_sse_event(&event2, &mut state);
         assert_eq!(state.accumulated_text, "Hello world");
@@ -529,7 +535,10 @@ mod tests {
         let events = process_sse_event(&event, &mut state);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            StreamEvent::ThinkingEnd { thinking, signature } => {
+            StreamEvent::ThinkingEnd {
+                thinking,
+                signature,
+            } => {
                 assert_eq!(thinking, "deep thought");
                 assert_eq!(signature.as_deref(), Some("sig123"));
             }
@@ -761,7 +770,9 @@ mod tests {
         let events = process_sse_event(
             &AnthropicSseEvent::ContentBlockStart {
                 index: 0,
-                content_block: SseContentBlock::Text { text: String::new() },
+                content_block: SseContentBlock::Text {
+                    text: String::new(),
+                },
             },
             &mut state,
         );
@@ -771,14 +782,18 @@ mod tests {
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 0,
-                delta: SseDelta::TextDelta { text: "Hello ".into() },
+                delta: SseDelta::TextDelta {
+                    text: "Hello ".into(),
+                },
             },
             &mut state,
         );
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 0,
-                delta: SseDelta::TextDelta { text: "world".into() },
+                delta: SseDelta::TextDelta {
+                    text: "world".into(),
+                },
             },
             &mut state,
         );
@@ -796,7 +811,9 @@ mod tests {
         // message_delta
         let _ = process_sse_event(
             &AnthropicSseEvent::MessageDelta {
-                delta: SseMessageDelta { stop_reason: Some("end_turn".into()) },
+                delta: SseMessageDelta {
+                    stop_reason: Some("end_turn".into()),
+                },
                 usage: Some(SseUsageDelta { output_tokens: 10 }),
             },
             &mut state,
@@ -805,7 +822,10 @@ mod tests {
         // message_stop
         let events = process_sse_event(&AnthropicSseEvent::MessageStop, &mut state);
         match &events[0] {
-            StreamEvent::Done { message, stop_reason } => {
+            StreamEvent::Done {
+                message,
+                stop_reason,
+            } => {
                 assert_eq!(stop_reason, "end_turn");
                 assert_eq!(message.content.len(), 1);
                 let usage = message.token_usage.as_ref().unwrap();
@@ -838,21 +858,27 @@ mod tests {
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockStart {
                 index: 0,
-                content_block: SseContentBlock::Thinking { thinking: String::new() },
+                content_block: SseContentBlock::Thinking {
+                    thinking: String::new(),
+                },
             },
             &mut state,
         );
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 0,
-                delta: SseDelta::ThinkingDelta { thinking: "deep".into() },
+                delta: SseDelta::ThinkingDelta {
+                    thinking: "deep".into(),
+                },
             },
             &mut state,
         );
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 0,
-                delta: SseDelta::SignatureDelta { signature: "sig".into() },
+                delta: SseDelta::SignatureDelta {
+                    signature: "sig".into(),
+                },
             },
             &mut state,
         );
@@ -861,7 +887,10 @@ mod tests {
             &mut state,
         );
         match &events[0] {
-            StreamEvent::ThinkingEnd { thinking, signature } => {
+            StreamEvent::ThinkingEnd {
+                thinking,
+                signature,
+            } => {
                 assert_eq!(thinking, "deep");
                 assert_eq!(signature.as_deref(), Some("sig"));
             }
@@ -872,14 +901,18 @@ mod tests {
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockStart {
                 index: 1,
-                content_block: SseContentBlock::Text { text: String::new() },
+                content_block: SseContentBlock::Text {
+                    text: String::new(),
+                },
             },
             &mut state,
         );
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 1,
-                delta: SseDelta::TextDelta { text: "Answer".into() },
+                delta: SseDelta::TextDelta {
+                    text: "Answer".into(),
+                },
             },
             &mut state,
         );
@@ -891,7 +924,9 @@ mod tests {
         // Done
         let _ = process_sse_event(
             &AnthropicSseEvent::MessageDelta {
-                delta: SseMessageDelta { stop_reason: Some("end_turn".into()) },
+                delta: SseMessageDelta {
+                    stop_reason: Some("end_turn".into()),
+                },
                 usage: Some(SseUsageDelta { output_tokens: 20 }),
             },
             &mut state,
@@ -900,7 +935,10 @@ mod tests {
         match &events[0] {
             StreamEvent::Done { message, .. } => {
                 assert_eq!(message.content.len(), 2);
-                assert!(matches!(&message.content[0], AssistantContent::Thinking { .. }));
+                assert!(matches!(
+                    &message.content[0],
+                    AssistantContent::Thinking { .. }
+                ));
                 assert!(matches!(&message.content[1], AssistantContent::Text { .. }));
             }
             _ => panic!("expected Done"),
@@ -937,14 +975,18 @@ mod tests {
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 0,
-                delta: SseDelta::InputJsonDelta { partial_json: r#"{"cm"#.into() },
+                delta: SseDelta::InputJsonDelta {
+                    partial_json: r#"{"cm"#.into(),
+                },
             },
             &mut state,
         );
         let _ = process_sse_event(
             &AnthropicSseEvent::ContentBlockDelta {
                 index: 0,
-                delta: SseDelta::InputJsonDelta { partial_json: r#"d":"ls"}"#.into() },
+                delta: SseDelta::InputJsonDelta {
+                    partial_json: r#"d":"ls"}"#.into(),
+                },
             },
             &mut state,
         );
@@ -964,7 +1006,9 @@ mod tests {
         // message_delta with tool_use stop reason
         let _ = process_sse_event(
             &AnthropicSseEvent::MessageDelta {
-                delta: SseMessageDelta { stop_reason: Some("tool_use".into()) },
+                delta: SseMessageDelta {
+                    stop_reason: Some("tool_use".into()),
+                },
                 usage: Some(SseUsageDelta { output_tokens: 30 }),
             },
             &mut state,

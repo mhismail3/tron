@@ -118,10 +118,8 @@ mod tests {
 
     #[test]
     fn test_database_from_rusqlite() {
-        let sqlite_err = rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(1),
-            Some("test".to_string()),
-        );
+        let sqlite_err =
+            rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), Some("test".to_string()));
         let err = TaskError::from(sqlite_err);
         assert!(err.to_string().contains("Database error"));
     }

@@ -106,11 +106,7 @@ pub fn build_task_context(
     if !areas.areas.is_empty() {
         let _ = write!(output, "\nAreas:");
         for area_with_counts in &areas.areas {
-            let _ = write!(
-                output,
-                "\n  - {}",
-                area_with_counts.area.title
-            );
+            let _ = write!(output, "\n  - {}", area_with_counts.area.title);
             if let Some(ref desc) = area_with_counts.area.description {
                 let _ = write!(output, " — {desc}");
             }
@@ -307,13 +303,8 @@ mod tests {
             },
         )
         .unwrap();
-        TaskRepository::add_dependency(
-            &conn,
-            &t1.id,
-            &t2.id,
-            DependencyRelationship::Blocks,
-        )
-        .unwrap();
+        TaskRepository::add_dependency(&conn, &t1.id, &t2.id, DependencyRelationship::Blocks)
+            .unwrap();
         let result = build_task_context(&conn, None).unwrap().unwrap();
         assert!(result.contains("1 blocked"));
     }

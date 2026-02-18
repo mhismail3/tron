@@ -60,12 +60,9 @@ impl HttpClient for ReqwestHttpClient {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .map(String::from);
-        let body = response
-            .text()
-            .await
-            .map_err(|e| ToolError::Internal {
-                message: format!("Failed to read response body: {e}"),
-            })?;
+        let body = response.text().await.map_err(|e| ToolError::Internal {
+            message: format!("Failed to read response body: {e}"),
+        })?;
 
         Ok(HttpResponse {
             status,

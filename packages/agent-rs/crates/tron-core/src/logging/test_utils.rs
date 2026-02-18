@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use tracing::level_filters::LevelFilter;
 use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Layer;
 
 /// A captured tracing event for assertion.
 #[derive(Clone, Debug)]
@@ -307,13 +307,17 @@ mod tests {
         let events = logs.events();
         assert_eq!(events.len(), 1);
         assert!(events[0].message.contains("turn started"));
-        assert!(events[0]
-            .fields
-            .iter()
-            .any(|(k, v)| k == "session_id" && v == "s1"));
-        assert!(events[0]
-            .fields
-            .iter()
-            .any(|(k, v)| k == "turn" && v == "3"));
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(k, v)| k == "session_id" && v == "s1")
+        );
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .any(|(k, v)| k == "turn" && v == "3")
+        );
     }
 }

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
-use tron_events::{AppendOptions, EventStore, EventType};
 use tron_events::sqlite::row_types::EventRow;
+use tron_events::{AppendOptions, EventStore, EventType};
 
 use crate::errors::RuntimeError;
 
@@ -69,12 +69,7 @@ impl EventPersister {
     }
 
     /// Append an event without waiting for persistence.
-    pub fn append_fire_and_forget(
-        &self,
-        session_id: &str,
-        event_type: EventType,
-        payload: Value,
-    ) {
+    pub fn append_fire_and_forget(&self, session_id: &str, event_type: EventType, payload: Value) {
         if let Err(e) = self.tx.try_send(PersistRequest {
             session_id: session_id.to_owned(),
             event_type,
@@ -186,12 +181,20 @@ mod tests {
         let sid = &session.session.id;
 
         let e1 = persister
-            .append(sid, EventType::MessageUser, serde_json::json!({"content": "a"}))
+            .append(
+                sid,
+                EventType::MessageUser,
+                serde_json::json!({"content": "a"}),
+            )
             .await
             .unwrap();
 
         let e2 = persister
-            .append(sid, EventType::MessageAssistant, serde_json::json!({"content": "b"}))
+            .append(
+                sid,
+                EventType::MessageAssistant,
+                serde_json::json!({"content": "b"}),
+            )
             .await
             .unwrap();
 

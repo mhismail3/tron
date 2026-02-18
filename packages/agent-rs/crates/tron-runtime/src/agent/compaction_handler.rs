@@ -1,15 +1,15 @@
 //! Compaction handler — monitors token usage and triggers compaction.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use async_trait::async_trait;
 use crate::context::context_manager::ContextManager;
 use crate::context::summarizer::KeywordSummarizer;
-use tron_core::events::{BaseEvent, CompactionReason, TronEvent};
-use tron_core::events::HookResult as EventHookResult;
 use crate::hooks::engine::HookEngine;
 use crate::hooks::types::{HookAction, HookContext};
+use async_trait::async_trait;
+use tron_core::events::HookResult as EventHookResult;
+use tron_core::events::{BaseEvent, CompactionReason, TronEvent};
 
 use metrics::{counter, histogram};
 use tracing::{debug, info};
@@ -252,14 +252,10 @@ impl CompactionHandler {
                 model: None, // Use session's model
             };
             let summarizer = crate::context::llm_summarizer::LlmSummarizer::new(spawner);
-            context_manager
-                .execute_compaction(&summarizer, None)
-                .await
+            context_manager.execute_compaction(&summarizer, None).await
         } else {
             let summarizer = KeywordSummarizer;
-            context_manager
-                .execute_compaction(&summarizer, None)
-                .await
+            context_manager.execute_compaction(&summarizer, None).await
         };
 
         self.is_compacting.store(false, Ordering::SeqCst);
@@ -270,7 +266,10 @@ impl CompactionHandler {
                 histogram!("compaction_duration_seconds")
                     .record(compaction_start.elapsed().as_secs_f64());
                 let tokens_after = context_manager.get_current_tokens();
-                info!(session_id, tokens_before, tokens_after, "compaction complete");
+                info!(
+                    session_id,
+                    tokens_before, tokens_after, "compaction complete"
+                );
                 let _ = emitter.emit(TronEvent::CompactionComplete {
                     base: BaseEvent::now(session_id),
                     success: compaction_result.success,

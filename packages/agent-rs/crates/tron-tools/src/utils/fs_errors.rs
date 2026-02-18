@@ -5,7 +5,7 @@
 
 use std::io;
 
-use tron_core::tools::{error_result, TronToolResult};
+use tron_core::tools::{TronToolResult, error_result};
 
 /// Format a filesystem error into a user-friendly [`TronToolResult`].
 ///
@@ -118,10 +118,7 @@ mod tests {
         let err = io::Error::from_raw_os_error(libc_enotdir());
         let result = format_fs_error(&err, "/tmp/file.txt/sub", "reading");
         assert_eq!(result.is_error, Some(true));
-        assert_eq!(
-            result_text(&result),
-            "Not a directory: /tmp/file.txt/sub"
-        );
+        assert_eq!(result_text(&result), "Not a directory: /tmp/file.txt/sub");
     }
 
     #[test]

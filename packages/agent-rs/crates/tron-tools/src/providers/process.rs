@@ -108,7 +108,10 @@ mod tests {
     #[tokio::test]
     async fn run_echo() {
         let runner = TokioProcessRunner;
-        let result = runner.run_command("echo hello", &default_opts()).await.unwrap();
+        let result = runner
+            .run_command("echo hello", &default_opts())
+            .await
+            .unwrap();
         assert_eq!(result.exit_code, 0);
         assert_eq!(result.stdout.trim(), "hello");
         assert!(!result.timed_out);
@@ -118,7 +121,10 @@ mod tests {
     #[tokio::test]
     async fn run_exit_code() {
         let runner = TokioProcessRunner;
-        let result = runner.run_command("exit 42", &default_opts()).await.unwrap();
+        let result = runner
+            .run_command("exit 42", &default_opts())
+            .await
+            .unwrap();
         assert_eq!(result.exit_code, 42);
     }
 
@@ -156,9 +162,7 @@ mod tests {
         let opts = default_opts();
         let cancel = opts.cancellation.clone();
 
-        let handle = tokio::spawn(async move {
-            runner.run_command("sleep 10", &opts).await
-        });
+        let handle = tokio::spawn(async move { runner.run_command("sleep 10", &opts).await });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         cancel.cancel();

@@ -21,9 +21,9 @@
 //! ...preserved messages...
 //! ```
 
+use tracing::{info, instrument, trace};
 use tron_core::content::AssistantContent;
 use tron_core::messages::{Message, UserMessageContent};
-use tracing::{info, instrument, trace};
 
 use super::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};
 use super::summarizer::Summarizer;
@@ -118,7 +118,9 @@ impl<D: CompactionDeps> CompactionEngine<D> {
 
         let compression_ratio = if tokens_before > 0 {
             #[allow(clippy::cast_precision_loss)]
-            { tokens_after as f64 / tokens_before as f64 }
+            {
+                tokens_after as f64 / tokens_before as f64
+            }
         } else {
             1.0
         };
@@ -151,8 +153,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         if to_summarize.is_empty() {
             info!(
                 total_messages = messages.len(),
-                preserve_count,
-                "Compaction skipped: all messages within preserve window"
+                preserve_count, "Compaction skipped: all messages within preserve window"
             );
             return Ok(CompactionResult {
                 success: true,
@@ -194,9 +195,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         // Build new message list
         let mut new_messages = Vec::with_capacity(2 + preserved.len());
         new_messages.push(Message::User {
-            content: UserMessageContent::Text(format!(
-                "{COMPACTION_SUMMARY_PREFIX}\n\n{summary}"
-            )),
+            content: UserMessageContent::Text(format!("{COMPACTION_SUMMARY_PREFIX}\n\n{summary}")),
             timestamp: None,
         });
         new_messages.push(Message::Assistant {
@@ -211,7 +210,9 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let tokens_after = self.estimate_tokens_after_compaction(&summary, &new_messages[2..]);
         let compression_ratio = if tokens_before > 0 {
             #[allow(clippy::cast_precision_loss)]
-            { tokens_after as f64 / tokens_before as f64 }
+            {
+                tokens_after as f64 / tokens_before as f64
+            }
         } else {
             1.0
         };
@@ -293,10 +294,7 @@ fn split_messages(messages: &[Message], preserve_count: usize) -> (Vec<Message>,
 
     if messages.len() > preserve_count {
         let split_at = messages.len() - preserve_count;
-        (
-            messages[..split_at].to_vec(),
-            messages[split_at..].to_vec(),
-        )
+        (messages[..split_at].to_vec(), messages[split_at..].to_vec())
     } else {
         (Vec::new(), messages.to_vec())
     }

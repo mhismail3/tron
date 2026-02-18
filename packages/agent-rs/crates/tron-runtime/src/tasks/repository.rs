@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use super::errors::TaskError;
@@ -60,10 +60,10 @@ impl TaskRepository {
         let priority = params.priority.unwrap_or(TaskPriority::Medium);
         let source = params.source.unwrap_or(TaskSource::Agent);
         let tags_json = tags_to_json(params.tags.as_deref().unwrap_or(&[]));
-        let metadata_json = params
-            .metadata
-            .as_ref()
-            .map_or_else(|| "{}".to_string(), |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
+        let metadata_json = params.metadata.as_ref().map_or_else(
+            || "{}".to_string(),
+            |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()),
+        );
 
         let started_at = if status == TaskStatus::InProgress {
             Some(now.clone())
@@ -155,17 +155,29 @@ impl TaskRepository {
         if let Some(ref pid) = updates.project_id {
             sets.push("project_id = ?".to_string());
             // Normalize empty strings to NULL for FK columns
-            let normalized: Option<String> = if pid.is_empty() { None } else { Some(pid.clone()) };
+            let normalized: Option<String> = if pid.is_empty() {
+                None
+            } else {
+                Some(pid.clone())
+            };
             values.push(Box::new(normalized));
         }
         if let Some(ref ptid) = updates.parent_task_id {
             sets.push("parent_task_id = ?".to_string());
-            let normalized: Option<String> = if ptid.is_empty() { None } else { Some(ptid.clone()) };
+            let normalized: Option<String> = if ptid.is_empty() {
+                None
+            } else {
+                Some(ptid.clone())
+            };
             values.push(Box::new(normalized));
         }
         if let Some(ref aid) = updates.area_id {
             sets.push("area_id = ?".to_string());
-            let normalized: Option<String> = if aid.is_empty() { None } else { Some(aid.clone()) };
+            let normalized: Option<String> = if aid.is_empty() {
+                None
+            } else {
+                Some(aid.clone())
+            };
             values.push(Box::new(normalized));
         }
         if let Some(ref dd) = updates.due_date {
@@ -197,11 +209,9 @@ impl TaskRepository {
         if updates.add_tags.is_some() || updates.remove_tags.is_some() {
             // Read current tags
             let current: Option<String> = conn
-                .query_row(
-                    "SELECT tags FROM tasks WHERE id = ?1",
-                    params![id],
-                    |row| row.get(0),
-                )
+                .query_row("SELECT tags FROM tasks WHERE id = ?1", params![id], |row| {
+                    row.get(0)
+                })
                 .optional()?;
 
             if let Some(current_json) = current {
@@ -250,12 +260,10 @@ impl TaskRepository {
         values.push(Box::new(now_iso()));
         values.push(Box::new(id.to_string()));
 
-        let sql = format!(
-            "UPDATE tasks SET {} WHERE id = ?",
-            sets.join(", ")
-        );
+        let sql = format!("UPDATE tasks SET {} WHERE id = ?", sets.join(", "));
 
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
         let changed = conn.execute(&sql, params_refs.as_slice())?;
 
         if changed == 0 {
@@ -329,9 +337,8 @@ impl TaskRepository {
             conditions.push("status NOT IN ('completed', 'cancelled')".to_string());
         }
         if !filter.include_deferred {
-            conditions.push(
-                "(deferred_until IS NULL OR deferred_until <= datetime('now'))".to_string(),
-            );
+            conditions
+                .push("(deferred_until IS NULL OR deferred_until <= datetime('now'))".to_string());
         }
         if !filter.include_backlog {
             conditions.push("status != 'backlog'".to_string());
@@ -428,10 +435,10 @@ impl TaskRepository {
         let now = now_iso();
         let status = params.status.unwrap_or(ProjectStatus::Active);
         let tags_json = tags_to_json(params.tags.as_deref().unwrap_or(&[]));
-        let metadata_json = params
-            .metadata
-            .as_ref()
-            .map_or_else(|| "{}".to_string(), |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
+        let metadata_json = params.metadata.as_ref().map_or_else(
+            || "{}".to_string(),
+            |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()),
+        );
 
         let _ = conn.execute(
             "INSERT INTO projects (id, workspace_id, area_id, title, description, status,
@@ -456,11 +463,9 @@ impl TaskRepository {
     /// Get a project by ID.
     pub fn get_project(conn: &Connection, id: &str) -> Result<Option<Project>, TaskError> {
         let project = conn
-            .query_row(
-                "SELECT * FROM projects WHERE id = ?1",
-                params![id],
-                |row| Ok(project_from_row(row)),
-            )
+            .query_row("SELECT * FROM projects WHERE id = ?1", params![id], |row| {
+                Ok(project_from_row(row))
+            })
             .optional()?;
         Ok(project)
     }
@@ -532,11 +537,9 @@ impl TaskRepository {
         values.push(Box::new(now_iso()));
         values.push(Box::new(id.to_string()));
 
-        let sql = format!(
-            "UPDATE projects SET {} WHERE id = ?",
-            sets.join(", ")
-        );
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
+        let sql = format!("UPDATE projects SET {} WHERE id = ?", sets.join(", "));
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
         let changed = conn.execute(&sql, params_refs.as_slice())?;
 
         if changed == 0 {
@@ -629,15 +632,12 @@ impl TaskRepository {
         let id = generate_id("area");
         let now = now_iso();
         let status = params.status.unwrap_or(AreaStatus::Active);
-        let workspace_id = params
-            .workspace_id
-            .as_deref()
-            .unwrap_or("default");
+        let workspace_id = params.workspace_id.as_deref().unwrap_or("default");
         let tags_json = tags_to_json(params.tags.as_deref().unwrap_or(&[]));
-        let metadata_json = params
-            .metadata
-            .as_ref()
-            .map_or_else(|| "{}".to_string(), |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()));
+        let metadata_json = params.metadata.as_ref().map_or_else(
+            || "{}".to_string(),
+            |m| serde_json::to_string(m).unwrap_or_else(|_| "{}".to_string()),
+        );
 
         let _ = conn.execute(
             "INSERT INTO areas (id, workspace_id, title, description, status,
@@ -698,11 +698,9 @@ impl TaskRepository {
         // Handle tags
         if updates.add_tags.is_some() || updates.remove_tags.is_some() {
             let current: Option<String> = conn
-                .query_row(
-                    "SELECT tags FROM areas WHERE id = ?1",
-                    params![id],
-                    |row| row.get(0),
-                )
+                .query_row("SELECT tags FROM areas WHERE id = ?1", params![id], |row| {
+                    row.get(0)
+                })
                 .optional()?;
 
             if let Some(current_json) = current {
@@ -737,11 +735,9 @@ impl TaskRepository {
         values.push(Box::new(now_iso()));
         values.push(Box::new(id.to_string()));
 
-        let sql = format!(
-            "UPDATE areas SET {} WHERE id = ?",
-            sets.join(", ")
-        );
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(AsRef::as_ref).collect();
+        let sql = format!("UPDATE areas SET {} WHERE id = ?", sets.join(", "));
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
         let changed = conn.execute(&sql, params_refs.as_slice())?;
 
         if changed == 0 {
@@ -1098,9 +1094,8 @@ impl TaskRepository {
         };
 
         // Pending count
-        let pending_sql = format!(
-            "SELECT COUNT(*) FROM tasks WHERE status = 'pending'{ws_condition}"
-        );
+        let pending_sql =
+            format!("SELECT COUNT(*) FROM tasks WHERE status = 'pending'{ws_condition}");
         let pending_count: u32 = if let Some(wid) = workspace_id {
             conn.query_row(&pending_sql, params![wid], |row| row.get(0))?
         } else {
@@ -1902,7 +1897,9 @@ mod tests {
         )
         .unwrap();
         TaskRepository::delete_area(&conn, &area.id).unwrap();
-        let updated = TaskRepository::get_project(&conn, &project.id).unwrap().unwrap();
+        let updated = TaskRepository::get_project(&conn, &project.id)
+            .unwrap()
+            .unwrap();
         assert!(updated.area_id.is_none());
     }
 

@@ -22,8 +22,7 @@ pub struct PatternRule {
 impl PatternRule {
     /// Evaluate this pattern rule against the context.
     pub fn evaluate(&self, ctx: &EvaluationContext) -> RuleEvaluationResult {
-        let Some(serde_json::Value::String(value)) =
-            ctx.tool_arguments.get(&self.target_argument)
+        let Some(serde_json::Value::String(value)) = ctx.tool_arguments.get(&self.target_argument)
         else {
             return RuleEvaluationResult::not_triggered(&self.base.id);
         };

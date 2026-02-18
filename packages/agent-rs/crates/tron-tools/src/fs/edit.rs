@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -49,7 +49,8 @@ impl TronTool for EditTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Edit".into(),
-            description: "Edit a file by replacing old_string with new_string. Requires exact match.".into(),
+            description:
+                "Edit a file by replacing old_string with new_string. Requires exact match.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -83,11 +84,7 @@ impl TronTool for EditTool {
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let file_path = match validate_required_string(&params, "file_path", "path to the file") {
             Ok(p) => p,
             Err(e) => return Ok(e),
@@ -177,9 +174,9 @@ impl TronTool for EditTool {
         });
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(diff),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                diff,
+            )]),
             details: Some(details),
             is_error: None,
             stop_turn: None,
@@ -201,31 +198,51 @@ mod tests {
 
     impl MockFs {
         fn new() -> Self {
-            Self { files: Mutex::new(HashMap::new()) }
+            Self {
+                files: Mutex::new(HashMap::new()),
+            }
         }
         fn with_file(self, path: impl Into<PathBuf>, content: impl AsRef<[u8]>) -> Self {
-            let _ = self.files.lock().unwrap().insert(path.into(), content.as_ref().to_vec());
+            let _ = self
+                .files
+                .lock()
+                .unwrap()
+                .insert(path.into(), content.as_ref().to_vec());
             self
         }
         fn read_content(&self, path: &Path) -> Option<String> {
-            self.files.lock().unwrap().get(path).map(|b| String::from_utf8_lossy(b).into_owned())
+            self.files
+                .lock()
+                .unwrap()
+                .get(path)
+                .map(|b| String::from_utf8_lossy(b).into_owned())
         }
     }
 
     #[async_trait]
     impl FileSystemOps for MockFs {
         async fn read_file(&self, path: &Path) -> Result<Vec<u8>, io::Error> {
-            self.files.lock().unwrap().get(path).cloned()
+            self.files
+                .lock()
+                .unwrap()
+                .get(path)
+                .cloned()
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
         }
         async fn write_file(&self, path: &Path, content: &[u8]) -> Result<(), io::Error> {
-            let _ = self.files.lock().unwrap().insert(path.to_path_buf(), content.to_vec());
+            let _ = self
+                .files
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), content.to_vec());
             Ok(())
         }
         async fn metadata(&self, _: &Path) -> Result<std::fs::Metadata, io::Error> {
             Err(io::Error::new(io::ErrorKind::Other, "mock"))
         }
-        async fn create_dir_all(&self, _: &Path) -> Result<(), io::Error> { Ok(()) }
+        async fn create_dir_all(&self, _: &Path) -> Result<(), io::Error> {
+            Ok(())
+        }
         fn exists(&self, path: &Path) -> bool {
             self.files.lock().unwrap().contains_key(path)
         }
@@ -245,10 +262,14 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
@@ -256,12 +277,18 @@ mod tests {
     async fn exact_match_replace() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "hello world"));
         let tool = EditTool::new(fs.clone());
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "hello", "new_string": "goodbye"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "hello", "new_string": "goodbye"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(result.is_error.is_none());
-        assert_eq!(fs.read_content(Path::new("/tmp/f.txt")).unwrap(), "goodbye world");
+        assert_eq!(
+            fs.read_content(Path::new("/tmp/f.txt")).unwrap(),
+            "goodbye world"
+        );
         let text = extract_text(&result);
         assert!(text.contains("-hello"));
         assert!(text.contains("+goodbye"));
@@ -271,10 +298,13 @@ mod tests {
     async fn old_string_not_found() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "hello"));
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "xyz", "new_string": "abc"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "xyz", "new_string": "abc"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
         assert!(text.contains("not found"));
@@ -284,10 +314,13 @@ mod tests {
     async fn multiple_without_replace_all() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "aaa bbb aaa"));
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "aaa", "new_string": "xxx"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "aaa", "new_string": "xxx"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
         assert!(text.contains("2 occurrences"));
@@ -302,7 +335,10 @@ mod tests {
             &make_ctx(),
         ).await.unwrap();
         assert!(result.is_error.is_none());
-        assert_eq!(fs.read_content(Path::new("/tmp/f.txt")).unwrap(), "xxx bbb xxx");
+        assert_eq!(
+            fs.read_content(Path::new("/tmp/f.txt")).unwrap(),
+            "xxx bbb xxx"
+        );
         let details = result.details.unwrap();
         assert_eq!(details["replacements"], 2);
     }
@@ -311,10 +347,13 @@ mod tests {
     async fn identical_strings_error() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "hello"));
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "hello", "new_string": "hello"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "hello", "new_string": "hello"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
         assert!(text.contains("identical"));
@@ -324,10 +363,13 @@ mod tests {
     async fn empty_old_string() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "hello"));
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "", "new_string": "x"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "", "new_string": "x"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
     }
 
@@ -341,7 +383,10 @@ mod tests {
             &make_ctx(),
         ).await.unwrap();
         assert!(result.is_error.is_none());
-        assert_eq!(fs.read_content(Path::new("/tmp/f.txt")).unwrap(), "line1\nnew2\nnew3\n");
+        assert_eq!(
+            fs.read_content(Path::new("/tmp/f.txt")).unwrap(),
+            "line1\nnew2\nnew3\n"
+        );
     }
 
     #[tokio::test]
@@ -353,17 +398,23 @@ mod tests {
             &make_ctx(),
         ).await.unwrap();
         assert!(result.is_error.is_none());
-        assert_eq!(fs.read_content(Path::new("/tmp/f.txt")).unwrap(), "coffee \u{1F600}");
+        assert_eq!(
+            fs.read_content(Path::new("/tmp/f.txt")).unwrap(),
+            "coffee \u{1F600}"
+        );
     }
 
     #[tokio::test]
     async fn diff_output_format() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "a\nb\nc\nd\ne"));
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "c", "new_string": "C"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "c", "new_string": "C"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let text = extract_text(&result);
         assert!(text.contains("@@"));
         assert!(text.contains("-c"));
@@ -374,10 +425,13 @@ mod tests {
     async fn file_not_found() {
         let fs = Arc::new(MockFs::new());
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/missing.txt", "old_string": "a", "new_string": "b"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/missing.txt", "old_string": "a", "new_string": "b"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
     }
 
@@ -385,10 +439,10 @@ mod tests {
     async fn missing_file_path() {
         let fs = Arc::new(MockFs::new());
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"old_string": "a", "new_string": "b"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(json!({"old_string": "a", "new_string": "b"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
     }
 
@@ -396,10 +450,13 @@ mod tests {
     async fn missing_old_string() {
         let fs = Arc::new(MockFs::new());
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "new_string": "b"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "new_string": "b"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
     }
 
@@ -407,10 +464,13 @@ mod tests {
     async fn missing_new_string() {
         let fs = Arc::new(MockFs::new());
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "a"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "a"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
     }
 
@@ -418,10 +478,13 @@ mod tests {
     async fn details_include_replacements_and_diff() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "hello world"));
         let tool = EditTool::new(fs);
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "hello", "new_string": "goodbye"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "hello", "new_string": "goodbye"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let details = result.details.unwrap();
         assert_eq!(details["replacements"], 1);
         assert!(details["diff"].as_str().unwrap().contains("@@"));
@@ -436,7 +499,10 @@ mod tests {
             &make_ctx(),
         ).await.unwrap();
         assert!(result.is_error.is_none());
-        assert_eq!(fs.read_content(Path::new("/tmp/f.txt")).unwrap(), "hello world");
+        assert_eq!(
+            fs.read_content(Path::new("/tmp/f.txt")).unwrap(),
+            "hello world"
+        );
     }
 
     #[tokio::test]
@@ -448,17 +514,23 @@ mod tests {
             &make_ctx(),
         ).await.unwrap();
         assert!(result.is_error.is_none());
-        assert_eq!(fs.read_content(Path::new("/tmp/f.txt")).unwrap(), "  hello  ");
+        assert_eq!(
+            fs.read_content(Path::new("/tmp/f.txt")).unwrap(),
+            "  hello  "
+        );
     }
 
     #[tokio::test]
     async fn replace_in_first_line() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "FIRST\nsecond\nthird"));
         let tool = EditTool::new(fs.clone());
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "FIRST", "new_string": "first"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "FIRST", "new_string": "first"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(result.is_error.is_none());
         let content = fs.read_content(Path::new("/tmp/f.txt")).unwrap();
         assert!(content.starts_with("first\n"));
@@ -468,10 +540,13 @@ mod tests {
     async fn replace_in_last_line() {
         let fs = Arc::new(MockFs::new().with_file("/tmp/f.txt", "first\nsecond\nLAST"));
         let tool = EditTool::new(fs.clone());
-        let result = tool.execute(
-            json!({"file_path": "/tmp/f.txt", "old_string": "LAST", "new_string": "last"}),
-            &make_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/f.txt", "old_string": "LAST", "new_string": "last"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(result.is_error.is_none());
         let content = fs.read_content(Path::new("/tmp/f.txt")).unwrap();
         assert!(content.ends_with("last"));

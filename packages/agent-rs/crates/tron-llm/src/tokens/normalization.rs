@@ -25,7 +25,8 @@ pub fn normalize_tokens(
     meta: TokenMeta,
 ) -> TokenRecord {
     let (context_window_tokens, calculation_method) = compute_context_window(&source);
-    let new_input_tokens = compute_new_input_tokens(&source, context_window_tokens, previous_baseline);
+    let new_input_tokens =
+        compute_new_input_tokens(&source, context_window_tokens, previous_baseline);
 
     let computed = ComputedTokens {
         context_window_tokens,

@@ -287,11 +287,8 @@ mod tests {
     #[test]
     fn test_self_dependency_blocked() {
         let conn = setup_db();
-        conn.execute(
-            "INSERT INTO tasks (id, title) VALUES ('t1', 'Task 1')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO tasks (id, title) VALUES ('t1', 'Task 1')", [])
+            .unwrap();
 
         let result = conn.execute(
             "INSERT INTO task_dependencies (blocker_task_id, blocked_task_id) VALUES ('t1', 't1')",

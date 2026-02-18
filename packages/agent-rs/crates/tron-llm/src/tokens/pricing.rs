@@ -46,7 +46,9 @@ pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Cost {
     let cache_1hr = usage.cache_creation_1h_tokens.unwrap_or(0);
 
     // Base input tokens = total input minus cache components
-    let base_input = input.saturating_sub(cache_read).saturating_sub(cache_creation);
+    let base_input = input
+        .saturating_sub(cache_read)
+        .saturating_sub(cache_creation);
     let base_input_cost = base_input as f64 / 1_000_000.0 * tier.input_per_million;
 
     // Cache creation cost: per-TTL if available, else aggregate
@@ -197,15 +199,20 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "claude-opus-4-6" | "claude-opus-4-5" => anthropic_tier(5.0, 25.0),
 
         // Anthropic — Sonnet family ($3/$15)
-        "claude-sonnet-4-5-20250929" | "claude-sonnet-4-5"
-        | "claude-sonnet-4-0-20250514" | "claude-sonnet-4"
-        | "claude-3-7-sonnet-20250219" | "claude-3-7-sonnet" => anthropic_tier(3.0, 15.0),
+        "claude-sonnet-4-5-20250929"
+        | "claude-sonnet-4-5"
+        | "claude-sonnet-4-0-20250514"
+        | "claude-sonnet-4"
+        | "claude-3-7-sonnet-20250219"
+        | "claude-3-7-sonnet" => anthropic_tier(3.0, 15.0),
 
         // Anthropic — Haiku 4.5
         "claude-haiku-4-5-20251001" | "claude-haiku-4-5" => anthropic_tier(1.0, 5.0),
 
         // Anthropic — Opus 4/4.1 ($15/$75)
-        "claude-opus-4-1-20250415" | "claude-opus-4-1" | "claude-opus-4-0-20250415"
+        "claude-opus-4-1-20250415"
+        | "claude-opus-4-1"
+        | "claude-opus-4-0-20250415"
         | "claude-opus-4" => anthropic_tier(15.0, 75.0),
 
         // Anthropic — Claude 3 Haiku
@@ -502,10 +509,7 @@ mod tests {
 
     #[test]
     fn detect_google() {
-        assert_eq!(
-            detect_provider("gemini-2-5-pro"),
-            ProviderType::Google
-        );
+        assert_eq!(detect_provider("gemini-2-5-pro"), ProviderType::Google);
     }
 
     #[test]

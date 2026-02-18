@@ -97,11 +97,7 @@ pub trait TronTool: Send + Sync {
     fn definition(&self) -> Tool;
 
     /// Execute the tool with JSON arguments.
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError>;
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -525,11 +521,7 @@ pub trait MessageBus: Send + Sync {
 #[async_trait]
 pub trait EventStoreQuery: Send + Sync {
     /// Semantic memory recall.
-    async fn recall_memory(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> Result<Vec<MemoryEntry>, ToolError>;
+    async fn recall_memory(&self, query: &str, limit: u32) -> Result<Vec<MemoryEntry>, ToolError>;
     /// Full-text search.
     async fn search_memory(
         &self,
@@ -539,11 +531,7 @@ pub trait EventStoreQuery: Send + Sync {
         offset: u32,
     ) -> Result<Vec<MemoryEntry>, ToolError>;
     /// List sessions.
-    async fn list_sessions(
-        &self,
-        limit: u32,
-        offset: u32,
-    ) -> Result<Vec<SessionInfo>, ToolError>;
+    async fn list_sessions(&self, limit: u32, offset: u32) -> Result<Vec<SessionInfo>, ToolError>;
     /// Get a single session.
     async fn get_session(&self, session_id: &str) -> Result<Option<SessionInfo>, ToolError>;
     /// Get events for a session.

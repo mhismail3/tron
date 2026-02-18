@@ -9,10 +9,10 @@ use serde_json::Value;
 
 use crate::errors::ToolError;
 use crate::traits::{
-    BrowserAction, BrowserDelegate, BrowserResult, EventStoreQuery, MessageBus, MessageFilter,
-    MessageSendResult, MemoryEntry, NotifyDelegate, NotifyResult, Notification, OutgoingMessage,
-    ReceivedMessage, SessionInfo, SubagentConfig, SubagentHandle, SubagentResult,
-    SubagentSpawner, TaskManagerDelegate, WaitMode,
+    BrowserAction, BrowserDelegate, BrowserResult, EventStoreQuery, MemoryEntry, MessageBus,
+    MessageFilter, MessageSendResult, Notification, NotifyDelegate, NotifyResult, OutgoingMessage,
+    ReceivedMessage, SessionInfo, SubagentConfig, SubagentHandle, SubagentResult, SubagentSpawner,
+    TaskManagerDelegate, WaitMode,
 };
 
 fn not_available(feature: &str) -> ToolError {
@@ -169,11 +169,7 @@ impl EventStoreQuery for StubEventStoreQuery {
     ) -> Result<Vec<Value>, ToolError> {
         Err(not_available("Event queries"))
     }
-    async fn get_messages(
-        &self,
-        _session_id: &str,
-        _limit: u32,
-    ) -> Result<Vec<Value>, ToolError> {
+    async fn get_messages(&self, _session_id: &str, _limit: u32) -> Result<Vec<Value>, ToolError> {
         Err(not_available("Message queries"))
     }
     async fn get_tool_calls(

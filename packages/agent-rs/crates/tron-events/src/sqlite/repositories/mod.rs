@@ -4,10 +4,10 @@
 //! parameter. This makes every operation a pure function from
 //! (connection, input) → output, trivially testable in isolation.
 
-pub mod workspace;
-pub mod branch;
 pub mod blob;
+pub mod branch;
 pub mod device_token;
 pub mod event;
-pub mod session;
 pub mod search;
+pub mod session;
+pub mod workspace;

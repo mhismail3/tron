@@ -46,7 +46,10 @@ mod session_event_tests {
 
     #[test]
     fn serde_null_parent_id() {
-        let mut event = make_event(EventType::SessionStart, json!({"workingDirectory": "/", "model": "m"}));
+        let mut event = make_event(
+            EventType::SessionStart,
+            json!({"workingDirectory": "/", "model": "m"}),
+        );
         event.parent_id = None;
         let json = serde_json::to_value(&event).unwrap();
         assert!(json["parentId"].is_null());
@@ -54,7 +57,10 @@ mod session_event_tests {
 
     #[test]
     fn serde_with_checksum() {
-        let mut event = make_event(EventType::SessionStart, json!({"workingDirectory": "/", "model": "m"}));
+        let mut event = make_event(
+            EventType::SessionStart,
+            json!({"workingDirectory": "/", "model": "m"}),
+        );
         event.checksum = Some("abc123".into());
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["checksum"], "abc123");
@@ -357,64 +363,211 @@ mod session_event_tests {
     fn serde_roundtrip_every_event_type_with_minimal_payload() {
         // For each event type, create a minimal valid event and verify roundtrip
         let cases: Vec<(EventType, serde_json::Value)> = vec![
-            (EventType::SessionStart, json!({"workingDirectory": "/", "model": "m"})),
+            (
+                EventType::SessionStart,
+                json!({"workingDirectory": "/", "model": "m"}),
+            ),
             (EventType::SessionEnd, json!({"reason": "completed"})),
-            (EventType::SessionFork, json!({"sourceSessionId": "s", "sourceEventId": "e"})),
+            (
+                EventType::SessionFork,
+                json!({"sourceSessionId": "s", "sourceEventId": "e"}),
+            ),
             (EventType::MessageUser, json!({"content": "hi", "turn": 1})),
-            (EventType::MessageAssistant, json!({"content": [], "turn": 1, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}, "stopReason": "end_turn", "model": "m"})),
-            (EventType::MessageSystem, json!({"content": "sys", "source": "context"})),
-            (EventType::MessageDeleted, json!({"targetEventId": "e", "targetType": "message.user"})),
-            (EventType::ToolCall, json!({"toolCallId": "tc", "name": "bash", "arguments": {}, "turn": 1})),
-            (EventType::ToolResult, json!({"toolCallId": "tc", "content": "ok", "isError": false, "duration": 100})),
+            (
+                EventType::MessageAssistant,
+                json!({"content": [], "turn": 1, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}, "stopReason": "end_turn", "model": "m"}),
+            ),
+            (
+                EventType::MessageSystem,
+                json!({"content": "sys", "source": "context"}),
+            ),
+            (
+                EventType::MessageDeleted,
+                json!({"targetEventId": "e", "targetType": "message.user"}),
+            ),
+            (
+                EventType::ToolCall,
+                json!({"toolCallId": "tc", "name": "bash", "arguments": {}, "turn": 1}),
+            ),
+            (
+                EventType::ToolResult,
+                json!({"toolCallId": "tc", "content": "ok", "isError": false, "duration": 100}),
+            ),
             (EventType::StreamTurnStart, json!({"turn": 1})),
-            (EventType::StreamTurnEnd, json!({"turn": 1, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}})),
-            (EventType::StreamTextDelta, json!({"delta": "hi", "turn": 1})),
-            (EventType::StreamThinkingDelta, json!({"delta": "hmm", "turn": 1})),
-            (EventType::ConfigModelSwitch, json!({"previousModel": "a", "newModel": "b"})),
+            (
+                EventType::StreamTurnEnd,
+                json!({"turn": 1, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}}),
+            ),
+            (
+                EventType::StreamTextDelta,
+                json!({"delta": "hi", "turn": 1}),
+            ),
+            (
+                EventType::StreamThinkingDelta,
+                json!({"delta": "hmm", "turn": 1}),
+            ),
+            (
+                EventType::ConfigModelSwitch,
+                json!({"previousModel": "a", "newModel": "b"}),
+            ),
             (EventType::ConfigPromptUpdate, json!({"newHash": "abc"})),
             (EventType::ConfigReasoningLevel, json!({})),
-            (EventType::NotificationInterrupted, json!({"timestamp": "t", "turn": 1})),
-            (EventType::NotificationSubagentResult, json!({"parentSessionId": "p", "subagentSessionId": "s", "task": "t", "resultSummary": "r", "success": true, "totalTurns": 1, "duration": 100, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}, "completedAt": "t"})),
-            (EventType::CompactBoundary, json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10})),
-            (EventType::CompactSummary, json!({"summary": "s", "boundaryEventId": "e"})),
-            (EventType::ContextCleared, json!({"tokensBefore": 100, "tokensAfter": 0, "reason": "manual"})),
-            (EventType::SkillAdded, json!({"skillName": "s", "source": "global", "addedVia": "mention"})),
-            (EventType::SkillRemoved, json!({"skillName": "s", "removedVia": "manual"})),
-            (EventType::RulesLoaded, json!({"files": [], "totalFiles": 0, "mergedTokens": 0})),
-            (EventType::RulesIndexed, json!({"totalRules": 0, "globalRules": 0, "scopedRules": 0, "files": []})),
-            (EventType::MetadataUpdate, json!({"key": "k", "newValue": "v"})),
+            (
+                EventType::NotificationInterrupted,
+                json!({"timestamp": "t", "turn": 1}),
+            ),
+            (
+                EventType::NotificationSubagentResult,
+                json!({"parentSessionId": "p", "subagentSessionId": "s", "task": "t", "resultSummary": "r", "success": true, "totalTurns": 1, "duration": 100, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}, "completedAt": "t"}),
+            ),
+            (
+                EventType::CompactBoundary,
+                json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10}),
+            ),
+            (
+                EventType::CompactSummary,
+                json!({"summary": "s", "boundaryEventId": "e"}),
+            ),
+            (
+                EventType::ContextCleared,
+                json!({"tokensBefore": 100, "tokensAfter": 0, "reason": "manual"}),
+            ),
+            (
+                EventType::SkillAdded,
+                json!({"skillName": "s", "source": "global", "addedVia": "mention"}),
+            ),
+            (
+                EventType::SkillRemoved,
+                json!({"skillName": "s", "removedVia": "manual"}),
+            ),
+            (
+                EventType::RulesLoaded,
+                json!({"files": [], "totalFiles": 0, "mergedTokens": 0}),
+            ),
+            (
+                EventType::RulesIndexed,
+                json!({"totalRules": 0, "globalRules": 0, "scopedRules": 0, "files": []}),
+            ),
+            (
+                EventType::MetadataUpdate,
+                json!({"key": "k", "newValue": "v"}),
+            ),
             (EventType::MetadataTag, json!({"action": "add", "tag": "t"})),
             (EventType::FileRead, json!({"path": "/f"})),
-            (EventType::FileWrite, json!({"path": "/f", "size": 100, "contentHash": "h"})),
-            (EventType::FileEdit, json!({"path": "/f", "oldString": "a", "newString": "b"})),
-            (EventType::WorktreeAcquired, json!({"path": "/w", "branch": "b", "baseCommit": "c", "isolated": true})),
-            (EventType::WorktreeCommit, json!({"commitHash": "h", "message": "m", "filesChanged": []})),
-            (EventType::WorktreeReleased, json!({"deleted": false, "branchPreserved": true})),
-            (EventType::WorktreeMerged, json!({"sourceBranch": "s", "targetBranch": "t", "mergeCommit": "m", "strategy": "merge"})),
-            (EventType::ErrorAgent, json!({"error": "e", "recoverable": true})),
-            (EventType::ErrorTool, json!({"toolName": "t", "toolCallId": "tc", "error": "e"})),
-            (EventType::ErrorProvider, json!({"provider": "p", "error": "e", "retryable": false})),
-            (EventType::SubagentSpawned, json!({"subagentSessionId": "s", "spawnType": "subsession", "task": "t", "model": "m", "workingDirectory": "/"})),
-            (EventType::SubagentStatusUpdate, json!({"subagentSessionId": "s", "status": "running", "currentTurn": 1})),
-            (EventType::SubagentCompleted, json!({"subagentSessionId": "s", "resultSummary": "r", "totalTurns": 1, "totalTokenUsage": {"inputTokens": 0, "outputTokens": 0}, "duration": 100})),
-            (EventType::SubagentFailed, json!({"subagentSessionId": "s", "error": "e", "recoverable": false})),
-            (EventType::SubagentResultsConsumed, json!({"consumedEventIds": ["evt-1"], "count": 1})),
-            (EventType::TodoWrite, json!({"todos": [], "trigger": "tool"})),
-            (EventType::TaskCreated, json!({"taskId": "t", "title": "t", "status": "pending", "projectId": null})),
-            (EventType::TaskUpdated, json!({"taskId": "t", "title": "t", "status": "done", "changedFields": ["status"]})),
+            (
+                EventType::FileWrite,
+                json!({"path": "/f", "size": 100, "contentHash": "h"}),
+            ),
+            (
+                EventType::FileEdit,
+                json!({"path": "/f", "oldString": "a", "newString": "b"}),
+            ),
+            (
+                EventType::WorktreeAcquired,
+                json!({"path": "/w", "branch": "b", "baseCommit": "c", "isolated": true}),
+            ),
+            (
+                EventType::WorktreeCommit,
+                json!({"commitHash": "h", "message": "m", "filesChanged": []}),
+            ),
+            (
+                EventType::WorktreeReleased,
+                json!({"deleted": false, "branchPreserved": true}),
+            ),
+            (
+                EventType::WorktreeMerged,
+                json!({"sourceBranch": "s", "targetBranch": "t", "mergeCommit": "m", "strategy": "merge"}),
+            ),
+            (
+                EventType::ErrorAgent,
+                json!({"error": "e", "recoverable": true}),
+            ),
+            (
+                EventType::ErrorTool,
+                json!({"toolName": "t", "toolCallId": "tc", "error": "e"}),
+            ),
+            (
+                EventType::ErrorProvider,
+                json!({"provider": "p", "error": "e", "retryable": false}),
+            ),
+            (
+                EventType::SubagentSpawned,
+                json!({"subagentSessionId": "s", "spawnType": "subsession", "task": "t", "model": "m", "workingDirectory": "/"}),
+            ),
+            (
+                EventType::SubagentStatusUpdate,
+                json!({"subagentSessionId": "s", "status": "running", "currentTurn": 1}),
+            ),
+            (
+                EventType::SubagentCompleted,
+                json!({"subagentSessionId": "s", "resultSummary": "r", "totalTurns": 1, "totalTokenUsage": {"inputTokens": 0, "outputTokens": 0}, "duration": 100}),
+            ),
+            (
+                EventType::SubagentFailed,
+                json!({"subagentSessionId": "s", "error": "e", "recoverable": false}),
+            ),
+            (
+                EventType::SubagentResultsConsumed,
+                json!({"consumedEventIds": ["evt-1"], "count": 1}),
+            ),
+            (
+                EventType::TodoWrite,
+                json!({"todos": [], "trigger": "tool"}),
+            ),
+            (
+                EventType::TaskCreated,
+                json!({"taskId": "t", "title": "t", "status": "pending", "projectId": null}),
+            ),
+            (
+                EventType::TaskUpdated,
+                json!({"taskId": "t", "title": "t", "status": "done", "changedFields": ["status"]}),
+            ),
             (EventType::TaskDeleted, json!({"taskId": "t", "title": "t"})),
-            (EventType::ProjectCreated, json!({"projectId": "p", "title": "t", "status": "active", "areaId": null})),
-            (EventType::ProjectUpdated, json!({"projectId": "p", "title": "t", "status": "active"})),
-            (EventType::ProjectDeleted, json!({"projectId": "p", "title": "t"})),
-            (EventType::AreaCreated, json!({"areaId": "a", "title": "t", "status": "active"})),
-            (EventType::AreaUpdated, json!({"areaId": "a", "title": "t", "status": "active", "changedFields": []})),
+            (
+                EventType::ProjectCreated,
+                json!({"projectId": "p", "title": "t", "status": "active", "areaId": null}),
+            ),
+            (
+                EventType::ProjectUpdated,
+                json!({"projectId": "p", "title": "t", "status": "active"}),
+            ),
+            (
+                EventType::ProjectDeleted,
+                json!({"projectId": "p", "title": "t"}),
+            ),
+            (
+                EventType::AreaCreated,
+                json!({"areaId": "a", "title": "t", "status": "active"}),
+            ),
+            (
+                EventType::AreaUpdated,
+                json!({"areaId": "a", "title": "t", "status": "active", "changedFields": []}),
+            ),
             (EventType::AreaDeleted, json!({"areaId": "a", "title": "t"})),
-            (EventType::TurnFailed, json!({"turn": 1, "error": "e", "recoverable": false})),
-            (EventType::HookTriggered, json!({"hookNames": ["h"], "hookEvent": "PreToolUse", "timestamp": "t"})),
-            (EventType::HookCompleted, json!({"hookNames": ["h"], "hookEvent": "PreToolUse", "result": "continue", "timestamp": "t"})),
-            (EventType::HookBackgroundStarted, json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "timestamp": "t"})),
-            (EventType::HookBackgroundCompleted, json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"})),
-            (EventType::MemoryLedger, json!({"eventRange": {"firstEventId": "e1", "lastEventId": "e2"}, "turnRange": {"firstTurn": 1, "lastTurn": 2}, "title": "t", "entryType": "feature", "status": "completed", "tags": [], "input": "i", "actions": [], "files": [], "decisions": [], "lessons": [], "thinkingInsights": [], "tokenCost": {"input": 0, "output": 0}, "model": "m", "workingDirectory": "/"})),
+            (
+                EventType::TurnFailed,
+                json!({"turn": 1, "error": "e", "recoverable": false}),
+            ),
+            (
+                EventType::HookTriggered,
+                json!({"hookNames": ["h"], "hookEvent": "PreToolUse", "timestamp": "t"}),
+            ),
+            (
+                EventType::HookCompleted,
+                json!({"hookNames": ["h"], "hookEvent": "PreToolUse", "result": "continue", "timestamp": "t"}),
+            ),
+            (
+                EventType::HookBackgroundStarted,
+                json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "timestamp": "t"}),
+            ),
+            (
+                EventType::HookBackgroundCompleted,
+                json!({"hookNames": ["h"], "hookEvent": "PostToolUse", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
+            ),
+            (
+                EventType::MemoryLedger,
+                json!({"eventRange": {"firstEventId": "e1", "lastEventId": "e2"}, "turnRange": {"firstTurn": 1, "lastTurn": 2}, "title": "t", "entryType": "feature", "status": "completed", "tags": [], "input": "i", "actions": [], "files": [], "decisions": [], "lessons": [], "thinkingInsights": [], "tokenCost": {"input": 0, "output": 0}, "model": "m", "workingDirectory": "/"}),
+            ),
             (EventType::MemoryLoaded, json!({})),
         ];
 
@@ -430,7 +583,11 @@ mod session_event_tests {
 
             // typed_payload should succeed
             let typed = event.typed_payload();
-            assert!(typed.is_ok(), "typed_payload failed for {event_type}: {:?}", typed.err());
+            assert!(
+                typed.is_ok(),
+                "typed_payload failed for {event_type}: {:?}",
+                typed.err()
+            );
         }
     }
 }
@@ -469,7 +626,9 @@ mod type_guard_tests {
     fn specific_message_guards() {
         assert!(is_user_message_event(&make(EventType::MessageUser)));
         assert!(!is_user_message_event(&make(EventType::MessageAssistant)));
-        assert!(is_assistant_message_event(&make(EventType::MessageAssistant)));
+        assert!(is_assistant_message_event(&make(
+            EventType::MessageAssistant
+        )));
     }
 
     #[test]
@@ -509,8 +668,12 @@ mod type_guard_tests {
     #[test]
     fn config_guards() {
         assert!(is_config_event(&make(EventType::ConfigModelSwitch)));
-        assert!(is_config_reasoning_level_event(&make(EventType::ConfigReasoningLevel)));
-        assert!(is_config_prompt_update_event(&make(EventType::ConfigPromptUpdate)));
+        assert!(is_config_reasoning_level_event(&make(
+            EventType::ConfigReasoningLevel
+        )));
+        assert!(is_config_prompt_update_event(&make(
+            EventType::ConfigPromptUpdate
+        )));
     }
 
     #[test]
@@ -566,8 +729,8 @@ mod type_guard_tests {
 mod state_type_tests {
     use serde_json::json;
 
-    use crate::types::state::*;
     use crate::types::payloads::TokenUsage;
+    use crate::types::state::*;
 
     #[test]
     fn message_serde_roundtrip() {

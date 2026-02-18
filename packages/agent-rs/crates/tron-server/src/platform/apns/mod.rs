@@ -7,6 +7,6 @@ mod config;
 mod service;
 mod types;
 
-pub use config::{load_apns_config, ApnsConfig};
+pub use config::{ApnsConfig, load_apns_config};
 pub use service::ApnsService;
 pub use types::{ApnsNotification, ApnsSendResult};

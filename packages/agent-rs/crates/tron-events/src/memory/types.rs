@@ -214,7 +214,9 @@ mod tests {
         };
         let tc = CompactionTriggerConfig::from(&cs);
         let defaults = CompactionTriggerConfig::default();
-        assert!((tc.trigger_token_threshold - defaults.trigger_token_threshold).abs() < f64::EPSILON);
+        assert!(
+            (tc.trigger_token_threshold - defaults.trigger_token_threshold).abs() < f64::EPSILON
+        );
         assert!((tc.alert_zone_threshold - defaults.alert_zone_threshold).abs() < f64::EPSILON);
         assert_eq!(tc.default_turn_fallback, defaults.default_turn_fallback);
         assert_eq!(tc.alert_turn_fallback, defaults.alert_turn_fallback);

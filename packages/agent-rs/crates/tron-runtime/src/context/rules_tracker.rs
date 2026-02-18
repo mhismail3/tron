@@ -234,8 +234,7 @@ impl RulesTracker {
 
         for rule in matched {
             if !self.activated_keys.contains(&rule.relative_path) {
-                let _ = self.activated_keys
-                    .insert(rule.relative_path.clone());
+                let _ = self.activated_keys.insert(rule.relative_path.clone());
                 self.activated_scoped_rules
                     .push((rule.relative_path.clone(), rule.clone()));
                 new_activations = true;
@@ -373,11 +372,9 @@ impl RulesTracker {
 
         for event in events {
             if event.event_type == "rules.loaded" {
-                if let Ok(files) =
-                    serde_json::from_value::<Vec<RulesFileInfo>>(
-                        event.payload.get("files").cloned().unwrap_or_default(),
-                    )
-                {
+                if let Ok(files) = serde_json::from_value::<Vec<RulesFileInfo>>(
+                    event.payload.get("files").cloned().unwrap_or_default(),
+                ) {
                     let merged_tokens = event
                         .payload
                         .get("mergedTokens")
@@ -385,12 +382,7 @@ impl RulesTracker {
                         .unwrap_or(0);
 
                     #[allow(clippy::cast_possible_truncation)]
-                    tracker.set_rules(
-                        files,
-                        merged_tokens as u32,
-                        event.id.clone(),
-                        None,
-                    );
+                    tracker.set_rules(files, merged_tokens as u32, event.id.clone(), None);
                 }
             }
         }
@@ -617,11 +609,7 @@ mod tests {
 
     #[test]
     fn touch_path_same_path_twice_is_idempotent() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -634,11 +622,7 @@ mod tests {
 
     #[test]
     fn touch_path_unrelated_causes_no_activation() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -666,11 +650,7 @@ mod tests {
 
     #[test]
     fn content_is_cached_until_new_activation() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Context",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Context");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -683,11 +663,7 @@ mod tests {
 
     #[test]
     fn get_activated_rules() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -713,11 +689,7 @@ mod tests {
 
     #[test]
     fn get_touched_paths() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -735,10 +707,8 @@ mod tests {
     fn content_format_globals_first_then_scoped_in_activation_order() {
         let global1 = make_global_rule(".claude/b-global.md", "# Global B");
         let global2 = make_global_rule(".claude/a-global.md", "# Global A");
-        let scoped1 =
-            make_scoped_rule("src/tools", "src/tools/.claude/CLAUDE.md", "# Tools");
-        let scoped2 =
-            make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Context");
+        let scoped1 = make_scoped_rule("src/tools", "src/tools/.claude/CLAUDE.md", "# Tools");
+        let scoped2 = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Context");
         let index = RulesIndex::new(vec![global1, global2, scoped1, scoped2]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -764,11 +734,7 @@ mod tests {
     #[test]
     fn rule_sections_include_comment_headers() {
         let global = make_global_rule(".claude/CLAUDE.md", "# G");
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# C",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# C");
         let index = RulesIndex::new(vec![global, scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -776,17 +742,12 @@ mod tests {
 
         let content = tracker.build_dynamic_rules_content().unwrap();
         assert!(content.contains("<!-- Rule: .claude/CLAUDE.md -->"));
-        assert!(content
-            .contains("<!-- Rule: src/context/.claude/CLAUDE.md (activated) -->"));
+        assert!(content.contains("<!-- Rule: src/context/.claude/CLAUDE.md (activated) -->"));
     }
 
     #[test]
     fn clear_dynamic_state_resets_activation() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Context",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Context");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -804,11 +765,7 @@ mod tests {
 
     #[test]
     fn returns_none_when_index_exists_but_no_rules_active() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -825,11 +782,7 @@ mod tests {
 
     #[test]
     fn has_rules_with_index_only() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -856,11 +809,7 @@ mod tests {
 
     #[test]
     fn pre_activate_unknown_path_returns_false() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);
@@ -871,11 +820,7 @@ mod tests {
 
     #[test]
     fn pre_activate_already_activated_is_idempotent() {
-        let scoped = make_scoped_rule(
-            "src/context",
-            "src/context/.claude/CLAUDE.md",
-            "# Rules",
-        );
+        let scoped = make_scoped_rule("src/context", "src/context/.claude/CLAUDE.md", "# Rules");
         let index = RulesIndex::new(vec![scoped]);
         let mut tracker = RulesTracker::new();
         tracker.set_rules_index(index);

@@ -70,18 +70,19 @@ impl AuditLogger {
     }
 
     /// Get entries for a specific session, optionally limited.
-    pub fn entries_for_session(
-        &self,
-        session_id: &str,
-        limit: Option<usize>,
-    ) -> Vec<&AuditEntry> {
+    pub fn entries_for_session(&self, session_id: &str, limit: Option<usize>) -> Vec<&AuditEntry> {
         let session_entries: Vec<&AuditEntry> = self
             .entries
             .iter()
             .filter(|e| e.session_id.as_deref() == Some(session_id))
             .collect();
         let count = limit.unwrap_or(session_entries.len());
-        session_entries.into_iter().rev().take(count).rev().collect()
+        session_entries
+            .into_iter()
+            .rev()
+            .take(count)
+            .rev()
+            .collect()
     }
 
     /// Get entries where a rule was triggered.
@@ -96,11 +97,7 @@ impl AuditLogger {
                     return false;
                 }
                 match rule_id {
-                    Some(id) => e
-                        .evaluation
-                        .triggered_rules
-                        .iter()
-                        .any(|r| r.rule_id == id),
+                    Some(id) => e.evaluation.triggered_rules.iter().any(|r| r.rule_id == id),
                     None => true,
                 }
             })

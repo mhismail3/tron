@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::{stream, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, stream};
 use parking_lot::RwLock;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -20,11 +20,11 @@ use tron_llm::models::types::ProviderType;
 use tron_llm::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
-use tron_server::rpc::context::{AgentDeps, RpcContext};
-use tron_server::rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_server::config::ServerConfig;
+use tron_server::rpc::context::{AgentDeps, RpcContext};
+use tron_server::rpc::registry::MethodRegistry;
 use tron_server::server::TronServer;
 use tron_server::websocket::event_bridge::EventBridge;
 use tron_skills::registry::SkillRegistry;
@@ -32,9 +32,8 @@ use tron_tools::registry::ToolRegistry;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Boot a test server and return the WS URL + shutdown handle.
 async fn boot_server() -> (String, Arc<TronServer>) {
@@ -72,10 +71,21 @@ async fn boot_server() -> (String, Arc<TronServer>) {
 
     let config = ServerConfig::default(); // port 0 = auto-assign
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .build_recorder().handle();
-    let server = Arc::new(TronServer::new(config, registry, rpc_context, metrics_handle));
+        .build_recorder()
+        .handle();
+    let server = Arc::new(TronServer::new(
+        config,
+        registry,
+        rpc_context,
+        metrics_handle,
+    ));
 
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None, server.shutdown().token());
+    let bridge = EventBridge::new(
+        orchestrator.subscribe(),
+        server.broadcast().clone(),
+        None,
+        server.shutdown().token(),
+    );
     let _bridge_handle = tokio::spawn(bridge.run());
 
     let (addr, _handle) = server.listen().await.unwrap();
@@ -185,10 +195,7 @@ impl Provider for SlowProvider {
 struct FixedProviderFactory(Arc<dyn Provider>);
 #[async_trait]
 impl ProviderFactory for FixedProviderFactory {
-    async fn create_for_model(
-        &self,
-        _model: &str,
-    ) -> Result<Arc<dyn Provider>, ProviderError> {
+    async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         Ok(self.0.clone())
     }
 }
@@ -234,10 +241,21 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
 
     let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .build_recorder().handle();
-    let server = Arc::new(TronServer::new(config, registry, rpc_context, metrics_handle));
+        .build_recorder()
+        .handle();
+    let server = Arc::new(TronServer::new(
+        config,
+        registry,
+        rpc_context,
+        metrics_handle,
+    ));
 
-    let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None, server.shutdown().token());
+    let bridge = EventBridge::new(
+        orchestrator.subscribe(),
+        server.broadcast().clone(),
+        None,
+        server.shutdown().token(),
+    );
     drop(tokio::spawn(bridge.run()));
 
     let (addr, _handle) = server.listen().await.unwrap();
@@ -479,13 +497,7 @@ async fn e2e_task_crud() {
     assert_eq!(resp["success"], true);
 
     // Delete
-    let resp = rpc_call(
-        &mut ws,
-        5,
-        "tasks.delete",
-        Some(json!({"taskId": task_id})),
-    )
-    .await;
+    let resp = rpc_call(&mut ws, 5, "tasks.delete", Some(json!({"taskId": task_id}))).await;
     assert_eq!(resp["success"], true);
 
     server.shutdown().shutdown();
@@ -543,13 +555,7 @@ async fn e2e_agent_abort() {
     )
     .await;
 
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "agent.abort",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
+    let resp = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(resp["success"], true);
     assert_eq!(resp["result"]["aborted"], true);
 
@@ -1114,10 +1120,7 @@ async fn create_and_bind_session(ws: &mut WsStream, id: u64) -> String {
         Some(json!({"model": "m", "workingDirectory": "/tmp"})),
     )
     .await;
-    resp["result"]["sessionId"]
-        .as_str()
-        .unwrap()
-        .to_string()
+    resp["result"]["sessionId"].as_str().unwrap().to_string()
 }
 
 /// Try to read a JSON message within timeout. Returns None on timeout.
@@ -1191,7 +1194,13 @@ async fn e2e_bridge_multiple_clients() {
     let sid = create_and_bind_session(&mut ws1, 1).await;
 
     // ws2 resumes the same session (auto-binds ws2)
-    let _ = rpc_call(&mut ws2, 1, "session.resume", Some(json!({"sessionId": sid}))).await;
+    let _ = rpc_call(
+        &mut ws2,
+        1,
+        "session.resume",
+        Some(json!({"sessionId": sid})),
+    )
+    .await;
 
     let _ = server
         .rpc_context()
@@ -1280,7 +1289,10 @@ async fn e2e_events_have_type_field() {
     // Read all 3 events
     for _ in 0..3 {
         if let Some(evt) = try_read_json(&mut ws, Duration::from_secs(2)).await {
-            assert!(evt.get("type").is_some(), "event should have type field: {evt}");
+            assert!(
+                evt.get("type").is_some(),
+                "event should have type field: {evt}"
+            );
         }
     }
 
@@ -1649,8 +1661,15 @@ async fn e2e_concurrent_isolated() {
     .await;
     let e1 = h1["result"]["events"].as_array().unwrap();
     let e2 = h2["result"]["events"].as_array().unwrap();
-    assert_eq!(e1.len(), e2.len(), "both sessions should have equal event counts");
-    assert!(e1.len() >= 2, "each session should have session.start + appended event");
+    assert_eq!(
+        e1.len(),
+        e2.len(),
+        "both sessions should have equal event counts"
+    );
+    assert!(
+        e1.len() >= 2,
+        "each session should have session.start + appended event"
+    );
 
     server.shutdown().shutdown();
 }
@@ -1671,12 +1690,7 @@ async fn e2e_many_sessions_stress() {
         )
         .await;
         assert_eq!(resp["success"], true, "session {i} creation failed");
-        sids.push(
-            resp["result"]["sessionId"]
-                .as_str()
-                .unwrap()
-                .to_string(),
-        );
+        sids.push(resp["result"]["sessionId"].as_str().unwrap().to_string());
     }
 
     // Verify all sessions exist
@@ -1960,22 +1974,13 @@ async fn e2e_sequential_prompts_after_abort() {
     assert_eq!(resp1["success"], true);
 
     // Abort
-    let _ = rpc_call(
-        &mut ws,
-        3,
-        "agent.abort",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
+    let _ = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
 
     // Wait a bit for the abort to process
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Complete the run so the session is no longer busy
-    server
-        .rpc_context()
-        .orchestrator
-        .complete_run(&sid);
+    server.rpc_context().orchestrator.complete_run(&sid);
 
     // Second prompt should work now
     let resp2 = rpc_call(
@@ -2386,13 +2391,7 @@ async fn e2e_prompt_abort_mid_stream() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Abort
-    let resp = rpc_call(
-        &mut ws,
-        3,
-        "agent.abort",
-        Some(json!({"sessionId": sid})),
-    )
-    .await;
+    let resp = rpc_call(&mut ws, 3, "agent.abort", Some(json!({"sessionId": sid}))).await;
     assert_eq!(resp["result"]["aborted"], true);
 
     // Wait for the run to be cleaned up (agent_runner calls complete_run)
@@ -2528,13 +2527,19 @@ async fn e2e_prompt_text_content_arrives() {
     assert!(
         !text_deltas.is_empty(),
         "should receive text_delta events, got: {:?}",
-        events.iter().filter_map(|e| e.get("type")).collect::<Vec<_>>()
+        events
+            .iter()
+            .filter_map(|e| e.get("type"))
+            .collect::<Vec<_>>()
     );
 
     // Verify actual text content from the provider is present
-    let has_content = text_deltas
-        .iter()
-        .any(|e| e["data"]["delta"].as_str().unwrap_or("").contains("specific text content"));
+    let has_content = text_deltas.iter().any(|e| {
+        e["data"]["delta"]
+            .as_str()
+            .unwrap_or("")
+            .contains("specific text content")
+    });
     assert!(has_content, "text_delta should contain provider text");
 
     server.shutdown().shutdown();
@@ -2615,7 +2620,10 @@ async fn e2e_prompt_state_transitions() {
         Some(json!({"sessionId": sid})),
     )
     .await;
-    assert_eq!(resp["result"]["isRunning"], false, "should be not busy after ready");
+    assert_eq!(
+        resp["result"]["isRunning"], false,
+        "should be not busy after ready"
+    );
 
     server.shutdown().shutdown();
 }
@@ -2844,7 +2852,10 @@ async fn e2e_detailed_snapshot_has_system_prompt() {
 
     // System prompt content should be non-empty
     let sys_content = result["systemPromptContent"].as_str().unwrap();
-    assert!(!sys_content.is_empty(), "systemPromptContent should be non-empty");
+    assert!(
+        !sys_content.is_empty(),
+        "systemPromptContent should be non-empty"
+    );
 
     // iOS required fields
     assert!(result["messages"].is_array());

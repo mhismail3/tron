@@ -5,7 +5,7 @@
 //! low-level CRUD, tree traversal (ancestors/descendants via recursive CTEs),
 //! and query operations.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 use crate::errors::Result;
@@ -47,7 +47,8 @@ impl EventRepo {
         let depth = Self::compute_depth(conn, event.parent_id.as_deref())?;
 
         // Extract token usage from payload.tokenUsage or payload directly
-        let (input_tokens, output_tokens, cache_read, cache_create) = extract_tokens(&event.payload);
+        let (input_tokens, output_tokens, cache_read, cache_create) =
+            extract_tokens(&event.payload);
 
         // Extract v002 per-turn metadata
         let model = extract_str(&event.payload, "model");
@@ -393,8 +394,7 @@ impl EventRepo {
         }
 
         // Build the type placeholders starting after session_id (?1)
-        let placeholders: Vec<String> =
-            (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
+        let placeholders: Vec<String> = (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
         let mut sql = format!(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
@@ -435,8 +435,7 @@ impl EventRepo {
             return Ok(Vec::new());
         }
 
-        let placeholders: Vec<String> =
-            (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
+        let placeholders: Vec<String> = (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
         let mut sql = format!(
             "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
                     content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
@@ -479,8 +478,7 @@ impl EventRepo {
             return Ok(0);
         }
 
-        let placeholders: Vec<String> =
-            (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
+        let placeholders: Vec<String> = (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
         let sql = format!(
             "SELECT COUNT(*) FROM events WHERE workspace_id = ?1 AND type IN ({})",
             placeholders.join(", ")
@@ -567,8 +565,7 @@ fn extract_role(event: &SessionEvent) -> Option<String> {
 }
 
 fn extract_tool_name(event: &SessionEvent) -> Option<String> {
-    extract_str(&event.payload, "toolName")
-        .or_else(|| extract_str(&event.payload, "name"))
+    extract_str(&event.payload, "toolName").or_else(|| extract_str(&event.payload, "name"))
 }
 
 fn extract_str(val: &Value, key: &str) -> Option<String> {
@@ -643,7 +640,13 @@ mod tests {
         conn
     }
 
-    fn make_event(id: &str, seq: i64, event_type: EventType, parent_id: Option<&str>, payload: Value) -> SessionEvent {
+    fn make_event(
+        id: &str,
+        seq: i64,
+        event_type: EventType,
+        parent_id: Option<&str>,
+        payload: Value,
+    ) -> SessionEvent {
         SessionEvent {
             id: id.to_string(),
             parent_id: parent_id.map(String::from),
@@ -674,7 +677,13 @@ mod tests {
     #[test]
     fn insert_extracts_role() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageUser, None, json!({"content": "hi"}));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageUser,
+            None,
+            json!({"content": "hi"}),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -684,7 +693,13 @@ mod tests {
     #[test]
     fn insert_extracts_tool_name() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::ToolCall, None, json!({"toolName": "bash", "toolCallId": "tc_1"}));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::ToolCall,
+            None,
+            json!({"toolName": "bash", "toolCallId": "tc_1"}),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -695,14 +710,20 @@ mod tests {
     #[test]
     fn insert_extracts_tokens() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "tokenUsage": {
-                "inputTokens": 100,
-                "outputTokens": 50,
-                "cacheReadTokens": 25
-            }
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "tokenUsage": {
+                    "inputTokens": 100,
+                    "outputTokens": 50,
+                    "cacheReadTokens": 25
+                }
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -716,15 +737,30 @@ mod tests {
         let conn = setup();
         let e1 = make_event("evt_1", 1, EventType::SessionStart, None, json!({}));
         let e2 = make_event("evt_2", 2, EventType::MessageUser, Some("evt_1"), json!({}));
-        let e3 = make_event("evt_3", 3, EventType::MessageAssistant, Some("evt_2"), json!({}));
+        let e3 = make_event(
+            "evt_3",
+            3,
+            EventType::MessageAssistant,
+            Some("evt_2"),
+            json!({}),
+        );
 
         EventRepo::insert(&conn, &e1).unwrap();
         EventRepo::insert(&conn, &e2).unwrap();
         EventRepo::insert(&conn, &e3).unwrap();
 
-        assert_eq!(EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap().depth, 0);
-        assert_eq!(EventRepo::get_by_id(&conn, "evt_2").unwrap().unwrap().depth, 1);
-        assert_eq!(EventRepo::get_by_id(&conn, "evt_3").unwrap().unwrap().depth, 2);
+        assert_eq!(
+            EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap().depth,
+            0
+        );
+        assert_eq!(
+            EventRepo::get_by_id(&conn, "evt_2").unwrap().unwrap().depth,
+            1
+        );
+        assert_eq!(
+            EventRepo::get_by_id(&conn, "evt_3").unwrap().unwrap().depth,
+            2
+        );
     }
 
     #[test]
@@ -742,7 +778,8 @@ mod tests {
             EventRepo::insert(&conn, &event).unwrap();
         }
 
-        let events = EventRepo::get_by_session(&conn, "sess_1", &ListEventsOptions::default()).unwrap();
+        let events =
+            EventRepo::get_by_session(&conn, "sess_1", &ListEventsOptions::default()).unwrap();
         assert_eq!(events.len(), 5);
         assert_eq!(events[0].sequence, 1);
         assert_eq!(events[4].sequence, 5);
@@ -752,11 +789,25 @@ mod tests {
     fn get_by_session_with_limit() {
         let conn = setup();
         for i in 1..=5 {
-            let event = make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}));
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
             EventRepo::insert(&conn, &event).unwrap();
         }
 
-        let events = EventRepo::get_by_session(&conn, "sess_1", &ListEventsOptions { limit: Some(3), offset: None }).unwrap();
+        let events = EventRepo::get_by_session(
+            &conn,
+            "sess_1",
+            &ListEventsOptions {
+                limit: Some(3),
+                offset: None,
+            },
+        )
+        .unwrap();
         assert_eq!(events.len(), 3);
     }
 
@@ -770,7 +821,13 @@ mod tests {
     fn get_next_sequence_after_events() {
         let conn = setup();
         for i in 1..=3 {
-            let event = make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}));
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
             EventRepo::insert(&conn, &event).unwrap();
         }
         assert_eq!(EventRepo::get_next_sequence(&conn, "sess_1").unwrap(), 4);
@@ -781,7 +838,13 @@ mod tests {
         let conn = setup();
         let e1 = make_event("evt_1", 1, EventType::SessionStart, None, json!({}));
         let e2 = make_event("evt_2", 2, EventType::MessageUser, Some("evt_1"), json!({}));
-        let e3 = make_event("evt_3", 3, EventType::MessageAssistant, Some("evt_2"), json!({}));
+        let e3 = make_event(
+            "evt_3",
+            3,
+            EventType::MessageAssistant,
+            Some("evt_2"),
+            json!({}),
+        );
         let e4 = make_event("evt_4", 4, EventType::ToolCall, Some("evt_3"), json!({}));
         let e5 = make_event("evt_5", 5, EventType::ToolResult, Some("evt_4"), json!({}));
 
@@ -813,7 +876,13 @@ mod tests {
         let conn = setup();
         let e1 = make_event("evt_1", 1, EventType::SessionStart, None, json!({}));
         let e2 = make_event("evt_2", 2, EventType::MessageUser, Some("evt_1"), json!({}));
-        let e3 = make_event("evt_3", 3, EventType::MessageAssistant, Some("evt_1"), json!({}));
+        let e3 = make_event(
+            "evt_3",
+            3,
+            EventType::MessageAssistant,
+            Some("evt_1"),
+            json!({}),
+        );
 
         EventRepo::insert(&conn, &e1).unwrap();
         EventRepo::insert(&conn, &e2).unwrap();
@@ -828,7 +897,13 @@ mod tests {
         let conn = setup();
         let e1 = make_event("evt_1", 1, EventType::SessionStart, None, json!({}));
         let e2 = make_event("evt_2", 2, EventType::MessageUser, Some("evt_1"), json!({}));
-        let e3 = make_event("evt_3", 3, EventType::MessageAssistant, Some("evt_2"), json!({}));
+        let e3 = make_event(
+            "evt_3",
+            3,
+            EventType::MessageAssistant,
+            Some("evt_2"),
+            json!({}),
+        );
 
         EventRepo::insert(&conn, &e1).unwrap();
         EventRepo::insert(&conn, &e2).unwrap();
@@ -842,7 +917,13 @@ mod tests {
     fn get_since() {
         let conn = setup();
         for i in 1..=5 {
-            let event = make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}));
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
             EventRepo::insert(&conn, &event).unwrap();
         }
 
@@ -856,7 +937,13 @@ mod tests {
     fn get_latest() {
         let conn = setup();
         for i in 1..=3 {
-            let event = make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}));
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
             EventRepo::insert(&conn, &event).unwrap();
         }
 
@@ -877,7 +964,13 @@ mod tests {
         assert_eq!(EventRepo::count_by_session(&conn, "sess_1").unwrap(), 0);
 
         for i in 1..=3 {
-            let event = make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}));
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
             EventRepo::insert(&conn, &event).unwrap();
         }
         assert_eq!(EventRepo::count_by_session(&conn, "sess_1").unwrap(), 3);
@@ -886,18 +979,40 @@ mod tests {
     #[test]
     fn count_by_type() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::MessageUser, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_3", 3, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
 
-        assert_eq!(EventRepo::count_by_type(&conn, "sess_1", "message.user").unwrap(), 2);
-        assert_eq!(EventRepo::count_by_type(&conn, "sess_1", "message.assistant").unwrap(), 1);
+        assert_eq!(
+            EventRepo::count_by_type(&conn, "sess_1", "message.user").unwrap(),
+            2
+        );
+        assert_eq!(
+            EventRepo::count_by_type(&conn, "sess_1", "message.assistant").unwrap(),
+            1
+        );
     }
 
     #[test]
     fn exists_event() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::SessionStart, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::SessionStart, None, json!({})),
+        )
+        .unwrap();
 
         assert!(EventRepo::exists(&conn, "evt_1").unwrap());
         assert!(!EventRepo::exists(&conn, "evt_nonexistent").unwrap());
@@ -906,7 +1021,11 @@ mod tests {
     #[test]
     fn delete_event() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::SessionStart, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::SessionStart, None, json!({})),
+        )
+        .unwrap();
 
         assert!(EventRepo::delete(&conn, "evt_1").unwrap());
         assert!(!EventRepo::exists(&conn, "evt_1").unwrap());
@@ -916,7 +1035,13 @@ mod tests {
     fn delete_by_session() {
         let conn = setup();
         for i in 1..=3 {
-            let event = make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}));
+            let event = make_event(
+                &format!("evt_{i}"),
+                i,
+                EventType::MessageUser,
+                None,
+                json!({}),
+            );
             EventRepo::insert(&conn, &event).unwrap();
         }
 
@@ -928,12 +1053,32 @@ mod tests {
     #[test]
     fn token_usage_summary() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "tokenUsage": {"inputTokens": 100, "outputTokens": 50, "cacheReadTokens": 20}
-        }))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({
-            "tokenUsage": {"inputTokens": 200, "outputTokens": 100}
-        }))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event(
+                "evt_1",
+                1,
+                EventType::MessageAssistant,
+                None,
+                json!({
+                    "tokenUsage": {"inputTokens": 100, "outputTokens": 50, "cacheReadTokens": 20}
+                }),
+            ),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event(
+                "evt_2",
+                2,
+                EventType::MessageAssistant,
+                None,
+                json!({
+                    "tokenUsage": {"inputTokens": 200, "outputTokens": 100}
+                }),
+            ),
+        )
+        .unwrap();
 
         let summary = EventRepo::get_token_usage_summary(&conn, "sess_1").unwrap();
         assert_eq!(summary.input_tokens, 300);
@@ -952,13 +1097,25 @@ mod tests {
     #[test]
     fn fts_trigger_indexes_on_insert() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({"content": "search for this phrase"}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event(
+                "evt_1",
+                1,
+                EventType::MessageUser,
+                None,
+                json!({"content": "search for this phrase"}),
+            ),
+        )
+        .unwrap();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'phrase'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH 'phrase'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -967,8 +1124,16 @@ mod tests {
     #[test]
     fn get_by_ids_basic() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({})),
+        )
+        .unwrap();
 
         let ids = ["evt_1", "evt_2"];
         let map = EventRepo::get_by_ids(&conn, &ids).unwrap();
@@ -987,7 +1152,11 @@ mod tests {
     #[test]
     fn get_by_ids_missing_omitted() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
 
         let ids = ["evt_1", "evt_nonexistent"];
         let map = EventRepo::get_by_ids(&conn, &ids).unwrap();
@@ -999,9 +1168,21 @@ mod tests {
     #[test]
     fn get_by_types_basic() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::ToolCall, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_3", 3, EventType::ToolCall, None, json!({})),
+        )
+        .unwrap();
 
         let types = ["message.user", "message.assistant"];
         let results = EventRepo::get_by_types(&conn, "sess_1", &types, None).unwrap();
@@ -1019,7 +1200,17 @@ mod tests {
     fn get_by_types_with_limit() {
         let conn = setup();
         for i in 1..=5 {
-            EventRepo::insert(&conn, &make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}))).unwrap();
+            EventRepo::insert(
+                &conn,
+                &make_event(
+                    &format!("evt_{i}"),
+                    i,
+                    EventType::MessageUser,
+                    None,
+                    json!({}),
+                ),
+            )
+            .unwrap();
         }
 
         let types = ["message.user"];
@@ -1032,11 +1223,20 @@ mod tests {
     #[test]
     fn get_by_workspace_and_types_basic() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::ToolCall, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_2", 2, EventType::ToolCall, None, json!({})),
+        )
+        .unwrap();
 
         let types = ["message.user"];
-        let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, None, None).unwrap();
+        let results =
+            EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, None, None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "evt_1");
     }
@@ -1044,7 +1244,8 @@ mod tests {
     #[test]
     fn get_by_workspace_and_types_empty_types() {
         let conn = setup();
-        let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &[], None, None).unwrap();
+        let results =
+            EventRepo::get_by_workspace_and_types(&conn, "ws_1", &[], None, None).unwrap();
         assert!(results.is_empty());
     }
 
@@ -1052,20 +1253,43 @@ mod tests {
     fn get_by_workspace_and_types_with_limit_offset() {
         let conn = setup();
         for i in 1..=5 {
-            EventRepo::insert(&conn, &make_event(&format!("evt_{i}"), i, EventType::MessageUser, None, json!({}))).unwrap();
+            EventRepo::insert(
+                &conn,
+                &make_event(
+                    &format!("evt_{i}"),
+                    i,
+                    EventType::MessageUser,
+                    None,
+                    json!({}),
+                ),
+            )
+            .unwrap();
         }
 
         let types = ["message.user"];
-        let results = EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, Some(2), Some(1)).unwrap();
+        let results =
+            EventRepo::get_by_workspace_and_types(&conn, "ws_1", &types, Some(2), Some(1)).unwrap();
         assert_eq!(results.len(), 2);
     }
 
     #[test]
     fn count_by_workspace_and_types_basic() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageUser, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({}))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::ToolCall, None, json!({}))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_1", 1, EventType::MessageUser, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({})),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event("evt_3", 3, EventType::ToolCall, None, json!({})),
+        )
+        .unwrap();
 
         let types = ["message.user", "message.assistant"];
         let count = EventRepo::count_by_workspace_and_types(&conn, "ws_1", &types).unwrap();
@@ -1084,10 +1308,16 @@ mod tests {
     #[test]
     fn extract_model_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "model": "claude-opus-4-6"
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "model": "claude-opus-4-6"
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1097,10 +1327,16 @@ mod tests {
     #[test]
     fn extract_latency_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "latency": 1234
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "latency": 1234
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1110,10 +1346,16 @@ mod tests {
     #[test]
     fn extract_stop_reason_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "stopReason": "end_turn"
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "stopReason": "end_turn"
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1123,10 +1365,16 @@ mod tests {
     #[test]
     fn extract_has_thinking_bool_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "hasThinking": true
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "hasThinking": true
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1136,10 +1384,16 @@ mod tests {
     #[test]
     fn extract_has_thinking_false_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "hasThinking": false
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "hasThinking": false
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1149,10 +1403,16 @@ mod tests {
     #[test]
     fn extract_provider_type_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "providerType": "google"
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "providerType": "google"
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1162,25 +1422,43 @@ mod tests {
     #[test]
     fn extract_cost_from_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "hello",
-            "cost": 0.0042
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "hello",
+                "cost": 0.0042
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
         let cost = row.cost.unwrap();
-        assert!((cost - 0.0042).abs() < f64::EPSILON, "cost should be ~0.0042, got {cost}");
+        assert!(
+            (cost - 0.0042).abs() < f64::EPSILON,
+            "cost should be ~0.0042, got {cost}"
+        );
     }
 
     #[test]
     fn new_columns_null_when_not_in_payload() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageUser, None, json!({"content": "hi"}));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageUser,
+            None,
+            json!({"content": "hi"}),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
-        assert!(row.model.is_none(), "model should be None for user messages");
+        assert!(
+            row.model.is_none(),
+            "model should be None for user messages"
+        );
         assert!(row.latency_ms.is_none(), "latency_ms should be None");
         assert!(row.stop_reason.is_none(), "stop_reason should be None");
         assert!(row.has_thinking.is_none(), "has_thinking should be None");
@@ -1191,20 +1469,26 @@ mod tests {
     #[test]
     fn extract_all_v002_fields_together() {
         let conn = setup();
-        let event = make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "content": "thinking response",
-            "model": "claude-opus-4-6",
-            "latency": 2500,
-            "stopReason": "end_turn",
-            "hasThinking": true,
-            "providerType": "anthropic",
-            "cost": 0.015,
-            "tokenUsage": {
-                "inputTokens": 500,
-                "outputTokens": 200,
-                "cacheReadTokens": 100
-            }
-        }));
+        let event = make_event(
+            "evt_1",
+            1,
+            EventType::MessageAssistant,
+            None,
+            json!({
+                "content": "thinking response",
+                "model": "claude-opus-4-6",
+                "latency": 2500,
+                "stopReason": "end_turn",
+                "hasThinking": true,
+                "providerType": "anthropic",
+                "cost": 0.015,
+                "tokenUsage": {
+                    "inputTokens": 500,
+                    "outputTokens": 200,
+                    "cacheReadTokens": 100
+                }
+            }),
+        );
         EventRepo::insert(&conn, &event).unwrap();
 
         let row = EventRepo::get_by_id(&conn, "evt_1").unwrap().unwrap();
@@ -1221,36 +1505,75 @@ mod tests {
     #[test]
     fn query_events_by_model() {
         let conn = setup();
-        EventRepo::insert(&conn, &make_event("evt_1", 1, EventType::MessageAssistant, None, json!({
-            "model": "claude-opus-4-6"
-        }))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_2", 2, EventType::MessageAssistant, None, json!({
-            "model": "claude-opus-4-6"
-        }))).unwrap();
-        EventRepo::insert(&conn, &make_event("evt_3", 3, EventType::MessageAssistant, None, json!({
-            "model": "gpt-4"
-        }))).unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event(
+                "evt_1",
+                1,
+                EventType::MessageAssistant,
+                None,
+                json!({
+                    "model": "claude-opus-4-6"
+                }),
+            ),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event(
+                "evt_2",
+                2,
+                EventType::MessageAssistant,
+                None,
+                json!({
+                    "model": "claude-opus-4-6"
+                }),
+            ),
+        )
+        .unwrap();
+        EventRepo::insert(
+            &conn,
+            &make_event(
+                "evt_3",
+                3,
+                EventType::MessageAssistant,
+                None,
+                json!({
+                    "model": "gpt-4"
+                }),
+            ),
+        )
+        .unwrap();
 
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM events WHERE session_id = 'sess_1' AND model = 'claude-opus-4-6'",
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(count, 2, "should find exactly 2 events with claude-opus-4-6 model");
+        assert_eq!(
+            count, 2,
+            "should find exactly 2 events with claude-opus-4-6 model"
+        );
     }
 
     #[test]
     fn v002_columns_survive_ancestor_cte() {
         let conn = setup();
         let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
-        let e2 = make_event("evt_2", 2, EventType::MessageAssistant, Some("evt_1"), json!({
-            "model": "claude-opus-4-6",
-            "latency": 1000,
-            "stopReason": "end_turn",
-            "hasThinking": false,
-            "providerType": "anthropic",
-            "cost": 0.01
-        }));
+        let e2 = make_event(
+            "evt_2",
+            2,
+            EventType::MessageAssistant,
+            Some("evt_1"),
+            json!({
+                "model": "claude-opus-4-6",
+                "latency": 1000,
+                "stopReason": "end_turn",
+                "hasThinking": false,
+                "providerType": "anthropic",
+                "cost": 0.01
+            }),
+        );
         EventRepo::insert(&conn, &e1).unwrap();
         EventRepo::insert(&conn, &e2).unwrap();
 
@@ -1268,10 +1591,16 @@ mod tests {
     fn v002_columns_survive_descendant_cte() {
         let conn = setup();
         let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
-        let e2 = make_event("evt_2", 2, EventType::MessageAssistant, Some("evt_1"), json!({
-            "model": "gpt-4",
-            "providerType": "openai"
-        }));
+        let e2 = make_event(
+            "evt_2",
+            2,
+            EventType::MessageAssistant,
+            Some("evt_1"),
+            json!({
+                "model": "gpt-4",
+                "providerType": "openai"
+            }),
+        );
         EventRepo::insert(&conn, &e1).unwrap();
         EventRepo::insert(&conn, &e2).unwrap();
 

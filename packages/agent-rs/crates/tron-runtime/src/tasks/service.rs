@@ -64,8 +64,8 @@ impl TaskService {
 
     /// Get a task with full details (subtasks, dependencies, activity).
     pub fn get_task(conn: &Connection, id: &str) -> Result<TaskWithDetails, TaskError> {
-        let task = TaskRepository::get_task(conn, id)?
-            .ok_or_else(|| TaskError::task_not_found(id))?;
+        let task =
+            TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))?;
 
         let subtasks = TaskRepository::get_subtasks(conn, id)?;
         let blocked_by = TaskRepository::get_blocked_by(conn, id)?;
@@ -88,8 +88,8 @@ impl TaskService {
         updates: &TaskUpdateParams,
         session_id: Option<&str>,
     ) -> Result<Task, TaskError> {
-        let current = TaskRepository::get_task(conn, id)?
-            .ok_or_else(|| TaskError::task_not_found(id))?;
+        let current =
+            TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))?;
 
         // Build augmented updates with auto-transitions
         let mut augmented = updates.clone();
@@ -178,8 +178,7 @@ impl TaskService {
         }
 
         // Re-read to pick up auto-timestamp changes
-        TaskRepository::get_task(conn, id)?
-            .ok_or_else(|| TaskError::task_not_found(id))
+        TaskRepository::get_task(conn, id)?.ok_or_else(|| TaskError::task_not_found(id))
     }
 
     /// Delete a task with activity logging.
@@ -326,7 +325,9 @@ impl TaskService {
         params: &ProjectCreateParams,
     ) -> Result<Project, TaskError> {
         if params.title.trim().is_empty() {
-            return Err(TaskError::Validation("Project title is required".to_string()));
+            return Err(TaskError::Validation(
+                "Project title is required".to_string(),
+            ));
         }
         TaskRepository::create_project(conn, params)
     }
@@ -345,14 +346,16 @@ impl TaskService {
 
         // Auto-set completed_at when status changes to completed
         if let Some(new_status) = updates.status {
-            if new_status == ProjectStatus::Completed && current.status != ProjectStatus::Completed {
+            if new_status == ProjectStatus::Completed && current.status != ProjectStatus::Completed
+            {
                 let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
                 let _ = conn.execute(
                     "UPDATE projects SET completed_at = ?1 WHERE id = ?2",
                     rusqlite::params![now, id],
                 )?;
             }
-            if new_status != ProjectStatus::Completed && current.status == ProjectStatus::Completed {
+            if new_status != ProjectStatus::Completed && current.status == ProjectStatus::Completed
+            {
                 let _ = conn.execute(
                     "UPDATE projects SET completed_at = NULL WHERE id = ?1",
                     rusqlite::params![id],
@@ -360,8 +363,7 @@ impl TaskService {
             }
         }
 
-        TaskRepository::get_project(conn, id)?
-            .ok_or_else(|| TaskError::project_not_found(id))
+        TaskRepository::get_project(conn, id)?.ok_or_else(|| TaskError::project_not_found(id))
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -602,7 +604,11 @@ mod tests {
         let updated = TaskRepository::get_task(&conn, &task.id).unwrap().unwrap();
         assert_eq!(updated.actual_minutes, 45);
         let activity = TaskRepository::get_activity(&conn, &task.id, 10).unwrap();
-        assert!(activity.iter().any(|a| a.action == ActivityAction::TimeLogged));
+        assert!(
+            activity
+                .iter()
+                .any(|a| a.action == ActivityAction::TimeLogged)
+        );
     }
 
     // --- Dependencies ---
@@ -626,14 +632,8 @@ mod tests {
             },
         )
         .unwrap();
-        TaskService::add_dependency(
-            &conn,
-            &t1.id,
-            &t2.id,
-            DependencyRelationship::Blocks,
-            None,
-        )
-        .unwrap();
+        TaskService::add_dependency(&conn, &t1.id, &t2.id, DependencyRelationship::Blocks, None)
+            .unwrap();
         let result = TaskService::add_dependency(
             &conn,
             &t2.id,
@@ -664,23 +664,11 @@ mod tests {
             },
         )
         .unwrap();
-        TaskService::add_dependency(
-            &conn,
-            &t1.id,
-            &t2.id,
-            DependencyRelationship::Related,
-            None,
-        )
-        .unwrap();
+        TaskService::add_dependency(&conn, &t1.id, &t2.id, DependencyRelationship::Related, None)
+            .unwrap();
         // Related in reverse should be fine (no cycle check)
-        TaskService::add_dependency(
-            &conn,
-            &t2.id,
-            &t1.id,
-            DependencyRelationship::Related,
-            None,
-        )
-        .unwrap();
+        TaskService::add_dependency(&conn, &t2.id, &t1.id, DependencyRelationship::Related, None)
+            .unwrap();
     }
 
     #[test]
@@ -702,19 +690,19 @@ mod tests {
             },
         )
         .unwrap();
-        TaskService::add_dependency(
-            &conn,
-            &t1.id,
-            &t2.id,
-            DependencyRelationship::Blocks,
-            None,
-        )
-        .unwrap();
+        TaskService::add_dependency(&conn, &t1.id, &t2.id, DependencyRelationship::Blocks, None)
+            .unwrap();
         // Both tasks should have dependency activity
         let a1 = TaskRepository::get_activity(&conn, &t1.id, 10).unwrap();
         let a2 = TaskRepository::get_activity(&conn, &t2.id, 10).unwrap();
-        assert!(a1.iter().any(|a| a.action == ActivityAction::DependencyAdded));
-        assert!(a2.iter().any(|a| a.action == ActivityAction::DependencyAdded));
+        assert!(
+            a1.iter()
+                .any(|a| a.action == ActivityAction::DependencyAdded)
+        );
+        assert!(
+            a2.iter()
+                .any(|a| a.action == ActivityAction::DependencyAdded)
+        );
     }
 
     // --- Project validation ---
@@ -730,7 +718,12 @@ mod tests {
             },
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("title is required"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("title is required")
+        );
     }
 
     #[test]
@@ -801,7 +794,12 @@ mod tests {
             },
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("title is required"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("title is required")
+        );
     }
 
     // --- Delete task ---

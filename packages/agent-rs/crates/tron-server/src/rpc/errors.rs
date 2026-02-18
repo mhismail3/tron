@@ -128,7 +128,9 @@ mod tests {
 
     #[test]
     fn invalid_params_code() {
-        let err = RpcError::InvalidParams { message: "bad".into() };
+        let err = RpcError::InvalidParams {
+            message: "bad".into(),
+        };
         assert_eq!(err.code(), INVALID_PARAMS);
         assert_eq!(err.to_string(), "bad");
     }
@@ -144,7 +146,9 @@ mod tests {
 
     #[test]
     fn internal_code() {
-        let err = RpcError::Internal { message: "boom".into() };
+        let err = RpcError::Internal {
+            message: "boom".into(),
+        };
         assert_eq!(err.code(), INTERNAL_ERROR);
     }
 
@@ -163,7 +167,9 @@ mod tests {
 
     #[test]
     fn to_error_body_without_details() {
-        let err = RpcError::NotAvailable { message: "nope".into() };
+        let err = RpcError::NotAvailable {
+            message: "nope".into(),
+        };
         assert_eq!(err.code(), NOT_AVAILABLE);
         let body = err.to_error_body();
         assert_eq!(body.code, NOT_AVAILABLE);

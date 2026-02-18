@@ -40,7 +40,9 @@ mod tests {
     #[tokio::test]
     async fn read_nonexistent_returns_error() {
         let fs = RealFileSystem;
-        let result = fs.read_file(Path::new("/tmp/nonexistent_tron_test_file")).await;
+        let result = fs
+            .read_file(Path::new("/tmp/nonexistent_tron_test_file"))
+            .await;
         assert!(result.is_err());
     }
 

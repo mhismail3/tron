@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::messages::{ToolCall, TokenUsage};
+use crate::messages::{TokenUsage, ToolCall};
 use crate::tools::TronToolResult;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,7 +283,6 @@ pub enum CompactionReason {
 #[serde(tag = "type")]
 pub enum TronEvent {
     // -- Agent lifecycle --
-
     /// Agent started processing.
     #[serde(rename = "agent_start")]
     AgentStart {
@@ -328,7 +327,6 @@ pub enum TronEvent {
     },
 
     // -- Turn lifecycle --
-
     /// Turn started.
     #[serde(rename = "turn_start")]
     TurnStart {
@@ -421,7 +419,6 @@ pub enum TronEvent {
     },
 
     // -- Message --
-
     /// Message content update.
     #[serde(rename = "message_update")]
     MessageUpdate {
@@ -433,7 +430,6 @@ pub enum TronEvent {
     },
 
     // -- Tool execution --
-
     /// All tool calls from the model's response (before execution).
     #[serde(rename = "tool_use_batch")]
     ToolUseBatch {
@@ -529,7 +525,6 @@ pub enum TronEvent {
     },
 
     // -- Hooks --
-
     /// Hook execution triggered.
     #[serde(rename = "hook_triggered")]
     HookTriggered {
@@ -620,7 +615,6 @@ pub enum TronEvent {
     },
 
     // -- Session --
-
     /// Session saved.
     #[serde(rename = "session_saved")]
     SessionSaved {
@@ -647,7 +641,6 @@ pub enum TronEvent {
     },
 
     // -- Context --
-
     /// Context window warning.
     #[serde(rename = "context_warning")]
     ContextWarning {
@@ -662,7 +655,6 @@ pub enum TronEvent {
     },
 
     // -- Compaction --
-
     /// Compaction started.
     #[serde(rename = "compaction_start")]
     CompactionStart {
@@ -700,12 +692,14 @@ pub enum TronEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
         /// Estimated total context tokens after compaction.
-        #[serde(rename = "estimatedContextTokens", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            rename = "estimatedContextTokens",
+            skip_serializing_if = "Option::is_none"
+        )]
         estimated_context_tokens: Option<u64>,
     },
 
     // -- Error / Retry --
-
     /// Error event.
     #[serde(rename = "error")]
     Error {
@@ -766,7 +760,6 @@ pub enum TronEvent {
     },
 
     // -- Thinking (agent-level with session context) --
-
     /// Thinking started.
     #[serde(rename = "thinking_start")]
     ThinkingStart {
@@ -796,7 +789,6 @@ pub enum TronEvent {
     },
 
     // -- Session lifecycle --
-
     /// Session created.
     #[serde(rename = "session_created")]
     SessionCreated {
@@ -886,7 +878,10 @@ pub enum TronEvent {
         #[serde(rename = "lastUserPrompt", skip_serializing_if = "Option::is_none")]
         last_user_prompt: Option<String>,
         /// Last assistant response preview.
-        #[serde(rename = "lastAssistantResponse", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            rename = "lastAssistantResponse",
+            skip_serializing_if = "Option::is_none"
+        )]
         last_assistant_response: Option<String>,
         /// Parent session ID (for forked sessions).
         #[serde(rename = "parentSessionId", skip_serializing_if = "Option::is_none")]
@@ -1001,7 +996,6 @@ pub enum TronEvent {
     },
 
     // -- Subagents --
-
     /// Subagent spawned.
     #[serde(rename = "subagent_spawned")]
     SubagentSpawned {
@@ -1524,9 +1518,7 @@ mod tests {
                 },
                 stop_reason: "end_turn".into(),
             },
-            StreamEvent::Error {
-                error: "e".into(),
-            },
+            StreamEvent::Error { error: "e".into() },
             StreamEvent::Retry {
                 attempt: 1,
                 max_retries: 3,
@@ -1716,16 +1708,12 @@ mod tests {
         // Verify every variant has a distinct event_type
         let base = BaseEvent::now("s1");
         let events: Vec<TronEvent> = vec![
-            TronEvent::AgentStart {
-                base: base.clone(),
-            },
+            TronEvent::AgentStart { base: base.clone() },
             TronEvent::AgentEnd {
                 base: base.clone(),
                 error: None,
             },
-            TronEvent::AgentReady {
-                base: base.clone(),
-            },
+            TronEvent::AgentReady { base: base.clone() },
             TronEvent::AgentInterrupted {
                 base: base.clone(),
                 turn: 1,
@@ -1886,9 +1874,7 @@ mod tests {
                 error_category: "c".into(),
                 error_message: "m".into(),
             },
-            TronEvent::ThinkingStart {
-                base: base.clone(),
-            },
+            TronEvent::ThinkingStart { base: base.clone() },
             TronEvent::ThinkingDelta {
                 base: base.clone(),
                 delta: "d".into(),
@@ -1914,9 +1900,7 @@ mod tests {
                 last_assistant_response: None,
                 parent_session_id: None,
             },
-            TronEvent::MemoryUpdating {
-                base: base.clone(),
-            },
+            TronEvent::MemoryUpdating { base: base.clone() },
             TronEvent::MemoryUpdated {
                 base: base.clone(),
                 title: None,
@@ -2044,7 +2028,9 @@ mod tests {
 
     #[test]
     fn memory_updating_event_type() {
-        let e = TronEvent::MemoryUpdating { base: BaseEvent::now("s1") };
+        let e = TronEvent::MemoryUpdating {
+            base: BaseEvent::now("s1"),
+        };
         assert_eq!(e.event_type(), "memory_updating");
     }
 

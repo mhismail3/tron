@@ -11,8 +11,8 @@
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::types::base::SessionEvent;
 use crate::types::EventType;
+use crate::types::base::SessionEvent;
 
 /// Scoped event factory — creates [`SessionEvent`] structs for a single session.
 ///
@@ -48,11 +48,7 @@ impl EventFactory {
     }
 
     /// Create a `session.start` event (root of a new session).
-    pub fn create_session_start(
-        &self,
-        model: &str,
-        working_directory: &str,
-    ) -> SessionEvent {
+    pub fn create_session_start(&self, model: &str, working_directory: &str) -> SessionEvent {
         SessionEvent {
             id: Self::generate_event_id(),
             parent_id: None,
@@ -190,7 +186,9 @@ mod tests {
 
     #[test]
     fn generate_event_id_unique() {
-        let ids: Vec<String> = (0..100).map(|_| EventFactory::generate_event_id()).collect();
+        let ids: Vec<String> = (0..100)
+            .map(|_| EventFactory::generate_event_id())
+            .collect();
         let unique: std::collections::HashSet<&String> = ids.iter().collect();
         assert_eq!(unique.len(), 100);
     }
@@ -244,12 +242,7 @@ mod tests {
     #[test]
     fn create_event_no_parent() {
         let factory = EventFactory::new("sess_1", "ws_1");
-        let event = factory.create_event(
-            EventType::ContextCleared,
-            None,
-            3,
-            serde_json::json!({}),
-        );
+        let event = factory.create_event(EventType::ContextCleared, None, 3, serde_json::json!({}));
 
         assert!(event.parent_id.is_none());
     }
@@ -273,22 +266,24 @@ mod tests {
             .unwrap();
 
         let store2 = crate::store::EventStore::new(pool);
-        let mut chain = EventChainBuilder::new(
-            store2,
-            &cr.session.id,
-            &cr.root_event.id,
-        );
+        let mut chain = EventChainBuilder::new(store2, &cr.session.id, &cr.root_event.id);
 
         assert_eq!(chain.head_event_id(), cr.root_event.id);
 
         let evt1 = chain
-            .append(EventType::MessageUser, serde_json::json!({"content": "Hello"}))
+            .append(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Hello"}),
+            )
             .unwrap();
         assert_eq!(evt1.parent_id.as_deref(), Some(cr.root_event.id.as_str()));
         assert_eq!(chain.head_event_id(), evt1.id);
 
         let evt2 = chain
-            .append(EventType::MessageAssistant, serde_json::json!({"content": "World"}))
+            .append(
+                EventType::MessageAssistant,
+                serde_json::json!({"content": "World"}),
+            )
             .unwrap();
         assert_eq!(evt2.parent_id.as_deref(), Some(evt1.id.as_str()));
         assert_eq!(chain.head_event_id(), evt2.id);

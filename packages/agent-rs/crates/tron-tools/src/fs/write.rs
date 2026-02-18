@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
 
 use crate::errors::ToolError;
@@ -40,7 +40,8 @@ impl TronTool for WriteTool {
     fn definition(&self) -> Tool {
         Tool {
             name: "Write".into(),
-            description: "Write content to a file. Creates parent directories if they do not exist.".into(),
+            description:
+                "Write content to a file. Creates parent directories if they do not exist.".into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -62,11 +63,7 @@ impl TronTool for WriteTool {
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let file_path = match validate_required_string(&params, "file_path", "path to the file") {
             Ok(p) => p,
             Err(e) => return Ok(e),
@@ -98,7 +95,11 @@ impl TronTool for WriteTool {
         // Create parent directories
         if let Some(parent) = resolved.parent() {
             if let Err(e) = self.fs.create_dir_all(parent).await {
-                return Ok(format_fs_error(&e, &parent.to_string_lossy(), "creating directory"));
+                return Ok(format_fs_error(
+                    &e,
+                    &parent.to_string_lossy(),
+                    "creating directory",
+                ));
             }
         }
 
@@ -159,7 +160,11 @@ mod tests {
         }
 
         fn with_file(self, path: impl Into<PathBuf>, content: impl Into<Vec<u8>>) -> Self {
-            let _ = self.files.lock().unwrap().insert(path.into(), content.into());
+            let _ = self
+                .files
+                .lock()
+                .unwrap()
+                .insert(path.into(), content.into());
             self
         }
     }
@@ -175,7 +180,8 @@ mod tests {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
         }
         async fn write_file(&self, path: &Path, content: &[u8]) -> Result<(), io::Error> {
-            let _ = self.files
+            let _ = self
+                .files
                 .lock()
                 .unwrap()
                 .insert(path.to_path_buf(), content.to_vec());

@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tracing::{debug, instrument, warn};
 
-use tron_runtime::context::ledger_writer::LedgerParseResult;
 use tron_core::messages::{Message, UserMessageContent};
+use tron_runtime::context::ledger_writer::LedgerParseResult;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
@@ -72,8 +72,14 @@ pub(crate) fn compute_cycle_messages(
         return None;
     }
 
-    let first_event_id = cycle_events.first().map(|e| e.id.clone()).unwrap_or_default();
-    let last_event_id = cycle_events.last().map(|e| e.id.clone()).unwrap_or_default();
+    let first_event_id = cycle_events
+        .first()
+        .map(|e| e.id.clone())
+        .unwrap_or_default();
+    let last_event_id = cycle_events
+        .last()
+        .map(|e| e.id.clone())
+        .unwrap_or_default();
 
     // 3. Reconstruct messages from cycle events
     //    If there's no boundary, use all messages from the session.
@@ -167,14 +173,15 @@ fn emit_memory_updated(
     entry_type: Option<&str>,
     event_id: Option<&str>,
 ) {
-    let _ = ctx.orchestrator.broadcast().emit(
-        tron_core::events::TronEvent::MemoryUpdated {
+    let _ = ctx
+        .orchestrator
+        .broadcast()
+        .emit(tron_core::events::TronEvent::MemoryUpdated {
             base: tron_core::events::BaseEvent::now(session_id),
             title: title.map(String::from),
             entry_type: entry_type.map(String::from),
             event_id: event_id.map(String::from),
-        },
-    );
+        });
 }
 
 // =============================================================================
@@ -190,8 +197,7 @@ pub(crate) struct LedgerWriteDeps {
     pub session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
     pub subagent_manager:
         Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
-    pub embedding_controller:
-        Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    pub embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 }
 
 /// Execute the full ledger write pipeline.
@@ -228,12 +234,15 @@ pub(crate) async fn execute_ledger_write(
     // 2. Spawn LLM subsession for structured ledger entry
     let cycle_message_count = cycle.messages.len();
     let has_subagent = deps.subagent_manager.is_some();
-    debug!(session_id, has_subagent, cycle_message_count, "executing ledger write");
+    debug!(
+        session_id,
+        has_subagent, cycle_message_count, "executing ledger write"
+    );
 
     let llm_result = if let Some(ref manager) = deps.subagent_manager {
+        use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
         use tron_runtime::context::llm_summarizer::SubsessionSpawner;
         use tron_runtime::context::summarizer::serialize_messages;
-        use tron_runtime::agent::compaction_handler::SubagentManagerSpawner;
 
         let transcript = serialize_messages(&cycle.messages);
         let spawner = SubagentManagerSpawner {
@@ -261,16 +270,15 @@ pub(crate) async fn execute_ledger_write(
     // 3. Process result
     match llm_result {
         Some(LedgerParseResult::Skip) => {
-            debug!(session_id, "LLM classified interaction as trivial, skipping");
+            debug!(
+                session_id,
+                "LLM classified interaction as trivial, skipping"
+            );
             tron_events::memory::types::LedgerWriteResult::skipped("trivial interaction")
         }
         Some(LedgerParseResult::Entry(entry)) => {
             // 4. Build full payload (matches TS server MemoryLedgerPayload format)
-            let session_info = deps
-                .session_manager
-                .get_session(session_id)
-                .ok()
-                .flatten();
+            let session_info = deps.session_manager.get_session(session_id).ok().flatten();
             let (total_input, total_output) = session_info
                 .as_ref()
                 .map_or((0, 0), |s| (s.total_input_tokens, s.total_output_tokens));
@@ -323,7 +331,9 @@ pub(crate) async fn execute_ledger_write(
                         title = %entry.title,
                         "failed to persist memory.ledger event"
                     );
-                    return tron_events::memory::types::LedgerWriteResult::failed("database temporarily busy");
+                    return tron_events::memory::types::LedgerWriteResult::failed(
+                        "database temporarily busy",
+                    );
                 }
             };
 
@@ -456,7 +466,10 @@ impl MethodHandler for UpdateLedgerHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         // Accept either sessionId directly or workingDirectory (find most recent session)
         let session_id_owned: String;
-        if let Some(sid) = params.as_ref().and_then(|p| p.get("sessionId")).and_then(Value::as_str)
+        if let Some(sid) = params
+            .as_ref()
+            .and_then(|p| p.get("sessionId"))
+            .and_then(Value::as_str)
         {
             session_id_owned = sid.to_owned();
         } else if let Some(wd) = params
@@ -470,7 +483,10 @@ impl MethodHandler for UpdateLedgerHandler {
                 limit: Some(1),
                 ..Default::default()
             };
-            let sessions = ctx.session_manager.list_sessions(&filter).unwrap_or_default();
+            let sessions = ctx
+                .session_manager
+                .list_sessions(&filter)
+                .unwrap_or_default();
             if let Some(s) = sessions.first() {
                 session_id_owned = s.id.clone();
             } else {
@@ -489,11 +505,12 @@ impl MethodHandler for UpdateLedgerHandler {
         let session_id = &session_id_owned;
 
         // Emit memory_updating immediately (iOS shows spinner pill)
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::MemoryUpdating {
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(tron_core::events::TronEvent::MemoryUpdating {
                 base: tron_core::events::BaseEvent::now(session_id),
-            },
-        );
+            });
 
         // Resume session to verify it exists and get working directory
         let Ok(active) = ctx.session_manager.resume_session(session_id) else {
@@ -540,7 +557,11 @@ impl MethodHandler for UpdateLedgerHandler {
             );
         } else {
             let entry_type = result.entry_type.as_deref().unwrap_or("skipped");
-            let title = if entry_type == "error" { result.reason.as_deref() } else { None };
+            let title = if entry_type == "error" {
+                result.reason.as_deref()
+            } else {
+                None
+            };
             emit_memory_updated(ctx, session_id, title, Some(entry_type), None);
         }
 
@@ -708,10 +729,7 @@ mod tests {
     async fn get_ledger_returns_entries() {
         let ctx = make_test_context();
         let result = GetLedgerHandler
-            .handle(
-                Some(json!({"workingDirectory": "/tmp"})),
-                &ctx,
-            )
+            .handle(Some(json!({"workingDirectory": "/tmp"})), &ctx)
             .await
             .unwrap();
         assert!(result["entries"].is_array());
@@ -721,10 +739,7 @@ mod tests {
     async fn get_ledger_returns_has_more() {
         let ctx = make_test_context();
         let result = GetLedgerHandler
-            .handle(
-                Some(json!({"workingDirectory": "/tmp"})),
-                &ctx,
-            )
+            .handle(Some(json!({"workingDirectory": "/tmp"})), &ctx)
             .await
             .unwrap();
         assert_eq!(result["hasMore"], false);
@@ -734,10 +749,7 @@ mod tests {
     async fn get_ledger_returns_total_count() {
         let ctx = make_test_context();
         let result = GetLedgerHandler
-            .handle(
-                Some(json!({"workingDirectory": "/tmp"})),
-                &ctx,
-            )
+            .handle(Some(json!({"workingDirectory": "/tmp"})), &ctx)
             .await
             .unwrap();
         assert!(result["totalCount"].is_number());
@@ -826,10 +838,7 @@ mod tests {
     #[tokio::test]
     async fn search_memory_returns_empty() {
         let ctx = make_test_context();
-        let result = SearchMemoryHandler
-            .handle(None, &ctx)
-            .await
-            .unwrap();
+        let result = SearchMemoryHandler.handle(None, &ctx).await.unwrap();
         assert!(result["entries"].as_array().unwrap().is_empty());
         assert_eq!(result["totalCount"], 0);
     }
@@ -860,10 +869,7 @@ mod tests {
     #[tokio::test]
     async fn get_handoffs_returns_empty() {
         let ctx = make_test_context();
-        let result = GetHandoffsHandler
-            .handle(None, &ctx)
-            .await
-            .unwrap();
+        let result = GetHandoffsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["handoffs"].as_array().unwrap().is_empty());
     }
 
@@ -871,10 +877,7 @@ mod tests {
     async fn get_handoffs_with_workspace() {
         let ctx = make_test_context();
         let result = GetHandoffsHandler
-            .handle(
-                Some(json!({"workingDirectory": "/tmp"})),
-                &ctx,
-            )
+            .handle(Some(json!({"workingDirectory": "/tmp"})), &ctx)
             .await
             .unwrap();
         assert!(result["handoffs"].as_array().unwrap().is_empty());

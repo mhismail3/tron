@@ -15,9 +15,7 @@ use tracing::{info, warn};
 
 use super::errors::MemoryError;
 use super::trigger::CompactionTrigger;
-use super::types::{
-    CompactionTriggerInput, CycleInfo, LedgerWriteOpts, LedgerWriteResult,
-};
+use super::types::{CompactionTriggerInput, CycleInfo, LedgerWriteOpts, LedgerWriteResult};
 
 /// Dependencies for the memory manager.
 ///
@@ -151,8 +149,13 @@ impl<D: MemoryManagerDeps> MemoryManager<D> {
             }
         } else {
             let entry_type = ledger_result.entry_type.as_deref().unwrap_or("skipped");
-            let title = if entry_type == "error" { ledger_result.reason.as_deref() } else { None };
-            self.deps.emit_memory_updated(&session_id, title, Some(entry_type), None);
+            let title = if entry_type == "error" {
+                ledger_result.reason.as_deref()
+            } else {
+                None
+            };
+            self.deps
+                .emit_memory_updated(&session_id, title, Some(entry_type), None);
         }
     }
 
@@ -331,14 +334,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_compact_ledger_writes() {
-        let deps = Arc::new(MockDeps::new().with_ledger_result(
-            LedgerWriteResult::written(
+        let deps = Arc::new(
+            MockDeps::new().with_ledger_result(LedgerWriteResult::written(
                 "Test Title".to_string(),
                 "feature".to_string(),
                 "evt-1".to_string(),
                 serde_json::json!({"key": "val"}),
-            ),
-        ));
+            )),
+        );
         let mut manager = MemoryManager::new(
             Arc::clone(&deps),
             CompactionTrigger::new(CompactionTriggerConfig::default()),
@@ -357,18 +360,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_compact_then_ledger() {
-        let deps = Arc::new(MockDeps::new().with_ledger_result(
-            LedgerWriteResult::skipped("no content"),
-        ));
+        let deps =
+            Arc::new(MockDeps::new().with_ledger_result(LedgerWriteResult::skipped("no content")));
         let mut manager = MemoryManager::new(
             Arc::clone(&deps),
             CompactionTrigger::new(CompactionTriggerConfig::default()),
         );
 
         // Trigger via high token ratio
-        manager
-            .on_cycle_complete(default_cycle_info(0.80))
-            .await;
+        manager.on_cycle_complete(default_cycle_info(0.80)).await;
 
         assert!(deps.compaction_called.load(Ordering::SeqCst));
         assert!(deps.ledger_called.load(Ordering::SeqCst));
@@ -389,9 +389,7 @@ mod tests {
             CompactionTrigger::new(CompactionTriggerConfig::default()),
         );
 
-        manager
-            .on_cycle_complete(default_cycle_info(0.80))
-            .await;
+        manager.on_cycle_complete(default_cycle_info(0.80)).await;
 
         assert!(deps.compaction_called.load(Ordering::SeqCst));
         assert!(deps.ledger_called.load(Ordering::SeqCst));
@@ -418,9 +416,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_ledger_failed_emits_error_with_title() {
-        let deps = Arc::new(MockDeps::new().with_ledger_result(
-            LedgerWriteResult::failed("database temporarily busy"),
-        ));
+        let deps = Arc::new(
+            MockDeps::new()
+                .with_ledger_result(LedgerWriteResult::failed("database temporarily busy")),
+        );
         let mut manager = MemoryManager::new(
             Arc::clone(&deps),
             CompactionTrigger::new(CompactionTriggerConfig::default()),
@@ -439,14 +438,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_ledger_written_calls_on_memory_written() {
-        let deps = Arc::new(MockDeps::new().with_ledger_result(
-            LedgerWriteResult::written(
+        let deps = Arc::new(
+            MockDeps::new().with_ledger_result(LedgerWriteResult::written(
                 "Title".to_string(),
                 "bugfix".to_string(),
                 "evt-1".to_string(),
                 serde_json::json!({}),
-            ),
-        ));
+            )),
+        );
         let mut manager = MemoryManager::new(
             Arc::clone(&deps),
             CompactionTrigger::new(CompactionTriggerConfig::default()),
@@ -461,14 +460,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_ledger_written_passes_event_id() {
-        let deps = Arc::new(MockDeps::new().with_ledger_result(
-            LedgerWriteResult::written(
+        let deps = Arc::new(
+            MockDeps::new().with_ledger_result(LedgerWriteResult::written(
                 "Title".to_string(),
                 "feature".to_string(),
                 "evt-2".to_string(),
                 serde_json::json!({"data": true}),
-            ),
-        ));
+            )),
+        );
         let mut manager = MemoryManager::new(
             Arc::clone(&deps),
             CompactionTrigger::new(CompactionTriggerConfig::default()),
@@ -491,9 +490,7 @@ mod tests {
         );
 
         // Force high ratio to trigger
-        manager
-            .on_cycle_complete(default_cycle_info(0.80))
-            .await;
+        manager.on_cycle_complete(default_cycle_info(0.80)).await;
 
         assert_eq!(manager.trigger().turns_since_compaction(), 0);
     }
@@ -512,9 +509,7 @@ mod tests {
             CompactionTrigger::new(CompactionTriggerConfig::default()),
         );
 
-        manager
-            .on_cycle_complete(default_cycle_info(0.80))
-            .await;
+        manager.on_cycle_complete(default_cycle_info(0.80)).await;
 
         // Turn counter was incremented by should_compact but NOT reset
         assert_eq!(manager.trigger().turns_since_compaction(), 1);
@@ -549,7 +544,13 @@ where
     fn emit_memory_updating(&self, session_id: &str) {
         (**self).emit_memory_updating(session_id);
     }
-    fn emit_memory_updated(&self, session_id: &str, title: Option<&str>, entry_type: Option<&str>, event_id: Option<&str>) {
+    fn emit_memory_updated(
+        &self,
+        session_id: &str,
+        title: Option<&str>,
+        entry_type: Option<&str>,
+        event_id: Option<&str>,
+    ) {
         (**self).emit_memory_updated(session_id, title, entry_type, event_id);
     }
     fn on_memory_written(&self, payload: &serde_json::Value, title: &str) {
@@ -562,5 +563,3 @@ where
         (**self).workspace_id()
     }
 }
-
-

@@ -38,26 +38,26 @@ pub mod tokens;
 pub mod tool_parsing;
 
 pub use context_composition::{
-    compose_context_parts, compose_context_parts_grouped, GroupedContextParts,
+    GroupedContextParts, compose_context_parts, compose_context_parts_grouped,
 };
+pub use health::ProviderHealthTracker;
 pub use id_remapping::{
-    build_tool_call_id_mapping, detect_id_format, is_anthropic_id, is_openai_id,
-    remap_tool_call_id, IdFormat,
+    IdFormat, build_tool_call_id_mapping, detect_id_format, is_anthropic_id, is_openai_id,
+    remap_tool_call_id,
 };
 pub use models::model_ids;
 pub use models::registry::{
     all_model_ids, detect_provider_from_model, is_model_supported, strip_provider_prefix,
 };
 pub use models::types::{
-    calculate_cost, format_context_window, format_model_pricing, ModelCapabilities, ModelCategory,
-    ModelInfo, ModelTier, ProviderType,
+    ModelCapabilities, ModelCategory, ModelInfo, ModelTier, ProviderType, calculate_cost,
+    format_context_window, format_model_pricing,
 };
 pub use provider::{
     Provider, ProviderError, ProviderFactory, ProviderResult, ProviderStreamOptions,
     StreamEventStream,
 };
-pub use health::ProviderHealthTracker;
-pub use retry::{with_provider_retry, StreamFactory, StreamRetryConfig};
-pub use sse::{parse_sse_data, parse_sse_lines, SseParserOptions};
+pub use retry::{StreamFactory, StreamRetryConfig, with_provider_retry};
+pub use sse::{SseParserOptions, parse_sse_data, parse_sse_lines};
 pub use stop_reason::{map_google_stop_reason, map_openai_stop_reason};
-pub use tool_parsing::{is_valid_tool_call_arguments, parse_tool_call_arguments, ToolCallContext};
+pub use tool_parsing::{ToolCallContext, is_valid_tool_call_arguments, parse_tool_call_arguments};

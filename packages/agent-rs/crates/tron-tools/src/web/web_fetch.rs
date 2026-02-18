@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -102,19 +102,16 @@ Returns the page content with title. Results are cached for 15 minutes — same 
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let raw_url = match validate_required_string(&params, "url", "the URL to fetch") {
             Ok(u) => u,
             Err(e) => return Ok(e),
         };
-        let prompt = match validate_required_string(&params, "prompt", "a question about the content") {
-            Ok(p) => p,
-            Err(e) => return Ok(e),
-        };
+        let prompt =
+            match validate_required_string(&params, "prompt", "a question about the content") {
+                Ok(p) => p,
+                Err(e) => return Ok(e),
+            };
 
         // Validate URL
         let config = UrlValidatorConfig::default();
@@ -156,7 +153,10 @@ Returns the page content with title. Results are cached for 15 minutes — same 
 
         // Size check
         if response.body.len() > MAX_RESPONSE_SIZE {
-            return Ok(error_result(format!("Response too large: {} bytes (max {MAX_RESPONSE_SIZE})", response.body.len())));
+            return Ok(error_result(format!(
+                "Response too large: {} bytes (max {MAX_RESPONSE_SIZE})",
+                response.body.len()
+            )));
         }
 
         // Parse HTML
@@ -171,7 +171,11 @@ Returns the page content with title. Results are cached for 15 minutes — same 
             parsed.markdown.clone()
         };
 
-        let title = if parsed.title.is_empty() { "(untitled)".to_string() } else { parsed.title.clone() };
+        let title = if parsed.title.is_empty() {
+            "(untitled)".to_string()
+        } else {
+            parsed.title.clone()
+        };
 
         // Summarize via subagent (or fall back to raw content)
         let (answer, subagent_session_id) = if let Some(ref summarizer) = self.summarizer {
@@ -188,17 +192,21 @@ Returns the page content with title. Results are cached for 15 minutes — same 
         };
 
         // Cache the result
-        self.cache.lock().set(&url, &prompt, CachedResult {
-            answer: answer.clone(),
-            url: url.clone(),
-            title: title.clone(),
-            subagent_session_id: subagent_session_id.clone(),
-        });
+        self.cache.lock().set(
+            &url,
+            &prompt,
+            CachedResult {
+                answer: answer.clone(),
+                url: url.clone(),
+                title: title.clone(),
+                subagent_session_id: subagent_session_id.clone(),
+            },
+        );
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(&answer),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                &answer,
+            )]),
             details: Some(json!({
                 "url": url,
                 "title": title,
@@ -234,11 +242,13 @@ mod tests {
     fn html_response(body: &str) -> MockHttp {
         let body = body.to_string();
         MockHttp {
-            handler: Box::new(move |_| Ok(HttpResponse {
-                status: 200,
-                body: body.clone(),
-                content_type: Some("text/html".into()),
-            })),
+            handler: Box::new(move |_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: body.clone(),
+                    content_type: Some("text/html".into()),
+                })
+            }),
         }
     }
 
@@ -284,7 +294,9 @@ mod tests {
             _task: &str,
             _parent_session_id: &str,
         ) -> Result<SummarizerResult, ToolError> {
-            Err(ToolError::Internal { message: "summarizer exploded".into() })
+            Err(ToolError::Internal {
+                message: "summarizer exploded".into(),
+            })
         }
     }
 
@@ -302,10 +314,14 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
@@ -313,9 +329,17 @@ mod tests {
 
     #[tokio::test]
     async fn successful_fetch_returns_parsed_content() {
-        let http = Arc::new(html_response("<html><head><title>Test</title></head><body><p>Hello World</p></body></html>"));
+        let http = Arc::new(html_response(
+            "<html><head><title>Test</title></head><body><p>Hello World</p></body></html>",
+        ));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "what is it?"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "what is it?"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("Test"));
@@ -326,7 +350,10 @@ mod tests {
     async fn invalid_url_returns_error() {
         let http = Arc::new(html_response(""));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "not-a-url", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"url": "not-a-url", "prompt": "q"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -334,7 +361,10 @@ mod tests {
     async fn missing_url_returns_error() {
         let http = Arc::new(html_response(""));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"prompt": "q"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -342,21 +372,32 @@ mod tests {
     async fn missing_prompt_returns_error() {
         let http = Arc::new(html_response(""));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"url": "https://example.com"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn http_error_status() {
         let http = Arc::new(MockHttp {
-            handler: Box::new(|_| Ok(HttpResponse {
-                status: 404,
-                body: "Not Found".into(),
-                content_type: Some("text/html".into()),
-            })),
+            handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 404,
+                    body: "Not Found".into(),
+                    content_type: Some("text/html".into()),
+                })
+            }),
         });
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com/missing", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com/missing", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("404"));
     }
@@ -367,15 +408,28 @@ mod tests {
             handler: Box::new(|_| Err("connection timed out".into())),
         });
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx()).await;
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await;
         assert!(r.is_err());
     }
 
     #[tokio::test]
     async fn details_include_url_and_title() {
-        let http = Arc::new(html_response("<html><head><title>My Page</title></head><body>content</body></html>"));
+        let http = Arc::new(html_response(
+            "<html><head><title>My Page</title></head><body>content</body></html>",
+        ));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let d = r.details.unwrap();
         assert_eq!(d["title"], "My Page");
         assert!(d["url"].as_str().unwrap().contains("example.com"));
@@ -385,7 +439,13 @@ mod tests {
     async fn localhost_url_blocked() {
         let http = Arc::new(html_response(""));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://localhost/admin", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://localhost/admin", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Internal"));
     }
@@ -393,14 +453,22 @@ mod tests {
     #[tokio::test]
     async fn response_too_large() {
         let http = Arc::new(MockHttp {
-            handler: Box::new(|_| Ok(HttpResponse {
-                status: 200,
-                body: "x".repeat(11 * 1024 * 1024),
-                content_type: Some("text/html".into()),
-            })),
+            handler: Box::new(|_| {
+                Ok(HttpResponse {
+                    status: 200,
+                    body: "x".repeat(11 * 1024 * 1024),
+                    content_type: Some("text/html".into()),
+                })
+            }),
         });
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("too large"));
     }
@@ -410,7 +478,13 @@ mod tests {
         let body = format!("<html><body>{}</body></html>", "word ".repeat(100_000));
         let http = Arc::new(html_response(&body));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
@@ -418,10 +492,18 @@ mod tests {
 
     #[tokio::test]
     async fn summarizer_called_when_available() {
-        let http = Arc::new(html_response("<html><head><title>Test</title></head><body><p>Hello</p></body></html>"));
+        let http = Arc::new(html_response(
+            "<html><head><title>Test</title></head><body><p>Hello</p></body></html>",
+        ));
         let summarizer = Arc::new(MockSummarizer::new("The page says Hello."));
         let tool = WebFetchTool::new_with_summarizer(http, summarizer.clone());
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "what does it say?"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "what does it say?"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         assert_eq!(extract_text(&r), "The page says Hello.");
         assert_eq!(summarizer.calls(), 1);
@@ -449,12 +531,18 @@ mod tests {
         let ctx = make_ctx();
 
         // First call — fetches + summarizes
-        let _ = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx).await.unwrap();
+        let _ = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(fetch_count.load(Ordering::Relaxed), 1);
         assert_eq!(summarizer.calls(), 1);
 
         // Second call — cache hit, no fetch or summarizer
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(fetch_count.load(Ordering::Relaxed), 1);
         assert_eq!(summarizer.calls(), 1);
         assert_eq!(extract_text(&r), "Summary");
@@ -469,20 +557,34 @@ mod tests {
         let ctx = make_ctx();
 
         // Miss
-        let r1 = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx).await.unwrap();
+        let r1 = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(r1.details.as_ref().unwrap()["fromCache"], false);
 
         // Hit
-        let r2 = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx).await.unwrap();
+        let r2 = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(r2.details.as_ref().unwrap()["fromCache"], true);
         assert_eq!(extract_text(&r2), "Cached answer");
     }
 
     #[tokio::test]
     async fn fallback_to_raw_content_without_summarizer() {
-        let http = Arc::new(html_response("<html><head><title>Page</title></head><body><p>Raw content</p></body></html>"));
+        let http = Arc::new(html_response(
+            "<html><head><title>Page</title></head><body><p>Raw content</p></body></html>",
+        ));
         let tool = WebFetchTool::new(http);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("# Page"));
@@ -493,10 +595,18 @@ mod tests {
 
     #[tokio::test]
     async fn summarizer_error_falls_back_to_raw_content() {
-        let http = Arc::new(html_response("<html><head><title>Fallback</title></head><body><p>Raw</p></body></html>"));
+        let http = Arc::new(html_response(
+            "<html><head><title>Fallback</title></head><body><p>Raw</p></body></html>",
+        ));
         let summarizer: Arc<dyn ContentSummarizer> = Arc::new(FailingSummarizer);
         let tool = WebFetchTool::new_with_summarizer(http, summarizer);
-        let r = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"url": "https://example.com", "prompt": "q"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("# Fallback"));
@@ -510,10 +620,16 @@ mod tests {
         let tool = WebFetchTool::new_with_summarizer(http, summarizer);
         let ctx = make_ctx();
 
-        let r1 = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx).await.unwrap();
+        let r1 = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(r1.details.as_ref().unwrap()["fromCache"], false);
 
-        let r2 = tool.execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx).await.unwrap();
+        let r2 = tool
+            .execute(json!({"url": "https://example.com", "prompt": "q"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(r2.details.as_ref().unwrap()["fromCache"], true);
     }
 

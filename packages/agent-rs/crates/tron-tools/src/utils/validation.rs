@@ -4,7 +4,7 @@
 //! returned as [`TronToolResult`] (not panics or unwraps).
 
 use serde_json::Value;
-use tron_core::tools::{error_result, TronToolResult};
+use tron_core::tools::{TronToolResult, error_result};
 
 /// Extract a required string parameter.
 ///
@@ -41,9 +41,7 @@ pub fn validate_path_not_root(path: &str, param: &str) -> Result<(), TronToolRes
 /// Validate a string is non-empty.
 pub fn validate_non_empty_string(value: &str, param: &str) -> Result<(), TronToolResult> {
     if value.is_empty() {
-        return Err(error_result(format!(
-            "Parameter {param} must not be empty"
-        )));
+        return Err(error_result(format!("Parameter {param} must not be empty")));
     }
     Ok(())
 }

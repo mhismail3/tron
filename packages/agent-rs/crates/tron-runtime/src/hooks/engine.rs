@@ -106,9 +106,7 @@ impl HookEngine {
             }
 
             // Execute with optional timeout
-            let result = self
-                .execute_single_handler(handler.as_ref(), context)
-                .await;
+            let result = self.execute_single_handler(handler.as_ref(), context).await;
 
             match result.action {
                 HookAction::Block => {
@@ -121,10 +119,8 @@ impl HookEngine {
                 }
                 HookAction::Modify => {
                     if let Some(mods) = &result.modifications {
-                        merged_modifications = Some(merge_json(
-                            merged_modifications.as_ref(),
-                            mods,
-                        ));
+                        merged_modifications =
+                            Some(merge_json(merged_modifications.as_ref(), mods));
                     }
                     if let Some(msg) = &result.message {
                         messages.push(msg.clone());
@@ -195,11 +191,7 @@ impl HookEngine {
     }
 
     /// Spawn background hooks as tracked tasks.
-    fn spawn_background(
-        &self,
-        handlers: Vec<Arc<dyn HookHandler>>,
-        context: &HookContext,
-    ) {
+    fn spawn_background(&self, handlers: Vec<Arc<dyn HookHandler>>, context: &HookContext) {
         for handler in handlers {
             if !handler.should_handle(context) {
                 continue;
@@ -241,10 +233,7 @@ impl HookEngine {
     /// Wait for background hooks with a timeout.
     ///
     /// Returns `true` if all completed within the timeout.
-    pub async fn wait_for_background_with_timeout(
-        &self,
-        timeout: std::time::Duration,
-    ) -> bool {
+    pub async fn wait_for_background_with_timeout(&self, timeout: std::time::Duration) -> bool {
         self.background.drain_with_timeout(timeout).await
     }
 
@@ -276,10 +265,7 @@ impl std::fmt::Debug for HookEngine {
 }
 
 /// Shallow-merge two JSON objects. `b` fields override `a` fields.
-fn merge_json(
-    a: Option<&serde_json::Value>,
-    b: &serde_json::Value,
-) -> serde_json::Value {
+fn merge_json(a: Option<&serde_json::Value>, b: &serde_json::Value) -> serde_json::Value {
     match (a, b) {
         (Some(serde_json::Value::Object(base)), serde_json::Value::Object(overlay)) => {
             let mut merged = base.clone();
@@ -461,8 +447,18 @@ mod tests {
     #[tokio::test]
     async fn test_execute_all_continue() {
         let mut registry = HookRegistry::new();
-        registry.register(make_simple("a", HookType::PreToolUse, 0, HookResult::continue_()));
-        registry.register(make_simple("b", HookType::PreToolUse, 0, HookResult::continue_()));
+        registry.register(make_simple(
+            "a",
+            HookType::PreToolUse,
+            0,
+            HookResult::continue_(),
+        ));
+        registry.register(make_simple(
+            "b",
+            HookType::PreToolUse,
+            0,
+            HookResult::continue_(),
+        ));
 
         let engine = HookEngine::new(registry);
         let result = engine.execute(&make_ctx(HookType::PreToolUse)).await;
@@ -573,19 +569,13 @@ mod tests {
             "a",
             HookType::PreToolUse,
             10,
-            HookResult::modify_with_message(
-                serde_json::json!({}),
-                "Message A",
-            ),
+            HookResult::modify_with_message(serde_json::json!({}), "Message A"),
         ));
         registry.register(make_simple(
             "b",
             HookType::PreToolUse,
             5,
-            HookResult::modify_with_message(
-                serde_json::json!({}),
-                "Message B",
-            ),
+            HookResult::modify_with_message(serde_json::json!({}), "Message B"),
         ));
 
         let engine = HookEngine::new(registry);
@@ -736,7 +726,12 @@ mod tests {
     #[tokio::test]
     async fn test_registry_access() {
         let mut registry = HookRegistry::new();
-        registry.register(make_simple("a", HookType::PreToolUse, 0, HookResult::continue_()));
+        registry.register(make_simple(
+            "a",
+            HookType::PreToolUse,
+            0,
+            HookResult::continue_(),
+        ));
 
         let engine = HookEngine::new(registry);
         assert_eq!(engine.registry().count(), 1);
@@ -746,9 +741,12 @@ mod tests {
     async fn test_registry_mut_access() {
         let registry = HookRegistry::new();
         let mut engine = HookEngine::new(registry);
-        engine
-            .registry_mut()
-            .register(make_simple("a", HookType::PreToolUse, 0, HookResult::continue_()));
+        engine.registry_mut().register(make_simple(
+            "a",
+            HookType::PreToolUse,
+            0,
+            HookResult::continue_(),
+        ));
         assert_eq!(engine.registry().count(), 1);
     }
 

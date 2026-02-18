@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -16,9 +16,23 @@ use crate::traits::{TaskManagerDelegate, ToolContext, TronTool};
 use crate::utils::validation::validate_required_string;
 
 const VALID_ACTIONS: &[&str] = &[
-    "create", "update", "get", "list", "search", "log_time", "delete",
-    "create_project", "update_project", "get_project", "list_projects", "delete_project",
-    "create_area", "update_area", "get_area", "delete_area", "list_areas",
+    "create",
+    "update",
+    "get",
+    "list",
+    "search",
+    "log_time",
+    "delete",
+    "create_project",
+    "update_project",
+    "get_project",
+    "list_projects",
+    "delete_project",
+    "create_area",
+    "update_area",
+    "get_area",
+    "delete_area",
+    "list_areas",
 ];
 
 /// The `TaskManager` tool manages tasks, projects, and areas.
@@ -125,8 +139,8 @@ backlog → pending → in_progress → completed/cancelled\n\n\
 
         match self.delegate.execute_action(&action, params.clone()).await {
             Ok(result) => {
-                let output = serde_json::to_string_pretty(&result)
-                    .unwrap_or_else(|_| result.to_string());
+                let output =
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
                 Ok(TronToolResult {
                     content: ToolResultBody::Blocks(vec![
                         tron_core::content::ToolResultContent::text(output),
@@ -159,7 +173,9 @@ mod tests {
     #[async_trait]
     impl TaskManagerDelegate for ErrorDelegate {
         async fn execute_action(&self, _action: &str, _params: Value) -> Result<Value, ToolError> {
-            Err(ToolError::Internal { message: "delegate error".into() })
+            Err(ToolError::Internal {
+                message: "delegate error".into(),
+            })
         }
     }
 
@@ -177,17 +193,24 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
     #[tokio::test]
     async fn create_action() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool.execute(json!({"action": "create", "title": "Test"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"action": "create", "title": "Test"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         assert!(extract_text(&r).contains("create"));
     }
@@ -195,14 +218,20 @@ mod tests {
     #[tokio::test]
     async fn update_action() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool.execute(json!({"action": "update", "taskId": "t1"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"action": "update", "taskId": "t1"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
     #[tokio::test]
     async fn list_action() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool.execute(json!({"action": "list"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"action": "list"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
@@ -210,7 +239,10 @@ mod tests {
     async fn all_actions_dispatch() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
         for action in VALID_ACTIONS {
-            let r = tool.execute(json!({"action": action}), &make_ctx()).await.unwrap();
+            let r = tool
+                .execute(json!({"action": action}), &make_ctx())
+                .await
+                .unwrap();
             assert!(r.is_error.is_none(), "Action {action} failed");
         }
     }
@@ -225,7 +257,10 @@ mod tests {
     #[tokio::test]
     async fn invalid_action_error() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool.execute(json!({"action": "invalid"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"action": "invalid"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Invalid action"));
     }
@@ -233,21 +268,36 @@ mod tests {
     #[tokio::test]
     async fn create_project() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool.execute(json!({"action": "create_project", "projectTitle": "P1"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"action": "create_project", "projectTitle": "P1"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
     #[tokio::test]
     async fn create_area() {
         let tool = TaskManagerTool::new(Arc::new(MockDelegate));
-        let r = tool.execute(json!({"action": "create_area", "areaTitle": "A1"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"action": "create_area", "areaTitle": "A1"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
     #[tokio::test]
     async fn delegate_error() {
         let tool = TaskManagerTool::new(Arc::new(ErrorDelegate));
-        let r = tool.execute(json!({"action": "create"}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"action": "create"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 }

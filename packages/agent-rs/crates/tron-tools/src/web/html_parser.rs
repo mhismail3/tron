@@ -34,8 +34,7 @@ pub fn parse_html(html: &str, _base_url: Option<&str>) -> HtmlParseResult {
     let description = extract_description(&document);
 
     // Convert to markdown via html2text
-    let markdown = html2text::from_read(html.as_bytes(), 100)
-        .unwrap_or_default();
+    let markdown = html2text::from_read(html.as_bytes(), 100).unwrap_or_default();
 
     // Clean up the markdown
     let markdown = clean_markdown(&markdown);
@@ -53,14 +52,20 @@ pub fn parse_html(html: &str, _base_url: Option<&str>) -> HtmlParseResult {
 
 fn extract_title(doc: &Html) -> String {
     // Priority: <title> → og:title → <h1>
-    if let Some(title_el) = Selector::parse("title").ok().and_then(|s| doc.select(&s).next()) {
+    if let Some(title_el) = Selector::parse("title")
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+    {
         let text = title_el.text().collect::<String>().trim().to_string();
         if !text.is_empty() {
             return text;
         }
     }
 
-    if let Some(og) = Selector::parse(r#"meta[property="og:title"]"#).ok().and_then(|s| doc.select(&s).next()) {
+    if let Some(og) = Selector::parse(r#"meta[property="og:title"]"#)
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+    {
         if let Some(content) = og.value().attr("content") {
             let text = content.trim().to_string();
             if !text.is_empty() {
@@ -69,7 +74,10 @@ fn extract_title(doc: &Html) -> String {
         }
     }
 
-    if let Some(h1) = Selector::parse("h1").ok().and_then(|s| doc.select(&s).next()) {
+    if let Some(h1) = Selector::parse("h1")
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+    {
         let text = h1.text().collect::<String>().trim().to_string();
         if !text.is_empty() {
             return text;
@@ -81,7 +89,10 @@ fn extract_title(doc: &Html) -> String {
 
 fn extract_description(doc: &Html) -> Option<String> {
     // Priority: meta[name=description] → og:description
-    if let Some(meta) = Selector::parse(r#"meta[name="description"]"#).ok().and_then(|s| doc.select(&s).next()) {
+    if let Some(meta) = Selector::parse(r#"meta[name="description"]"#)
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+    {
         if let Some(content) = meta.value().attr("content") {
             let text = content.trim().to_string();
             if !text.is_empty() {
@@ -90,7 +101,10 @@ fn extract_description(doc: &Html) -> Option<String> {
         }
     }
 
-    if let Some(og) = Selector::parse(r#"meta[property="og:description"]"#).ok().and_then(|s| doc.select(&s).next()) {
+    if let Some(og) = Selector::parse(r#"meta[property="og:description"]"#)
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+    {
         if let Some(content) = og.value().attr("content") {
             let text = content.trim().to_string();
             if !text.is_empty() {

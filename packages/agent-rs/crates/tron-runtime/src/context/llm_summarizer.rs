@@ -13,7 +13,7 @@ use tracing::warn;
 use tron_core::messages::Message;
 
 use super::summarizer::{
-    parse_summarizer_response, serialize_messages, KeywordSummarizer, Summarizer,
+    KeywordSummarizer, Summarizer, parse_summarizer_response, serialize_messages,
 };
 use super::types::SummaryResult;
 
@@ -429,9 +429,7 @@ mod tests {
         let spawner = MockSpawner {
             result: SubsessionResult {
                 success: true,
-                output: Some(
-                    "```json\n{\"narrative\": \"Fenced summary\"}\n```".into(),
-                ),
+                output: Some("```json\n{\"narrative\": \"Fenced summary\"}\n```".into()),
                 error: None,
             },
         };

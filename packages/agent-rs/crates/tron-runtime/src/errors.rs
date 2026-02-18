@@ -181,7 +181,13 @@ mod tests {
         assert!(RuntimeError::Cancelled.is_recoverable());
         assert!(RuntimeError::MaxTurns(5).is_recoverable());
         assert!(RuntimeError::SessionBusy("s".into()).is_recoverable());
-        assert!(RuntimeError::ServerBusy { current: 50, max: 50 }.is_recoverable());
+        assert!(
+            RuntimeError::ServerBusy {
+                current: 50,
+                max: 50
+            }
+            .is_recoverable()
+        );
         assert!(!RuntimeError::Internal("x".into()).is_recoverable());
         assert!(!RuntimeError::Context("x".into()).is_recoverable());
         assert!(!RuntimeError::SessionNotFound("s".into()).is_recoverable());
@@ -189,7 +195,10 @@ mod tests {
 
     #[test]
     fn server_busy_error() {
-        let err = RuntimeError::ServerBusy { current: 50, max: 50 };
+        let err = RuntimeError::ServerBusy {
+            current: 50,
+            max: 50,
+        };
         assert_eq!(err.to_string(), "Server busy: 50/50 concurrent runs");
         assert_eq!(err.category(), "server_busy");
         assert!(err.is_recoverable());

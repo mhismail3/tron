@@ -23,7 +23,7 @@ pub mod transport;
 pub mod types;
 
 pub use store::LogStore;
-pub use test_utils::{capture_logs, CapturedLogs};
+pub use test_utils::{CapturedLogs, capture_logs};
 pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
 pub use types::{LogEntry, LogLevel, LogQueryOptions};
 
@@ -38,8 +38,7 @@ pub use types::{LogEntry, LogLevel, LogQueryOptions};
 pub fn init_subscriber(level: &str) {
     use tracing_subscriber::EnvFilter;
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -62,16 +61,12 @@ pub fn init_subscriber(level: &str) {
 ///
 /// * `level` - Minimum log level to display/persist.
 /// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
-pub fn init_subscriber_with_sqlite(
-    level: &str,
-    conn: rusqlite::Connection,
-) -> TransportHandle {
+pub fn init_subscriber_with_sqlite(level: &str, conn: rusqlite::Connection) -> TransportHandle {
+    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
-    use tracing_subscriber::EnvFilter;
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
@@ -98,8 +93,7 @@ pub fn init_subscriber_with_sqlite(
 pub fn spawn_flush_task(handle: TransportHandle) -> tokio::task::JoinHandle<()> {
     let interval_ms = TransportConfig::default().flush_interval_ms;
     tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(std::time::Duration::from_millis(interval_ms));
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(interval_ms));
         loop {
             let _ = interval.tick().await;
             handle.flush();

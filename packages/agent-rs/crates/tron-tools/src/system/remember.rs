@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -16,8 +16,18 @@ use crate::traits::{EventStoreQuery, ToolContext, TronTool};
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
 const VALID_ACTIONS: &[&str] = &[
-    "recall", "search", "memory", "schema", "sessions", "session",
-    "events", "messages", "tools", "logs", "stats", "read_blob",
+    "recall",
+    "search",
+    "memory",
+    "schema",
+    "sessions",
+    "session",
+    "events",
+    "messages",
+    "tools",
+    "logs",
+    "stats",
+    "read_blob",
 ];
 const DEFAULT_LIMIT: u32 = 20;
 const MAX_LIMIT: u32 = 500;
@@ -47,7 +57,9 @@ fn format_entries(entries: &[crate::traits::MemoryEntry]) -> String {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            let score_str = e.score.map_or(String::new(), |s| format!(" (relevance: {s}%)"));
+            let score_str = e
+                .score
+                .map_or(String::new(), |s| format!(" (relevance: {s}%)"));
             format!("{}. {}{score_str}", i + 1, e.content)
         })
         .collect::<Vec<_>>()
@@ -168,7 +180,10 @@ Use read_blob to retrieve full content when tool results reference a blob_id.".i
             }
             "search" | "memory" => {
                 let q = query.unwrap_or_default();
-                let entries = self.store.search_memory(session_id.as_deref(), &q, limit, offset).await?;
+                let entries = self
+                    .store
+                    .search_memory(session_id.as_deref(), &q, limit, offset)
+                    .await?;
                 format_entries(&entries)
             }
             "sessions" => {
@@ -180,7 +195,9 @@ Use read_blob to retrieve full content when tool results reference a blob_id.".i
                     return Ok(error_result("session action requires session_id parameter"));
                 };
                 match self.store.get_session(sid).await? {
-                    Some(s) => serde_json::to_string_pretty(&s).unwrap_or_else(|_| format!("{s:?}")),
+                    Some(s) => {
+                        serde_json::to_string_pretty(&s).unwrap_or_else(|_| format!("{s:?}"))
+                    }
                     None => format!("Session not found: {sid}"),
                 }
             }
@@ -189,12 +206,17 @@ Use read_blob to retrieve full content when tool results reference a blob_id.".i
                 let event_type = get_optional_string(&params, "type");
                 #[allow(clippy::cast_possible_truncation)]
                 let turn = get_optional_u64(&params, "turn").map(|v| v as u32);
-                let entries = self.store.get_events(sid, event_type.as_deref(), turn, limit, offset).await?;
+                let entries = self
+                    .store
+                    .get_events(sid, event_type.as_deref(), turn, limit, offset)
+                    .await?;
                 format_json_entries(&entries)
             }
             "messages" => {
                 let Some(sid) = &session_id else {
-                    return Ok(error_result("messages action requires session_id parameter"));
+                    return Ok(error_result(
+                        "messages action requires session_id parameter",
+                    ));
                 };
                 let entries = self.store.get_messages(sid, limit).await?;
                 format_json_entries(&entries)
@@ -209,16 +231,17 @@ Use read_blob to retrieve full content when tool results reference a blob_id.".i
             "logs" => {
                 let sid = session_id.as_deref().unwrap_or("");
                 let level = get_optional_string(&params, "level");
-                let entries = self.store.get_logs(sid, level.as_deref(), limit, offset).await?;
+                let entries = self
+                    .store
+                    .get_logs(sid, level.as_deref(), limit, offset)
+                    .await?;
                 format_json_entries(&entries)
             }
             "stats" => {
                 let stats = self.store.get_stats().await?;
                 serde_json::to_string_pretty(&stats).unwrap_or_else(|_| stats.to_string())
             }
-            "schema" => {
-                self.store.get_schema().await?
-            }
+            "schema" => self.store.get_schema().await?,
             "read_blob" => {
                 let Some(blob_id) = get_optional_string(&params, "blob_id") else {
                     return Ok(error_result("read_blob action requires blob_id parameter"));
@@ -229,9 +252,9 @@ Use read_blob to retrieve full content when tool results reference a blob_id.".i
         };
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(content),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                content,
+            )]),
             details: Some(json!({"action": action})),
             is_error: None,
             stop_turn: None,
@@ -248,23 +271,66 @@ mod tests {
 
     #[async_trait]
     impl EventStoreQuery for MockStore {
-        async fn recall_memory(&self, _query: &str, _limit: u32) -> Result<Vec<MemoryEntry>, ToolError> {
-            Ok(vec![MemoryEntry { content: "recalled memory".into(), session_id: None, score: Some(85), timestamp: None }])
+        async fn recall_memory(
+            &self,
+            _query: &str,
+            _limit: u32,
+        ) -> Result<Vec<MemoryEntry>, ToolError> {
+            Ok(vec![MemoryEntry {
+                content: "recalled memory".into(),
+                session_id: None,
+                score: Some(85),
+                timestamp: None,
+            }])
         }
-        async fn search_memory(&self, _sid: Option<&str>, _q: &str, _limit: u32, _offset: u32) -> Result<Vec<MemoryEntry>, ToolError> {
-            Ok(vec![MemoryEntry { content: "searched memory".into(), session_id: None, score: None, timestamp: None }])
+        async fn search_memory(
+            &self,
+            _sid: Option<&str>,
+            _q: &str,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<MemoryEntry>, ToolError> {
+            Ok(vec![MemoryEntry {
+                content: "searched memory".into(),
+                session_id: None,
+                score: None,
+                timestamp: None,
+            }])
         }
-        async fn list_sessions(&self, _limit: u32, _offset: u32) -> Result<Vec<SessionInfo>, ToolError> {
-            Ok(vec![SessionInfo { session_id: "s1".into(), title: Some("Test".into()), created_at: Some("2026-01-01".into()), archived: None, event_count: None }])
+        async fn list_sessions(
+            &self,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<SessionInfo>, ToolError> {
+            Ok(vec![SessionInfo {
+                session_id: "s1".into(),
+                title: Some("Test".into()),
+                created_at: Some("2026-01-01".into()),
+                archived: None,
+                event_count: None,
+            }])
         }
         async fn get_session(&self, sid: &str) -> Result<Option<SessionInfo>, ToolError> {
             if sid == "s1" {
-                Ok(Some(SessionInfo { session_id: "s1".into(), title: Some("Test".into()), created_at: None, archived: None, event_count: None }))
+                Ok(Some(SessionInfo {
+                    session_id: "s1".into(),
+                    title: Some("Test".into()),
+                    created_at: None,
+                    archived: None,
+                    event_count: None,
+                }))
             } else {
                 Ok(None)
             }
         }
-        async fn get_events(&self, _sid: &str, _et: Option<&str>, _turn: Option<u32>, _limit: u32, _offset: u32) -> Result<Vec<Value>, ToolError> {
+        async fn get_events(
+            &self,
+            _sid: &str,
+            _et: Option<&str>,
+            _turn: Option<u32>,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<Value>, ToolError> {
             Ok(vec![json!({"type": "agent.message", "turn": 1})])
         }
         async fn get_messages(&self, _sid: &str, _limit: u32) -> Result<Vec<Value>, ToolError> {
@@ -273,7 +339,13 @@ mod tests {
         async fn get_tool_calls(&self, _sid: &str, _limit: u32) -> Result<Vec<Value>, ToolError> {
             Ok(vec![json!({"tool": "Bash", "result": "ok"})])
         }
-        async fn get_logs(&self, _sid: &str, _level: Option<&str>, _limit: u32, _offset: u32) -> Result<Vec<Value>, ToolError> {
+        async fn get_logs(
+            &self,
+            _sid: &str,
+            _level: Option<&str>,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<Value>, ToolError> {
             Ok(vec![json!({"level": "info", "msg": "started"})])
         }
         async fn get_stats(&self) -> Result<Value, ToolError> {
@@ -301,10 +373,14 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
@@ -314,75 +390,117 @@ mod tests {
 
     #[tokio::test]
     async fn recall_action() {
-        let r = tool().execute(json!({"action": "recall", "query": "test"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "recall", "query": "test"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("recalled memory"));
         assert!(extract_text(&r).contains("relevance: 85%"));
     }
 
     #[tokio::test]
     async fn search_action() {
-        let r = tool().execute(json!({"action": "search", "query": "test"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "search", "query": "test"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("searched memory"));
     }
 
     #[tokio::test]
     async fn memory_alias_for_search() {
-        let r = tool().execute(json!({"action": "memory", "query": "test"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "memory", "query": "test"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("searched memory"));
     }
 
     #[tokio::test]
     async fn sessions_action() {
-        let r = tool().execute(json!({"action": "sessions"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "sessions"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("s1"));
         assert!(extract_text(&r).contains("Test"));
     }
 
     #[tokio::test]
     async fn session_action() {
-        let r = tool().execute(json!({"action": "session", "session_id": "s1"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(
+                json!({"action": "session", "session_id": "s1"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("s1"));
     }
 
     #[tokio::test]
     async fn events_action() {
-        let r = tool().execute(json!({"action": "events", "session_id": "s1"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "events", "session_id": "s1"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("agent.message"));
     }
 
     #[tokio::test]
     async fn messages_action() {
-        let r = tool().execute(json!({"action": "messages", "session_id": "s1"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(
+                json!({"action": "messages", "session_id": "s1"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("hello"));
     }
 
     #[tokio::test]
     async fn tools_action() {
-        let r = tool().execute(json!({"action": "tools", "session_id": "s1"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "tools", "session_id": "s1"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("Bash"));
     }
 
     #[tokio::test]
     async fn logs_action() {
-        let r = tool().execute(json!({"action": "logs", "session_id": "s1"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "logs", "session_id": "s1"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("started"));
     }
 
     #[tokio::test]
     async fn stats_action() {
-        let r = tool().execute(json!({"action": "stats"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "stats"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("42"));
     }
 
     #[tokio::test]
     async fn schema_action() {
-        let r = tool().execute(json!({"action": "schema"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "schema"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("CREATE TABLE"));
     }
 
     #[tokio::test]
     async fn read_blob_action() {
-        let r = tool().execute(json!({"action": "read_blob", "blob_id": "b1"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "read_blob", "blob_id": "b1"}), &make_ctx())
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("blob content"));
     }
 
@@ -394,7 +512,10 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_action() {
-        let r = tool().execute(json!({"action": "invalid"}), &make_ctx()).await.unwrap();
+        let r = tool()
+            .execute(json!({"action": "invalid"}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
         assert!(extract_text(&r).contains("Invalid action"));
     }

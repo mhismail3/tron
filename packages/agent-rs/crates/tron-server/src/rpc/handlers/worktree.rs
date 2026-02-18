@@ -128,7 +128,9 @@ impl MethodHandler for CommitHandler {
                 message: format!("Failed to get commit hash: {e}"),
             })?;
 
-        let commit_hash = String::from_utf8_lossy(&rev_output.stdout).trim().to_string();
+        let commit_hash = String::from_utf8_lossy(&rev_output.stdout)
+            .trim()
+            .to_string();
 
         Ok(serde_json::json!({
             "success": true,

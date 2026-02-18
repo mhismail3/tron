@@ -4,11 +4,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::rpc::context::RpcContext;
+use crate::rpc::registry::MethodRegistry;
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
-use crate::rpc::context::RpcContext;
-use crate::rpc::registry::MethodRegistry;
 
 use metrics::{counter, gauge, histogram};
 use tracing::{debug, info, instrument, warn};
@@ -113,7 +113,11 @@ pub async fn run_ws_session(
                 if let Ok(s) = std::str::from_utf8(data) {
                     Some(s)
                 } else {
-                    info!(client_id, len = data.len(), "received non-UTF8 binary frame");
+                    info!(
+                        client_id,
+                        len = data.len(),
+                        "received non-UTF8 binary frame"
+                    );
                     None
                 }
             }
@@ -148,7 +152,10 @@ pub async fn run_ws_session(
         }
 
         if !connection.send(Arc::new(result.response_json)) {
-            info!(client_id, "failed to enqueue response (channel full or closed)");
+            info!(
+                client_id,
+                "failed to enqueue response (channel full or closed)"
+            );
         }
     }
 

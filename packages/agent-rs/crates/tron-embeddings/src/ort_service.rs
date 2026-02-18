@@ -125,7 +125,11 @@ fn run_inference(
         .map_err(|e| EmbeddingError::Inference(format!("tokenize: {e}")))?;
 
     // Find max length for padding
-    let max_len = encodings.iter().map(|e| e.get_ids().len()).max().unwrap_or(0);
+    let max_len = encodings
+        .iter()
+        .map(|e| e.get_ids().len())
+        .max()
+        .unwrap_or(0);
     if max_len == 0 {
         return Err(EmbeddingError::Inference("empty tokenization".into()));
     }
@@ -167,7 +171,11 @@ fn run_inference(
 
     // Run ONNX session
     let outputs = session
-        .run(ort::inputs![input_ids_tensor, attention_mask_tensor, position_ids_tensor])
+        .run(ort::inputs![
+            input_ids_tensor,
+            attention_mask_tensor,
+            position_ids_tensor
+        ])
         .map_err(|e| EmbeddingError::Inference(format!("inference: {e}")))?;
 
     // Extract output tensor (shape: [batch_size, seq_len, hidden_dim])
@@ -225,12 +233,8 @@ impl EmbeddingService for OnnxEmbeddingService {
         let mut session_guard = self.session.lock();
         let tokenizer_guard = self.tokenizer.lock();
 
-        let session = session_guard
-            .as_mut()
-            .ok_or(EmbeddingError::NotReady)?;
-        let tokenizer = tokenizer_guard
-            .as_ref()
-            .ok_or(EmbeddingError::NotReady)?;
+        let session = session_guard.as_mut().ok_or(EmbeddingError::NotReady)?;
+        let tokenizer = tokenizer_guard.as_ref().ok_or(EmbeddingError::NotReady)?;
 
         run_inference(session, tokenizer, texts, &self.config)
     }

@@ -180,65 +180,185 @@ impl SessionEvent {
     /// Returns `Err` if the payload JSON doesn't match the expected shape.
     pub fn typed_payload(&self) -> std::result::Result<SessionEventPayload, serde_json::Error> {
         match self.event_type {
-            EventType::SessionStart => Ok(SessionEventPayload::SessionStart(serde_json::from_value(self.payload.clone())?)),
-            EventType::SessionEnd => Ok(SessionEventPayload::SessionEnd(serde_json::from_value(self.payload.clone())?)),
-            EventType::SessionFork => Ok(SessionEventPayload::SessionFork(serde_json::from_value(self.payload.clone())?)),
-            EventType::MessageUser => Ok(SessionEventPayload::MessageUser(serde_json::from_value(self.payload.clone())?)),
-            EventType::MessageAssistant => Ok(SessionEventPayload::MessageAssistant(serde_json::from_value(self.payload.clone())?)),
-            EventType::MessageSystem => Ok(SessionEventPayload::MessageSystem(serde_json::from_value(self.payload.clone())?)),
-            EventType::MessageDeleted => Ok(SessionEventPayload::MessageDeleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::ToolCall => Ok(SessionEventPayload::ToolCall(serde_json::from_value(self.payload.clone())?)),
-            EventType::ToolResult => Ok(SessionEventPayload::ToolResult(serde_json::from_value(self.payload.clone())?)),
-            EventType::StreamTurnStart => Ok(SessionEventPayload::StreamTurnStart(serde_json::from_value(self.payload.clone())?)),
-            EventType::StreamTurnEnd => Ok(SessionEventPayload::StreamTurnEnd(serde_json::from_value(self.payload.clone())?)),
-            EventType::StreamTextDelta => Ok(SessionEventPayload::StreamTextDelta(serde_json::from_value(self.payload.clone())?)),
-            EventType::StreamThinkingDelta => Ok(SessionEventPayload::StreamThinkingDelta(serde_json::from_value(self.payload.clone())?)),
-            EventType::ConfigModelSwitch => Ok(SessionEventPayload::ConfigModelSwitch(serde_json::from_value(self.payload.clone())?)),
-            EventType::ConfigPromptUpdate => Ok(SessionEventPayload::ConfigPromptUpdate(serde_json::from_value(self.payload.clone())?)),
-            EventType::ConfigReasoningLevel => Ok(SessionEventPayload::ConfigReasoningLevel(serde_json::from_value(self.payload.clone())?)),
-            EventType::NotificationInterrupted => Ok(SessionEventPayload::NotificationInterrupted(serde_json::from_value(self.payload.clone())?)),
-            EventType::NotificationSubagentResult => Ok(SessionEventPayload::NotificationSubagentResult(serde_json::from_value(self.payload.clone())?)),
-            EventType::CompactBoundary => Ok(SessionEventPayload::CompactBoundary(serde_json::from_value(self.payload.clone())?)),
-            EventType::CompactSummary => Ok(SessionEventPayload::CompactSummary(serde_json::from_value(self.payload.clone())?)),
-            EventType::ContextCleared => Ok(SessionEventPayload::ContextCleared(serde_json::from_value(self.payload.clone())?)),
-            EventType::SkillAdded => Ok(SessionEventPayload::SkillAdded(serde_json::from_value(self.payload.clone())?)),
-            EventType::SkillRemoved => Ok(SessionEventPayload::SkillRemoved(serde_json::from_value(self.payload.clone())?)),
-            EventType::RulesLoaded => Ok(SessionEventPayload::RulesLoaded(serde_json::from_value(self.payload.clone())?)),
-            EventType::RulesIndexed => Ok(SessionEventPayload::RulesIndexed(serde_json::from_value(self.payload.clone())?)),
-            EventType::RulesActivated => Ok(SessionEventPayload::RulesActivated(serde_json::from_value(self.payload.clone())?)),
-            EventType::MetadataUpdate => Ok(SessionEventPayload::MetadataUpdate(serde_json::from_value(self.payload.clone())?)),
-            EventType::MetadataTag => Ok(SessionEventPayload::MetadataTag(serde_json::from_value(self.payload.clone())?)),
-            EventType::FileRead => Ok(SessionEventPayload::FileRead(serde_json::from_value(self.payload.clone())?)),
-            EventType::FileWrite => Ok(SessionEventPayload::FileWrite(serde_json::from_value(self.payload.clone())?)),
-            EventType::FileEdit => Ok(SessionEventPayload::FileEdit(serde_json::from_value(self.payload.clone())?)),
-            EventType::WorktreeAcquired => Ok(SessionEventPayload::WorktreeAcquired(serde_json::from_value(self.payload.clone())?)),
-            EventType::WorktreeCommit => Ok(SessionEventPayload::WorktreeCommit(serde_json::from_value(self.payload.clone())?)),
-            EventType::WorktreeReleased => Ok(SessionEventPayload::WorktreeReleased(serde_json::from_value(self.payload.clone())?)),
-            EventType::WorktreeMerged => Ok(SessionEventPayload::WorktreeMerged(serde_json::from_value(self.payload.clone())?)),
-            EventType::ErrorAgent => Ok(SessionEventPayload::ErrorAgent(serde_json::from_value(self.payload.clone())?)),
-            EventType::ErrorTool => Ok(SessionEventPayload::ErrorTool(serde_json::from_value(self.payload.clone())?)),
-            EventType::ErrorProvider => Ok(SessionEventPayload::ErrorProvider(serde_json::from_value(self.payload.clone())?)),
-            EventType::SubagentSpawned => Ok(SessionEventPayload::SubagentSpawned(serde_json::from_value(self.payload.clone())?)),
-            EventType::SubagentStatusUpdate => Ok(SessionEventPayload::SubagentStatusUpdate(serde_json::from_value(self.payload.clone())?)),
-            EventType::SubagentCompleted => Ok(SessionEventPayload::SubagentCompleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::SubagentFailed => Ok(SessionEventPayload::SubagentFailed(serde_json::from_value(self.payload.clone())?)),
-            EventType::SubagentResultsConsumed => Ok(SessionEventPayload::SubagentResultsConsumed(serde_json::from_value(self.payload.clone())?)),
-            EventType::TodoWrite => Ok(SessionEventPayload::TodoWrite(serde_json::from_value(self.payload.clone())?)),
-            EventType::TaskCreated => Ok(SessionEventPayload::TaskCreated(serde_json::from_value(self.payload.clone())?)),
-            EventType::TaskUpdated => Ok(SessionEventPayload::TaskUpdated(serde_json::from_value(self.payload.clone())?)),
-            EventType::TaskDeleted => Ok(SessionEventPayload::TaskDeleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::ProjectCreated => Ok(SessionEventPayload::ProjectCreated(serde_json::from_value(self.payload.clone())?)),
-            EventType::ProjectUpdated => Ok(SessionEventPayload::ProjectUpdated(serde_json::from_value(self.payload.clone())?)),
-            EventType::ProjectDeleted => Ok(SessionEventPayload::ProjectDeleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::AreaCreated => Ok(SessionEventPayload::AreaCreated(serde_json::from_value(self.payload.clone())?)),
-            EventType::AreaUpdated => Ok(SessionEventPayload::AreaUpdated(serde_json::from_value(self.payload.clone())?)),
-            EventType::AreaDeleted => Ok(SessionEventPayload::AreaDeleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::TurnFailed => Ok(SessionEventPayload::TurnFailed(serde_json::from_value(self.payload.clone())?)),
-            EventType::HookTriggered => Ok(SessionEventPayload::HookTriggered(serde_json::from_value(self.payload.clone())?)),
-            EventType::HookCompleted => Ok(SessionEventPayload::HookCompleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::HookBackgroundStarted => Ok(SessionEventPayload::HookBackgroundStarted(serde_json::from_value(self.payload.clone())?)),
-            EventType::HookBackgroundCompleted => Ok(SessionEventPayload::HookBackgroundCompleted(serde_json::from_value(self.payload.clone())?)),
-            EventType::MemoryLedger => Ok(SessionEventPayload::MemoryLedger(serde_json::from_value(self.payload.clone())?)),
+            EventType::SessionStart => Ok(SessionEventPayload::SessionStart(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SessionEnd => Ok(SessionEventPayload::SessionEnd(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::SessionFork => Ok(SessionEventPayload::SessionFork(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::MessageUser => Ok(SessionEventPayload::MessageUser(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::MessageAssistant => Ok(SessionEventPayload::MessageAssistant(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::MessageSystem => Ok(SessionEventPayload::MessageSystem(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::MessageDeleted => Ok(SessionEventPayload::MessageDeleted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ToolCall => Ok(SessionEventPayload::ToolCall(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::ToolResult => Ok(SessionEventPayload::ToolResult(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::StreamTurnStart => Ok(SessionEventPayload::StreamTurnStart(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::StreamTurnEnd => Ok(SessionEventPayload::StreamTurnEnd(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::StreamTextDelta => Ok(SessionEventPayload::StreamTextDelta(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::StreamThinkingDelta => Ok(SessionEventPayload::StreamThinkingDelta(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ConfigModelSwitch => Ok(SessionEventPayload::ConfigModelSwitch(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ConfigPromptUpdate => Ok(SessionEventPayload::ConfigPromptUpdate(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ConfigReasoningLevel => Ok(SessionEventPayload::ConfigReasoningLevel(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::NotificationInterrupted => Ok(SessionEventPayload::NotificationInterrupted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::NotificationSubagentResult => {
+                Ok(SessionEventPayload::NotificationSubagentResult(
+                    serde_json::from_value(self.payload.clone())?,
+                ))
+            }
+            EventType::CompactBoundary => Ok(SessionEventPayload::CompactBoundary(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::CompactSummary => Ok(SessionEventPayload::CompactSummary(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ContextCleared => Ok(SessionEventPayload::ContextCleared(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SkillAdded => Ok(SessionEventPayload::SkillAdded(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::SkillRemoved => Ok(SessionEventPayload::SkillRemoved(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::RulesLoaded => Ok(SessionEventPayload::RulesLoaded(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::RulesIndexed => Ok(SessionEventPayload::RulesIndexed(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::RulesActivated => Ok(SessionEventPayload::RulesActivated(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::MetadataUpdate => Ok(SessionEventPayload::MetadataUpdate(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::MetadataTag => Ok(SessionEventPayload::MetadataTag(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::FileRead => Ok(SessionEventPayload::FileRead(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::FileWrite => Ok(SessionEventPayload::FileWrite(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::FileEdit => Ok(SessionEventPayload::FileEdit(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::WorktreeAcquired => Ok(SessionEventPayload::WorktreeAcquired(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::WorktreeCommit => Ok(SessionEventPayload::WorktreeCommit(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::WorktreeReleased => Ok(SessionEventPayload::WorktreeReleased(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::WorktreeMerged => Ok(SessionEventPayload::WorktreeMerged(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ErrorAgent => Ok(SessionEventPayload::ErrorAgent(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::ErrorTool => Ok(SessionEventPayload::ErrorTool(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::ErrorProvider => Ok(SessionEventPayload::ErrorProvider(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SubagentSpawned => Ok(SessionEventPayload::SubagentSpawned(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SubagentStatusUpdate => Ok(SessionEventPayload::SubagentStatusUpdate(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SubagentCompleted => Ok(SessionEventPayload::SubagentCompleted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SubagentFailed => Ok(SessionEventPayload::SubagentFailed(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::SubagentResultsConsumed => Ok(SessionEventPayload::SubagentResultsConsumed(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::TodoWrite => Ok(SessionEventPayload::TodoWrite(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::TaskCreated => Ok(SessionEventPayload::TaskCreated(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::TaskUpdated => Ok(SessionEventPayload::TaskUpdated(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::TaskDeleted => Ok(SessionEventPayload::TaskDeleted(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::ProjectCreated => Ok(SessionEventPayload::ProjectCreated(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ProjectUpdated => Ok(SessionEventPayload::ProjectUpdated(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::ProjectDeleted => Ok(SessionEventPayload::ProjectDeleted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::AreaCreated => Ok(SessionEventPayload::AreaCreated(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::AreaUpdated => Ok(SessionEventPayload::AreaUpdated(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::AreaDeleted => Ok(SessionEventPayload::AreaDeleted(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::TurnFailed => Ok(SessionEventPayload::TurnFailed(serde_json::from_value(
+                self.payload.clone(),
+            )?)),
+            EventType::HookTriggered => Ok(SessionEventPayload::HookTriggered(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::HookCompleted => Ok(SessionEventPayload::HookCompleted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::HookBackgroundStarted => Ok(SessionEventPayload::HookBackgroundStarted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::HookBackgroundCompleted => Ok(SessionEventPayload::HookBackgroundCompleted(
+                serde_json::from_value(self.payload.clone())?,
+            )),
+            EventType::MemoryLedger => Ok(SessionEventPayload::MemoryLedger(
+                serde_json::from_value(self.payload.clone())?,
+            )),
             EventType::MemoryLoaded => Ok(SessionEventPayload::MemoryLoaded(self.payload.clone())),
         }
     }

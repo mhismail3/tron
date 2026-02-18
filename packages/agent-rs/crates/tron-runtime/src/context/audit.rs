@@ -268,10 +268,7 @@ impl ContextAudit {
     #[must_use]
     /// Produce a one-line summary string.
     pub fn to_summary(&self) -> String {
-        let session_id = self
-            .session
-            .as_ref()
-            .map_or("unknown", |s| s.id.as_str());
+        let session_id = self.session.as_ref().map_or("unknown", |s| s.id.as_str());
         format!(
             "session={} files={} handoffs={} tools={} tokens={}",
             session_id,
@@ -318,16 +315,8 @@ impl ContextAudit {
         if !self.context_files.is_empty() {
             let _ = writeln!(md, "## Context Files ({})\n", self.context_files.len());
             for file in &self.context_files {
-                let _ = writeln!(
-                    md,
-                    "### {} ({})\n",
-                    file.path, file.file_type,
-                );
-                let _ = writeln!(
-                    md,
-                    "- {} chars, {} lines",
-                    file.char_count, file.line_count,
-                );
+                let _ = writeln!(md, "### {} ({})\n", file.path, file.file_type,);
+                let _ = writeln!(md, "- {} chars, {} lines", file.char_count, file.line_count,);
                 if !file.preview.is_empty() {
                     let _ = writeln!(md, "\n```\n{}...\n```\n", file.preview);
                 }
@@ -389,13 +378,7 @@ impl ContextAudit {
             let _ = writeln!(md, "| Section | Source | Chars |");
             let _ = writeln!(md, "|---------|--------|-------|");
             for s in &self.system_prompt_sections {
-                let _ = writeln!(
-                    md,
-                    "| {} | {} | {} |",
-                    s.name,
-                    s.source,
-                    s.content.len(),
-                );
+                let _ = writeln!(md, "| {} | {} | {} |", s.name, s.source, s.content.len(),);
             }
             let _ = writeln!(md);
         }
@@ -471,7 +454,11 @@ mod tests {
     #[test]
     fn add_context_file_tracks_metadata() {
         let mut audit = ContextAudit::new();
-        audit.add_context_file("/project/.claude/AGENTS.md", ContextFileType::Project, "# Rules\n\nBe helpful.");
+        audit.add_context_file(
+            "/project/.claude/AGENTS.md",
+            ContextFileType::Project,
+            "# Rules\n\nBe helpful.",
+        );
         assert_eq!(audit.context_files().len(), 1);
         let f = &audit.context_files()[0];
         assert_eq!(f.path, "/project/.claude/AGENTS.md");

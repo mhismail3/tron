@@ -1,15 +1,15 @@
 //! `TronAgent` — multi-turn agent with turn loop, abort, and state tracking.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
 use crate::context::context_manager::ContextManager;
-use tron_core::events::{BaseEvent, TronEvent};
-use tron_core::messages::{Message, TokenUsage, UserMessageContent};
 use crate::guardrails::GuardrailEngine;
 use crate::hooks::engine::HookEngine;
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
+use tron_core::events::{BaseEvent, TronEvent};
+use tron_core::messages::{Message, TokenUsage, UserMessageContent};
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
@@ -122,11 +122,10 @@ impl TronAgent {
         } else {
             UserMessageContent::Text(content.to_owned())
         };
-        self.context_manager
-            .add_message(Message::User {
-                content: user_content,
-                timestamp: None,
-            });
+        self.context_manager.add_message(Message::User {
+            content: user_content,
+            timestamp: None,
+        });
 
         // Emit AgentStart
         let _ = self.emitter.emit(TronEvent::AgentStart {
@@ -297,7 +296,6 @@ impl TronAgent {
     pub fn emitter(&self) -> &Arc<EventEmitter> {
         &self.emitter
     }
-
 }
 
 #[cfg(test)]
@@ -314,10 +312,10 @@ impl TronAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::types::ContextManagerConfig;
     use async_trait::async_trait;
     use futures::stream;
     use serde_json::Map;
-    use crate::context::types::ContextManagerConfig;
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::ToolResultMessageContent;
@@ -489,12 +487,31 @@ mod tests {
         struct ReadTool;
         #[at]
         impl tron_tools::traits::TronTool for ReadTool {
-            fn name(&self) -> &str { "read" }
-            fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Filesystem }
-            fn definition(&self) -> Tool {
-                Tool { name: "read".into(), description: "Read file".into(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() } }
+            fn name(&self) -> &str {
+                "read"
             }
-            async fn execute(&self, _p: serde_json::Value, _c: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            fn category(&self) -> tron_core::tools::ToolCategory {
+                tron_core::tools::ToolCategory::Filesystem
+            }
+            fn definition(&self) -> Tool {
+                Tool {
+                    name: "read".into(),
+                    description: "Read file".into(),
+                    parameters: ToolParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::new(),
+                    },
+                }
+            }
+            async fn execute(
+                &self,
+                _p: serde_json::Value,
+                _c: &tron_tools::traits::ToolContext,
+            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
+            {
                 Ok(text_result("file contents", false))
             }
         }
@@ -535,18 +552,26 @@ mod tests {
         // Instead, test with max_turns = 2
         let turn1 = vec![
             StreamEvent::Start,
-            StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "echo".into() },
+            StreamEvent::ToolCallStart {
+                tool_call_id: "tc-1".into(),
+                name: "echo".into(),
+            },
             StreamEvent::ToolCallEnd {
                 tool_call: tron_core::messages::ToolCall {
-                    content_type: "tool_use".into(), id: "tc-1".into(), name: "echo".into(),
-                    arguments: Map::new(), thought_signature: None,
+                    content_type: "tool_use".into(),
+                    id: "tc-1".into(),
+                    name: "echo".into(),
+                    arguments: Map::new(),
+                    thought_signature: None,
                 },
             },
             StreamEvent::Done {
                 message: AssistantMessage {
                     content: vec![AssistantContent::ToolUse {
-                        id: "tc-1".into(), name: "echo".into(),
-                        arguments: Map::new(), thought_signature: None,
+                        id: "tc-1".into(),
+                        name: "echo".into(),
+                        arguments: Map::new(),
+                        thought_signature: None,
                     }],
                     token_usage: Some(TokenUsage::default()),
                 },
@@ -563,12 +588,31 @@ mod tests {
         struct EchoTool;
         #[async_trait]
         impl tron_tools::traits::TronTool for EchoTool {
-            fn name(&self) -> &str { "echo" }
-            fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
-            fn definition(&self) -> Tool {
-                Tool { name: "echo".into(), description: "Echo".into(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() } }
+            fn name(&self) -> &str {
+                "echo"
             }
-            async fn execute(&self, _p: serde_json::Value, _c: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            fn category(&self) -> tron_core::tools::ToolCategory {
+                tron_core::tools::ToolCategory::Custom
+            }
+            fn definition(&self) -> Tool {
+                Tool {
+                    name: "echo".into(),
+                    description: "Echo".into(),
+                    parameters: ToolParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::new(),
+                    },
+                }
+            }
+            async fn execute(
+                &self,
+                _p: serde_json::Value,
+                _c: &tron_tools::traits::ToolContext,
+            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
+            {
                 Ok(text_result("ok", false))
             }
         }
@@ -586,8 +630,12 @@ mod tests {
         struct SlowProvider;
         #[async_trait]
         impl Provider for SlowProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _context: &tron_core::messages::Context,
@@ -659,14 +707,20 @@ mod tests {
         struct ErrorProvider;
         #[async_trait]
         impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _context: &tron_core::messages::Context,
                 _options: &ProviderStreamOptions,
             ) -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth { message: "expired".into() })
+                Err(ProviderError::Auth {
+                    message: "expired".into(),
+                })
             }
         }
 
@@ -710,8 +764,12 @@ mod tests {
         struct NoUsageProvider;
         #[async_trait]
         impl Provider for NoUsageProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _context: &tron_core::messages::Context,
@@ -796,14 +854,20 @@ mod tests {
         struct ErrorProvider;
         #[async_trait]
         impl Provider for ErrorProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _context: &tron_core::messages::Context,
                 _options: &ProviderStreamOptions,
             ) -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth { message: "Token expired".into() })
+                Err(ProviderError::Auth {
+                    message: "Token expired".into(),
+                })
             }
         }
 
@@ -850,8 +914,12 @@ mod tests {
         struct SlowProvider;
         #[async_trait]
         impl Provider for SlowProvider {
-            fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-            fn model(&self) -> &str { "mock" }
+            fn provider_type(&self) -> ProviderType {
+                ProviderType::Anthropic
+            }
+            fn model(&self) -> &str {
+                "mock"
+            }
             async fn stream(
                 &self,
                 _context: &tron_core::messages::Context,
@@ -971,12 +1039,12 @@ mod tests {
     #[tokio::test]
     async fn agent_set_persister() {
         let store = make_event_store();
-        let (mut agent, sid) =
-            make_agent_with_store(MockProvider::text_only("Hello"), &store);
+        let (mut agent, sid) = make_agent_with_store(MockProvider::text_only("Hello"), &store);
 
-        let persister = Arc::new(
-            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
-        );
+        let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
+            store.clone(),
+            sid.clone(),
+        ));
         agent.set_persister(Some(persister.clone()));
 
         let result = agent.run("Hi", RunContext::default()).await;
@@ -1081,13 +1149,14 @@ mod tests {
         let provider = MockProvider::multi_turn(vec![turn1_events, turn2_events]);
         let (mut agent, sid) = make_agent_with_store(provider, &store);
 
-        let persister = Arc::new(
-            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
-        );
+        let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
+            store.clone(),
+            sid.clone(),
+        ));
         agent.set_persister(Some(persister.clone()));
 
         // Register read tool
-        use tron_core::tools::{text_result, Tool, ToolParameterSchema};
+        use tron_core::tools::{Tool, ToolParameterSchema, text_result};
         struct ReadTool;
         #[async_trait]
         impl tron_tools::traits::TronTool for ReadTool {
@@ -1114,7 +1183,8 @@ mod tests {
                 &self,
                 _p: serde_json::Value,
                 _c: &tron_tools::traits::ToolContext,
-            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
+            {
                 Ok(text_result("file contents", false))
             }
         }
@@ -1142,10 +1212,8 @@ mod tests {
         );
 
         // Verify turn numbers in payloads
-        let p1: serde_json::Value =
-            serde_json::from_str(&assistant_events[0].payload).unwrap();
-        let p2: serde_json::Value =
-            serde_json::from_str(&assistant_events[1].payload).unwrap();
+        let p1: serde_json::Value = serde_json::from_str(&assistant_events[0].payload).unwrap();
+        let p2: serde_json::Value = serde_json::from_str(&assistant_events[1].payload).unwrap();
         assert_eq!(p1["turn"], 1);
         assert_eq!(p2["turn"], 2);
 
@@ -1165,12 +1233,12 @@ mod tests {
     #[tokio::test]
     async fn agent_persisted_event_has_indexed_columns() {
         let store = make_event_store();
-        let (mut agent, sid) =
-            make_agent_with_store(MockProvider::text_only("Hello"), &store);
+        let (mut agent, sid) = make_agent_with_store(MockProvider::text_only("Hello"), &store);
 
-        let persister = Arc::new(
-            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
-        );
+        let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
+            store.clone(),
+            sid.clone(),
+        ));
         agent.set_persister(Some(persister.clone()));
 
         let _ = agent.run("Hi", RunContext::default()).await;
@@ -1226,21 +1294,29 @@ mod tests {
 
     #[async_trait]
     impl tron_tools::traits::TronTool for SlowTool {
-        fn name(&self) -> &str { self.tool_name }
-        fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
+        fn name(&self) -> &str {
+            self.tool_name
+        }
+        fn category(&self) -> tron_core::tools::ToolCategory {
+            tron_core::tools::ToolCategory::Custom
+        }
         fn definition(&self) -> tron_core::tools::Tool {
             tron_core::tools::Tool {
                 name: self.tool_name.into(),
                 description: String::new(),
                 parameters: tron_core::tools::ToolParameterSchema {
                     schema_type: "object".into(),
-                    properties: None, required: None, description: None,
+                    properties: None,
+                    required: None,
+                    description: None,
                     extra: Map::new(),
                 },
             }
         }
         async fn execute(
-            &self, _params: serde_json::Value, ctx: &tron_tools::traits::ToolContext,
+            &self,
+            _params: serde_json::Value,
+            ctx: &tron_tools::traits::ToolContext,
         ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
             tokio::select! {
                 () = tokio::time::sleep(Duration::from_millis(self.delay_ms)) => {},
@@ -1262,22 +1338,32 @@ mod tests {
 
     #[async_trait]
     impl tron_tools::traits::TronTool for SerializedSlowTool {
-        fn name(&self) -> &str { self.tool_name }
-        fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
-        fn execution_mode(&self) -> ExecutionMode { ExecutionMode::Serialized(self.group.into()) }
+        fn name(&self) -> &str {
+            self.tool_name
+        }
+        fn category(&self) -> tron_core::tools::ToolCategory {
+            tron_core::tools::ToolCategory::Custom
+        }
+        fn execution_mode(&self) -> ExecutionMode {
+            ExecutionMode::Serialized(self.group.into())
+        }
         fn definition(&self) -> tron_core::tools::Tool {
             tron_core::tools::Tool {
                 name: self.tool_name.into(),
                 description: String::new(),
                 parameters: tron_core::tools::ToolParameterSchema {
                     schema_type: "object".into(),
-                    properties: None, required: None, description: None,
+                    properties: None,
+                    required: None,
+                    description: None,
                     extra: Map::new(),
                 },
             }
         }
         async fn execute(
-            &self, _params: serde_json::Value, ctx: &tron_tools::traits::ToolContext,
+            &self,
+            _params: serde_json::Value,
+            ctx: &tron_tools::traits::ToolContext,
         ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
             tokio::select! {
                 () = tokio::time::sleep(Duration::from_millis(self.delay_ms)) => {},
@@ -1289,9 +1375,7 @@ mod tests {
         }
     }
 
-    fn make_tool_call_events(
-        tool_calls: &[(&str, &str)],
-    ) -> Vec<StreamEvent> {
+    fn make_tool_call_events(tool_calls: &[(&str, &str)]) -> Vec<StreamEvent> {
         let mut events = vec![StreamEvent::Start];
         let mut content = Vec::new();
         for &(id, name) in tool_calls {
@@ -1332,7 +1416,9 @@ mod tests {
     fn make_end_turn_events() -> Vec<StreamEvent> {
         vec![
             StreamEvent::Start,
-            StreamEvent::TextDelta { delta: "done".into() },
+            StreamEvent::TextDelta {
+                delta: "done".into(),
+            },
             StreamEvent::Done {
                 message: AssistantMessage {
                     content: vec![AssistantContent::text("done")],
@@ -1377,17 +1463,29 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_tools_execute_concurrently() {
-        let turn1 = make_tool_call_events(&[
-            ("tc-1", "slow_a"),
-            ("tc-2", "slow_b"),
-            ("tc-3", "slow_c"),
-        ]);
+        let turn1 =
+            make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "slow_b"), ("tc-3", "slow_c")]);
         let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-        let mut agent = make_agent_with_tools(provider, vec![
-            Arc::new(SlowTool { tool_name: "slow_a", delay_ms: 200, response: "a" }),
-            Arc::new(SlowTool { tool_name: "slow_b", delay_ms: 200, response: "b" }),
-            Arc::new(SlowTool { tool_name: "slow_c", delay_ms: 200, response: "c" }),
-        ]);
+        let mut agent = make_agent_with_tools(
+            provider,
+            vec![
+                Arc::new(SlowTool {
+                    tool_name: "slow_a",
+                    delay_ms: 200,
+                    response: "a",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "slow_b",
+                    delay_ms: 200,
+                    response: "b",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "slow_c",
+                    delay_ms: 200,
+                    response: "c",
+                }),
+            ],
+        );
 
         let start = std::time::Instant::now();
         let result = agent.run("go", RunContext::default()).await;
@@ -1405,17 +1503,29 @@ mod tests {
     #[tokio::test]
     async fn parallel_results_in_original_order() {
         // A=300ms, B=50ms, C=150ms — B finishes first, then C, then A
-        let turn1 = make_tool_call_events(&[
-            ("tc-a", "slow_a"),
-            ("tc-b", "slow_b"),
-            ("tc-c", "slow_c"),
-        ]);
+        let turn1 =
+            make_tool_call_events(&[("tc-a", "slow_a"), ("tc-b", "slow_b"), ("tc-c", "slow_c")]);
         let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-        let mut agent = make_agent_with_tools(provider, vec![
-            Arc::new(SlowTool { tool_name: "slow_a", delay_ms: 300, response: "result_a" }),
-            Arc::new(SlowTool { tool_name: "slow_b", delay_ms: 50, response: "result_b" }),
-            Arc::new(SlowTool { tool_name: "slow_c", delay_ms: 150, response: "result_c" }),
-        ]);
+        let mut agent = make_agent_with_tools(
+            provider,
+            vec![
+                Arc::new(SlowTool {
+                    tool_name: "slow_a",
+                    delay_ms: 300,
+                    response: "result_a",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "slow_b",
+                    delay_ms: 50,
+                    response: "result_b",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "slow_c",
+                    delay_ms: 150,
+                    response: "result_c",
+                }),
+            ],
+        );
 
         let mut rx = agent.subscribe();
         let _ = agent.run("go", RunContext::default()).await;
@@ -1431,16 +1541,27 @@ mod tests {
         // but tool results in context must be in original order.
         // Verify the context has results in order A, B, C:
         let messages = agent.context_manager().get_messages();
-        let tool_results: Vec<_> = messages.iter().filter_map(|m| {
-            if let Message::ToolResult { tool_call_id, content, .. } = m {
-                Some((tool_call_id.clone(), match content {
-                    ToolResultMessageContent::Text(t) => t.clone(),
-                    _ => String::new(),
-                }))
-            } else {
-                None
-            }
-        }).collect();
+        let tool_results: Vec<_> = messages
+            .iter()
+            .filter_map(|m| {
+                if let Message::ToolResult {
+                    tool_call_id,
+                    content,
+                    ..
+                } = m
+                {
+                    Some((
+                        tool_call_id.clone(),
+                        match content {
+                            ToolResultMessageContent::Text(t) => t.clone(),
+                            _ => String::new(),
+                        },
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(tool_results.len(), 3);
         assert_eq!(tool_results[0].0, "tc-a");
         assert_eq!(tool_results[1].0, "tc-b");
@@ -1453,35 +1574,51 @@ mod tests {
     #[tokio::test]
     async fn tool_call_events_precede_tool_result_events() {
         let store = make_event_store();
-        let turn1 = make_tool_call_events(&[
-            ("tc-1", "slow_a"),
-            ("tc-2", "slow_b"),
-            ("tc-3", "slow_c"),
-        ]);
+        let turn1 =
+            make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "slow_b"), ("tc-3", "slow_c")]);
         let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
         let (mut agent, sid) = make_agent_with_store(provider, &store);
-        agent.registry.register(Arc::new(SlowTool { tool_name: "slow_a", delay_ms: 50, response: "a" }) as Arc<dyn tron_tools::traits::TronTool>);
-        agent.registry.register(Arc::new(SlowTool { tool_name: "slow_b", delay_ms: 50, response: "b" }) as Arc<dyn tron_tools::traits::TronTool>);
-        agent.registry.register(Arc::new(SlowTool { tool_name: "slow_c", delay_ms: 50, response: "c" }) as Arc<dyn tron_tools::traits::TronTool>);
+        agent.registry.register(Arc::new(SlowTool {
+            tool_name: "slow_a",
+            delay_ms: 50,
+            response: "a",
+        }) as Arc<dyn tron_tools::traits::TronTool>);
+        agent.registry.register(Arc::new(SlowTool {
+            tool_name: "slow_b",
+            delay_ms: 50,
+            response: "b",
+        }) as Arc<dyn tron_tools::traits::TronTool>);
+        agent.registry.register(Arc::new(SlowTool {
+            tool_name: "slow_c",
+            delay_ms: 50,
+            response: "c",
+        }) as Arc<dyn tron_tools::traits::TronTool>);
 
-        let persister = Arc::new(
-            crate::orchestrator::event_persister::EventPersister::new(store.clone(), sid.clone()),
-        );
+        let persister = Arc::new(crate::orchestrator::event_persister::EventPersister::new(
+            store.clone(),
+            sid.clone(),
+        ));
         agent.set_persister(Some(persister.clone()));
 
         let _ = agent.run("go", RunContext::default()).await;
         persister.flush().await.unwrap();
 
-        let events = store.get_events_by_session(
-            &sid,
-            &tron_events::sqlite::repositories::event::ListEventsOptions::default(),
-        ).unwrap();
+        let events = store
+            .get_events_by_session(
+                &sid,
+                &tron_events::sqlite::repositories::event::ListEventsOptions::default(),
+            )
+            .unwrap();
 
-        let call_positions: Vec<_> = events.iter().enumerate()
+        let call_positions: Vec<_> = events
+            .iter()
+            .enumerate()
             .filter(|(_, e)| e.event_type == "tool.call")
             .map(|(i, _)| i)
             .collect();
-        let result_positions: Vec<_> = events.iter().enumerate()
+        let result_positions: Vec<_> = events
+            .iter()
+            .enumerate()
             .filter(|(_, e)| e.event_type == "tool.result")
             .map(|(i, _)| i)
             .collect();
@@ -1499,17 +1636,29 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_during_parallel_batch() {
-        let turn1 = make_tool_call_events(&[
-            ("tc-1", "slow_a"),
-            ("tc-2", "slow_b"),
-            ("tc-3", "slow_c"),
-        ]);
+        let turn1 =
+            make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "slow_b"), ("tc-3", "slow_c")]);
         let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-        let mut agent = make_agent_with_tools(provider, vec![
-            Arc::new(SlowTool { tool_name: "slow_a", delay_ms: 500, response: "a" }),
-            Arc::new(SlowTool { tool_name: "slow_b", delay_ms: 500, response: "b" }),
-            Arc::new(SlowTool { tool_name: "slow_c", delay_ms: 500, response: "c" }),
-        ]);
+        let mut agent = make_agent_with_tools(
+            provider,
+            vec![
+                Arc::new(SlowTool {
+                    tool_name: "slow_a",
+                    delay_ms: 500,
+                    response: "a",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "slow_b",
+                    delay_ms: 500,
+                    response: "b",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "slow_c",
+                    delay_ms: 500,
+                    response: "c",
+                }),
+            ],
+        );
 
         let token = CancellationToken::new();
         agent.set_abort_token(token.clone());
@@ -1538,27 +1687,52 @@ mod tests {
         struct StopTool;
         #[async_trait]
         impl tron_tools::traits::TronTool for StopTool {
-            fn name(&self) -> &str { "stop_tool" }
-            fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
-            fn stops_turn(&self) -> bool { true }
-            fn definition(&self) -> Tool {
-                Tool { name: "stop_tool".into(), description: String::new(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: Map::new() } }
+            fn name(&self) -> &str {
+                "stop_tool"
             }
-            async fn execute(&self, _: serde_json::Value, _: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+            fn category(&self) -> tron_core::tools::ToolCategory {
+                tron_core::tools::ToolCategory::Custom
+            }
+            fn stops_turn(&self) -> bool {
+                true
+            }
+            fn definition(&self) -> Tool {
+                Tool {
+                    name: "stop_tool".into(),
+                    description: String::new(),
+                    parameters: ToolParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: Map::new(),
+                    },
+                }
+            }
+            async fn execute(
+                &self,
+                _: serde_json::Value,
+                _: &tron_tools::traits::ToolContext,
+            ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError>
+            {
                 Ok(text_result("stopped", false))
             }
         }
 
-        let turn1 = make_tool_call_events(&[
-            ("tc-1", "slow_a"),
-            ("tc-2", "stop_tool"),
-        ]);
+        let turn1 = make_tool_call_events(&[("tc-1", "slow_a"), ("tc-2", "stop_tool")]);
         // No turn2 needed — stop_tool should end the run
         let provider = MockProvider::multi_turn(vec![turn1]);
-        let mut agent = make_agent_with_tools(provider, vec![
-            Arc::new(SlowTool { tool_name: "slow_a", delay_ms: 50, response: "a" }),
-            Arc::new(StopTool),
-        ]);
+        let mut agent = make_agent_with_tools(
+            provider,
+            vec![
+                Arc::new(SlowTool {
+                    tool_name: "slow_a",
+                    delay_ms: 50,
+                    response: "a",
+                }),
+                Arc::new(StopTool),
+            ],
+        );
 
         let result = agent.run("go", RunContext::default()).await;
         assert_eq!(result.stop_reason, StopReason::ToolStop);
@@ -1566,7 +1740,10 @@ mod tests {
 
         // Both tool results should be in context
         let messages = agent.context_manager().get_messages();
-        let tool_results: Vec<_> = messages.iter().filter(|m| matches!(m, Message::ToolResult { .. })).collect();
+        let tool_results: Vec<_> = messages
+            .iter()
+            .filter(|m| matches!(m, Message::ToolResult { .. }))
+            .collect();
         assert_eq!(tool_results.len(), 2);
     }
 
@@ -1580,11 +1757,28 @@ mod tests {
             ("tc-3", "parallel"),
         ]);
         let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-        let mut agent = make_agent_with_tools(provider, vec![
-            Arc::new(SerializedSlowTool { tool_name: "browser1", group: "browser", delay_ms: 100, response: "b1" }),
-            Arc::new(SerializedSlowTool { tool_name: "browser2", group: "browser", delay_ms: 100, response: "b2" }),
-            Arc::new(SlowTool { tool_name: "parallel", delay_ms: 200, response: "p" }),
-        ]);
+        let mut agent = make_agent_with_tools(
+            provider,
+            vec![
+                Arc::new(SerializedSlowTool {
+                    tool_name: "browser1",
+                    group: "browser",
+                    delay_ms: 100,
+                    response: "b1",
+                }),
+                Arc::new(SerializedSlowTool {
+                    tool_name: "browser2",
+                    group: "browser",
+                    delay_ms: 100,
+                    response: "b2",
+                }),
+                Arc::new(SlowTool {
+                    tool_name: "parallel",
+                    delay_ms: 200,
+                    response: "p",
+                }),
+            ],
+        );
 
         let start = std::time::Instant::now();
         let result = agent.run("go", RunContext::default()).await;
@@ -1608,11 +1802,16 @@ mod tests {
 
         // All 3 results in context in original order
         let messages = agent.context_manager().get_messages();
-        let tool_results: Vec<_> = messages.iter().filter_map(|m| {
-            if let Message::ToolResult { tool_call_id, .. } = m {
-                Some(tool_call_id.clone())
-            } else { None }
-        }).collect();
+        let tool_results: Vec<_> = messages
+            .iter()
+            .filter_map(|m| {
+                if let Message::ToolResult { tool_call_id, .. } = m {
+                    Some(tool_call_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(tool_results, vec!["tc-1", "tc-2", "tc-3"]);
     }
 
@@ -1621,16 +1820,24 @@ mod tests {
         // Regression: single tool call should work identically
         let turn1 = make_tool_call_events(&[("tc-1", "slow_a")]);
         let provider = MockProvider::multi_turn(vec![turn1, make_end_turn_events()]);
-        let mut agent = make_agent_with_tools(provider, vec![
-            Arc::new(SlowTool { tool_name: "slow_a", delay_ms: 10, response: "a" }),
-        ]);
+        let mut agent = make_agent_with_tools(
+            provider,
+            vec![Arc::new(SlowTool {
+                tool_name: "slow_a",
+                delay_ms: 10,
+                response: "a",
+            })],
+        );
 
         let result = agent.run("go", RunContext::default()).await;
         assert_eq!(result.turns_executed, 2);
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 
         let messages = agent.context_manager().get_messages();
-        let tool_results: Vec<_> = messages.iter().filter(|m| matches!(m, Message::ToolResult { .. })).collect();
+        let tool_results: Vec<_> = messages
+            .iter()
+            .filter(|m| matches!(m, Message::ToolResult { .. }))
+            .collect();
         assert_eq!(tool_results.len(), 1);
     }
 }

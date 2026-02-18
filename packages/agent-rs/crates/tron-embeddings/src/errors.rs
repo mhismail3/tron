@@ -59,14 +59,8 @@ mod tests {
                 EmbeddingError::Config("missing field".into()),
                 "Config error: missing field",
             ),
-            (
-                EmbeddingError::NotReady,
-                "Embedding service not ready",
-            ),
-            (
-                EmbeddingError::Internal("oops".into()),
-                "oops",
-            ),
+            (EmbeddingError::NotReady, "Embedding service not ready"),
+            (EmbeddingError::Internal("oops".into()), "oops"),
         ];
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);

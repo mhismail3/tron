@@ -573,8 +573,7 @@ pub fn is_gemini_3_model(model: &str) -> bool {
 }
 
 /// Default API base URL for API key authentication.
-pub const DEFAULT_API_KEY_BASE_URL: &str =
-    "https://generativelanguage.googleapis.com/v1beta";
+pub const DEFAULT_API_KEY_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 /// Cloud Code Assist API endpoint.
 pub const CLOUD_CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.com";
@@ -583,8 +582,7 @@ pub const CLOUD_CODE_ASSIST_ENDPOINT: &str = "https://cloudcode-pa.googleapis.co
 pub const CLOUD_CODE_ASSIST_VERSION: &str = "v1internal";
 
 /// Antigravity API endpoint.
-pub const ANTIGRAVITY_ENDPOINT: &str =
-    "https://daily-cloudcode-pa.sandbox.googleapis.com";
+pub const ANTIGRAVITY_ENDPOINT: &str = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 
 /// Antigravity API version.
 pub const ANTIGRAVITY_VERSION: &str = "v1internal";
@@ -683,9 +681,11 @@ mod tests {
     fn default_safety_settings_has_all_categories() {
         let settings = default_safety_settings();
         assert_eq!(settings.len(), 5);
-        assert!(settings
-            .iter()
-            .all(|s| s.threshold == HarmBlockThreshold::Off));
+        assert!(
+            settings
+                .iter()
+                .all(|s| s.threshold == HarmBlockThreshold::Off)
+        );
     }
 
     // ── Auth types ───────────────────────────────────────────────────
@@ -962,10 +962,19 @@ mod tests {
 
     #[test]
     fn antigravity_model_mapping() {
-        assert_eq!(map_to_antigravity_model("gemini-3-pro-preview"), "gemini-3-pro-high");
-        assert_eq!(map_to_antigravity_model("gemini-3-flash-preview"), "gemini-3-pro-low");
+        assert_eq!(
+            map_to_antigravity_model("gemini-3-pro-preview"),
+            "gemini-3-pro-high"
+        );
+        assert_eq!(
+            map_to_antigravity_model("gemini-3-flash-preview"),
+            "gemini-3-pro-low"
+        );
         assert_eq!(map_to_antigravity_model("gemini-2.5-pro"), "gemini-2.5-pro");
-        assert_eq!(map_to_antigravity_model("gemini-2.5-flash"), "gemini-2.5-flash");
+        assert_eq!(
+            map_to_antigravity_model("gemini-2.5-flash"),
+            "gemini-2.5-flash"
+        );
         assert_eq!(map_to_antigravity_model("unknown-model"), "unknown-model");
     }
 

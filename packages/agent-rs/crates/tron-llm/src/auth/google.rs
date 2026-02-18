@@ -6,8 +6,8 @@
 
 use super::errors::AuthError;
 use super::types::{
-    GoogleAuth, GoogleOAuthEndpoint, OAuthConfig, OAuthTokens, ServerAuth,
-    calculate_expires_at, now_ms,
+    GoogleAuth, GoogleOAuthEndpoint, OAuthConfig, OAuthTokens, ServerAuth, calculate_expires_at,
+    now_ms,
 };
 
 /// Default project for Antigravity free tier.
@@ -114,8 +114,7 @@ pub async fn exchange_code_for_tokens_with_client(
         ("redirect_uri", &config.oauth.redirect_uri),
         ("code_verifier", verifier),
     ];
-    let body_with_secret: Vec<(&str, &str)> = if let Some(ref secret) = config.oauth.client_secret
-    {
+    let body_with_secret: Vec<(&str, &str)> = if let Some(ref secret) = config.oauth.client_secret {
         let mut b = body.to_vec();
         b.push(("client_secret", secret));
         b
@@ -144,10 +143,7 @@ pub async fn exchange_code_for_tokens_with_client(
     Ok(OAuthTokens {
         access_token: data.access_token,
         refresh_token: refresh,
-        expires_at: calculate_expires_at(
-            data.expires_in,
-            config.oauth.token_expiry_buffer_seconds,
-        ),
+        expires_at: calculate_expires_at(data.expires_in, config.oauth.token_expiry_buffer_seconds),
     })
 }
 
@@ -172,8 +168,7 @@ pub async fn refresh_token_with_client(
         ("client_id", &config.oauth.client_id),
         ("refresh_token", refresh_token),
     ];
-    let body_with_secret: Vec<(&str, &str)> = if let Some(ref secret) = config.oauth.client_secret
-    {
+    let body_with_secret: Vec<(&str, &str)> = if let Some(ref secret) = config.oauth.client_secret {
         let mut b = body.to_vec();
         b.push(("client_secret", secret));
         b
@@ -202,10 +197,7 @@ pub async fn refresh_token_with_client(
         refresh_token: data
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string()),
-        expires_at: calculate_expires_at(
-            data.expires_in,
-            config.oauth.token_expiry_buffer_seconds,
-        ),
+        expires_at: calculate_expires_at(data.expires_in, config.oauth.token_expiry_buffer_seconds),
     })
 }
 
@@ -229,9 +221,7 @@ pub fn get_api_url(auth: &GoogleAuth, model: &str, action: &str) -> String {
         let version = auth.api_version.as_deref().unwrap_or("v1internal");
         format!("{endpoint}/{version}:{action}")
     } else {
-        format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:{action}"
-        )
+        format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:{action}")
     }
 }
 
@@ -241,7 +231,10 @@ pub fn get_api_headers(auth: &GoogleAuth) -> Vec<(String, String)> {
 
     match &auth.auth {
         ServerAuth::OAuth { access_token, .. } => {
-            headers.push(("Authorization".to_string(), format!("Bearer {access_token}")));
+            headers.push((
+                "Authorization".to_string(),
+                format!("Bearer {access_token}"),
+            ));
         }
         ServerAuth::ApiKey { api_key } => {
             headers.push(("x-goog-api-key".to_string(), api_key.clone()));
@@ -319,9 +312,7 @@ pub async fn load_server_auth_with_client(
                         // Update the stored OAuth tokens in the google provider auth
                         let mut updated_gpa = gpa.clone();
                         updated_gpa.base.oauth = Some(tokens.clone());
-                        let _ = super::storage::save_google_provider_auth(
-                            auth_path, &updated_gpa,
-                        );
+                        let _ = super::storage::save_google_provider_auth(auth_path, &updated_gpa);
                     }
                     return Ok(Some(GoogleAuth {
                         auth: ServerAuth::from_oauth(&tokens, None),
@@ -379,11 +370,13 @@ async fn maybe_refresh_tokens(
     tracing::info!("Google OAuth token expired, refreshing...");
     match refresh_token_with_client(config, &tokens.refresh_token, client).await {
         Ok(new_tokens) => {
-            metrics::counter!("auth_refresh_total", "provider" => "google", "status" => "success").increment(1);
+            metrics::counter!("auth_refresh_total", "provider" => "google", "status" => "success")
+                .increment(1);
             Ok((new_tokens, true))
         }
         Err(e) => {
-            metrics::counter!("auth_refresh_total", "provider" => "google", "status" => "failure").increment(1);
+            metrics::counter!("auth_refresh_total", "provider" => "google", "status" => "failure")
+                .increment(1);
             Err(e)
         }
     }
@@ -404,8 +397,7 @@ pub fn save_oauth_credentials(
     client_secret: &str,
     endpoint: GoogleOAuthEndpoint,
 ) -> Result<(), AuthError> {
-    let mut gpa = super::storage::get_google_provider_auth(auth_path)
-        .unwrap_or_default();
+    let mut gpa = super::storage::get_google_provider_auth(auth_path).unwrap_or_default();
     gpa.client_id = Some(client_id.to_string());
     gpa.client_secret = Some(client_secret.to_string());
     gpa.endpoint = Some(endpoint);
@@ -413,9 +405,7 @@ pub fn save_oauth_credentials(
 }
 
 /// Get stored Google OAuth credentials.
-pub fn get_oauth_credentials(
-    auth_path: &std::path::Path,
-) -> Option<(String, String)> {
+pub fn get_oauth_credentials(auth_path: &std::path::Path) -> Option<(String, String)> {
     let gpa = super::storage::get_google_provider_auth(auth_path)?;
     let id = gpa.client_id?;
     let secret = gpa.client_secret?;
@@ -526,8 +516,16 @@ mod tests {
             project_id: Some("my-proj".to_string()),
         };
         let headers = get_api_headers(&auth);
-        assert!(headers.iter().any(|(k, v)| k == "Authorization" && v.contains("ya29.abc")));
-        assert!(headers.iter().any(|(k, v)| k == "x-goog-user-project" && v == "my-proj"));
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k == "Authorization" && v.contains("ya29.abc"))
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k == "x-goog-user-project" && v == "my-proj")
+        );
     }
 
     #[test]
@@ -540,7 +538,11 @@ mod tests {
             project_id: None,
         };
         let headers = get_api_headers(&auth);
-        assert!(headers.iter().any(|(k, v)| k == "x-goog-api-key" && v == "key-123"));
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k == "x-goog-api-key" && v == "key-123")
+        );
         assert!(!headers.iter().any(|(k, _)| k == "x-goog-user-project"));
     }
 

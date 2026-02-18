@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use serde_json::Value;
 use crate::errors::ToolError;
 use crate::traits::{BrowserAction, BrowserDelegate, BrowserResult};
+use async_trait::async_trait;
+use serde_json::Value;
 
 use super::service::BrowserService;
 
@@ -29,13 +29,13 @@ impl BrowserDelegate for CdpBrowserDelegate {
         session_id: &str,
         action: &BrowserAction,
     ) -> Result<BrowserResult, ToolError> {
-        let session = self
-            .service
-            .get_or_create(session_id)
-            .await
-            .map_err(|e| ToolError::Internal {
-                message: e.to_string(),
-            })?;
+        let session =
+            self.service
+                .get_or_create(session_id)
+                .await
+                .map_err(|e| ToolError::Internal {
+                    message: e.to_string(),
+                })?;
 
         match action.action.as_str() {
             "navigate" => {
@@ -46,9 +46,12 @@ impl BrowserDelegate for CdpBrowserDelegate {
                     .ok_or_else(|| ToolError::Validation {
                         message: "navigate requires 'url' parameter".into(),
                     })?;
-                session.navigate(url).await.map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
+                session
+                    .navigate(url)
+                    .await
+                    .map_err(|e| ToolError::Internal {
+                        message: e.to_string(),
+                    })?;
                 Ok(BrowserResult {
                     content: format!("Navigated to {url}"),
                     details: None,
@@ -116,9 +119,12 @@ impl BrowserDelegate for CdpBrowserDelegate {
 
             "click" => {
                 let selector = require_selector(&action.params)?;
-                session.click(selector).await.map_err(|e| ToolError::Internal {
-                    message: e.to_string(),
-                })?;
+                session
+                    .click(selector)
+                    .await
+                    .map_err(|e| ToolError::Internal {
+                        message: e.to_string(),
+                    })?;
                 Ok(BrowserResult {
                     content: format!("Clicked {selector}"),
                     details: None,

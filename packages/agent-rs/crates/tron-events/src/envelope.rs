@@ -162,9 +162,11 @@ pub fn create_event_envelope(
     data: Value,
     session_id: Option<&str>,
 ) -> EventEnvelope {
-    let resolved_session_id = session_id
-        .map(String::from)
-        .or_else(|| data.get("sessionId").and_then(|v| v.as_str()).map(String::from));
+    let resolved_session_id = session_id.map(String::from).or_else(|| {
+        data.get("sessionId")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    });
 
     let timestamp = data
         .get("timestamp")
@@ -211,11 +213,23 @@ mod tests {
             (BroadcastEventType::SessionForked, "session.forked"),
             (BroadcastEventType::SessionRewound, "session.rewound"),
             (BroadcastEventType::AgentTurn, "agent.turn"),
-            (BroadcastEventType::AgentMessageDeleted, "agent.message_deleted"),
-            (BroadcastEventType::AgentContextCleared, "agent.context_cleared"),
+            (
+                BroadcastEventType::AgentMessageDeleted,
+                "agent.message_deleted",
+            ),
+            (
+                BroadcastEventType::AgentContextCleared,
+                "agent.context_cleared",
+            ),
             (BroadcastEventType::AgentCompaction, "agent.compaction"),
-            (BroadcastEventType::AgentMemoryUpdating, "agent.memory_updating"),
-            (BroadcastEventType::AgentMemoryUpdated, "agent.memory_updated"),
+            (
+                BroadcastEventType::AgentMemoryUpdating,
+                "agent.memory_updating",
+            ),
+            (
+                BroadcastEventType::AgentMemoryUpdated,
+                "agent.memory_updated",
+            ),
             (BroadcastEventType::AgentSkillRemoved, "agent.skill_removed"),
             (BroadcastEventType::AgentTodosUpdated, "agent.todos_updated"),
             (BroadcastEventType::TaskCreated, "task.created"),
@@ -234,7 +248,11 @@ mod tests {
 
         for (variant, expected_str) in expected {
             let json = serde_json::to_string(&variant).unwrap();
-            assert_eq!(json, format!("\"{expected_str}\""), "wrong string for {variant:?}");
+            assert_eq!(
+                json,
+                format!("\"{expected_str}\""),
+                "wrong string for {variant:?}"
+            );
         }
     }
 
@@ -274,7 +292,10 @@ mod tests {
         };
 
         let json = serde_json::to_string(&envelope).unwrap();
-        assert!(!json.contains("sessionId"), "sessionId should be omitted when None");
+        assert!(
+            !json.contains("sessionId"),
+            "sessionId should be omitted when None"
+        );
     }
 
     #[test]
@@ -287,8 +308,14 @@ mod tests {
         };
 
         let val: Value = serde_json::to_value(&envelope).unwrap();
-        assert!(val.get("type").is_some(), "should use 'type' not 'event_type'");
-        assert!(val.get("sessionId").is_some(), "should use camelCase 'sessionId'");
+        assert!(
+            val.get("type").is_some(),
+            "should use 'type' not 'event_type'"
+        );
+        assert!(
+            val.get("sessionId").is_some(),
+            "should use camelCase 'sessionId'"
+        );
         assert!(val.get("timestamp").is_some());
         assert!(val.get("data").is_some());
     }
@@ -332,11 +359,7 @@ mod tests {
 
     #[test]
     fn create_envelope_no_session_id() {
-        let envelope = create_event_envelope(
-            "browser.closed",
-            serde_json::json!({}),
-            None,
-        );
+        let envelope = create_event_envelope("browser.closed", serde_json::json!({}), None);
 
         assert!(envelope.session_id.is_none());
     }
@@ -354,11 +377,7 @@ mod tests {
 
     #[test]
     fn create_envelope_generates_timestamp_when_absent() {
-        let envelope = create_event_envelope(
-            "event.new",
-            serde_json::json!({"id": "evt_1"}),
-            None,
-        );
+        let envelope = create_event_envelope("event.new", serde_json::json!({"id": "evt_1"}), None);
 
         assert!(!envelope.timestamp.is_empty());
         // Should be a valid ISO 8601 timestamp

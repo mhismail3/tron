@@ -46,7 +46,11 @@ impl ShutdownCoordinator {
         let timeout = timeout.unwrap_or(DEFAULT_SHUTDOWN_TIMEOUT);
 
         self.shutdown();
-        info!(task_count = handles.len(), timeout_secs = timeout.as_secs(), "waiting for tasks to complete");
+        info!(
+            task_count = handles.len(),
+            timeout_secs = timeout.as_secs(),
+            "waiting for tasks to complete"
+        );
 
         let drain = futures::future::join_all(handles);
 

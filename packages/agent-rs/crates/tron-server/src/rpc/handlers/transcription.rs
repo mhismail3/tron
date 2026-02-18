@@ -61,8 +61,8 @@ pub async fn transcribe_audio_via_sidecar(
         });
     }
 
-    let settings = tron_settings::load_settings_from_path(settings_path)
-        .map_err(|e| RpcError::Internal {
+    let settings =
+        tron_settings::load_settings_from_path(settings_path).map_err(|e| RpcError::Internal {
             message: format!("Failed to load settings: {e}"),
         })?;
     let transcription = &settings.server.transcription;
@@ -156,7 +156,10 @@ async fn transcribe_audio_full(
         match engine.transcribe(audio_bytes, mime_type).await {
             Ok(result) => {
                 let elapsed_ms = start.elapsed().as_millis() as u64;
-                info!("native transcription succeeded ({:.1}s audio)", result.duration_seconds);
+                info!(
+                    "native transcription succeeded ({:.1}s audio)",
+                    result.duration_seconds
+                );
                 return serde_json::json!({
                     "text": result.text,
                     "rawText": result.text,

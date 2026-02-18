@@ -3,11 +3,11 @@
 //! The `events_fts` table is auto-populated by triggers on INSERT/DELETE of events.
 //! This repository provides search, filtering, and index maintenance operations.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::errors::Result;
-use crate::types::state::SearchResult;
 use crate::types::EventType;
+use crate::types::state::SearchResult;
 
 /// Options for search queries.
 #[derive(Default)]
@@ -32,7 +32,11 @@ impl SearchRepo {
     ///
     /// The `query` parameter uses FTS5 syntax (e.g., `"hello world"`, `hello OR world`,
     /// `hello NOT world`). Results are ranked by relevance.
-    pub fn search(conn: &Connection, query: &str, opts: &SearchOptions<'_>) -> Result<Vec<SearchResult>> {
+    pub fn search(
+        conn: &Connection,
+        query: &str,
+        opts: &SearchOptions<'_>,
+    ) -> Result<Vec<SearchResult>> {
         use std::fmt::Write;
         let mut sql = String::from(
             "SELECT
@@ -54,7 +58,11 @@ impl SearchRepo {
             param_values.push(Box::new(ws_id.to_string()));
         }
         if let Some(sess_id) = opts.session_id {
-            let _ = write!(sql, " AND events_fts.session_id = ?{}", param_values.len() + 1);
+            let _ = write!(
+                sql,
+                " AND events_fts.session_id = ?{}",
+                param_values.len() + 1
+            );
             param_values.push(Box::new(sess_id.to_string()));
         }
         if let Some(types) = opts.types {
@@ -152,7 +160,11 @@ impl SearchRepo {
             param_values.push(Box::new(ws_id.to_string()));
         }
         if let Some(sess_id) = opts.session_id {
-            let _ = write!(sql, " AND events_fts.session_id = ?{}", param_values.len() + 1);
+            let _ = write!(
+                sql,
+                " AND events_fts.session_id = ?{}",
+                param_values.len() + 1
+            );
             param_values.push(Box::new(sess_id.to_string()));
         }
 
@@ -173,10 +185,7 @@ impl SearchRepo {
 
     /// Remove an event from the search index.
     pub fn remove(conn: &Connection, event_id: &str) -> Result<bool> {
-        let changed = conn.execute(
-            "DELETE FROM events_fts WHERE id = ?1",
-            params![event_id],
-        )?;
+        let changed = conn.execute("DELETE FROM events_fts WHERE id = ?1", params![event_id])?;
         Ok(changed > 0)
     }
 
@@ -243,7 +252,9 @@ impl SearchRepo {
         let count = events.len();
         for (id, sess_id, event_type, payload_str, tool_name) in &events {
             let content = extract_content(payload_str);
-            let tool = tool_name.clone().unwrap_or_else(|| extract_tool_name(payload_str));
+            let tool = tool_name
+                .clone()
+                .unwrap_or_else(|| extract_tool_name(payload_str));
             let _ = conn.execute(
                 "INSERT INTO events_fts (id, session_id, type, content, tool_name)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -434,8 +445,14 @@ mod tests {
     fn auto_index_on_insert() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello world"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello world"}),
+            None,
         );
 
         assert!(SearchRepo::is_indexed(&conn, "evt_1").unwrap());
@@ -445,12 +462,19 @@ mod tests {
     fn auto_index_on_delete() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello world"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello world"}),
+            None,
         );
         assert!(SearchRepo::is_indexed(&conn, "evt_1").unwrap());
 
-        conn.execute("DELETE FROM events WHERE id = 'evt_1'", []).unwrap();
+        conn.execute("DELETE FROM events WHERE id = 'evt_1'", [])
+            .unwrap();
         assert!(!SearchRepo::is_indexed(&conn, "evt_1").unwrap());
     }
 
@@ -458,12 +482,24 @@ mod tests {
     fn search_basic() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "rust programming language"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "rust programming language"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.assistant",
-            json!({"content": "python scripting language"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.assistant",
+            json!({"content": "python scripting language"}),
+            None,
         );
 
         let results = SearchRepo::search(&conn, "rust", &SearchOptions::default()).unwrap();
@@ -475,12 +511,24 @@ mod tests {
     fn search_returns_multiple_results() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "programming in rust"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "programming in rust"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.assistant",
-            json!({"content": "programming in python"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.assistant",
+            json!({"content": "programming in python"}),
+            None,
         );
 
         let results = SearchRepo::search(&conn, "programming", &SearchOptions::default()).unwrap();
@@ -491,8 +539,14 @@ mod tests {
     fn search_no_results() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello world"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello world"}),
+            None,
         );
 
         let results = SearchRepo::search(&conn, "nonexistent", &SearchOptions::default()).unwrap();
@@ -504,8 +558,14 @@ mod tests {
         let (conn, ws_id) = setup();
         for i in 1..=5 {
             insert_event(
-                &conn, &format!("evt_{i}"), "sess_1", &ws_id, i, "message.user",
-                json!({"content": format!("test message number {i}")}), None,
+                &conn,
+                &format!("evt_{i}"),
+                "sess_1",
+                &ws_id,
+                i,
+                "message.user",
+                json!({"content": format!("test message number {i}")}),
+                None,
             );
         }
 
@@ -533,12 +593,24 @@ mod tests {
         .unwrap();
 
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello from session one"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello from session one"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_2", &ws_id, 1, "message.user",
-            json!({"content": "hello from session two"}), None,
+            &conn,
+            "evt_2",
+            "sess_2",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello from session two"}),
+            None,
         );
 
         let results = SearchRepo::search_in_session(&conn, "sess_1", "hello", None).unwrap();
@@ -566,12 +638,24 @@ mod tests {
         .unwrap();
 
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello from workspace one"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello from workspace one"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_2", &ws2.id, 1, "message.user",
-            json!({"content": "hello from workspace two"}), None,
+            &conn,
+            "evt_2",
+            "sess_2",
+            &ws2.id,
+            1,
+            "message.user",
+            json!({"content": "hello from workspace two"}),
+            None,
         );
 
         let results = SearchRepo::search_in_workspace(&conn, &ws_id, "hello", None).unwrap();
@@ -583,17 +667,28 @@ mod tests {
     fn search_by_tool_name() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "tool.call",
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "tool.call",
             json!({"toolName": "Bash", "input": {"command": "ls"}}),
             Some("Bash"),
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "tool.call",
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "tool.call",
             json!({"toolName": "Read", "input": {"path": "/tmp/file"}}),
             Some("Read"),
         );
 
-        let results = SearchRepo::search_by_tool_name(&conn, "Bash", &SearchOptions::default()).unwrap();
+        let results =
+            SearchRepo::search_by_tool_name(&conn, "Bash", &SearchOptions::default()).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].event_id, "evt_1");
     }
@@ -602,12 +697,24 @@ mod tests {
     fn search_with_type_filter() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "test message"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "test message"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.assistant",
-            json!({"content": "test response"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.assistant",
+            json!({"content": "test response"}),
+            None,
         );
 
         let results = SearchRepo::search(
@@ -627,8 +734,14 @@ mod tests {
     fn search_result_has_snippet() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "the quick brown fox jumps over the lazy dog"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "the quick brown fox jumps over the lazy dog"}),
+            None,
         );
 
         let results = SearchRepo::search(&conn, "fox", &SearchOptions::default()).unwrap();
@@ -640,12 +753,24 @@ mod tests {
     fn search_result_has_score() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "rust rust rust"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "rust rust rust"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.user",
-            json!({"content": "rust once"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.user",
+            json!({"content": "rust once"}),
+            None,
         );
 
         let results = SearchRepo::search(&conn, "rust", &SearchOptions::default()).unwrap();
@@ -659,8 +784,14 @@ mod tests {
     fn remove_from_index() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello world"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello world"}),
+            None,
         );
 
         assert!(SearchRepo::is_indexed(&conn, "evt_1").unwrap());
@@ -678,12 +809,24 @@ mod tests {
     fn remove_by_session() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.user",
-            json!({"content": "world"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.user",
+            json!({"content": "world"}),
+            None,
         );
 
         let removed = SearchRepo::remove_by_session(&conn, "sess_1").unwrap();
@@ -697,12 +840,24 @@ mod tests {
         assert_eq!(SearchRepo::count_by_session(&conn, "sess_1").unwrap(), 0);
 
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.user",
-            json!({"content": "world"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.user",
+            json!({"content": "world"}),
+            None,
         );
 
         assert_eq!(SearchRepo::count_by_session(&conn, "sess_1").unwrap(), 2);
@@ -712,16 +867,29 @@ mod tests {
     fn rebuild_session_index() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.user",
-            json!({"content": "hello world"}), None,
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.user",
+            json!({"content": "hello world"}),
+            None,
         );
         insert_event(
-            &conn, "evt_2", "sess_1", &ws_id, 2, "message.user",
-            json!({"content": "foo bar"}), None,
+            &conn,
+            "evt_2",
+            "sess_1",
+            &ws_id,
+            2,
+            "message.user",
+            json!({"content": "foo bar"}),
+            None,
         );
 
         // Manually clear the FTS index
-        conn.execute("DELETE FROM events_fts WHERE session_id = 'sess_1'", []).unwrap();
+        conn.execute("DELETE FROM events_fts WHERE session_id = 'sess_1'", [])
+            .unwrap();
         assert_eq!(SearchRepo::count_by_session(&conn, "sess_1").unwrap(), 0);
 
         // Rebuild
@@ -738,7 +906,12 @@ mod tests {
     fn search_content_blocks_array() {
         let (conn, ws_id) = setup();
         insert_event(
-            &conn, "evt_1", "sess_1", &ws_id, 1, "message.assistant",
+            &conn,
+            "evt_1",
+            "sess_1",
+            &ws_id,
+            1,
+            "message.assistant",
             json!({
                 "content": [
                     {"type": "text", "text": "hello from the assistant"},

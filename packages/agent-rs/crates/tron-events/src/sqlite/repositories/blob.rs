@@ -4,7 +4,7 @@
 //! Content is hashed with SHA-256 for deduplication — storing the same content twice
 //! increments the reference count instead of creating a duplicate row.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -316,7 +316,13 @@ mod tests {
     fn get_total_size_empty() {
         let conn = setup();
         let size = BlobRepo::get_total_size(&conn).unwrap();
-        assert_eq!(size, BlobSizeInfo { original: 0, compressed: 0 });
+        assert_eq!(
+            size,
+            BlobSizeInfo {
+                original: 0,
+                compressed: 0
+            }
+        );
     }
 
     #[test]

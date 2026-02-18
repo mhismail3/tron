@@ -31,9 +31,7 @@ pub fn expand_home(path: &str) -> String {
 }
 
 fn home_dir() -> Option<String> {
-    std::env::var("HOME")
-        .ok()
-        .or_else(dirs_fallback)
+    std::env::var("HOME").ok().or_else(dirs_fallback)
 }
 
 #[cfg(unix)]

@@ -207,10 +207,7 @@ impl ContextLoader {
     }
 
     /// Load directory-level context files by walking from root to target.
-    fn load_directory_contexts(
-        &self,
-        target_dir: &Path,
-    ) -> std::io::Result<Vec<ContextFile>> {
+    fn load_directory_contexts(&self, target_dir: &Path) -> std::io::Result<Vec<ContextFile>> {
         let root = &self.config.project_root;
         let mut files = Vec::new();
 
@@ -480,11 +477,7 @@ mod tests {
         let root = create_temp_project();
         let subdir = root.join("packages").join("agent");
         fs::create_dir_all(&subdir).unwrap();
-        fs::write(
-            root.join("packages").join("AGENTS.md"),
-            "# Packages Rules",
-        )
-        .unwrap();
+        fs::write(root.join("packages").join("AGENTS.md"), "# Packages Rules").unwrap();
         fs::write(subdir.join("AGENTS.md"), "# Agent Rules").unwrap();
 
         let loader = ContextLoader::new(ContextLoaderConfig {
@@ -519,7 +512,13 @@ mod tests {
     #[test]
     fn load_directory_contexts_max_depth() {
         let root = create_temp_project();
-        let deep = root.join("a").join("b").join("c").join("d").join("e").join("f");
+        let deep = root
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f");
         fs::create_dir_all(&deep).unwrap();
         // Write files at each level
         for (i, name) in ["a", "b", "c", "d", "e", "f"].iter().enumerate() {
@@ -780,7 +779,10 @@ mod tests {
             ..ContextLoaderConfig::default()
         });
         let result = loader.load(&root).unwrap();
-        assert!(result.merged.is_empty(), "standalone file should be skipped");
+        assert!(
+            result.merged.is_empty(),
+            "standalone file should be skipped"
+        );
 
         cleanup(&root);
     }
@@ -797,7 +799,10 @@ mod tests {
             ..ContextLoaderConfig::default()
         });
         let result = loader.load(&root).unwrap();
-        assert!(!result.merged.is_empty(), "agent dir file should still be found");
+        assert!(
+            !result.merged.is_empty(),
+            "agent dir file should still be found"
+        );
         assert!(result.merged.contains("agent dir rules"));
 
         cleanup(&root);
@@ -837,7 +842,10 @@ mod tests {
             ..ContextLoaderConfig::default()
         });
         let result = loader.load(&subdir).unwrap();
-        assert!(result.merged.is_empty(), "nested standalone file should be skipped");
+        assert!(
+            result.merged.is_empty(),
+            "nested standalone file should be skipped"
+        );
 
         cleanup(&root);
     }

@@ -113,7 +113,8 @@ impl WebCache {
     /// Check if a result exists (non-destructive, checks TTL).
     pub fn has(&self, url: &str, prompt: &str) -> bool {
         let key = cache_key(url, prompt);
-        self.entries.get(&key)
+        self.entries
+            .get(&key)
             .is_some_and(|e| Instant::now() < e.expires_at)
     }
 
@@ -128,7 +129,9 @@ impl WebCache {
     /// Remove expired entries.
     pub fn cleanup(&mut self) {
         let now = Instant::now();
-        let expired_keys: Vec<String> = self.entries.iter()
+        let expired_keys: Vec<String> = self
+            .entries
+            .iter()
             .filter(|(_, e)| now >= e.expires_at)
             .map(|(k, _)| k.clone())
             .collect();
@@ -146,14 +149,20 @@ impl WebCache {
             hits: self.hits,
             misses: self.misses,
             #[allow(clippy::cast_precision_loss)]
-            hit_rate: if total == 0 { 0.0 } else { self.hits as f64 / total as f64 },
+            hit_rate: if total == 0 {
+                0.0
+            } else {
+                self.hits as f64 / total as f64
+            },
         }
     }
 
     fn evict_oldest(&mut self) {
         // Prefer expired entries over LRU
         let now = Instant::now();
-        let expired_key = self.entries.iter()
+        let expired_key = self
+            .entries
+            .iter()
             .find(|(_, e)| now >= e.expires_at)
             .map(|(k, _)| k.clone());
 

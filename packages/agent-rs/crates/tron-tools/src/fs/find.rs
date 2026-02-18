@@ -6,7 +6,7 @@
 use std::fmt::Write;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -33,7 +33,14 @@ fn format_size(bytes: u64) -> String {
         format!("{:.1}G", bytes as f64 / 1_073_741_824.0)
     }
 }
-const SKIP_DIRS: &[&str] = &[".git", "node_modules", "dist", ".next", "coverage", "__pycache__"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "dist",
+    ".next",
+    "coverage",
+    "__pycache__",
+];
 
 /// The `Find` tool searches for files using glob patterns.
 pub struct FindTool;
@@ -98,7 +105,10 @@ fn collect_entries(
             _ => {}
         }
 
-        let rel_path = entry.path().strip_prefix(search_root).unwrap_or(entry.path());
+        let rel_path = entry
+            .path()
+            .strip_prefix(search_root)
+            .unwrap_or(entry.path());
         if !glob.is_match(rel_path) && !glob.is_match(entry.file_name()) {
             continue;
         }
@@ -108,8 +118,16 @@ fn collect_entries(
             continue;
         }
 
-        let size = if show_size || sort_by_time { entry.metadata().ok().map(|m| m.len()) } else { None };
-        let modified = if sort_by_time { entry.metadata().ok().and_then(|m| m.modified().ok()) } else { None };
+        let size = if show_size || sort_by_time {
+            entry.metadata().ok().map(|m| m.len())
+        } else {
+            None
+        };
+        let modified = if sort_by_time {
+            entry.metadata().ok().and_then(|m| m.modified().ok())
+        } else {
+            None
+        };
 
         entries.push((rel_path.to_string_lossy().into_owned(), size, modified));
 
@@ -161,24 +179,23 @@ impl TronTool for FindTool {
         }
     }
 
-    async fn execute(
-        &self,
-        params: Value,
-        ctx: &ToolContext,
-    ) -> Result<TronToolResult, ToolError> {
+    async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
         let pattern = match validate_required_string(&params, "pattern", "glob pattern") {
             Ok(p) => p,
             Err(e) => return Ok(e),
         };
 
-        let search_root = get_optional_string(&params, "path")
-            .map_or_else(|| resolve_path(".", &ctx.working_directory), |p| resolve_path(&p, &ctx.working_directory));
+        let search_root = get_optional_string(&params, "path").map_or_else(
+            || resolve_path(".", &ctx.working_directory),
+            |p| resolve_path(&p, &ctx.working_directory),
+        );
 
         let type_filter = get_optional_string(&params, "type").unwrap_or_else(|| "all".into());
         #[allow(clippy::cast_possible_truncation)]
         let max_depth = get_optional_u64(&params, "maxDepth").map(|v| v as usize);
         #[allow(clippy::cast_possible_truncation)]
-        let max_results = get_optional_u64(&params, "maxResults").map_or(DEFAULT_MAX_RESULTS, |v| v as usize);
+        let max_results =
+            get_optional_u64(&params, "maxResults").map_or(DEFAULT_MAX_RESULTS, |v| v as usize);
         let show_size = get_optional_bool(&params, "showSize").unwrap_or(false);
         let sort_by_time = get_optional_bool(&params, "sortByTime").unwrap_or(false);
 
@@ -200,12 +217,24 @@ impl TronTool for FindTool {
             })
             .unwrap_or_default();
 
-        let glob = match globset::GlobBuilder::new(&pattern).literal_separator(false).build() {
+        let glob = match globset::GlobBuilder::new(&pattern)
+            .literal_separator(false)
+            .build()
+        {
             Ok(g) => g.compile_matcher(),
             Err(e) => return Ok(error_result(format!("Invalid glob pattern: {e}"))),
         };
 
-        let entries = collect_entries(&search_root, &glob, &exclude_matchers, &type_filter, max_depth, max_results, show_size, sort_by_time);
+        let entries = collect_entries(
+            &search_root,
+            &glob,
+            &exclude_matchers,
+            &type_filter,
+            max_depth,
+            max_results,
+            show_size,
+            sort_by_time,
+        );
         let truncated = entries.len() >= max_results;
 
         let mut output = String::new();
@@ -223,9 +252,9 @@ impl TronTool for FindTool {
         }
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(output),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                output,
+            )]),
             details: Some(json!({
                 "matchCount": entries.len(),
                 "truncated": truncated,
@@ -257,10 +286,14 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
@@ -280,7 +313,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool: Arc<dyn TronTool> = Arc::new(FindTool::new());
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*.rs"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*.rs"}), &ctx)
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains("a.rs"));
         assert!(text.contains("b.rs"));
@@ -292,7 +328,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "**/*.rs"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "**/*.rs"}), &ctx)
+            .await
+            .unwrap();
         assert!(extract_text(&r).contains("lib.rs"));
     }
 
@@ -301,7 +340,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*.rs", "path": "src"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*.rs", "path": "src"}), &ctx)
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains("lib.rs"));
         assert!(!text.contains("a.rs"));
@@ -312,7 +354,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*", "type": "file"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*", "type": "file"}), &ctx)
+            .await
+            .unwrap();
         assert!(!extract_text(&r).contains("src\n"));
     }
 
@@ -321,7 +366,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*", "type": "directory"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*", "type": "directory"}), &ctx)
+            .await
+            .unwrap();
         assert!(!extract_text(&r).contains("a.rs"));
     }
 
@@ -330,7 +378,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*", "maxResults": 2}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*", "maxResults": 2}), &ctx)
+            .await
+            .unwrap();
         assert!(r.details.unwrap()["matchCount"].as_u64().unwrap() <= 2);
     }
 
@@ -339,7 +390,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*.xyz"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*.xyz"}), &ctx)
+            .await
+            .unwrap();
         assert_eq!(r.details.unwrap()["matchCount"], 0);
     }
 
@@ -382,9 +436,15 @@ mod tests {
         std::fs::write(dir.path().join("big.txt"), "x".repeat(6158)).unwrap();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "big.txt", "showSize": true}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "big.txt", "showSize": true}), &ctx)
+            .await
+            .unwrap();
         let text = extract_text(&r);
-        assert!(text.contains("6.0K"), "expected human-readable size, got: {text}");
+        assert!(
+            text.contains("6.0K"),
+            "expected human-readable size, got: {text}"
+        );
     }
 
     #[tokio::test]
@@ -393,13 +453,20 @@ mod tests {
         std::fs::write(dir.path().join("f.txt"), "hello").unwrap();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "f.txt", "showSize": true}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "f.txt", "showSize": true}), &ctx)
+            .await
+            .unwrap();
         let text = extract_text(&r);
         // Size field is right-aligned in 8 chars: "       5  f.txt"
         let line = text.lines().next().unwrap();
         let size_part = &line[..8];
         assert_eq!(size_part.len(), 8);
-        assert!(size_part.trim().parse::<u64>().is_ok() || size_part.contains('K') || size_part.contains('M'));
+        assert!(
+            size_part.trim().parse::<u64>().is_ok()
+                || size_part.contains('K')
+                || size_part.contains('M')
+        );
     }
 
     #[tokio::test]
@@ -407,7 +474,13 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "**/*", "type": "file", "exclude": ["*.txt"]}), &ctx).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"pattern": "**/*", "type": "file", "exclude": ["*.txt"]}),
+                &ctx,
+            )
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains(".rs"), "should still find .rs files");
         assert!(!text.contains("c.txt"), "should exclude .txt files");
@@ -418,7 +491,13 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "**/*", "type": "file", "exclude": ["*.txt", "*.ts"]}), &ctx).await.unwrap();
+        let r = tool
+            .execute(
+                json!({"pattern": "**/*", "type": "file", "exclude": ["*.txt", "*.ts"]}),
+                &ctx,
+            )
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains(".rs"));
         assert!(!text.contains("c.txt"));
@@ -430,7 +509,10 @@ mod tests {
         let dir = setup_test_dir();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "*.rs", "exclude": []}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "*.rs", "exclude": []}), &ctx)
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains("a.rs"));
         assert!(text.contains("b.rs"));
@@ -441,7 +523,10 @@ mod tests {
         let tool = FindTool::new();
         let def = tool.definition();
         let props = def.parameters.properties.as_ref().unwrap();
-        assert!(props.contains_key("exclude"), "schema should have exclude property");
+        assert!(
+            props.contains_key("exclude"),
+            "schema should have exclude property"
+        );
         let exclude = &props["exclude"];
         assert_eq!(exclude["type"], "array");
         assert_eq!(exclude["items"]["type"], "string");
@@ -455,7 +540,10 @@ mod tests {
         std::fs::write(dir.path().join("visible.txt"), "visible").unwrap();
         let tool = FindTool::new();
         let ctx = make_ctx(dir.path().to_str().unwrap());
-        let r = tool.execute(json!({"pattern": "**/*.txt"}), &ctx).await.unwrap();
+        let r = tool
+            .execute(json!({"pattern": "**/*.txt"}), &ctx)
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains("visible.txt"));
         assert!(!text.contains("secret.txt"));

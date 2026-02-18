@@ -192,9 +192,7 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
                 tron_core::messages::ToolResultMessageContent::Blocks(blocks) => blocks
                     .iter()
                     .filter_map(|b| match b {
-                        tron_core::content::ToolResultContent::Text { text } => {
-                            Some(text.as_str())
-                        }
+                        tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
                         tron_core::content::ToolResultContent::Image { .. } => None,
                     })
                     .collect::<Vec<_>>()
@@ -337,7 +335,10 @@ mod tests {
         assert_eq!(detailed.messages.len(), 2);
         assert_eq!(detailed.messages[0].role, "user");
         assert_eq!(detailed.messages[1].role, "assistant");
-        assert_eq!(detailed.system_prompt_content, "You are a helpful assistant.");
+        assert_eq!(
+            detailed.system_prompt_content,
+            "You are a helpful assistant."
+        );
         assert!(detailed.tool_clarification_content.is_none());
         assert_eq!(detailed.tools_content, vec!["bash", "read"]);
     }

@@ -161,3 +161,11 @@ missing_panics_doc = "allow"
 lto = "thin"
 strip = true
 codegen-units = 1
+
+# Fast release builds for local development: `cargo run --profile dev-opt`
+# ~4x faster than release, still optimized (opt-level 2, parallel codegen, no LTO).
+[profile.dev-opt]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

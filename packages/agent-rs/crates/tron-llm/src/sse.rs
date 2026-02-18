@@ -120,7 +120,9 @@ fn extract_sse_data(line: &str) -> Option<String> {
     }
 
     // Extract "data: " payload
-    let data = trimmed.strip_prefix("data: ").or_else(|| trimmed.strip_prefix("data:"))?;
+    let data = trimmed
+        .strip_prefix("data: ")
+        .or_else(|| trimmed.strip_prefix("data:"))?;
 
     let data = data.trim();
 
@@ -219,16 +221,14 @@ mod tests {
 
     #[test]
     fn parse_valid_json() {
-        let result: Option<serde_json::Value> =
-            parse_sse_data("{\"type\":\"text\"}", "test");
+        let result: Option<serde_json::Value> = parse_sse_data("{\"type\":\"text\"}", "test");
         assert!(result.is_some());
         assert_eq!(result.unwrap()["type"], "text");
     }
 
     #[test]
     fn parse_invalid_json_returns_none() {
-        let result: Option<serde_json::Value> =
-            parse_sse_data("not json at all", "test");
+        let result: Option<serde_json::Value> = parse_sse_data("not json at all", "test");
         assert!(result.is_none());
     }
 
@@ -247,9 +247,7 @@ mod tests {
 
     #[tokio::test]
     async fn parse_lines_multiple_events_in_one_chunk() {
-        let chunks = vec![Ok(Bytes::from(
-            "data: {\"a\":1}\n\ndata: {\"b\":2}\n\n",
-        ))];
+        let chunks = vec![Ok(Bytes::from("data: {\"a\":1}\n\ndata: {\"b\":2}\n\n"))];
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
@@ -275,9 +273,7 @@ mod tests {
 
     #[tokio::test]
     async fn parse_lines_filters_done_marker() {
-        let chunks = vec![Ok(Bytes::from(
-            "data: {\"ok\":true}\n\ndata: [DONE]\n\n",
-        ))];
+        let chunks = vec![Ok(Bytes::from("data: {\"ok\":true}\n\ndata: [DONE]\n\n"))];
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 

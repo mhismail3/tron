@@ -8,7 +8,7 @@ use serde_json::Map;
 use tokio_util::sync::CancellationToken;
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
-use tron_core::messages::{ToolCall, TokenUsage};
+use tron_core::messages::{TokenUsage, ToolCall};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::errors::RuntimeError;
@@ -71,7 +71,12 @@ pub async fn process_stream(
                     Some(text_acc.clone())
                 };
                 return Ok(StreamResult {
-                    message: build_message(&text_acc, &thinking_acc, thinking_signature.as_deref(), &tool_calls),
+                    message: build_message(
+                        &text_acc,
+                        &thinking_acc,
+                        thinking_signature.as_deref(),
+                        &tool_calls,
+                    ),
                     tool_calls,
                     stop_reason: "interrupted".into(),
                     token_usage,
@@ -115,7 +120,10 @@ pub async fn process_stream(
                         });
                     }
 
-                    StreamEvent::ThinkingEnd { thinking, signature } => {
+                    StreamEvent::ThinkingEnd {
+                        thinking,
+                        signature,
+                    } => {
                         thinking_acc.clone_from(&thinking);
                         thinking_signature = signature;
                         let _ = emitter.emit(TronEvent::ThinkingEnd {
@@ -124,10 +132,7 @@ pub async fn process_stream(
                         });
                     }
 
-                    StreamEvent::ToolCallStart {
-                        tool_call_id,
-                        name,
-                    } => {
+                    StreamEvent::ToolCallStart { tool_call_id, name } => {
                         // Finalize any previous in-progress tool call
                         finalize_tool_call(
                             &mut tool_calls,
@@ -221,7 +226,12 @@ pub async fn process_stream(
     );
 
     let message = final_message.unwrap_or_else(|| {
-        build_message(&text_acc, &thinking_acc, thinking_signature.as_deref(), &tool_calls)
+        build_message(
+            &text_acc,
+            &thinking_acc,
+            thinking_signature.as_deref(),
+            &tool_calls,
+        )
     });
 
     Ok(StreamResult {
@@ -324,7 +334,8 @@ mod tests {
                 stop_reason: "end_turn".into(),
             });
         };
-        Box::pin(s) as Pin<Box<dyn futures::Stream<Item = Result<StreamEvent, ProviderError>> + Send>>
+        Box::pin(s)
+            as Pin<Box<dyn futures::Stream<Item = Result<StreamEvent, ProviderError>> + Send>>
     }
 
     fn thinking_then_text_stream() -> StreamEventStream {

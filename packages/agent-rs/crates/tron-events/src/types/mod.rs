@@ -16,9 +16,9 @@ mod tests;
 pub mod type_guards;
 
 pub use base::{SessionEvent, SessionEventPayload};
-pub use event_type::{EventType, ALL_EVENT_TYPES};
+pub use event_type::{ALL_EVENT_TYPES, EventType};
 pub use payloads::{TokenRecord, TokenUsage};
 pub use state::{
-    Branch, BranchRef, ForkRef, Message, MessageWithEventId, SearchResult,
-    SessionMetadata, SessionState, SessionSummary, Workspace,
+    Branch, BranchRef, ForkRef, Message, MessageWithEventId, SearchResult, SessionMetadata,
+    SessionState, SessionSummary, Workspace,
 };

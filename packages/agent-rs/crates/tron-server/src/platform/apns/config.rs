@@ -78,7 +78,10 @@ pub(crate) fn load_from_path(base: Option<&Path>) -> Option<ApnsConfig> {
     };
 
     if !config_path.exists() {
-        debug!(?config_path, "APNS config not found, push notifications disabled");
+        debug!(
+            ?config_path,
+            "APNS config not found, push notifications disabled"
+        );
         return None;
     }
 

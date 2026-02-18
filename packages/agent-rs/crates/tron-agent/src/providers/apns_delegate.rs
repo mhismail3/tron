@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::{debug, info};
-use tron_events::sqlite::repositories::device_token::DeviceTokenRepo;
 use tron_events::ConnectionPool;
+use tron_events::sqlite::repositories::device_token::DeviceTokenRepo;
 use tron_server::platform::apns::{ApnsNotification, ApnsService};
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{Notification, NotifyDelegate, NotifyResult};
@@ -78,7 +78,10 @@ impl NotifyDelegate for ApnsNotifyDelegate {
 
         if tokens.is_empty() {
             info!("No active device tokens — skipping APNS send");
-            return Ok(NotifyResult { success: true, message: None });
+            return Ok(NotifyResult {
+                success: true,
+                message: None,
+            });
         }
 
         let token_strings: Vec<String> = tokens.iter().map(|t| t.device_token.clone()).collect();

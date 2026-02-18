@@ -289,7 +289,10 @@ mod tests {
 
     #[test]
     fn rpc_error_code_display() {
-        assert_eq!(RpcErrorCode::SessionNotFound.to_string(), "SESSION_NOT_FOUND");
+        assert_eq!(
+            RpcErrorCode::SessionNotFound.to_string(),
+            "SESSION_NOT_FOUND"
+        );
         assert_eq!(RpcErrorCode::InternalError.to_string(), "INTERNAL_ERROR");
     }
 

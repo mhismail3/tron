@@ -5,9 +5,9 @@ use std::sync::Arc;
 use crate::context::context_manager::ContextManager;
 use crate::context::rules_index::RulesIndex;
 use crate::context::types::ContextManagerConfig;
-use tron_core::messages::Message;
 use crate::guardrails::GuardrailEngine;
 use crate::hooks::engine::HookEngine;
+use tron_core::messages::Message;
 use tron_llm::provider::Provider;
 use tron_tools::registry::ToolRegistry;
 
@@ -132,7 +132,7 @@ impl AgentFactory {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use tron_core::tools::{Tool, ToolParameterSchema, ToolCategory, TronToolResult, text_result};
+    use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
     use tron_llm::models::types::ProviderType;
     use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::traits::{ToolContext, TronTool};
@@ -158,25 +158,56 @@ mod tests {
     struct MockProvider;
     #[async_trait]
     impl Provider for MockProvider {
-        fn provider_type(&self) -> ProviderType { ProviderType::Anthropic }
-        fn model(&self) -> &str { "mock" }
-        async fn stream(&self, _c: &tron_core::messages::Context, _o: &ProviderStreamOptions)
-            -> Result<StreamEventStream, ProviderError> {
-            Err(ProviderError::Other { message: "not impl".into() })
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            Err(ProviderError::Other {
+                message: "not impl".into(),
+            })
         }
     }
 
     struct InteractiveTool;
     #[async_trait]
     impl TronTool for InteractiveTool {
-        fn name(&self) -> &str { "ask_user" }
-        fn category(&self) -> ToolCategory { ToolCategory::Custom }
-        fn is_interactive(&self) -> bool { true }
-        fn stops_turn(&self) -> bool { true }
-        fn definition(&self) -> Tool {
-            Tool { name: "ask_user".into(), description: "Ask".into(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() } }
+        fn name(&self) -> &str {
+            "ask_user"
         }
-        async fn execute(&self, _p: serde_json::Value, _c: &ToolContext) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn is_interactive(&self) -> bool {
+            true
+        }
+        fn stops_turn(&self) -> bool {
+            true
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "ask_user".into(),
+                description: "Ask".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _p: serde_json::Value,
+            _c: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
             Ok(text_result("ok", false))
         }
     }
@@ -184,12 +215,30 @@ mod tests {
     struct NormalTool;
     #[async_trait]
     impl TronTool for NormalTool {
-        fn name(&self) -> &str { "bash" }
-        fn category(&self) -> ToolCategory { ToolCategory::Shell }
-        fn definition(&self) -> Tool {
-            Tool { name: "bash".into(), description: "Shell".into(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() } }
+        fn name(&self) -> &str {
+            "bash"
         }
-        async fn execute(&self, _p: serde_json::Value, _c: &ToolContext) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Shell
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "bash".into(),
+                description: "Shell".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _p: serde_json::Value,
+            _c: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
             Ok(text_result("ok", false))
         }
     }
@@ -242,7 +291,10 @@ mod tests {
         opts.rules_content = Some("# My Rules".into());
 
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
-        assert_eq!(agent.context_manager().get_rules_content(), Some("# My Rules"));
+        assert_eq!(
+            agent.context_manager().get_rules_content(),
+            Some("# My Rules")
+        );
     }
 
     #[test]
@@ -344,12 +396,30 @@ mod tests {
     struct FakeSpawnTool;
     #[async_trait]
     impl TronTool for FakeSpawnTool {
-        fn name(&self) -> &str { "SpawnSubagent" }
-        fn category(&self) -> ToolCategory { ToolCategory::Custom }
-        fn definition(&self) -> Tool {
-            Tool { name: "SpawnSubagent".into(), description: "Spawn".into(), parameters: ToolParameterSchema { schema_type: "object".into(), properties: None, required: None, description: None, extra: serde_json::Map::new() } }
+        fn name(&self) -> &str {
+            "SpawnSubagent"
         }
-        async fn execute(&self, _p: serde_json::Value, _c: &ToolContext) -> Result<TronToolResult, tron_tools::errors::ToolError> {
+        fn category(&self) -> ToolCategory {
+            ToolCategory::Custom
+        }
+        fn definition(&self) -> Tool {
+            Tool {
+                name: "SpawnSubagent".into(),
+                description: "Spawn".into(),
+                parameters: ToolParameterSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                    description: None,
+                    extra: serde_json::Map::new(),
+                },
+            }
+        }
+        async fn execute(
+            &self,
+            _p: serde_json::Value,
+            _c: &ToolContext,
+        ) -> Result<TronToolResult, tron_tools::errors::ToolError> {
             Ok(text_result("ok", false))
         }
     }
@@ -383,7 +453,10 @@ mod tests {
         let agent = AgentFactory::create_agent(AgentConfig::default(), "s1".into(), opts);
         // SpawnSubagent should be kept (max_depth > 0) — tool contributes tokens
         let tools_tokens = agent.context_manager().estimate_tools_tokens();
-        assert!(tools_tokens > 0, "SpawnSubagent + bash should contribute tool tokens");
+        assert!(
+            tools_tokens > 0,
+            "SpawnSubagent + bash should contribute tool tokens"
+        );
 
         // Verify by comparing against subagent_max_depth=0 (tools removed)
         let mut registry2 = ToolRegistry::new();
@@ -394,6 +467,9 @@ mod tests {
         opts2.subagent_max_depth = 0;
         let agent2 = AgentFactory::create_agent(AgentConfig::default(), "s2".into(), opts2);
         let tools_tokens2 = agent2.context_manager().estimate_tools_tokens();
-        assert!(tools_tokens > tools_tokens2, "max_depth>0 should have more tools than max_depth=0");
+        assert!(
+            tools_tokens > tools_tokens2,
+            "max_depth>0 should have more tools than max_depth=0"
+        );
     }
 }

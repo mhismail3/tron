@@ -4,7 +4,7 @@
 //! operations on tasks, projects, and areas.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_events::ConnectionPool;
 use tron_runtime::tasks::service::TaskService;
 use tron_runtime::tasks::types::{
@@ -181,7 +181,8 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                     .ok_or_else(|| tool_err("taskId is required for log_time"))?;
                 #[allow(clippy::cast_possible_truncation)]
                 let minutes = get_i64(&params, "minutes")
-                    .ok_or_else(|| tool_err("minutes is required for log_time"))? as i32;
+                    .ok_or_else(|| tool_err("minutes is required for log_time"))?
+                    as i32;
                 TaskService::log_time(&conn, &id, minutes, None).map_err(tool_err)?;
                 Ok(json!({ "success": true, "taskId": id, "minutesLogged": minutes }))
             }
@@ -208,11 +209,9 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                 let id = get_str(&params, "projectId")
                     .ok_or_else(|| tool_err("projectId is required"))?;
                 let updates = ProjectUpdateParams {
-                    title: get_str(&params, "title")
-                        .or_else(|| get_str(&params, "projectTitle")),
+                    title: get_str(&params, "title").or_else(|| get_str(&params, "projectTitle")),
                     description: get_str(&params, "description"),
-                    status: get_str(&params, "status")
-                        .and_then(|s| parse_project_status(&s)),
+                    status: get_str(&params, "status").and_then(|s| parse_project_status(&s)),
                     ..Default::default()
                 };
                 let project =
@@ -317,22 +316,24 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
                     "update_area" => {
                         let id = get_str(&params, "areaId")
                             .ok_or_else(|| tool_err("areaId is required"))?;
-                        let title = get_str(&params, "title")
-                            .or_else(|| get_str(&params, "areaTitle"));
+                        let title =
+                            get_str(&params, "title").or_else(|| get_str(&params, "areaTitle"));
                         let desc = get_str(&params, "description");
                         if let Some(t) = &title {
-                            let _ = conn.execute(
-                                "UPDATE areas SET title = ?1 WHERE id = ?2",
-                                rusqlite::params![t, id],
-                            )
-                            .map_err(tool_err)?;
+                            let _ = conn
+                                .execute(
+                                    "UPDATE areas SET title = ?1 WHERE id = ?2",
+                                    rusqlite::params![t, id],
+                                )
+                                .map_err(tool_err)?;
                         }
                         if let Some(d) = &desc {
-                            let _ = conn.execute(
-                                "UPDATE areas SET description = ?1 WHERE id = ?2",
-                                rusqlite::params![d, id],
-                            )
-                            .map_err(tool_err)?;
+                            let _ = conn
+                                .execute(
+                                    "UPDATE areas SET description = ?1 WHERE id = ?2",
+                                    rusqlite::params![d, id],
+                                )
+                                .map_err(tool_err)?;
                         }
                         Ok(json!({ "success": true, "areaId": id }))
                     }
@@ -414,10 +415,7 @@ mod tests {
     #[tokio::test]
     async fn list_tasks_empty() {
         let delegate = SqliteTaskManagerDelegate::new(setup_pool());
-        let result = delegate
-            .execute_action("list", json!({}))
-            .await
-            .unwrap();
+        let result = delegate.execute_action("list", json!({})).await.unwrap();
         assert_eq!(result["count"], 0);
     }
 
@@ -472,9 +470,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_action_returns_error() {
         let delegate = SqliteTaskManagerDelegate::new(setup_pool());
-        let result = delegate
-            .execute_action("unknown", json!({}))
-            .await;
+        let result = delegate.execute_action("unknown", json!({})).await;
         assert!(result.is_err());
     }
 }

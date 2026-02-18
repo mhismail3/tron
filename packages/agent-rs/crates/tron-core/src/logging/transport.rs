@@ -21,11 +21,11 @@
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
-use tracing::field::{Field, Visit};
 use tracing::Subscriber;
+use tracing::field::{Field, Visit};
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 use super::types::LogLevel;
 
@@ -121,7 +121,10 @@ impl SqliteTransport {
 
         let entries: Vec<PendingEntry> = guard.batch.drain(..).collect();
         if let Err(e) = write_batch(&guard.conn, &entries) {
-            eprintln!("[tron-logging] write_batch failed ({} entries dropped): {e}", entries.len());
+            eprintln!(
+                "[tron-logging] write_batch failed ({} entries dropped): {e}",
+                entries.len()
+            );
         }
     }
 }
@@ -209,9 +212,10 @@ impl Visit for EventFieldVisitor {
             }
             "error.stack" | "error_stack" => self.error_stack = Some(value.to_string()),
             name => {
-                let _ = self
-                    .data
-                    .insert(name.to_string(), serde_json::Value::String(value.to_string()));
+                let _ = self.data.insert(
+                    name.to_string(),
+                    serde_json::Value::String(value.to_string()),
+                );
             }
         }
     }
@@ -339,7 +343,10 @@ where
             if should_flush || guard.batch.len() >= self.config.batch_size {
                 let entries: Vec<PendingEntry> = guard.batch.drain(..).collect();
                 if let Err(e) = write_batch(&guard.conn, &entries) {
-                    eprintln!("[tron-logging] write_batch failed ({} entries dropped): {e}", entries.len());
+                    eprintln!(
+                        "[tron-logging] write_batch failed ({} entries dropped): {e}",
+                        entries.len()
+                    );
                 }
             }
         }
@@ -552,11 +559,9 @@ mod tests {
         assert_eq!(trace.as_deref(), Some("trace_abc"));
 
         let err_msg: Option<String> = conn
-            .query_row(
-                "SELECT error_message FROM logs WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT error_message FROM logs WHERE id = 1", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(err_msg.as_deref(), Some("Connection refused"));
     }
@@ -564,7 +569,12 @@ mod tests {
     #[test]
     fn write_batch_populates_fts() {
         let conn = create_test_db();
-        let entries = vec![make_entry("info", 30, "EventStore", "Session created successfully")];
+        let entries = vec![make_entry(
+            "info",
+            30,
+            "EventStore",
+            "Session created successfully",
+        )];
         write_batch(&conn, &entries).unwrap();
 
         // FTS search should find it
@@ -624,8 +634,12 @@ mod tests {
         // Manually push entries into the batch
         {
             let mut guard = transport.inner.lock().unwrap();
-            guard.batch.push(make_entry("info", 30, "Test", "pending 1"));
-            guard.batch.push(make_entry("info", 30, "Test", "pending 2"));
+            guard
+                .batch
+                .push(make_entry("info", 30, "Test", "pending 1"));
+            guard
+                .batch
+                .push(make_entry("info", 30, "Test", "pending 2"));
         }
 
         handle.flush();
@@ -671,10 +685,7 @@ mod tests {
         let field = fields.field("error_stack").unwrap();
         visitor.record_str(&field, "at line 42");
 
-        assert_eq!(
-            visitor.error_message.as_deref(),
-            Some("Connection refused")
-        );
+        assert_eq!(visitor.error_message.as_deref(), Some("Connection refused"));
         assert_eq!(visitor.error_stack.as_deref(), Some("at line 42"));
     }
 

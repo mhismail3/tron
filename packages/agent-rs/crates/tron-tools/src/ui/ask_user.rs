@@ -5,7 +5,7 @@
 //! arrives as the next prompt.
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -69,7 +69,8 @@ Rules:\n\
 - Each question must have at least 2 options\n\
 - Question IDs must be unique within the call\n\n\
 IMPORTANT: When using this tool, do NOT output any text response after calling it. \
-The question tool should be the FINAL action in your response.".into(),
+The question tool should be the FINAL action in your response."
+                .into(),
             parameters: ToolParameterSchema {
                 schema_type: "object".into(),
                 properties: Some({
@@ -124,7 +125,9 @@ The question tool should be the FINAL action in your response.".into(),
         }
 
         if questions.len() > MAX_QUESTIONS {
-            return Ok(error_result(format!("Maximum {MAX_QUESTIONS} questions allowed")));
+            return Ok(error_result(format!(
+                "Maximum {MAX_QUESTIONS} questions allowed"
+            )));
         }
 
         // Validate each question has enough options and all have labels
@@ -132,14 +135,18 @@ The question tool should be the FINAL action in your response.".into(),
             let options = q.get("options").and_then(Value::as_array);
             if let Some(opts) = options {
                 if opts.len() < MIN_OPTIONS {
-                    return Ok(error_result(format!("Question {} must have at least {MIN_OPTIONS} options", i + 1)));
+                    return Ok(error_result(format!(
+                        "Question {} must have at least {MIN_OPTIONS} options",
+                        i + 1
+                    )));
                 }
                 // Validate that object options have a "label" field
                 for (j, opt) in opts.iter().enumerate() {
                     if opt.is_object() && opt.get("label").and_then(Value::as_str).is_none() {
                         return Ok(error_result(format!(
                             "Question {} option {} is missing required 'label' field",
-                            i + 1, j + 1
+                            i + 1,
+                            j + 1
                         )));
                     }
                 }
@@ -151,17 +158,27 @@ The question tool should be the FINAL action in your response.".into(),
         // Format summary — extract labels from both string and object options
         let mut summary = String::new();
         for (i, q) in questions.iter().enumerate() {
-            let text = q.get("question").and_then(Value::as_str).unwrap_or("(no question)");
+            let text = q
+                .get("question")
+                .and_then(Value::as_str)
+                .unwrap_or("(no question)");
             let mode = q.get("mode").and_then(Value::as_str).unwrap_or("single");
-            let options_text = q.get("options").and_then(Value::as_array).map(|opts| {
-                opts.iter().filter_map(|o| {
-                    if let Some(s) = o.as_str() {
-                        Some(s.to_string())
-                    } else {
-                        o.get("label").and_then(Value::as_str).map(String::from)
-                    }
-                }).collect::<Vec<_>>().join(", ")
-            }).unwrap_or_default();
+            let options_text = q
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|opts| {
+                    opts.iter()
+                        .filter_map(|o| {
+                            if let Some(s) = o.as_str() {
+                                Some(s.to_string())
+                            } else {
+                                o.get("label").and_then(Value::as_str).map(String::from)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
             let _ = write!(summary, "Q{}: {text} [{mode}]", i + 1);
             if !options_text.is_empty() {
                 let _ = write!(summary, " ({options_text})");
@@ -174,9 +191,9 @@ The question tool should be the FINAL action in your response.".into(),
         }
 
         Ok(TronToolResult {
-            content: ToolResultBody::Blocks(vec![
-                tron_core::content::ToolResultContent::text(summary),
-            ]),
+            content: ToolResultBody::Blocks(vec![tron_core::content::ToolResultContent::text(
+                summary,
+            )]),
             details: Some(json!({
                 "questionCount": questions.len(),
                 "context": context,
@@ -205,19 +222,29 @@ mod tests {
     fn extract_text(result: &TronToolResult) -> String {
         match &result.content {
             ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks.iter().filter_map(|b| match b {
-                tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join(""),
+            ToolResultBody::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| match b {
+                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(""),
         }
     }
 
     #[tokio::test]
     async fn valid_questions_returns_stop_turn() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Pick one", "options": ["A", "B"]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Pick one", "options": ["A", "B"]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.stop_turn, Some(true));
         assert!(r.is_error.is_none());
     }
@@ -237,57 +264,84 @@ mod tests {
     #[tokio::test]
     async fn one_question_two_options() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Choose", "options": ["X", "Y"]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Choose", "options": ["X", "Y"]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
     #[tokio::test]
     async fn max_questions() {
-        let questions: Vec<Value> = (1..=5).map(|i| {
-            json!({"question": format!("Q{i}"), "options": ["A", "B"]})
-        }).collect();
+        let questions: Vec<Value> = (1..=5)
+            .map(|i| json!({"question": format!("Q{i}"), "options": ["A", "B"]}))
+            .collect();
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({"questions": questions}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"questions": questions}), &make_ctx())
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
     #[tokio::test]
     async fn zero_questions_error() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({"questions": []}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"questions": []}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn too_many_questions_error() {
-        let questions: Vec<Value> = (1..=6).map(|i| {
-            json!({"question": format!("Q{i}"), "options": ["A", "B"]})
-        }).collect();
+        let questions: Vec<Value> = (1..=6)
+            .map(|i| json!({"question": format!("Q{i}"), "options": ["A", "B"]}))
+            .collect();
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({"questions": questions}), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(json!({"questions": questions}), &make_ctx())
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn too_few_options_error() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Q", "options": ["only one"]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Q", "options": ["only one"]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
     #[tokio::test]
     async fn mode_single_and_multi() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [
-                {"question": "Pick", "options": ["A", "B"], "mode": "single"},
-                {"question": "Select", "options": ["X", "Y"], "mode": "multi"}
-            ]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [
+                        {"question": "Pick", "options": ["A", "B"], "mode": "single"},
+                        {"question": "Select", "options": ["X", "Y"], "mode": "multi"}
+                    ]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
         assert!(text.contains("[single]"));
@@ -297,10 +351,16 @@ mod tests {
     #[tokio::test]
     async fn context_included() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Q", "options": ["A", "B"]}],
-            "context": "some context"
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Q", "options": ["A", "B"]}],
+                    "context": "some context"
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains("some context"));
     }
@@ -315,9 +375,15 @@ mod tests {
     #[tokio::test]
     async fn result_content_formatted() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Choose a color", "options": ["Red", "Blue"]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Choose a color", "options": ["Red", "Blue"]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         let text = extract_text(&r);
         assert!(text.contains("Choose a color"));
     }
@@ -327,9 +393,15 @@ mod tests {
     #[tokio::test]
     async fn object_options_accepted() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Pick", "options": [{"label": "A"}, {"label": "B"}]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Pick", "options": [{"label": "A"}, {"label": "B"}]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 
@@ -341,15 +413,24 @@ mod tests {
         }), &make_ctx()).await.unwrap();
         assert!(r.is_error.is_none());
         let text = extract_text(&r);
-        assert!(text.contains("A"), "summary should contain option label A: {text}");
+        assert!(
+            text.contains("A"),
+            "summary should contain option label A: {text}"
+        );
     }
 
     #[tokio::test]
     async fn options_missing_label_error() {
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Pick", "options": [{"value": "x"}, {"label": "B"}]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Pick", "options": [{"value": "x"}, {"label": "B"}]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(r.is_error, Some(true));
     }
 
@@ -379,9 +460,15 @@ mod tests {
     async fn string_options_backward_compat() {
         // String options should still work (backward compat)
         let tool = AskUserQuestionTool::new();
-        let r = tool.execute(json!({
-            "questions": [{"question": "Pick", "options": ["A", "B"]}]
-        }), &make_ctx()).await.unwrap();
+        let r = tool
+            .execute(
+                json!({
+                    "questions": [{"question": "Pick", "options": ["A", "B"]}]
+                }),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
         assert!(r.is_error.is_none());
     }
 

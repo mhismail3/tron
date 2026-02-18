@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::tools::{
     Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
 };
@@ -81,16 +81,20 @@ impl TronTool for WaitForAgentsTool {
         };
 
         if session_ids.is_empty() {
-            return Ok(error_result("sessionIds must contain at least one session ID"));
+            return Ok(error_result(
+                "sessionIds must contain at least one session ID",
+            ));
         }
 
         let mode_str = get_optional_string(&params, "mode").unwrap_or_else(|| "all".into());
         let mode = match mode_str.as_str() {
             "all" => WaitMode::All,
             "any" => WaitMode::Any,
-            _ => return Ok(error_result(format!(
-                "Invalid mode: \"{mode_str}\". Must be \"all\" or \"any\"."
-            ))),
+            _ => {
+                return Ok(error_result(format!(
+                    "Invalid mode: \"{mode_str}\". Must be \"all\" or \"any\"."
+                )));
+            }
         };
 
         let timeout_ms = params
@@ -240,10 +244,7 @@ mod tests {
     async fn wait_all_mode() {
         let tool = WaitForAgentsTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(
-                json!({"sessionIds": ["sub-1", "sub-2"]}),
-                &make_ctx(),
-            )
+            .execute(json!({"sessionIds": ["sub-1", "sub-2"]}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());
@@ -256,10 +257,7 @@ mod tests {
     async fn wait_any_mode() {
         let tool = WaitForAgentsTool::new(Arc::new(MockSpawner::success()));
         let r = tool
-            .execute(
-                json!({"sessionIds": ["sub-1"], "mode": "any"}),
-                &make_ctx(),
-            )
+            .execute(json!({"sessionIds": ["sub-1"], "mode": "any"}), &make_ctx())
             .await
             .unwrap();
         assert!(r.is_error.is_none());

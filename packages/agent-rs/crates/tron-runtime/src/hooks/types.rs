@@ -155,7 +155,10 @@ impl HookResult {
 
     /// Create a `Modify` result with modifications and a message.
     #[must_use]
-    pub fn modify_with_message(modifications: serde_json::Value, message: impl Into<String>) -> Self {
+    pub fn modify_with_message(
+        modifications: serde_json::Value,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             action: HookAction::Modify,
             reason: None,

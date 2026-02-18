@@ -3,7 +3,7 @@
 //! Workspaces represent project directories. Each session belongs to a workspace,
 //! and workspace paths are unique (two sessions in the same directory share one workspace).
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::errors::Result;
@@ -150,19 +150,17 @@ impl WorkspaceRepo {
 
     /// Count total workspaces.
     pub fn count(conn: &Connection) -> Result<i64> {
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))?;
         Ok(count)
     }
 
     /// Check if workspace exists.
     pub fn exists(conn: &Connection, workspace_id: &str) -> Result<bool> {
-        let exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?1)",
-                params![workspace_id],
-                |row| row.get(0),
-            )?;
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?1)",
+            params![workspace_id],
+            |row| row.get(0),
+        )?;
         Ok(exists)
     }
 }

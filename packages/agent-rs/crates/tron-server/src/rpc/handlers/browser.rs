@@ -22,11 +22,11 @@ impl MethodHandler for StartStreamHandler {
                 message: "Browser streaming not available (Chrome not found)".into(),
             });
         };
-        svc.start_stream(&session_id).await.map_err(|e| {
-            RpcError::Internal {
+        svc.start_stream(&session_id)
+            .await
+            .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
-            }
-        })?;
+            })?;
         Ok(serde_json::json!({ "success": true }))
     }
 }
@@ -40,11 +40,11 @@ impl MethodHandler for StopStreamHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         if let Some(ref svc) = ctx.browser_service {
-            svc.stop_stream(&session_id).await.map_err(|e| {
-                RpcError::Internal {
+            svc.stop_stream(&session_id)
+                .await
+                .map_err(|e| RpcError::Internal {
                     message: e.to_string(),
-                }
-            })?;
+                })?;
         }
         Ok(serde_json::json!({ "success": true }))
     }

@@ -117,7 +117,14 @@ impl MethodHandler for GetHomeHandler {
 
         // Build suggested paths (common workspaces)
         let mut suggested = Vec::new();
-        for name in &["Desktop", "Documents", "Projects", "Workspace", "Developer", "Code"] {
+        for name in &[
+            "Desktop",
+            "Documents",
+            "Projects",
+            "Workspace",
+            "Developer",
+            "Code",
+        ] {
             let path = format!("{home}/{name}");
             let exists = std::path::Path::new(&path).is_dir();
             if exists {
@@ -220,10 +227,7 @@ mod tests {
     #[tokio::test]
     async fn list_dir_defaults_to_home() {
         let ctx = make_test_context();
-        let result = ListDirHandler
-            .handle(Some(json!({})), &ctx)
-            .await
-            .unwrap();
+        let result = ListDirHandler.handle(Some(json!({})), &ctx).await.unwrap();
         assert!(result["entries"].is_array());
         assert!(result["path"].is_string());
     }
@@ -232,10 +236,7 @@ mod tests {
     async fn list_dir_not_found() {
         let ctx = make_test_context();
         let err = ListDirHandler
-            .handle(
-                Some(json!({"path": "/nonexistent_dir_xyz_12345"})),
-                &ctx,
-            )
+            .handle(Some(json!({"path": "/nonexistent_dir_xyz_12345"})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "FILE_NOT_FOUND");

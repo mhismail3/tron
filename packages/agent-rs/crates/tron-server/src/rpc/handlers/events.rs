@@ -103,7 +103,11 @@ impl MethodHandler for GetHistoryHandler {
             .as_ref()
             .and_then(|p| p.get("types"))
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            });
 
         let before_event_id = params
             .as_ref()
@@ -139,9 +143,7 @@ impl MethodHandler for GetHistoryHandler {
             events
         };
 
-        let has_more = limit.is_some_and(|l| {
-            i64::try_from(events.len()).unwrap_or(0) >= l
-        });
+        let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
 
         // Include oldestEventId for iOS pagination
         let oldest_event_id = events.first().map(|e| e.id.clone());
@@ -200,9 +202,7 @@ impl MethodHandler for GetSinceHandler {
                 message: e.to_string(),
             })?;
 
-        let has_more = limit.is_some_and(|l| {
-            i64::try_from(events.len()).unwrap_or(0) > l
-        });
+        let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) > l);
 
         if let Some(l) = limit {
             events.truncate(usize::try_from(l).unwrap_or(usize::MAX));
@@ -258,9 +258,11 @@ impl MethodHandler for AppendHandler {
         let payload = require_param(params.as_ref(), "payload")?;
 
         let event_type: tron_events::EventType =
-            event_type_str.parse().map_err(|_| RpcError::InvalidParams {
-                message: format!("Unknown event type: {event_type_str}"),
-            })?;
+            event_type_str
+                .parse()
+                .map_err(|_| RpcError::InvalidParams {
+                    message: format!("Unknown event type: {event_type_str}"),
+                })?;
 
         let parent_id = params
             .as_ref()
@@ -431,10 +433,7 @@ mod tests {
 
         // afterSequence=999 → nothing after that
         let result = GetSinceHandler
-            .handle(
-                Some(json!({"sessionId": sid, "afterSequence": 999})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": sid, "afterSequence": 999})), &ctx)
             .await
             .unwrap();
 
@@ -461,10 +460,7 @@ mod tests {
 
         // afterSequence=0 → get events after the root event
         let result = GetSinceHandler
-            .handle(
-                Some(json!({"sessionId": sid, "afterSequence": 0})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": sid, "afterSequence": 0})), &ctx)
             .await
             .unwrap();
 

@@ -55,9 +55,7 @@ impl CompositeRule {
                 !child_results.is_empty() && child_results.iter().all(|r| r.triggered)
             }
             CompositeOperator::Or => child_results.iter().any(|r| r.triggered),
-            CompositeOperator::Not => {
-                child_results.first().is_some_and(|r| !r.triggered)
-            }
+            CompositeOperator::Not => child_results.first().is_some_and(|r| !r.triggered),
         };
 
         if triggered {

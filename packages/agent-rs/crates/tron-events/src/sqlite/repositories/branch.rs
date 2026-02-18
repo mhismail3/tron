@@ -3,7 +3,7 @@
 //! Branches are named positions in the event tree. Each session can have
 //! multiple branches, with one marked as default.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
 use crate::errors::Result;

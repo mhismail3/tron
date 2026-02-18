@@ -153,7 +153,11 @@ mod tests {
     #[test]
     fn all_search_paths_are_absolute() {
         for path in search_paths() {
-            assert!(path.is_absolute(), "path should be absolute: {}", path.display());
+            assert!(
+                path.is_absolute(),
+                "path should be absolute: {}",
+                path.display()
+            );
         }
     }
 
@@ -183,16 +187,18 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn find_chrome_real_system() {
-        let chrome_path = PathBuf::from(
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        );
+        let chrome_path =
+            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
         if chrome_path.exists() {
             let key = "CHROME_PATH";
             let prev = std::env::var(key).ok();
             remove_env(key);
 
             let result = find_chrome();
-            assert!(result.is_some(), "Chrome is installed but find_chrome() returned None");
+            assert!(
+                result.is_some(),
+                "Chrome is installed but find_chrome() returned None"
+            );
             assert!(is_executable(result.as_ref().unwrap()));
 
             restore_env(key, prev);

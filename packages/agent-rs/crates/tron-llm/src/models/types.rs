@@ -197,7 +197,11 @@ pub fn calculate_cost(
 }
 
 /// Format a token count for display (e.g., `200000` -> `"200K"`, `1000000` -> `"1M"`).
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn format_context_window(tokens: u64) -> String {
     if tokens >= 1_000_000 {
         let m = tokens as f64 / 1_000_000.0;
@@ -251,10 +255,22 @@ mod tests {
 
     #[test]
     fn provider_type_from_str() {
-        assert_eq!("anthropic".parse::<ProviderType>().unwrap(), ProviderType::Anthropic);
-        assert_eq!("openai".parse::<ProviderType>().unwrap(), ProviderType::OpenAi);
-        assert_eq!("openai-codex".parse::<ProviderType>().unwrap(), ProviderType::OpenAi);
-        assert_eq!("google".parse::<ProviderType>().unwrap(), ProviderType::Google);
+        assert_eq!(
+            "anthropic".parse::<ProviderType>().unwrap(),
+            ProviderType::Anthropic
+        );
+        assert_eq!(
+            "openai".parse::<ProviderType>().unwrap(),
+            ProviderType::OpenAi
+        );
+        assert_eq!(
+            "openai-codex".parse::<ProviderType>().unwrap(),
+            ProviderType::OpenAi
+        );
+        assert_eq!(
+            "google".parse::<ProviderType>().unwrap(),
+            ProviderType::Google
+        );
         assert!("unknown".parse::<ProviderType>().is_err());
     }
 

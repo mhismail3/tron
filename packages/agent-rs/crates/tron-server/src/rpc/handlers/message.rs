@@ -40,15 +40,16 @@ impl MethodHandler for DeleteMessageHandler {
             })?;
 
         // Emit message deleted event via broadcast
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::MessageDeleted {
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(tron_core::events::TronEvent::MessageDeleted {
                 base: tron_core::events::BaseEvent::now(&session_id),
                 target_event_id: event_id.clone(),
                 target_type: deletion_event.event_type.clone(),
                 target_turn: None,
                 reason: reason.map(String::from),
-            },
-        );
+            });
 
         Ok(serde_json::json!({
             "success": true,
@@ -162,7 +163,9 @@ mod tests {
 
         let _ = DeleteMessageHandler
             .handle(
-                Some(json!({"sessionId": sid, "targetEventId": event_id, "reason": "test cleanup"})),
+                Some(
+                    json!({"sessionId": sid, "targetEventId": event_id, "reason": "test cleanup"}),
+                ),
                 &ctx,
             )
             .await

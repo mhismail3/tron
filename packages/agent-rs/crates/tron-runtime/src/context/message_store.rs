@@ -318,7 +318,9 @@ mod tests {
         small.add(Message::user("Hi"));
 
         let mut large = MessageStore::new();
-        large.add(Message::user("This is a much longer message with substantially more content"));
+        large.add(Message::user(
+            "This is a much longer message with substantially more content",
+        ));
 
         assert!(large.get_tokens() > small.get_tokens());
     }
