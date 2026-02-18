@@ -380,6 +380,7 @@ pub(crate) mod test_helpers {
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
         }
     }
 
@@ -410,6 +411,7 @@ pub(crate) mod test_helpers {
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
         }
     }
 }

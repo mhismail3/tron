@@ -309,12 +309,15 @@ impl MethodHandler for DownloadModelHandler {
 
         // Spawn background download — don't block the RPC response
         let dir = model_dir.clone();
-        let _ = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             match tron_transcription::model::ensure_model(&dir).await {
                 Ok(()) => info!("transcription model download complete"),
                 Err(e) => warn!(error = %e, "transcription model download failed"),
             }
         });
+        if let Some(ref coord) = _ctx.shutdown_coordinator {
+            coord.register_task(handle);
+        }
 
         Ok(serde_json::json!({
             "started": true,

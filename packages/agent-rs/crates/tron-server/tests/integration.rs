@@ -64,6 +64,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         subagent_manager: None,
         embedding_controller: None,
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+        shutdown_coordinator: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -234,6 +235,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         subagent_manager: None,
         embedding_controller: None,
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+        shutdown_coordinator: None,
     };
 
     let mut registry = MethodRegistry::new();

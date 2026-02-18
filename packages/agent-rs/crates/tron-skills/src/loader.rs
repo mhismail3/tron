@@ -66,6 +66,15 @@ pub fn scan_directory(dir: &Path, source: SkillSource) -> SkillScanResult {
             None => continue,
         };
 
+        if !is_valid_skill_name(&name) {
+            result.errors.push(SkillScanError {
+                path: path.display().to_string(),
+                message: format!("Invalid skill name '{name}': must be 1-64 alphanumeric, dash, or underscore chars, starting with alphanumeric"),
+                recoverable: true,
+            });
+            continue;
+        }
+
         match load_skill(&path, &skill_md_path, &name, source) {
             Ok(skill) => {
                 debug!(name = %name, source = %source, "Loaded skill");
@@ -167,6 +176,16 @@ fn load_skill(
         additional_files,
         last_modified,
     })
+}
+
+/// Validate a skill directory name.
+///
+/// Must be 1-64 chars, alphanumeric/dash/underscore, starting with alphanumeric.
+fn is_valid_skill_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && name.as_bytes()[0].is_ascii_alphanumeric()
 }
 
 /// List additional files in a skill directory (everything except `SKILL.md`).
@@ -329,5 +348,41 @@ mod tests {
         assert_eq!(dirs.len(), 2);
         assert!(dirs[0].to_string_lossy().ends_with(".claude/skills"));
         assert!(dirs[1].to_string_lossy().ends_with(".tron/skills"));
+    }
+
+    #[test]
+    fn valid_skill_names() {
+        assert!(is_valid_skill_name("my-skill"));
+        assert!(is_valid_skill_name("skill_v2"));
+        assert!(is_valid_skill_name("MySkill123"));
+        assert!(is_valid_skill_name("a"));
+    }
+
+    #[test]
+    fn invalid_skill_names() {
+        assert!(!is_valid_skill_name("../escape"));
+        assert!(!is_valid_skill_name("has space"));
+        assert!(!is_valid_skill_name(".hidden"));
+        assert!(!is_valid_skill_name("has/slash"));
+        assert!(!is_valid_skill_name("-starts-dash"));
+        assert!(!is_valid_skill_name("_starts-underscore"));
+    }
+
+    #[test]
+    fn empty_skill_name() {
+        assert!(!is_valid_skill_name(""));
+    }
+
+    #[test]
+    fn scan_rejects_invalid_skill_name() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let bad_dir = tmp.path().join("..escape");
+        std::fs::create_dir_all(&bad_dir).unwrap();
+        std::fs::write(bad_dir.join("SKILL.md"), "# Test\nTest skill").unwrap();
+
+        let result = scan_directory(tmp.path(), SkillSource::Global);
+        assert!(result.skills.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0].message.contains("Invalid skill name"));
     }
 }

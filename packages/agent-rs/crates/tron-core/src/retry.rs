@@ -91,19 +91,20 @@ pub struct RetryResult<T> {
 // Backoff calculation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Calculate exponential backoff delay with jitter.
+/// Calculate exponential backoff delay with deterministic additive jitter.
 ///
-/// Formula: `min(max_delay, base_delay * 2^attempt) * (1 + random * jitter)`
+/// Formula: `capped + capped * jitter_factor` where
+/// `capped = min(max_delay, base_delay * 2^attempt)`.
 ///
-/// The jitter factor is applied symmetrically: a factor of 0.2 means the
-/// delay varies by ±20% from the base exponential value.
+/// Returns a value in `[capped, capped * (1 + jitter_factor)]`. For
+/// actual symmetric jitter, use [`calculate_backoff_delay_with_random`].
 ///
 /// # Arguments
 ///
 /// * `attempt` — zero-based attempt index (0 for first retry)
 /// * `base_delay_ms` — base delay in milliseconds
 /// * `max_delay_ms` — maximum delay cap
-/// * `jitter_factor` — jitter range (0.0–1.0)
+/// * `jitter_factor` — additive jitter fraction (0.0–1.0)
 ///
 /// # Note
 ///

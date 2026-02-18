@@ -159,6 +159,7 @@ struct RuntimeMemoryDeps {
     session_id: String,
     workspace_id: String,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
 }
 
 #[async_trait]
@@ -258,6 +259,7 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
             session_manager: self.session_manager.clone(),
             subagent_manager: self.subagent_manager.clone(),
             embedding_controller: self.embedding_controller.clone(),
+            shutdown_coordinator: self.shutdown_coordinator.clone(),
         };
         crate::rpc::handlers::memory::execute_ledger_write(
             &self.session_id,
@@ -369,6 +371,12 @@ impl MethodHandler for PromptHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let prompt = require_string_param(params.as_ref(), "prompt")?;
 
+        crate::rpc::validation::validate_string_param(
+            &prompt,
+            "prompt",
+            crate::rpc::validation::MAX_PROMPT_LENGTH,
+        )?;
+
         // Extract optional extra params (iOS sends these)
         let reasoning_level = params
             .as_ref()
@@ -438,6 +446,8 @@ impl MethodHandler for PromptHandler {
             let embedding_controller = ctx.embedding_controller.clone();
             let skill_registry = ctx.skill_registry.clone();
             let subagent_manager = ctx.subagent_manager.clone();
+            let shutdown_coordinator = ctx.shutdown_coordinator.clone();
+            let shutdown_coordinator_for_register = ctx.shutdown_coordinator.clone();
             let prompt_clone = prompt.clone();
             let reasoning_level_clone = reasoning_level.clone();
             let images_clone = images.clone();
@@ -445,7 +455,7 @@ impl MethodHandler for PromptHandler {
             let skills_clone = skills.clone();
             let spells_clone = spells.clone();
 
-            drop(tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
                 use tron_runtime::orchestrator::agent_runner::run_agent;
                 use tron_runtime::types::{AgentConfig, RunContext};
@@ -919,6 +929,7 @@ impl MethodHandler for PromptHandler {
                         session_id: session_id_clone.clone(),
                         workspace_id: resolved_workspace_id,
                         embedding_controller: embedding_controller.clone(),
+                        shutdown_coordinator: shutdown_coordinator.clone(),
                     };
 
                     let (recent_event_types, recent_tool_calls) =
@@ -987,7 +998,10 @@ impl MethodHandler for PromptHandler {
                     "prompt run completed"
                 );
                 orchestrator.complete_run(&session_id_clone);
-            }));
+            });
+            if let Some(ref coord) = shutdown_coordinator_for_register {
+                coord.register_task(handle);
+            }
         }
 
         Ok(serde_json::json!({

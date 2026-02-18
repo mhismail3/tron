@@ -63,6 +63,7 @@ pub fn new_in_memory(config: &ConnectionConfig) -> Result<ConnectionPool> {
     let manager = SqliteConnectionManager::memory();
     let pool = Pool::builder()
         .max_size(config.pool_size)
+        .connection_timeout(std::time::Duration::from_secs(5))
         .connection_customizer(Box::new(PragmaCustomizer {
             busy_timeout_ms: config.busy_timeout_ms,
             cache_size_kib: config.cache_size_kib,
@@ -76,6 +77,7 @@ pub fn new_file(path: &str, config: &ConnectionConfig) -> Result<ConnectionPool>
     let manager = SqliteConnectionManager::file(path);
     let pool = Pool::builder()
         .max_size(config.pool_size)
+        .connection_timeout(std::time::Duration::from_secs(5))
         .connection_customizer(Box::new(PragmaCustomizer {
             busy_timeout_ms: config.busy_timeout_ms,
             cache_size_kib: config.cache_size_kib,

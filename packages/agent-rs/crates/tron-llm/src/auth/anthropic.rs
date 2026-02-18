@@ -238,16 +238,28 @@ pub async fn load_server_auth_with_client(
 
 /// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
 ///
-/// Note: This function is not synchronized. Concurrent calls may both trigger
-/// a refresh to the token endpoint. This is harmless — both calls receive valid
-/// tokens and the last writer wins on disk. Adding a lock was considered but
-/// rejected as unnecessary complexity for a benign race.
+/// Serializes concurrent refresh attempts to prevent invalidating the
+/// refresh token with a second concurrent call.
 async fn maybe_refresh_tokens(
     tokens: &OAuthTokens,
     config: &OAuthConfig,
     client: &reqwest::Client,
 ) -> Result<(OAuthTokens, bool), AuthError> {
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex as TokioMutex;
+
+    static REFRESH_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
+
     let buffer_ms = config.token_expiry_buffer_seconds * 1000;
+    if now_ms() + buffer_ms < tokens.expires_at {
+        return Ok((tokens.clone(), false));
+    }
+
+    // Serialize concurrent refresh attempts
+    let lock = REFRESH_LOCK.get_or_init(|| TokioMutex::new(()));
+    let _guard = lock.lock().await;
+
+    // Re-check expiry after acquiring lock (another caller may have refreshed)
     if now_ms() + buffer_ms < tokens.expires_at {
         return Ok((tokens.clone(), false));
     }

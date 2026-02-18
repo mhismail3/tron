@@ -21,7 +21,10 @@ use super::handler::handle_message;
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 
 /// How long to wait for a Pong before considering the client dead.
-const PONG_TIMEOUT: Duration = Duration::from_secs(60);
+const PONG_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long to wait for the outbound forwarder to drain after disconnect.
+const OUTBOUND_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Run a WebSocket session for a connected client.
 ///
@@ -159,13 +162,22 @@ pub async fn run_ws_session(
         }
     }
 
-    // Clean up
+    // Clean up — let outbound forwarder drain rather than aborting mid-send
     info!(client_id, "client disconnected");
     counter!("ws_disconnections_total").increment(1);
     gauge!("ws_connections_active").decrement(1.0);
     gauge!("sessions_active").decrement(1.0);
     histogram!("ws_connection_duration_seconds").record(connection_start.elapsed().as_secs_f64());
-    outbound.abort();
+
+    // Drop the connection (closes send channel), allowing forwarder to drain
+    drop(connection);
+    match tokio::time::timeout(OUTBOUND_DRAIN_TIMEOUT, outbound).await {
+        Ok(_) => debug!(client_id, "outbound forwarder drained"),
+        Err(_) => {
+            warn!(client_id, "outbound forwarder drain timed out, aborting");
+        }
+    }
+
     broadcast.remove(&client_id).await;
 }
 

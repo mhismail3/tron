@@ -6,6 +6,10 @@ use crate::rpc::registry::MethodRegistry;
 use crate::rpc::types::{RpcRequest, RpcResponse};
 use tracing::{debug, instrument, warn};
 
+/// Fallback JSON for when response serialization itself fails.
+const SERIALIZATION_FALLBACK: &str =
+    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal serialization error"}}"#;
+
 /// Result of handling a WebSocket message.
 pub struct HandleResult {
     /// Serialized JSON response to send back.
@@ -34,7 +38,7 @@ pub async fn handle_message(
                 RpcResponse::error("unknown", "INVALID_PARAMS", format!("Invalid JSON: {e}"));
             let json = serde_json::to_string(&resp).unwrap_or_else(|e| {
                 tracing::error!(error = %e, "Failed to serialize error response");
-                String::new()
+                SERIALIZATION_FALLBACK.to_string()
             });
             return HandleResult {
                 response_json: json,
@@ -69,7 +73,7 @@ pub async fn handle_message(
     }
     let json = serde_json::to_string(&response).unwrap_or_else(|e| {
         tracing::error!(error = %e, "Failed to serialize response");
-        String::new()
+        SERIALIZATION_FALLBACK.to_string()
     });
     HandleResult {
         response_json: json,
@@ -116,6 +120,7 @@ mod tests {
             subagent_manager: None,
             embedding_controller: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
         }
     }
 
@@ -393,5 +398,12 @@ mod tests {
             !rendered.trim_start().starts_with('{'),
             "expected non-JSON adapted TaskManager text"
         );
+    }
+
+    #[test]
+    fn serialization_fallback_is_valid_json() {
+        let parsed: serde_json::Value = serde_json::from_str(SERIALIZATION_FALLBACK).unwrap();
+        assert_eq!(parsed["error"]["code"], -32603);
+        assert!(parsed["error"]["message"].as_str().unwrap().contains("serialization"));
     }
 }

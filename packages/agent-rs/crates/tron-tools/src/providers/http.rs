@@ -16,6 +16,7 @@ impl ReqwestHttpClient {
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::limited(5))
                 .user_agent("tron-agent/1.0")
                 .build()
                 .unwrap_or_default(),

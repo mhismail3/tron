@@ -14,6 +14,9 @@ use crate::types::TranscriptionError;
 /// Target sample rate for the transcription model.
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 
+/// Maximum audio duration: 30 minutes at 16kHz.
+const MAX_AUDIO_SAMPLES: usize = 30 * 60 * 16_000;
+
 /// Decode audio bytes into 16kHz mono f32 samples.
 ///
 /// Supports WAV, M4A/AAC, and other formats via symphonia.
@@ -95,6 +98,13 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
             }
         } else {
             all_samples.extend_from_slice(samples);
+        }
+
+        if all_samples.len() > MAX_AUDIO_SAMPLES {
+            return Err(TranscriptionError::AudioDecode(format!(
+                "Audio too long: exceeds 30 minute limit (estimated {}m)",
+                all_samples.len() / 16_000 / 60
+            )));
         }
     }
 

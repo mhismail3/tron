@@ -105,12 +105,21 @@ impl TronTool for ReadTool {
         let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
         let limit = params.get("limit").and_then(Value::as_u64);
 
-        // Check if path is a directory
+        // Check metadata before reading (prevents OOM on huge files)
         if let Ok(meta) = self.fs.metadata(&resolved).await {
             if meta.is_dir() {
                 return Ok(error_result(format!(
                     "Is a directory: {}",
                     resolved.display()
+                )));
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            let file_size = meta.len() as usize;
+            if file_size > MAX_FILE_SIZE {
+                return Ok(error_result(format!(
+                    "File too large: {} bytes (max {} MB). Use offset/limit for partial reads.",
+                    file_size,
+                    MAX_FILE_SIZE / 1024 / 1024
                 )));
             }
         }

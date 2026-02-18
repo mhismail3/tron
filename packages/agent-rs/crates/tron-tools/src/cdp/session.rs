@@ -46,58 +46,82 @@ struct CdpCommand {
 }
 
 impl BrowserSession {
+    /// Maximum port-binding attempts to mitigate TOCTOU race.
+    const MAX_PORT_ATTEMPTS: usize = 3;
+
     /// Launch a headless Chrome, connect via CDP WebSocket.
     pub async fn launch(chrome_path: &std::path::Path) -> Result<Self, BrowserError> {
-        // Find a free port
-        let listener =
-            std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| BrowserError::LaunchFailed {
-                context: format!("bind port: {e}"),
+        let mut last_err = None;
+
+        for attempt in 0..Self::MAX_PORT_ATTEMPTS {
+            // Find a free port
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| {
+                BrowserError::LaunchFailed {
+                    context: format!("bind port: {e}"),
+                }
             })?;
-        let port = listener
-            .local_addr()
-            .map_err(|e| BrowserError::LaunchFailed {
-                context: format!("local_addr: {e}"),
-            })?
-            .port();
-        drop(listener);
+            let port = listener
+                .local_addr()
+                .map_err(|e| BrowserError::LaunchFailed {
+                    context: format!("local_addr: {e}"),
+                })?
+                .port();
+            drop(listener);
 
-        // Launch Chrome
-        let mut child = Command::new(chrome_path)
-            .arg("--headless=new")
-            .arg("--disable-gpu")
-            .arg("--no-sandbox")
-            .arg("--disable-dev-shm-usage")
-            .arg(format!("--remote-debugging-port={port}"))
-            .arg("--window-size=1280,800")
-            .arg("about:blank")
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| BrowserError::LaunchFailed {
-                context: e.to_string(),
-            })?;
+            // Launch Chrome
+            let mut child = Command::new(chrome_path)
+                .arg("--headless=new")
+                .arg("--disable-gpu")
+                .arg("--no-sandbox")
+                .arg("--disable-dev-shm-usage")
+                .arg(format!("--remote-debugging-port={port}"))
+                .arg("--window-size=1280,800")
+                .arg("about:blank")
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| BrowserError::LaunchFailed {
+                    context: e.to_string(),
+                })?;
 
-        // Wait for Chrome to start accepting connections
-        let ws_url = wait_for_ws_url(port, &mut child).await?;
+            // Wait for Chrome to start accepting connections
+            match wait_for_ws_url(port, &mut child).await {
+                Ok(ws_url) => {
+                    // Connect to the page WebSocket
+                    let (ws, _) =
+                        connect_async(&ws_url)
+                            .await
+                            .map_err(|e| BrowserError::LaunchFailed {
+                                context: format!("WebSocket connect: {e}"),
+                            })?;
 
-        // Connect to the page WebSocket
-        let (ws, _) = connect_async(&ws_url)
-            .await
-            .map_err(|e| BrowserError::LaunchFailed {
-                context: format!("WebSocket connect: {e}"),
-            })?;
+                    let (cmd_tx, cmd_rx) = mpsc::channel::<CdpCommand>(64);
+                    let handler = tokio::spawn(cdp_handler_loop(ws, cmd_rx));
 
-        let (cmd_tx, cmd_rx) = mpsc::channel::<CdpCommand>(64);
-        let handler = tokio::spawn(cdp_handler_loop(ws, cmd_rx));
+                    return Ok(Self {
+                        cmd_tx,
+                        is_streaming: AtomicBool::new(false),
+                        screencast_handle: Mutex::new(None),
+                        current_url: parking_lot::RwLock::new(None),
+                        chrome_process: Mutex::new(Some(child)),
+                        _handler: handler,
+                    });
+                }
+                Err(e) if attempt < Self::MAX_PORT_ATTEMPTS - 1 => {
+                    tracing::warn!(port, attempt, error = %e, "port conflict, retrying");
+                    let _ = child.kill().await;
+                    last_err = Some(e);
+                    continue;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                }
+            }
+        }
 
-        Ok(Self {
-            cmd_tx,
-            is_streaming: AtomicBool::new(false),
-            screencast_handle: Mutex::new(None),
-            current_url: parking_lot::RwLock::new(None),
-            chrome_process: Mutex::new(Some(child)),
-            _handler: handler,
-        })
+        Err(last_err.unwrap_or(BrowserError::LaunchFailed {
+            context: "all port attempts exhausted".into(),
+        }))
     }
 
     /// Whether screencast streaming is active.

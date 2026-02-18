@@ -10,6 +10,9 @@ use tracing::{debug, warn};
 
 use super::connection::ClientConnection;
 
+/// Number of consecutive drops before disconnecting a slow client.
+const MAX_CONSECUTIVE_DROPS: u64 = 100;
+
 /// Manages event broadcasting to connected clients.
 pub struct BroadcastManager {
     /// Connected clients indexed by connection ID.
@@ -45,22 +48,36 @@ impl BroadcastManager {
                 return;
             }
         };
-        let conns = self.connections.read().await;
-        let mut recipients = 0u32;
-        for conn in conns.values() {
-            if conn.session_id().as_deref() == Some(session_id) {
-                recipients += 1;
-                if !conn.send(Arc::clone(&json)) {
-                    counter!("ws_broadcast_drops_total").increment(1);
-                    let drops = conn.drop_count();
-                    warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
+        let mut to_remove = Vec::new();
+        {
+            let conns = self.connections.read().await;
+            let mut recipients = 0u32;
+            for conn in conns.values() {
+                if conn.session_id().as_deref() == Some(session_id) {
+                    recipients += 1;
+                    if !conn.send(Arc::clone(&json)) {
+                        counter!("ws_broadcast_drops_total").increment(1);
+                        let drops = conn.drop_count();
+                        if drops >= MAX_CONSECUTIVE_DROPS {
+                            warn!(conn_id = %conn.id, session_id, drops, "disconnecting slow client");
+                            to_remove.push(conn.id.clone());
+                        } else {
+                            warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
+                        }
+                    }
                 }
             }
+            debug!(
+                event_type = event.event_type,
+                session_id, recipients, "broadcast event to session"
+            );
         }
-        debug!(
-            event_type = event.event_type,
-            session_id, recipients, "broadcast event to session"
-        );
+        if !to_remove.is_empty() {
+            let mut conns = self.connections.write().await;
+            for id in &to_remove {
+                let _ = conns.remove(id);
+            }
+        }
     }
 
     /// Broadcast an event to all connections.
@@ -72,19 +89,33 @@ impl BroadcastManager {
                 return;
             }
         };
-        let conns = self.connections.read().await;
-        for conn in conns.values() {
-            if !conn.send(Arc::clone(&json)) {
-                counter!("ws_broadcast_drops_total").increment(1);
-                let drops = conn.drop_count();
-                warn!(conn_id = %conn.id, total_drops = drops, "failed to send event to client (channel full)");
+        let mut to_remove = Vec::new();
+        {
+            let conns = self.connections.read().await;
+            for conn in conns.values() {
+                if !conn.send(Arc::clone(&json)) {
+                    counter!("ws_broadcast_drops_total").increment(1);
+                    let drops = conn.drop_count();
+                    if drops >= MAX_CONSECUTIVE_DROPS {
+                        warn!(conn_id = %conn.id, drops, "disconnecting slow client");
+                        to_remove.push(conn.id.clone());
+                    } else {
+                        warn!(conn_id = %conn.id, total_drops = drops, "failed to send event to client (channel full)");
+                    }
+                }
+            }
+            debug!(
+                event_type = event.event_type,
+                recipients = conns.len(),
+                "broadcast event to all"
+            );
+        }
+        if !to_remove.is_empty() {
+            let mut conns = self.connections.write().await;
+            for id in &to_remove {
+                let _ = conns.remove(id);
             }
         }
-        debug!(
-            event_type = event.event_type,
-            recipients = conns.len(),
-            "broadcast event to all"
-        );
     }
 
     /// Number of active connections.
@@ -324,6 +355,52 @@ mod tests {
         bm.broadcast_all(&event).await;
 
         assert!(rx1.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn broadcast_disconnects_slow_client_after_threshold() {
+        let bm = BroadcastManager::new();
+        // Create a slow client with buffer of 1
+        let (tx, _rx) = mpsc::channel(1);
+        let slow_conn = Arc::new(ClientConnection::new("slow".into(), tx));
+        slow_conn.bind_session("s".into());
+
+        // Create a fast client with large buffer
+        let (fast_conn, mut fast_rx) = make_connection_with_rx("fast", Some("s"));
+
+        bm.add(slow_conn.clone()).await;
+        bm.add(fast_conn).await;
+
+        // Fill slow client's channel
+        let event = make_event("test.event", Some("s"));
+        // First send fills the buffer
+        bm.broadcast_to_session("s", &event).await;
+        // Now send MAX_CONSECUTIVE_DROPS more to exceed the threshold
+        for _ in 0..MAX_CONSECUTIVE_DROPS {
+            bm.broadcast_to_session("s", &event).await;
+        }
+
+        // Slow client should have been disconnected
+        assert_eq!(bm.connection_count().await, 1);
+        // Fast client should still be connected and received all messages
+        assert!(fast_rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn broadcast_keeps_fast_client() {
+        let bm = BroadcastManager::new();
+        let (fast, mut rx) = make_connection_with_rx("fast", Some("s"));
+        bm.add(fast).await;
+
+        let event = make_event("test.event", Some("s"));
+        for _ in 0..20 {
+            bm.broadcast_to_session("s", &event).await;
+            // Drain to keep channel clear (simulating a fast client)
+            while rx.try_recv().is_ok() {}
+        }
+
+        // Fast client should still be connected
+        assert_eq!(bm.connection_count().await, 1);
     }
 
     #[tokio::test]

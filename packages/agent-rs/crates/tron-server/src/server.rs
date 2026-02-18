@@ -79,14 +79,17 @@ impl TronServer {
     pub fn new(
         config: ServerConfig,
         registry: MethodRegistry,
-        rpc_context: RpcContext,
+        mut rpc_context: RpcContext,
         metrics_handle: PrometheusHandle,
     ) -> Self {
+        let shutdown = Arc::new(ShutdownCoordinator::new());
+        // Inject shutdown coordinator into context so handlers can register tasks
+        rpc_context.shutdown_coordinator = Some(Arc::clone(&shutdown));
         Self {
             config,
             registry: Arc::new(registry),
             broadcast: Arc::new(BroadcastManager::new()),
-            shutdown: Arc::new(ShutdownCoordinator::new()),
+            shutdown,
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
             start_time: Instant::now(),
@@ -254,6 +257,7 @@ mod tests {
             subagent_manager: None,
             embedding_controller: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
         }
     }
 

@@ -198,6 +198,7 @@ pub(crate) struct LedgerWriteDeps {
     pub subagent_manager:
         Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
     pub embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    pub shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
 }
 
 /// Execute the full ledger write pipeline.
@@ -350,6 +351,7 @@ pub(crate) async fn execute_ledger_write(
                 &event_id,
                 &embed_ws_id,
                 &payload,
+                &deps.shutdown_coordinator,
             );
 
             debug!(
@@ -377,18 +379,22 @@ fn spawn_embed_memory_with_deps(
     event_id: &str,
     workspace_id: &str,
     payload: &Value,
+    shutdown_coordinator: &Option<Arc<crate::shutdown::ShutdownCoordinator>>,
 ) {
     if let Some(ec) = controller {
         let ec = Arc::clone(ec);
         let event_id = event_id.to_owned();
         let workspace_id = workspace_id.to_owned();
         let payload = payload.clone();
-        let _ = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let ctrl = ec.lock().await;
             if let Err(e) = ctrl.embed_memory(&event_id, &workspace_id, &payload).await {
                 warn!(error = %e, event_id, "failed to embed ledger entry");
             }
         });
+        if let Some(coord) = shutdown_coordinator {
+            coord.register_task(handle);
+        }
     }
 }
 
@@ -543,6 +549,7 @@ impl MethodHandler for UpdateLedgerHandler {
             session_manager: ctx.session_manager.clone(),
             subagent_manager: ctx.subagent_manager.clone(),
             embedding_controller: ctx.embedding_controller.clone(),
+            shutdown_coordinator: ctx.shutdown_coordinator.clone(),
         };
         let result = execute_ledger_write(session_id, &working_dir, &deps, "manual").await;
 
@@ -981,6 +988,7 @@ mod tests {
             session_manager: ctx.session_manager.clone(),
             subagent_manager: None,
             embedding_controller: None,
+            shutdown_coordinator: None,
         };
         let result = execute_ledger_write(&sid, "/tmp", &deps, "manual").await;
         assert!(!result.written); // No LLM available

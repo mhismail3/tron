@@ -44,7 +44,13 @@ static SETTINGS: OnceLock<TronSettings> = OnceLock::new();
 /// overrides. On subsequent calls, returns the cached value. If loading
 /// fails, returns compiled defaults.
 pub fn get_settings() -> &'static TronSettings {
-    SETTINGS.get_or_init(|| load_settings().unwrap_or_default())
+    SETTINGS.get_or_init(|| match load_settings() {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to load settings, using defaults");
+            TronSettings::default()
+        }
+    })
 }
 
 /// Initialize the global settings with a specific value.

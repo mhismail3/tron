@@ -481,10 +481,18 @@ impl SubagentSpawner for SubagentManager {
             });
         }
 
-        // Depth check: current_depth > 0 means we're inside a subagent
+        // Depth check
+        if config.max_depth > 0 && config.current_depth >= config.max_depth {
+            return Err(ToolError::Validation {
+                message: format!(
+                    "Maximum subagent depth ({}) exceeded (current: {})",
+                    config.max_depth, config.current_depth
+                ),
+            });
+        }
         if config.current_depth > 0 && config.max_depth == 0 {
             return Err(ToolError::Validation {
-                message: "Subagent nesting is not allowed at this depth.".into(),
+                message: "Subagent nesting is not allowed".into(),
             });
         }
 
@@ -1401,6 +1409,26 @@ mod tests {
         let mut config = make_config("nested task");
         config.current_depth = 1;
         config.max_depth = 2;
+        let handle = manager.spawn(config).await.unwrap();
+        assert!(!handle.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn spawn_depth_exceeded_returns_error() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("deep task");
+        config.current_depth = 2;
+        config.max_depth = 2; // current >= max → blocked
+        let err = manager.spawn(config).await.unwrap_err();
+        assert!(err.to_string().contains("exceeded"));
+    }
+
+    #[tokio::test]
+    async fn spawn_depth_within_limit_succeeds() {
+        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
+        let mut config = make_config("allowed task");
+        config.current_depth = 1;
+        config.max_depth = 3;
         let handle = manager.spawn(config).await.unwrap();
         assert!(!handle.session_id.is_empty());
     }

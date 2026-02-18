@@ -18,6 +18,8 @@ use tron_skills::registry::SkillRegistry;
 use tron_tools::registry::ToolRegistry;
 use tron_transcription::TranscriptionEngine;
 
+use crate::shutdown::ShutdownCoordinator;
+
 /// Dependencies needed to create and run agents.
 pub struct AgentDeps {
     /// Factory that creates a fresh LLM provider per request (reads current model + auth).
@@ -58,6 +60,8 @@ pub struct RpcContext {
     pub subagent_manager: Option<Arc<SubagentManager>>,
     /// Provider health tracker for rolling-window error rate monitoring.
     pub health_tracker: Arc<ProviderHealthTracker>,
+    /// Shutdown coordinator for registering background task handles.
+    pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
 }
 
 #[cfg(test)]

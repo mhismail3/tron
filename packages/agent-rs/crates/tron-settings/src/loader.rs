@@ -180,19 +180,39 @@ fn read_env_string(name: &str) -> Option<String> {
 }
 
 fn read_env_bool(name: &str) -> Option<bool> {
-    parse_bool(&std::env::var(name).ok()?)
+    let val = std::env::var(name).ok()?;
+    let result = parse_bool(&val);
+    if result.is_none() {
+        tracing::warn!(key = name, value = %val, "invalid boolean env var, ignoring");
+    }
+    result
 }
 
 fn read_env_u16(name: &str, min: u16, max: u16) -> Option<u16> {
-    parse_u16_range(&std::env::var(name).ok()?, min, max)
+    let val = std::env::var(name).ok()?;
+    let result = parse_u16_range(&val, min, max);
+    if result.is_none() {
+        tracing::warn!(key = name, value = %val, "invalid u16 env var, ignoring");
+    }
+    result
 }
 
 fn read_env_u64(name: &str, min: u64, max: u64) -> Option<u64> {
-    parse_u64_range(&std::env::var(name).ok()?, min, max)
+    let val = std::env::var(name).ok()?;
+    let result = parse_u64_range(&val, min, max);
+    if result.is_none() {
+        tracing::warn!(key = name, value = %val, "invalid u64 env var, ignoring");
+    }
+    result
 }
 
 fn read_env_usize(name: &str, min: usize, max: usize) -> Option<usize> {
-    parse_usize_range(&std::env::var(name).ok()?, min, max)
+    let val = std::env::var(name).ok()?;
+    let result = parse_usize_range(&val, min, max);
+    if result.is_none() {
+        tracing::warn!(key = name, value = %val, "invalid usize env var, ignoring");
+    }
+    result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

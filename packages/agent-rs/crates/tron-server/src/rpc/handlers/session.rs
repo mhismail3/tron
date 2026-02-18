@@ -499,7 +499,10 @@ impl MethodHandler for GetHistoryHandler {
                     "tool.result" => "tool",
                     _ => "unknown",
                 };
-                let content = serde_json::from_str::<Value>(&e.payload).unwrap_or(Value::Null);
+                let content = serde_json::from_str::<Value>(&e.payload).unwrap_or_else(|err| {
+                    tracing::warn!(event_id = %e.id, error = %err, "corrupt event payload");
+                    Value::Null
+                });
 
                 let mut msg = serde_json::json!({
                     "id": e.id,

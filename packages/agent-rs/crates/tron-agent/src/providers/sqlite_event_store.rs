@@ -232,7 +232,10 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         Ok(rows
             .into_iter()
             .map(|r| {
-                let payload: Value = serde_json::from_str(&r.payload).unwrap_or(Value::Null);
+                let payload: Value = serde_json::from_str(&r.payload).unwrap_or_else(|e| {
+                    tracing::warn!(event_type = %r.event_type, error = %e, "corrupt event payload");
+                    Value::Null
+                });
                 json!({
                     "type": r.event_type,
                     "turn": r.turn,
@@ -253,7 +256,10 @@ impl EventStoreQuery for SqliteEventStoreQuery {
         Ok(rows
             .into_iter()
             .map(|r| {
-                let payload: Value = serde_json::from_str(&r.payload).unwrap_or(Value::Null);
+                let payload: Value = serde_json::from_str(&r.payload).unwrap_or_else(|e| {
+                    tracing::warn!(tool_name = ?r.tool_name, error = %e, "corrupt tool payload");
+                    Value::Null
+                });
                 json!({
                     "toolName": r.tool_name,
                     "turn": r.turn,

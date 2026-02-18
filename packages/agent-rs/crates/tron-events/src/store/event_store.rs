@@ -999,7 +999,10 @@ fn rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
             event_type: row.event_type.parse().unwrap_or(EventType::SessionStart),
             sequence: row.sequence,
             checksum: row.checksum.clone(),
-            payload: serde_json::from_str(&row.payload).unwrap_or(Value::Null),
+            payload: serde_json::from_str(&row.payload).unwrap_or_else(|e| {
+                tracing::warn!(event_id = %row.id, error = %e, "corrupt event payload, defaulting to null");
+                Value::Null
+            }),
         })
         .collect()
 }

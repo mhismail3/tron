@@ -66,7 +66,11 @@ impl MethodRegistry {
             Ok(Ok(result)) => RpcResponse::success(&request.id, result),
             Ok(Err(err)) => {
                 counter!("rpc_errors_total", "method" => method.clone(), "error_type" => err.code().to_owned()).increment(1);
-                let body = err.to_error_body();
+                // Log full error server-side, sanitize for client
+                tracing::warn!(method, error = %err, "RPC handler returned error");
+                let sanitized_msg = crate::rpc::validation::sanitize_error_message(&err);
+                let mut body = err.to_error_body();
+                body.message = sanitized_msg;
                 RpcResponse {
                     id: request.id,
                     success: false,

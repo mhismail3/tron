@@ -316,14 +316,25 @@ async fn main() -> Result<()> {
             let service_clone = Arc::clone(&service);
             let ctrl_for_init = Arc::clone(&ctrl_arc);
 
-            drop(tokio::spawn(async move {
-                if let Err(e) = service_clone.initialize().await {
-                    tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
-                    return;
+            let _embed_init_handle = tokio::spawn(async move {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(120),
+                    service_clone.initialize(),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
+                        ctrl_for_init.lock().await.set_service(service_clone);
+                        tracing::info!("embedding service ready — semantic memory enabled");
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
+                    }
+                    Err(_) => {
+                        tracing::error!("embedding service init timed out after 120s — semantic memory disabled");
+                    }
                 }
-                ctrl_for_init.lock().await.set_service(service_clone);
-                tracing::info!("embedding service ready — semantic memory enabled");
-            }));
+            });
 
             tracing::info!("embedding controller created (vector repo ready)");
             Some(ctrl_arc)
@@ -463,6 +474,7 @@ async fn main() -> Result<()> {
         embedding_controller,
         subagent_manager: shared_subagent_manager,
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+        shutdown_coordinator: None, // set by TronServer after creation
     };
 
     // Method registry
@@ -886,6 +898,7 @@ mod tests {
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1067,6 +1080,7 @@ mod tests {
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
         };
 
         let mut registry = MethodRegistry::new();

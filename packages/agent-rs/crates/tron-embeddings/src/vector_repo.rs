@@ -126,6 +126,16 @@ impl VectorRepository {
 
     /// Search for nearest neighbors using brute-force cosine similarity.
     pub fn search(&self, query: &[f32], opts: &SearchOptions) -> Result<Vec<VectorSearchResult>> {
+        if query.is_empty() {
+            return Err(EmbeddingError::Storage("Empty query vector".into()));
+        }
+        if query.len() != self.dims {
+            return Err(EmbeddingError::Storage(format!(
+                "Query dimension mismatch: expected {}, got {}",
+                self.dims,
+                query.len()
+            )));
+        }
         let limit = if opts.limit == 0 { 10 } else { opts.limit };
         let rows = self.load_vectors(opts)?;
         Ok(Self::rank_results(query, rows, limit))
@@ -537,5 +547,36 @@ mod tests {
         let wrong_dims = vec![1.0, 2.0];
         let result = repo.store("e1", "ws1", &wrong_dims);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn search_wrong_dimension_returns_error() {
+        let repo = make_repo(4);
+        let v = vec![0.5, 0.5, 0.5, 0.5];
+        repo.store("e1", "ws1", &v).unwrap();
+        // Query with wrong dimensions
+        let wrong_query = vec![1.0; 8];
+        let result = repo.search(&wrong_query, &SearchOptions { limit: 5, ..Default::default() });
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("dimension mismatch"));
+    }
+
+    #[test]
+    fn search_correct_dimension_succeeds() {
+        let repo = make_repo(4);
+        let v = vec![0.5, 0.5, 0.5, 0.5];
+        repo.store("e1", "ws1", &v).unwrap();
+        let query = vec![0.5, 0.5, 0.5, 0.5];
+        let result = repo.search(&query, &SearchOptions { limit: 5, ..Default::default() });
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn search_empty_query_returns_error() {
+        let repo = make_repo(4);
+        let result = repo.search(&[], &SearchOptions { limit: 5, ..Default::default() });
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Empty"));
     }
 }
