@@ -30,6 +30,23 @@ pub struct TokenUsage {
     pub cache_creation_1h_tokens: Option<i64>,
 }
 
+/// Aggregate token totals accumulated from multiple events.
+///
+/// Used by both the message reconstructor and the SQL token summary queries.
+/// All fields are non-optional `i64` since they represent running sums.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenTotals {
+    /// Total input tokens.
+    pub input_tokens: i64,
+    /// Total output tokens.
+    pub output_tokens: i64,
+    /// Total cache read tokens.
+    pub cache_read_tokens: i64,
+    /// Total cache creation tokens.
+    pub cache_creation_tokens: i64,
+}
+
 /// Canonical token record with source, computed, and metadata fields.
 ///
 /// Stored as `tokenRecord` on assistant message and streaming turn-end events.

@@ -10,7 +10,18 @@ use serde_json::Value;
 
 use crate::errors::Result;
 use crate::sqlite::row_types::EventRow;
-use crate::types::SessionEvent;
+use crate::types::{EventType, SessionEvent};
+use crate::types::payloads::TokenTotals;
+
+/// The 25 denormalized columns selected from the `events` table.
+///
+/// Every query that returns `EventRow` uses this constant so column order
+/// is defined in exactly one place.
+const EVENT_COLUMNS: &str = "\
+    id, session_id, parent_id, sequence, depth, type, timestamp, payload, \
+    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn, \
+    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum, \
+    model, latency_ms, stop_reason, has_thinking, provider_type, cost";
 
 /// Options for listing events.
 #[derive(Default)]
@@ -21,18 +32,8 @@ pub struct ListEventsOptions {
     pub offset: Option<i64>,
 }
 
-/// Token usage summary.
-#[derive(Debug, Clone, Default)]
-pub struct TokenUsageSummary {
-    /// Total input tokens.
-    pub input_tokens: i64,
-    /// Total output tokens.
-    pub output_tokens: i64,
-    /// Total cache read tokens.
-    pub cache_read_tokens: i64,
-    /// Total cache creation tokens.
-    pub cache_creation_tokens: i64,
-}
+/// Re-export for backward compatibility with callers using `TokenUsageSummary`.
+pub type TokenUsageSummary = TokenTotals;
 
 /// Event repository — stateless, every method takes `&Connection`.
 pub struct EventRepo;
@@ -60,13 +61,13 @@ impl EventRepo {
 
         let payload_str = serde_json::to_string(&event.payload)?;
 
-        let _ = conn.execute(
-            "INSERT INTO events (id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-             content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-             model, latency_ms, stop_reason, has_thinking, provider_type, cost)
+        let sql = format!(
+            "INSERT INTO events ({EVENT_COLUMNS})
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                     ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                     ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"
+        );
+        let _ = conn.execute(
+            &sql,
             params![
                 event.id,
                 event.session_id,
@@ -100,13 +101,10 @@ impl EventRepo {
 
     /// Get a single event by ID.
     pub fn get_by_id(conn: &Connection, event_id: &str) -> Result<Option<EventRow>> {
+        let sql = format!("SELECT {EVENT_COLUMNS} FROM events WHERE id = ?1");
         let row = conn
             .query_row(
-                "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                        content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-                 FROM events WHERE id = ?1",
+                &sql,
                 params![event_id],
                 Self::map_row,
             )
@@ -120,12 +118,8 @@ impl EventRepo {
         session_id: &str,
         opts: &ListEventsOptions,
     ) -> Result<Vec<EventRow>> {
-        let mut sql = String::from(
-            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM events WHERE session_id = ?1 ORDER BY sequence ASC",
+        let mut sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM events WHERE session_id = ?1 ORDER BY sequence ASC"
         );
         if let Some(limit) = opts.limit {
             use std::fmt::Write;
@@ -158,15 +152,9 @@ impl EventRepo {
 
     /// Get ancestor chain from root to the given event (inclusive), using recursive CTE.
     pub fn get_ancestors(conn: &Connection, event_id: &str) -> Result<Vec<EventRow>> {
-        let mut stmt = conn.prepare(
-            "WITH RECURSIVE ancestors(id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, lvl) AS (
-               SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                      content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, 0
+        let sql = format!(
+            "WITH RECURSIVE ancestors({EVENT_COLUMNS}, lvl) AS (
+               SELECT {EVENT_COLUMNS}, 0
                FROM events WHERE id = ?1
                UNION ALL
                SELECT e.id, e.session_id, e.parent_id, e.sequence, e.depth, e.type, e.timestamp, e.payload,
@@ -176,12 +164,10 @@ impl EventRepo {
                FROM events e JOIN ancestors a ON e.id = a.parent_id
                WHERE a.lvl < 10000
              )
-             SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM ancestors ORDER BY lvl DESC",
-        )?;
+             SELECT {EVENT_COLUMNS}
+             FROM ancestors ORDER BY lvl DESC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params![event_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -190,13 +176,10 @@ impl EventRepo {
 
     /// Get direct children of an event.
     pub fn get_children(conn: &Connection, event_id: &str) -> Result<Vec<EventRow>> {
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM events WHERE parent_id = ?1 ORDER BY sequence ASC",
-        )?;
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM events WHERE parent_id = ?1 ORDER BY sequence ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params![event_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -205,15 +188,9 @@ impl EventRepo {
 
     /// Get all descendants of an event (recursive CTE downward).
     pub fn get_descendants(conn: &Connection, event_id: &str) -> Result<Vec<EventRow>> {
-        let mut stmt = conn.prepare(
-            "WITH RECURSIVE desc(id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, lvl) AS (
-               SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                      content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost, 0
+        let sql = format!(
+            "WITH RECURSIVE desc({EVENT_COLUMNS}, lvl) AS (
+               SELECT {EVENT_COLUMNS}, 0
                FROM events WHERE parent_id = ?1
                UNION ALL
                SELECT e.id, e.session_id, e.parent_id, e.sequence, e.depth, e.type, e.timestamp, e.payload,
@@ -223,12 +200,10 @@ impl EventRepo {
                FROM events e JOIN desc d ON e.parent_id = d.id
                WHERE d.lvl < 10000
              )
-             SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM desc ORDER BY sequence ASC",
-        )?;
+             SELECT {EVENT_COLUMNS}
+             FROM desc ORDER BY sequence ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params![event_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -241,13 +216,10 @@ impl EventRepo {
         session_id: &str,
         after_sequence: i64,
     ) -> Result<Vec<EventRow>> {
-        let mut stmt = conn.prepare(
-            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM events WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC",
-        )?;
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM events WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params![session_id, after_sequence], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -256,13 +228,12 @@ impl EventRepo {
 
     /// Get the latest event for a session.
     pub fn get_latest(conn: &Connection, session_id: &str) -> Result<Option<EventRow>> {
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM events WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 1"
+        );
         let row = conn
             .query_row(
-                "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                        content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                        input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-                 FROM events WHERE session_id = ?1 ORDER BY sequence DESC LIMIT 1",
+                &sql,
                 params![session_id],
                 Self::map_row,
             )
@@ -359,11 +330,7 @@ impl EventRepo {
 
         let placeholders: Vec<String> = (1..=event_ids.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
-            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM events WHERE id IN ({})",
+            "SELECT {EVENT_COLUMNS} FROM events WHERE id IN ({})",
             placeholders.join(", ")
         );
 
@@ -396,11 +363,7 @@ impl EventRepo {
         // Build the type placeholders starting after session_id (?1)
         let placeholders: Vec<String> = (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
         let mut sql = format!(
-            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM events WHERE session_id = ?1 AND type IN ({}) ORDER BY sequence ASC",
+            "SELECT {EVENT_COLUMNS} FROM events WHERE session_id = ?1 AND type IN ({}) ORDER BY sequence ASC",
             placeholders.join(", ")
         );
         if let Some(limit) = limit {
@@ -437,11 +400,7 @@ impl EventRepo {
 
         let placeholders: Vec<String> = (2..=types.len() + 1).map(|i| format!("?{i}")).collect();
         let mut sql = format!(
-            "SELECT id, session_id, parent_id, sequence, depth, type, timestamp, payload,
-                    content_blob_id, workspace_id, role, tool_name, tool_call_id, turn,
-                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, checksum,
-                    model, latency_ms, stop_reason, has_thinking, provider_type, cost
-             FROM events WHERE workspace_id = ?1 AND type IN ({}) ORDER BY timestamp DESC",
+            "SELECT {EVENT_COLUMNS} FROM events WHERE workspace_id = ?1 AND type IN ({}) ORDER BY timestamp DESC",
             placeholders.join(", ")
         );
         if let Some(limit) = limit {
@@ -517,31 +476,31 @@ impl EventRepo {
 
     fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EventRow> {
         Ok(EventRow {
-            id: row.get(0)?,
-            session_id: row.get(1)?,
-            parent_id: row.get(2)?,
-            sequence: row.get(3)?,
-            depth: row.get(4)?,
-            event_type: row.get(5)?,
-            timestamp: row.get(6)?,
-            payload: row.get(7)?,
-            content_blob_id: row.get(8)?,
-            workspace_id: row.get(9)?,
-            role: row.get(10)?,
-            tool_name: row.get(11)?,
-            tool_call_id: row.get(12)?,
-            turn: row.get(13)?,
-            input_tokens: row.get(14)?,
-            output_tokens: row.get(15)?,
-            cache_read_tokens: row.get(16)?,
-            cache_creation_tokens: row.get(17)?,
-            checksum: row.get(18)?,
-            model: row.get(19)?,
-            latency_ms: row.get(20)?,
-            stop_reason: row.get(21)?,
-            has_thinking: row.get(22)?,
-            provider_type: row.get(23)?,
-            cost: row.get(24)?,
+            id: row.get("id")?,
+            session_id: row.get("session_id")?,
+            parent_id: row.get("parent_id")?,
+            sequence: row.get("sequence")?,
+            depth: row.get("depth")?,
+            event_type: row.get("type")?,
+            timestamp: row.get("timestamp")?,
+            payload: row.get("payload")?,
+            content_blob_id: row.get("content_blob_id")?,
+            workspace_id: row.get("workspace_id")?,
+            role: row.get("role")?,
+            tool_name: row.get("tool_name")?,
+            tool_call_id: row.get("tool_call_id")?,
+            turn: row.get("turn")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_creation_tokens: row.get("cache_creation_tokens")?,
+            checksum: row.get("checksum")?,
+            model: row.get("model")?,
+            latency_ms: row.get("latency_ms")?,
+            stop_reason: row.get("stop_reason")?,
+            has_thinking: row.get("has_thinking")?,
+            provider_type: row.get("provider_type")?,
+            cost: row.get("cost")?,
         })
     }
 }
@@ -549,18 +508,12 @@ impl EventRepo {
 // ─── Extraction helpers ──────────────────────────────────────────────────────
 
 fn extract_role(event: &SessionEvent) -> Option<String> {
-    let t = event.event_type.as_str();
-    if t.starts_with("message.") {
-        match t {
-            "message.user" => Some("user".to_string()),
-            "message.assistant" => Some("assistant".to_string()),
-            "message.system" => Some("system".to_string()),
-            _ => None,
-        }
-    } else if t == "tool.result" {
-        Some("tool".to_string())
-    } else {
-        None
+    match event.event_type {
+        EventType::MessageUser => Some("user".to_string()),
+        EventType::MessageAssistant => Some("assistant".to_string()),
+        EventType::MessageSystem => Some("system".to_string()),
+        EventType::ToolResult => Some("tool".to_string()),
+        _ => None,
     }
 }
 

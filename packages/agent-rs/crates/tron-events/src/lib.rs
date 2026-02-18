@@ -4,7 +4,7 @@
 //!
 //! This is the largest subsystem, responsible for:
 //!
-//! - **Event types**: 58-variant [`EventType`] enum matching the TypeScript wire format exactly
+//! - **Event types**: 60-variant [`EventType`] enum matching the TypeScript wire format exactly
 //! - **Session events**: [`SessionEvent`] flat struct with typed payload access
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
@@ -30,8 +30,7 @@ pub use envelope::{
 pub use errors::{EventStoreError, Result};
 pub use factory::{EventChainBuilder, EventFactory};
 pub use reconstruct::{
-    COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructedTokenUsage, ReconstructionResult,
-    reconstruct_from_events,
+    COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };
 pub use sqlite::repositories::device_token::RegisterTokenResult;
 pub use sqlite::repositories::session::MessagePreview;
@@ -41,5 +40,5 @@ pub use sqlite::{
 pub use store::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
 pub use types::{
     ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SearchResult, SessionEvent,
-    SessionEventPayload, SessionState, SessionSummary, TokenUsage, Workspace,
+    SessionEventPayload, SessionState, SessionSummary, TokenTotals, TokenUsage, Workspace,
 };

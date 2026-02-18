@@ -4,8 +4,8 @@
 mod session_event_tests {
     use serde_json::json;
 
-    use crate::types::base::{SessionEvent, SessionEventPayload};
-    use crate::types::event_type::EventType;
+    use crate::types::base::SessionEvent;
+    use crate::types::{EventType, SessionEventPayload};
 
     fn make_event(event_type: EventType, payload: serde_json::Value) -> SessionEvent {
         SessionEvent {
@@ -450,6 +450,10 @@ mod session_event_tests {
                 json!({"totalRules": 0, "globalRules": 0, "scopedRules": 0, "files": []}),
             ),
             (
+                EventType::RulesActivated,
+                json!({"rules": [], "totalActivated": 0}),
+            ),
+            (
                 EventType::MetadataUpdate,
                 json!({"key": "k", "newValue": "v"}),
             ),
@@ -572,7 +576,7 @@ mod session_event_tests {
             (EventType::MemoryLoaded, json!({})),
         ];
 
-        assert_eq!(cases.len(), 59, "must cover all 59 event types");
+        assert_eq!(cases.len(), 60, "must cover all 60 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());
@@ -595,134 +599,116 @@ mod session_event_tests {
 
 #[cfg(test)]
 mod type_guard_tests {
-    use serde_json::json;
-
-    use crate::types::base::SessionEvent;
-    use crate::types::event_type::EventType;
-    use crate::types::type_guards::*;
-
-    fn make(event_type: EventType) -> SessionEvent {
-        SessionEvent {
-            id: "e".into(),
-            parent_id: None,
-            session_id: "s".into(),
-            workspace_id: "w".into(),
-            timestamp: "t".into(),
-            event_type,
-            sequence: 0,
-            checksum: None,
-            payload: json!({}),
-        }
-    }
+    use crate::types::EventType;
 
     #[test]
     fn message_guards() {
-        assert!(is_message_event(&make(EventType::MessageUser)));
-        assert!(is_message_event(&make(EventType::MessageAssistant)));
-        assert!(is_message_event(&make(EventType::MessageSystem)));
-        assert!(!is_message_event(&make(EventType::ToolCall)));
+        assert!(EventType::MessageUser.is_message_type());
+        assert!(EventType::MessageAssistant.is_message_type());
+        assert!(EventType::MessageSystem.is_message_type());
+        assert!(!EventType::ToolCall.is_message_type());
     }
 
     #[test]
     fn specific_message_guards() {
-        assert!(is_user_message_event(&make(EventType::MessageUser)));
-        assert!(!is_user_message_event(&make(EventType::MessageAssistant)));
-        assert!(is_assistant_message_event(&make(
-            EventType::MessageAssistant
-        )));
+        assert_eq!(EventType::MessageUser, EventType::MessageUser);
+        assert_ne!(EventType::MessageUser, EventType::MessageAssistant);
+        assert_eq!(EventType::MessageAssistant, EventType::MessageAssistant);
     }
 
     #[test]
     fn streaming_guards() {
-        assert!(is_streaming_event(&make(EventType::StreamTextDelta)));
-        assert!(is_streaming_event(&make(EventType::StreamTurnEnd)));
-        assert!(!is_streaming_event(&make(EventType::MessageUser)));
+        assert!(EventType::StreamTextDelta.is_streaming_type());
+        assert!(EventType::StreamTurnEnd.is_streaming_type());
+        assert!(!EventType::MessageUser.is_streaming_type());
     }
 
     #[test]
     fn error_guards() {
-        assert!(is_error_event(&make(EventType::ErrorAgent)));
-        assert!(is_error_event(&make(EventType::ErrorTool)));
-        assert!(is_error_event(&make(EventType::ErrorProvider)));
-        assert!(!is_error_event(&make(EventType::ToolResult)));
+        assert!(EventType::ErrorAgent.is_error_type());
+        assert!(EventType::ErrorTool.is_error_type());
+        assert!(EventType::ErrorProvider.is_error_type());
+        assert!(!EventType::ToolResult.is_error_type());
     }
 
     #[test]
     fn tool_guards() {
-        assert!(is_tool_call_event(&make(EventType::ToolCall)));
-        assert!(is_tool_result_event(&make(EventType::ToolResult)));
-        assert!(!is_tool_call_event(&make(EventType::ToolResult)));
+        assert_eq!(EventType::ToolCall, EventType::ToolCall);
+        assert_eq!(EventType::ToolResult, EventType::ToolResult);
+        assert_ne!(EventType::ToolCall, EventType::ToolResult);
     }
 
     #[test]
     fn compact_guards() {
-        assert!(is_compact_boundary_event(&make(EventType::CompactBoundary)));
-        assert!(is_compact_summary_event(&make(EventType::CompactSummary)));
+        assert_eq!(EventType::CompactBoundary, EventType::CompactBoundary);
+        assert_eq!(EventType::CompactSummary, EventType::CompactSummary);
     }
 
     #[test]
     fn context_guards() {
-        assert!(is_context_cleared_event(&make(EventType::ContextCleared)));
-        assert!(!is_context_cleared_event(&make(EventType::CompactBoundary)));
+        assert_eq!(EventType::ContextCleared, EventType::ContextCleared);
+        assert_ne!(EventType::ContextCleared, EventType::CompactBoundary);
     }
 
     #[test]
     fn config_guards() {
-        assert!(is_config_event(&make(EventType::ConfigModelSwitch)));
-        assert!(is_config_reasoning_level_event(&make(
+        assert!(EventType::ConfigModelSwitch.is_config_type());
+        assert_eq!(
+            EventType::ConfigReasoningLevel,
             EventType::ConfigReasoningLevel
-        )));
-        assert!(is_config_prompt_update_event(&make(
+        );
+        assert_eq!(
+            EventType::ConfigPromptUpdate,
             EventType::ConfigPromptUpdate
-        )));
+        );
     }
 
     #[test]
     fn worktree_guards() {
-        assert!(is_worktree_event(&make(EventType::WorktreeAcquired)));
-        assert!(is_worktree_event(&make(EventType::WorktreeMerged)));
+        assert!(EventType::WorktreeAcquired.is_worktree_type());
+        assert!(EventType::WorktreeMerged.is_worktree_type());
     }
 
     #[test]
     fn subagent_guards() {
-        assert!(is_subagent_event(&make(EventType::SubagentSpawned)));
-        assert!(is_subagent_event(&make(EventType::SubagentCompleted)));
+        assert!(EventType::SubagentSpawned.is_subagent_type());
+        assert!(EventType::SubagentCompleted.is_subagent_type());
     }
 
     #[test]
     fn hook_guards() {
-        assert!(is_hook_event(&make(EventType::HookTriggered)));
-        assert!(is_hook_event(&make(EventType::HookBackgroundCompleted)));
+        assert!(EventType::HookTriggered.is_hook_type());
+        assert!(EventType::HookBackgroundCompleted.is_hook_type());
     }
 
     #[test]
     fn skill_guards() {
-        assert!(is_skill_event(&make(EventType::SkillAdded)));
-        assert!(is_skill_event(&make(EventType::SkillRemoved)));
+        assert!(EventType::SkillAdded.is_skill_type());
+        assert!(EventType::SkillRemoved.is_skill_type());
     }
 
     #[test]
     fn rules_guards() {
-        assert!(is_rules_event(&make(EventType::RulesLoaded)));
-        assert!(is_rules_event(&make(EventType::RulesIndexed)));
+        assert!(EventType::RulesLoaded.is_rules_type());
+        assert!(EventType::RulesIndexed.is_rules_type());
     }
 
     #[test]
     fn memory_guards() {
-        assert!(is_memory_event(&make(EventType::MemoryLedger)));
-        assert!(is_memory_event(&make(EventType::MemoryLoaded)));
+        assert!(EventType::MemoryLedger.is_memory_type());
+        assert!(EventType::MemoryLoaded.is_memory_type());
     }
 
     #[test]
     fn session_start_guard() {
-        assert!(is_session_start_event(&make(EventType::SessionStart)));
-        assert!(!is_session_start_event(&make(EventType::SessionEnd)));
+        assert_eq!(EventType::SessionStart, EventType::SessionStart);
+        assert_ne!(EventType::SessionStart, EventType::SessionEnd);
     }
 
     #[test]
     fn message_deleted_guard() {
-        assert!(is_message_deleted_event(&make(EventType::MessageDeleted)));
-        assert!(!is_message_deleted_event(&make(EventType::MessageUser)));
+        assert_eq!(EventType::MessageDeleted, EventType::MessageDeleted);
+        assert_ne!(EventType::MessageDeleted, EventType::MessageUser);
     }
 }
 

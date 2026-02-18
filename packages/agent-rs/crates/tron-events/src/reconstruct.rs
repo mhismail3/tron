@@ -14,6 +14,8 @@
 use serde_json::Value;
 
 use crate::types::base::SessionEvent;
+use crate::types::EventType;
+use crate::types::payloads::TokenTotals;
 use crate::types::state::{Message, MessageWithEventId};
 
 /// Prefix for compaction summary messages, matching TypeScript `context/constants.ts`.
@@ -28,26 +30,13 @@ pub struct ReconstructionResult {
     /// Reconstructed messages with their source event IDs.
     pub messages_with_event_ids: Vec<MessageWithEventId>,
     /// Aggregate token usage across all message events.
-    pub token_usage: ReconstructedTokenUsage,
+    pub token_usage: TokenTotals,
     /// Highest turn number seen.
     pub turn_count: i64,
     /// Last-seen reasoning level from `config.reasoning_level` events.
     pub reasoning_level: Option<String>,
     /// System prompt from `session.start` or `config.prompt_update`.
     pub system_prompt: Option<String>,
-}
-
-/// Aggregate token usage accumulated during reconstruction.
-#[derive(Clone, Debug, Default)]
-pub struct ReconstructedTokenUsage {
-    /// Total input tokens.
-    pub input_tokens: i64,
-    /// Total output tokens.
-    pub output_tokens: i64,
-    /// Total cache read tokens.
-    pub cache_read_tokens: i64,
-    /// Total cache creation tokens.
-    pub cache_creation_tokens: i64,
 }
 
 /// Pending tool result accumulated between assistant messages.
@@ -89,32 +78,32 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     let mut system_prompt: Option<String> = None;
 
     for event in ancestors {
-        match event.event_type.as_str() {
-            "message.deleted" => {
+        match event.event_type {
+            EventType::MessageDeleted => {
                 if let Some(target) = event.payload.get("targetEventId").and_then(Value::as_str) {
                     let _ = deleted_event_ids.insert(target.to_string());
                 }
             }
-            "tool.call" => {
+            EventType::ToolCall => {
                 let tc_id = event.payload.get("toolCallId").and_then(Value::as_str);
                 let args = event.payload.get("arguments");
                 if let (Some(id), Some(a)) = (tc_id, args) {
                     let _ = tool_call_args_map.insert(id.to_string(), a.clone());
                 }
             }
-            "config.reasoning_level" => {
+            EventType::ConfigReasoningLevel => {
                 reasoning_level = event
                     .payload
                     .get("newLevel")
                     .and_then(Value::as_str)
                     .map(String::from);
             }
-            "session.start" => {
+            EventType::SessionStart => {
                 if let Some(sp) = event.payload.get("systemPrompt").and_then(Value::as_str) {
                     system_prompt = Some(sp.to_string());
                 }
             }
-            "config.prompt_update" => {
+            EventType::ConfigPromptUpdate => {
                 if event.payload.get("contentBlobId").is_some() {
                     if let Some(hash) = event.payload.get("newHash").and_then(Value::as_str) {
                         system_prompt = Some(format!("[Updated prompt - hash: {hash}]"));
@@ -137,7 +126,7 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
 /// Mutable state carried through the message-building pass.
 struct BuildState {
     combined: Vec<MessageWithEventId>,
-    tokens: ReconstructedTokenUsage,
+    tokens: TokenTotals,
     turn_count: i64,
     current_turn: i64,
     pending_tool_results: Vec<PendingToolResult>,
@@ -147,7 +136,7 @@ struct BuildState {
 fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> ReconstructionResult {
     let mut st = BuildState {
         combined: Vec::new(),
-        tokens: ReconstructedTokenUsage::default(),
+        tokens: TokenTotals::default(),
         turn_count: 0,
         current_turn: 0,
         pending_tool_results: Vec::new(),
@@ -157,12 +146,12 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         if metadata.deleted_event_ids.contains(&event.id) {
             continue;
         }
-        match event.event_type.as_str() {
-            "compact.summary" => handle_compact_summary(event, &mut st),
-            "context.cleared" => handle_context_cleared(&mut st),
-            "tool.result" => handle_tool_result(event, &mut st),
-            "message.user" => handle_message_user(event, &mut st),
-            "message.assistant" => handle_message_assistant(event, metadata, &mut st),
+        match event.event_type {
+            EventType::CompactSummary => handle_compact_summary(event, &mut st),
+            EventType::ContextCleared => handle_context_cleared(&mut st),
+            EventType::ToolResult => handle_tool_result(event, &mut st),
+            EventType::MessageUser => handle_message_user(event, &mut st),
+            EventType::MessageAssistant => handle_message_assistant(event, metadata, &mut st),
             _ => {}
         }
     }
@@ -506,7 +495,7 @@ fn restore_truncated_inputs(
 }
 
 /// Accumulate token usage from a payload's `tokenUsage` field.
-fn accumulate_tokens(payload: &Value, tokens: &mut ReconstructedTokenUsage) {
+fn accumulate_tokens(payload: &Value, tokens: &mut TokenTotals) {
     if let Some(tu) = payload.get("tokenUsage") {
         tokens.input_tokens += tu.get("inputTokens").and_then(Value::as_i64).unwrap_or(0);
         tokens.output_tokens += tu.get("outputTokens").and_then(Value::as_i64).unwrap_or(0);
@@ -529,7 +518,6 @@ fn accumulate_tokens(payload: &Value, tokens: &mut ReconstructedTokenUsage) {
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use crate::types::EventType;
 
     /// Helper: create a minimal session event.
     fn ev(event_type: EventType, payload: Value) -> SessionEvent {

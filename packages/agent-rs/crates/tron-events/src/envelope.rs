@@ -142,7 +142,7 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
 pub struct EventEnvelope {
     /// Broadcast event type.
     #[serde(rename = "type")]
-    pub event_type: String,
+    pub event_type: BroadcastEventType,
     /// Associated session ID (absent for system-wide events).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -158,7 +158,7 @@ pub struct EventEnvelope {
 /// `data["sessionId"]`. If `data` contains a `"timestamp"` field, it is
 /// preserved; otherwise the current UTC time is used.
 pub fn create_event_envelope(
-    event_type: &str,
+    event_type: BroadcastEventType,
     data: Value,
     session_id: Option<&str>,
 ) -> EventEnvelope {
@@ -174,7 +174,7 @@ pub fn create_event_envelope(
         .map_or_else(|| chrono::Utc::now().to_rfc3339(), String::from);
 
     EventEnvelope {
-        event_type: event_type.to_string(),
+        event_type,
         session_id: resolved_session_id,
         timestamp,
         data,
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn envelope_serde_roundtrip() {
         let envelope = EventEnvelope {
-            event_type: "event.new".to_string(),
+            event_type: BroadcastEventType::EventNew,
             session_id: Some("sess_123".to_string()),
             timestamp: "2025-01-15T10:00:00Z".to_string(),
             data: serde_json::json!({"id": "evt_1", "type": "message.user"}),
@@ -276,7 +276,7 @@ mod tests {
         let json = serde_json::to_string(&envelope).unwrap();
         let deserialized: EventEnvelope = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.event_type, "event.new");
+        assert_eq!(deserialized.event_type, BroadcastEventType::EventNew);
         assert_eq!(deserialized.session_id.as_deref(), Some("sess_123"));
         assert_eq!(deserialized.timestamp, "2025-01-15T10:00:00Z");
         assert_eq!(deserialized.data["id"], "evt_1");
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn envelope_omits_null_session_id() {
         let envelope = EventEnvelope {
-            event_type: "browser.closed".to_string(),
+            event_type: BroadcastEventType::BrowserClosed,
             session_id: None,
             timestamp: "2025-01-15T10:00:00Z".to_string(),
             data: serde_json::json!({}),
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn envelope_json_field_names() {
         let envelope = EventEnvelope {
-            event_type: "session.created".to_string(),
+            event_type: BroadcastEventType::SessionCreated,
             session_id: Some("sess_1".to_string()),
             timestamp: "2025-01-15T10:00:00Z".to_string(),
             data: serde_json::json!({}),
@@ -325,12 +325,12 @@ mod tests {
     #[test]
     fn create_envelope_with_explicit_session_id() {
         let envelope = create_event_envelope(
-            "event.new",
+            BroadcastEventType::EventNew,
             serde_json::json!({"id": "evt_1"}),
             Some("sess_1"),
         );
 
-        assert_eq!(envelope.event_type, "event.new");
+        assert_eq!(envelope.event_type, BroadcastEventType::EventNew);
         assert_eq!(envelope.session_id.as_deref(), Some("sess_1"));
         assert!(!envelope.timestamp.is_empty());
     }
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn create_envelope_extracts_session_id_from_data() {
         let envelope = create_event_envelope(
-            "event.new",
+            BroadcastEventType::EventNew,
             serde_json::json!({"sessionId": "sess_from_data"}),
             None,
         );
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn create_envelope_explicit_session_id_overrides_data() {
         let envelope = create_event_envelope(
-            "event.new",
+            BroadcastEventType::EventNew,
             serde_json::json!({"sessionId": "sess_from_data"}),
             Some("sess_explicit"),
         );
@@ -359,7 +359,11 @@ mod tests {
 
     #[test]
     fn create_envelope_no_session_id() {
-        let envelope = create_event_envelope("browser.closed", serde_json::json!({}), None);
+        let envelope = create_event_envelope(
+            BroadcastEventType::BrowserClosed,
+            serde_json::json!({}),
+            None,
+        );
 
         assert!(envelope.session_id.is_none());
     }
@@ -367,7 +371,7 @@ mod tests {
     #[test]
     fn create_envelope_preserves_data_timestamp() {
         let envelope = create_event_envelope(
-            "event.new",
+            BroadcastEventType::EventNew,
             serde_json::json!({"timestamp": "2025-01-15T10:00:00Z"}),
             None,
         );
@@ -377,10 +381,13 @@ mod tests {
 
     #[test]
     fn create_envelope_generates_timestamp_when_absent() {
-        let envelope = create_event_envelope("event.new", serde_json::json!({"id": "evt_1"}), None);
+        let envelope = create_event_envelope(
+            BroadcastEventType::EventNew,
+            serde_json::json!({"id": "evt_1"}),
+            None,
+        );
 
         assert!(!envelope.timestamp.is_empty());
-        // Should be a valid ISO 8601 timestamp
         assert!(envelope.timestamp.contains('T'));
     }
 }

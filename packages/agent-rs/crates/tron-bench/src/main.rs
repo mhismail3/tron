@@ -173,6 +173,7 @@ fn run_prompt_text_only(iterations: usize) -> Result<ScenarioResult> {
         "claude-sonnet-4-20250514",
         "/tmp/bench-text",
         Some("text-only"),
+        None,
     )?;
     let session_id = session.session.id;
 
@@ -225,6 +226,7 @@ fn run_prompt_with_tools(iterations: usize) -> Result<ScenarioResult> {
         "claude-sonnet-4-20250514",
         "/tmp/bench-tools",
         Some("with-tools"),
+        None,
     )?;
     let session_id = session.session.id;
 
@@ -310,6 +312,7 @@ fn run_concurrent_sessions(iterations: usize, concurrency: usize) -> Result<Scen
                 "claude-sonnet-4-20250514",
                 &format!("/tmp/bench-concurrent-{worker}"),
                 Some("concurrent"),
+                None,
             )?;
             let session_id = session.session.id;
             let mut latencies = Vec::with_capacity(iterations);

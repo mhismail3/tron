@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::event_type::EventType;
+use super::generated::EventType;
 use super::payloads::TokenUsage;
 
 /// A reconstructed message from the event history.

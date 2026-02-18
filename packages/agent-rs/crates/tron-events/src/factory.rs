@@ -262,7 +262,7 @@ mod tests {
         let store = crate::store::EventStore::new(pool.clone());
 
         let cr = store
-            .create_session("claude-opus-4-6", "/tmp/project", None)
+            .create_session("claude-opus-4-6", "/tmp/project", None, None)
             .unwrap();
 
         let store2 = crate::store::EventStore::new(pool);

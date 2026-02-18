@@ -27,4 +27,4 @@ pub mod tool;
 pub mod turn;
 pub mod worktree;
 
-pub use token_usage::{TokenRecord, TokenUsage};
+pub use token_usage::{TokenRecord, TokenTotals, TokenUsage};

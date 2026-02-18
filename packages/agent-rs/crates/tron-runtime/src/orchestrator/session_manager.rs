@@ -70,7 +70,7 @@ impl SessionManager {
     ) -> Result<String, RuntimeError> {
         let result = self
             .event_store
-            .create_session(model, workspace_path, title)
+            .create_session(model, workspace_path, title, None)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         let session_id = result.session.id.clone();
