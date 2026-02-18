@@ -16,9 +16,10 @@ use tracing::warn;
 use super::errors::TaskError;
 use super::repository::TaskRepository;
 use super::types::{
-    ActivityAction, Area, AreaCreateParams, DependencyRelationship, LogActivityParams, Project,
-    ProjectCreateParams, ProjectStatus, ProjectUpdateParams, Task, TaskCreateParams, TaskStatus,
-    TaskUpdateParams, TaskWithDetails,
+    ActivityAction, Area, AreaCreateParams, AreaFilter, AreaListResult, AreaUpdateParams,
+    DependencyRelationship, LogActivityParams, Project, ProjectCreateParams, ProjectFilter,
+    ProjectListResult, ProjectStatus, ProjectUpdateParams, Task, TaskCreateParams, TaskFilter,
+    TaskListResult, TaskStatus, TaskUpdateParams, TaskWithDetails,
 };
 
 /// Task service with business logic and validation.
@@ -234,6 +235,25 @@ impl TaskService {
         Ok(())
     }
 
+    /// List tasks with filtering and pagination.
+    pub fn list_tasks(
+        conn: &Connection,
+        filter: &TaskFilter,
+        limit: u32,
+        offset: u32,
+    ) -> Result<TaskListResult, TaskError> {
+        TaskRepository::list_tasks(conn, filter, limit, offset)
+    }
+
+    /// Search tasks by title/description.
+    pub fn search_tasks(
+        conn: &Connection,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<Task>, TaskError> {
+        TaskRepository::search_tasks(conn, query, limit)
+    }
+
     /// Add a dependency with circular detection for `Blocks` relationships.
     #[allow(clippy::similar_names)]
     pub fn add_dependency(
@@ -366,6 +386,26 @@ impl TaskService {
         TaskRepository::get_project(conn, id)?.ok_or_else(|| TaskError::project_not_found(id))
     }
 
+    /// Get a project by ID.
+    pub fn get_project(conn: &Connection, id: &str) -> Result<Project, TaskError> {
+        TaskRepository::get_project(conn, id)?.ok_or_else(|| TaskError::project_not_found(id))
+    }
+
+    /// Delete a project.
+    pub fn delete_project(conn: &Connection, id: &str) -> Result<bool, TaskError> {
+        TaskRepository::delete_project(conn, id)
+    }
+
+    /// List projects with progress counts.
+    pub fn list_projects(
+        conn: &Connection,
+        filter: &ProjectFilter,
+        limit: u32,
+        offset: u32,
+    ) -> Result<ProjectListResult, TaskError> {
+        TaskRepository::list_projects(conn, filter, limit, offset)
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Area operations
     // ─────────────────────────────────────────────────────────────────────
@@ -376,6 +416,36 @@ impl TaskService {
             return Err(TaskError::Validation("Area title is required".to_string()));
         }
         TaskRepository::create_area(conn, params)
+    }
+
+    /// Get an area by ID.
+    pub fn get_area(conn: &Connection, id: &str) -> Result<Area, TaskError> {
+        TaskRepository::get_area(conn, id)?.ok_or_else(|| TaskError::area_not_found(id))
+    }
+
+    /// Update an area.
+    pub fn update_area(
+        conn: &Connection,
+        id: &str,
+        updates: &AreaUpdateParams,
+    ) -> Result<Area, TaskError> {
+        TaskRepository::update_area(conn, id, updates)?
+            .ok_or_else(|| TaskError::area_not_found(id))
+    }
+
+    /// Delete an area.
+    pub fn delete_area(conn: &Connection, id: &str) -> Result<bool, TaskError> {
+        TaskRepository::delete_area(conn, id)
+    }
+
+    /// List areas with counts.
+    pub fn list_areas(
+        conn: &Connection,
+        filter: &AreaFilter,
+        limit: u32,
+        offset: u32,
+    ) -> Result<AreaListResult, TaskError> {
+        TaskRepository::list_areas(conn, filter, limit, offset)
     }
 }
 
@@ -779,6 +849,207 @@ mod tests {
         )
         .unwrap();
         assert!(reopened.completed_at.is_none());
+    }
+
+    // --- Task list/search ---
+
+    #[test]
+    fn test_list_tasks_empty_db() {
+        let conn = setup_db();
+        let filter = TaskFilter::default();
+        let result = TaskService::list_tasks(&conn, &filter, 20, 0).unwrap();
+        assert_eq!(result.total, 0);
+        assert!(result.tasks.is_empty());
+    }
+
+    #[test]
+    fn test_list_tasks_with_status_filter() {
+        let conn = setup_db();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "A".to_string(),
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "B".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filter = TaskFilter {
+            status: Some(TaskStatus::InProgress),
+            include_completed: true,
+            include_deferred: true,
+            include_backlog: true,
+            ..Default::default()
+        };
+        let result = TaskService::list_tasks(&conn, &filter, 20, 0).unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.tasks[0].title, "A");
+    }
+
+    #[test]
+    fn test_search_tasks_by_title() {
+        let conn = setup_db();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Fix login bug".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Add logout".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let results = TaskService::search_tasks(&conn, "login", 20).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    // --- Project queries ---
+
+    #[test]
+    fn test_get_project_returns_project() {
+        let conn = setup_db();
+        let project = TaskService::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "My Project".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = TaskService::get_project(&conn, &project.id).unwrap();
+        assert_eq!(result.title, "My Project");
+    }
+
+    #[test]
+    fn test_get_project_not_found() {
+        let conn = setup_db();
+        let result = TaskService::get_project(&conn, "proj-missing");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete_project() {
+        let conn = setup_db();
+        let project = TaskService::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "To Delete".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let deleted = TaskService::delete_project(&conn, &project.id).unwrap();
+        assert!(deleted);
+    }
+
+    #[test]
+    fn test_list_projects() {
+        let conn = setup_db();
+        TaskService::create_project(
+            &conn,
+            &ProjectCreateParams {
+                title: "P1".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filter = ProjectFilter::default();
+        let result = TaskService::list_projects(&conn, &filter, 20, 0).unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.projects[0].project.title, "P1");
+    }
+
+    // --- Area queries ---
+
+    #[test]
+    fn test_get_area_returns_area() {
+        let conn = setup_db();
+        let area = TaskService::create_area(
+            &conn,
+            &AreaCreateParams {
+                title: "My Area".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let result = TaskService::get_area(&conn, &area.id).unwrap();
+        assert_eq!(result.title, "My Area");
+    }
+
+    #[test]
+    fn test_get_area_not_found() {
+        let conn = setup_db();
+        let result = TaskService::get_area(&conn, "area-missing");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_area() {
+        let conn = setup_db();
+        let area = TaskService::create_area(
+            &conn,
+            &AreaCreateParams {
+                title: "Old Title".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let updated = TaskService::update_area(
+            &conn,
+            &area.id,
+            &AreaUpdateParams {
+                title: Some("New Title".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.title, "New Title");
+    }
+
+    #[test]
+    fn test_delete_area() {
+        let conn = setup_db();
+        let area = TaskService::create_area(
+            &conn,
+            &AreaCreateParams {
+                title: "To Delete".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let deleted = TaskService::delete_area(&conn, &area.id).unwrap();
+        assert!(deleted);
+    }
+
+    #[test]
+    fn test_list_areas() {
+        let conn = setup_db();
+        TaskService::create_area(
+            &conn,
+            &AreaCreateParams {
+                title: "A1".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let filter = AreaFilter::default();
+        let result = TaskService::list_areas(&conn, &filter, 20, 0).unwrap();
+        assert_eq!(result.total, 1);
+        assert_eq!(result.areas[0].area.title, "A1");
     }
 
     // --- Area validation ---

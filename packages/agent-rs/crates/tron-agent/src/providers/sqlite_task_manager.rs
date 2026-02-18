@@ -1,15 +1,16 @@
 //! Real `TaskManagerDelegate` backed by `tron_runtime::tasks::TaskService`.
 //!
 //! Provides the `TaskManager` tool with actual database access for CRUD
-//! operations on tasks, projects, and areas.
+//! operations on tasks, projects, and areas. Each entity type has its own
+//! handler method; the outer dispatcher routes by action name.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tron_events::ConnectionPool;
 use tron_runtime::tasks::service::TaskService;
 use tron_runtime::tasks::types::{
-    AreaCreateParams, ProjectCreateParams, ProjectStatus, ProjectUpdateParams, TaskCreateParams,
-    TaskPriority, TaskStatus, TaskUpdateParams,
+    AreaCreateParams, AreaFilter, AreaUpdateParams, ProjectCreateParams, ProjectFilter,
+    ProjectUpdateParams, TaskCreateParams, TaskFilter, TaskUpdateParams,
 };
 use tron_tools::errors::ToolError;
 use tron_tools::traits::TaskManagerDelegate;
@@ -23,356 +24,208 @@ impl SqliteTaskManagerDelegate {
     pub fn new(pool: ConnectionPool) -> Self {
         Self { pool }
     }
-}
 
-fn tool_err(msg: impl std::fmt::Display) -> ToolError {
-    ToolError::Internal {
-        message: msg.to_string(),
-    }
-}
-
-fn get_str(params: &Value, key: &str) -> Option<String> {
-    params.get(key).and_then(Value::as_str).map(String::from)
-}
-
-fn get_i64(params: &Value, key: &str) -> Option<i64> {
-    params.get(key).and_then(Value::as_i64)
-}
-
-/// Parse an enum from a JSON string value using serde deserialization.
-/// These types implement `Deserialize` with `rename_all = "lowercase"` but
-/// not `FromStr`, so we round-trip through a JSON string literal.
-fn parse_status(s: &str) -> Option<TaskStatus> {
-    serde_json::from_value(Value::String(s.to_string())).ok()
-}
-
-fn parse_priority(s: &str) -> Option<TaskPriority> {
-    serde_json::from_value(Value::String(s.to_string())).ok()
-}
-
-fn parse_project_status(s: &str) -> Option<ProjectStatus> {
-    serde_json::from_value(Value::String(s.to_string())).ok()
-}
-
-#[async_trait]
-#[allow(clippy::too_many_lines)]
-impl TaskManagerDelegate for SqliteTaskManagerDelegate {
-    async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError> {
-        let conn = self.pool.get().map_err(tool_err)?;
+    #[allow(clippy::cast_possible_truncation)]
+    fn handle_task(&self, action: &str, params: Value) -> Result<Value, ToolError> {
+        let conn = self.pool.get().map_err(ToolError::internal)?;
 
         match action {
             "create" => {
-                let title = get_str(&params, "title")
-                    .ok_or_else(|| tool_err("title is required for create"))?;
-                let create_params = TaskCreateParams {
-                    title,
-                    description: get_str(&params, "description"),
-                    status: get_str(&params, "status").and_then(|s| parse_status(&s)),
-                    priority: get_str(&params, "priority").and_then(|s| parse_priority(&s)),
-                    project_id: get_str(&params, "projectId"),
-                    area_id: get_str(&params, "areaId"),
-                    parent_task_id: get_str(&params, "parentTaskId"),
-                    ..Default::default()
-                };
-                let task = TaskService::create_task(&conn, &create_params).map_err(tool_err)?;
-                Ok(serde_json::to_value(&task).map_err(tool_err)?)
+                let cp: TaskCreateParams = serde_json::from_value(params).map_err(ToolError::internal)?;
+                if cp.title.is_empty() {
+                    return Err(ToolError::internal("title is required for create"));
+                }
+                let task = TaskService::create_task(&conn, &cp).map_err(ToolError::internal)?;
+                serde_json::to_value(&task).map_err(ToolError::internal)
             }
             "update" => {
-                let id = get_str(&params, "taskId")
-                    .ok_or_else(|| tool_err("taskId is required for update"))?;
-                let updates = TaskUpdateParams {
-                    title: get_str(&params, "title"),
-                    description: get_str(&params, "description"),
-                    status: get_str(&params, "status").and_then(|s| parse_status(&s)),
-                    priority: get_str(&params, "priority").and_then(|s| parse_priority(&s)),
-                    project_id: get_str(&params, "projectId"),
-                    area_id: get_str(&params, "areaId"),
-                    add_note: get_str(&params, "note"),
+                let task_id = params.get("taskId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for update"))?
+                    .to_string();
+                let get_str = |key: &str| params.get(key).and_then(Value::as_str).map(String::from);
+                let up = TaskUpdateParams {
+                    title: get_str("title"),
+                    description: get_str("description"),
+                    status: get_str("status")
+                        .and_then(|s| serde_json::from_value(Value::String(s)).ok()),
+                    priority: get_str("priority")
+                        .and_then(|s| serde_json::from_value(Value::String(s)).ok()),
+                    project_id: get_str("projectId"),
+                    area_id: get_str("areaId"),
+                    add_note: get_str("note"),
                     ..Default::default()
                 };
-                let task =
-                    TaskService::update_task(&conn, &id, &updates, None).map_err(tool_err)?;
-                Ok(serde_json::to_value(&task).map_err(tool_err)?)
+                let task = TaskService::update_task(&conn, &task_id, &up, None).map_err(ToolError::internal)?;
+                serde_json::to_value(&task).map_err(ToolError::internal)
             }
             "get" => {
-                let id = get_str(&params, "taskId")
-                    .ok_or_else(|| tool_err("taskId is required for get"))?;
-                let details = TaskService::get_task(&conn, &id).map_err(tool_err)?;
-                Ok(serde_json::to_value(&details).map_err(tool_err)?)
+                let task_id = params.get("taskId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for get"))?;
+                let details = TaskService::get_task(&conn, task_id).map_err(ToolError::internal)?;
+                serde_json::to_value(&details).map_err(ToolError::internal)
             }
             "list" => {
-                let limit = get_i64(&params, "limit").unwrap_or(20);
-                let offset = get_i64(&params, "offset").unwrap_or(0);
-                let status_filter = get_str(&params, "status");
-                let project_filter = get_str(&params, "projectId");
-
-                let mut sql = String::from(
-                    "SELECT id, title, status, priority, project_id, area_id, \
-                     created_at, started_at, completed_at \
-                     FROM tasks WHERE 1=1",
-                );
-                let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-                if let Some(ref s) = status_filter {
-                    sql.push_str(" AND status = ?");
-                    sql_params.push(Box::new(s.clone()));
-                }
-                if let Some(ref p) = project_filter {
-                    sql.push_str(" AND project_id = ?");
-                    sql_params.push(Box::new(p.clone()));
-                }
-                sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
-                sql_params.push(Box::new(limit));
-                sql_params.push(Box::new(offset));
-
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    sql_params.iter().map(AsRef::as_ref).collect();
-                let mut stmt = conn.prepare(&sql).map_err(tool_err)?;
-                let rows: Vec<Value> = stmt
-                    .query_map(param_refs.as_slice(), |row| {
-                        Ok(json!({
-                            "id": row.get::<_, String>(0)?,
-                            "title": row.get::<_, String>(1)?,
-                            "status": row.get::<_, String>(2)?,
-                            "priority": row.get::<_, String>(3)?,
-                            "projectId": row.get::<_, Option<String>>(4)?,
-                            "areaId": row.get::<_, Option<String>>(5)?,
-                            "createdAt": row.get::<_, String>(6)?,
-                            "startedAt": row.get::<_, Option<String>>(7)?,
-                            "completedAt": row.get::<_, Option<String>>(8)?,
-                        }))
-                    })
-                    .map_err(tool_err)?
-                    .filter_map(Result::ok)
-                    .collect();
-
-                Ok(json!({ "tasks": rows, "count": rows.len() }))
+                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(20) as u32;
+                let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                let filter = TaskFilter {
+                    status: params.get("status").and_then(Value::as_str)
+                        .and_then(|s| serde_json::from_value(Value::String(s.to_string())).ok()),
+                    project_id: params.get("projectId").and_then(Value::as_str).map(String::from),
+                    area_id: params.get("areaId").and_then(Value::as_str).map(String::from),
+                    include_completed: params.get("includeCompleted").and_then(Value::as_bool).unwrap_or(true),
+                    include_deferred: params.get("includeDeferred").and_then(Value::as_bool).unwrap_or(true),
+                    include_backlog: params.get("includeBacklog").and_then(Value::as_bool).unwrap_or(true),
+                    ..Default::default()
+                };
+                let result = TaskService::list_tasks(&conn, &filter, limit, offset).map_err(ToolError::internal)?;
+                // Use "count" for backwards compatibility with existing consumers
+                Ok(json!({ "tasks": serde_json::to_value(&result.tasks).map_err(ToolError::internal)?, "count": result.total }))
             }
             "search" => {
-                let query = get_str(&params, "query").unwrap_or_default();
-                let limit = get_i64(&params, "limit").unwrap_or(20);
-
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT id, title, status, priority \
-                         FROM tasks \
-                         WHERE title LIKE '%' || ?1 || '%' \
-                            OR description LIKE '%' || ?1 || '%' \
-                         ORDER BY created_at DESC LIMIT ?2",
-                    )
-                    .map_err(tool_err)?;
-                let rows: Vec<Value> = stmt
-                    .query_map(rusqlite::params![query, limit], |row| {
-                        Ok(json!({
-                            "id": row.get::<_, String>(0)?,
-                            "title": row.get::<_, String>(1)?,
-                            "status": row.get::<_, String>(2)?,
-                            "priority": row.get::<_, String>(3)?,
-                        }))
-                    })
-                    .map_err(tool_err)?
-                    .filter_map(Result::ok)
-                    .collect();
-
-                Ok(json!({ "tasks": rows, "count": rows.len() }))
+                let query = params.get("query").and_then(Value::as_str).unwrap_or_default();
+                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(20) as u32;
+                let tasks = TaskService::search_tasks(&conn, query, limit).map_err(ToolError::internal)?;
+                Ok(json!({ "tasks": serde_json::to_value(&tasks).map_err(ToolError::internal)?, "count": tasks.len() }))
             }
             "log_time" => {
-                let id = get_str(&params, "taskId")
-                    .ok_or_else(|| tool_err("taskId is required for log_time"))?;
+                let task_id = params.get("taskId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for log_time"))?;
                 #[allow(clippy::cast_possible_truncation)]
-                let minutes = get_i64(&params, "minutes")
-                    .ok_or_else(|| tool_err("minutes is required for log_time"))?
-                    as i32;
-                TaskService::log_time(&conn, &id, minutes, None).map_err(tool_err)?;
-                Ok(json!({ "success": true, "taskId": id, "minutesLogged": minutes }))
+                let minutes = params.get("minutes").and_then(Value::as_i64)
+                    .ok_or_else(|| ToolError::internal("minutes is required for log_time"))? as i32;
+                TaskService::log_time(&conn, task_id, minutes, None).map_err(ToolError::internal)?;
+                Ok(json!({ "success": true, "taskId": task_id, "minutesLogged": minutes }))
             }
             "delete" => {
-                let id = get_str(&params, "taskId")
-                    .ok_or_else(|| tool_err("taskId is required for delete"))?;
-                let deleted = TaskService::delete_task(&conn, &id, None).map_err(tool_err)?;
-                Ok(json!({ "success": deleted, "taskId": id }))
+                let task_id = params.get("taskId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("taskId is required for delete"))?;
+                let deleted = TaskService::delete_task(&conn, task_id, None).map_err(ToolError::internal)?;
+                Ok(json!({ "success": deleted, "taskId": task_id }))
             }
+            _ => unreachable!(),
+        }
+    }
+
+    #[allow(clippy::needless_pass_by_value, clippy::cast_possible_truncation)]
+    fn handle_project(&self, action: &str, params: Value) -> Result<Value, ToolError> {
+        let conn = self.pool.get().map_err(ToolError::internal)?;
+
+        match action {
             "create_project" => {
-                let title = get_str(&params, "projectTitle")
-                    .or_else(|| get_str(&params, "title"))
-                    .ok_or_else(|| tool_err("projectTitle is required"))?;
-                let create_params = ProjectCreateParams {
-                    title,
-                    description: get_str(&params, "description"),
+                let title = params.get("projectTitle").or_else(|| params.get("title"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("projectTitle is required"))?;
+                let cp = ProjectCreateParams {
+                    title: title.to_string(),
+                    description: params.get("description").and_then(Value::as_str).map(String::from),
                     ..Default::default()
                 };
-                let project =
-                    TaskService::create_project(&conn, &create_params).map_err(tool_err)?;
-                Ok(serde_json::to_value(&project).map_err(tool_err)?)
+                let project = TaskService::create_project(&conn, &cp).map_err(ToolError::internal)?;
+                serde_json::to_value(&project).map_err(ToolError::internal)
             }
             "update_project" => {
-                let id = get_str(&params, "projectId")
-                    .ok_or_else(|| tool_err("projectId is required"))?;
-                let updates = ProjectUpdateParams {
-                    title: get_str(&params, "title").or_else(|| get_str(&params, "projectTitle")),
-                    description: get_str(&params, "description"),
-                    status: get_str(&params, "status").and_then(|s| parse_project_status(&s)),
+                let id = params.get("projectId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("projectId is required"))?;
+                let up = ProjectUpdateParams {
+                    title: params.get("title").or_else(|| params.get("projectTitle"))
+                        .and_then(Value::as_str).map(String::from),
+                    description: params.get("description").and_then(Value::as_str).map(String::from),
+                    status: params.get("status").and_then(Value::as_str)
+                        .and_then(|s| serde_json::from_value(Value::String(s.to_string())).ok()),
                     ..Default::default()
                 };
-                let project =
-                    TaskService::update_project(&conn, &id, &updates).map_err(tool_err)?;
-                Ok(serde_json::to_value(&project).map_err(tool_err)?)
+                let project = TaskService::update_project(&conn, id, &up).map_err(ToolError::internal)?;
+                serde_json::to_value(&project).map_err(ToolError::internal)
             }
-            "get_project" | "delete_project" | "list_projects" => {
-                // Direct SQL for these since TaskService doesn't expose them all
-                match action {
-                    "get_project" => {
-                        let id = get_str(&params, "projectId")
-                            .ok_or_else(|| tool_err("projectId is required"))?;
-                        let mut stmt = conn
-                            .prepare(
-                                "SELECT id, title, description, status, created_at, completed_at \
-                                 FROM projects WHERE id = ?1",
-                            )
-                            .map_err(tool_err)?;
-                        let project: Option<Value> = stmt
-                            .query_row(rusqlite::params![id], |row| {
-                                Ok(json!({
-                                    "id": row.get::<_, String>(0)?,
-                                    "title": row.get::<_, String>(1)?,
-                                    "description": row.get::<_, Option<String>>(2)?,
-                                    "status": row.get::<_, String>(3)?,
-                                    "createdAt": row.get::<_, String>(4)?,
-                                    "completedAt": row.get::<_, Option<String>>(5)?,
-                                }))
-                            })
-                            .ok();
-                        Ok(project.unwrap_or(json!({ "error": "Project not found" })))
-                    }
-                    "delete_project" => {
-                        let id = get_str(&params, "projectId")
-                            .ok_or_else(|| tool_err("projectId is required"))?;
-                        let deleted = conn
-                            .execute("DELETE FROM projects WHERE id = ?1", rusqlite::params![id])
-                            .map_err(tool_err)?;
-                        Ok(json!({ "success": deleted > 0, "projectId": id }))
-                    }
-                    "list_projects" => {
-                        let limit = get_i64(&params, "limit").unwrap_or(20);
-                        let mut stmt = conn
-                            .prepare(
-                                "SELECT id, title, status, created_at \
-                                 FROM projects ORDER BY created_at DESC LIMIT ?1",
-                            )
-                            .map_err(tool_err)?;
-                        let rows: Vec<Value> = stmt
-                            .query_map(rusqlite::params![limit], |row| {
-                                Ok(json!({
-                                    "id": row.get::<_, String>(0)?,
-                                    "title": row.get::<_, String>(1)?,
-                                    "status": row.get::<_, String>(2)?,
-                                    "createdAt": row.get::<_, String>(3)?,
-                                }))
-                            })
-                            .map_err(tool_err)?
-                            .filter_map(Result::ok)
-                            .collect();
-                        Ok(json!({ "projects": rows, "count": rows.len() }))
-                    }
-                    _ => unreachable!(),
-                }
+            "get_project" => {
+                let id = params.get("projectId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("projectId is required"))?;
+                let project = TaskService::get_project(&conn, id).map_err(ToolError::internal)?;
+                serde_json::to_value(&project).map_err(ToolError::internal)
             }
+            "delete_project" => {
+                let id = params.get("projectId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("projectId is required"))?;
+                let deleted = TaskService::delete_project(&conn, id).map_err(ToolError::internal)?;
+                Ok(json!({ "success": deleted, "projectId": id }))
+            }
+            "list_projects" => {
+                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(20) as u32;
+                let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                let filter = ProjectFilter::default();
+                let result = TaskService::list_projects(&conn, &filter, limit, offset).map_err(ToolError::internal)?;
+                Ok(json!({ "projects": serde_json::to_value(&result.projects).map_err(ToolError::internal)?, "count": result.total }))
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[allow(clippy::needless_pass_by_value, clippy::cast_possible_truncation)]
+    fn handle_area(&self, action: &str, params: Value) -> Result<Value, ToolError> {
+        let conn = self.pool.get().map_err(ToolError::internal)?;
+
+        match action {
             "create_area" => {
-                let title = get_str(&params, "areaTitle")
-                    .or_else(|| get_str(&params, "title"))
-                    .ok_or_else(|| tool_err("areaTitle is required"))?;
-                let create_params = AreaCreateParams {
-                    title,
-                    description: get_str(&params, "description"),
+                let title = params.get("areaTitle").or_else(|| params.get("title"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("areaTitle is required"))?;
+                let cp = AreaCreateParams {
+                    title: title.to_string(),
+                    description: params.get("description").and_then(Value::as_str).map(String::from),
                     ..Default::default()
                 };
-                let area = TaskService::create_area(&conn, &create_params).map_err(tool_err)?;
-                Ok(serde_json::to_value(&area).map_err(tool_err)?)
+                let area = TaskService::create_area(&conn, &cp).map_err(ToolError::internal)?;
+                serde_json::to_value(&area).map_err(ToolError::internal)
             }
-            "update_area" | "get_area" | "delete_area" | "list_areas" => {
-                // Direct SQL for area operations
-                match action {
-                    "get_area" => {
-                        let id = get_str(&params, "areaId")
-                            .ok_or_else(|| tool_err("areaId is required"))?;
-                        let mut stmt = conn
-                            .prepare(
-                                "SELECT id, title, description, created_at \
-                                 FROM areas WHERE id = ?1",
-                            )
-                            .map_err(tool_err)?;
-                        let area: Option<Value> = stmt
-                            .query_row(rusqlite::params![id], |row| {
-                                Ok(json!({
-                                    "id": row.get::<_, String>(0)?,
-                                    "title": row.get::<_, String>(1)?,
-                                    "description": row.get::<_, Option<String>>(2)?,
-                                    "createdAt": row.get::<_, String>(3)?,
-                                }))
-                            })
-                            .ok();
-                        Ok(area.unwrap_or(json!({ "error": "Area not found" })))
-                    }
-                    "update_area" => {
-                        let id = get_str(&params, "areaId")
-                            .ok_or_else(|| tool_err("areaId is required"))?;
-                        let title =
-                            get_str(&params, "title").or_else(|| get_str(&params, "areaTitle"));
-                        let desc = get_str(&params, "description");
-                        if let Some(t) = &title {
-                            let _ = conn
-                                .execute(
-                                    "UPDATE areas SET title = ?1 WHERE id = ?2",
-                                    rusqlite::params![t, id],
-                                )
-                                .map_err(tool_err)?;
-                        }
-                        if let Some(d) = &desc {
-                            let _ = conn
-                                .execute(
-                                    "UPDATE areas SET description = ?1 WHERE id = ?2",
-                                    rusqlite::params![d, id],
-                                )
-                                .map_err(tool_err)?;
-                        }
-                        Ok(json!({ "success": true, "areaId": id }))
-                    }
-                    "delete_area" => {
-                        let id = get_str(&params, "areaId")
-                            .ok_or_else(|| tool_err("areaId is required"))?;
-                        let deleted = conn
-                            .execute("DELETE FROM areas WHERE id = ?1", rusqlite::params![id])
-                            .map_err(tool_err)?;
-                        Ok(json!({ "success": deleted > 0, "areaId": id }))
-                    }
-                    "list_areas" => {
-                        let limit = get_i64(&params, "limit").unwrap_or(20);
-                        let mut stmt = conn
-                            .prepare(
-                                "SELECT id, title, description, created_at \
-                                 FROM areas ORDER BY created_at DESC LIMIT ?1",
-                            )
-                            .map_err(tool_err)?;
-                        let rows: Vec<Value> = stmt
-                            .query_map(rusqlite::params![limit], |row| {
-                                Ok(json!({
-                                    "id": row.get::<_, String>(0)?,
-                                    "title": row.get::<_, String>(1)?,
-                                    "description": row.get::<_, Option<String>>(2)?,
-                                    "createdAt": row.get::<_, String>(3)?,
-                                }))
-                            })
-                            .map_err(tool_err)?
-                            .filter_map(Result::ok)
-                            .collect();
-                        Ok(json!({ "areas": rows, "count": rows.len() }))
-                    }
-                    _ => unreachable!(),
-                }
+            "update_area" => {
+                let id = params.get("areaId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("areaId is required"))?;
+                let up = AreaUpdateParams {
+                    title: params.get("title").or_else(|| params.get("areaTitle"))
+                        .and_then(Value::as_str).map(String::from),
+                    description: params.get("description").and_then(Value::as_str).map(String::from),
+                    ..Default::default()
+                };
+                let area = TaskService::update_area(&conn, id, &up).map_err(ToolError::internal)?;
+                Ok(json!({ "success": true, "areaId": id, "area": serde_json::to_value(&area).map_err(ToolError::internal)? }))
             }
-            other => Err(ToolError::Internal {
-                message: format!("Unknown action: {other}"),
-            }),
+            "get_area" => {
+                let id = params.get("areaId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("areaId is required"))?;
+                let area = TaskService::get_area(&conn, id).map_err(ToolError::internal)?;
+                serde_json::to_value(&area).map_err(ToolError::internal)
+            }
+            "delete_area" => {
+                let id = params.get("areaId").and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::internal("areaId is required"))?;
+                let deleted = TaskService::delete_area(&conn, id).map_err(ToolError::internal)?;
+                Ok(json!({ "success": deleted, "areaId": id }))
+            }
+            "list_areas" => {
+                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(20) as u32;
+                let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as u32;
+                let filter = AreaFilter::default();
+                let result = TaskService::list_areas(&conn, &filter, limit, offset).map_err(ToolError::internal)?;
+                Ok(json!({ "areas": serde_json::to_value(&result.areas).map_err(ToolError::internal)?, "count": result.total }))
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[async_trait]
+impl TaskManagerDelegate for SqliteTaskManagerDelegate {
+    async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError> {
+        match action {
+            "create" | "update" | "get" | "list" | "search" | "log_time" | "delete" => {
+                self.handle_task(action, params)
+            }
+            "create_project" | "update_project" | "get_project" | "delete_project"
+            | "list_projects" => self.handle_project(action, params),
+            "create_area" | "update_area" | "get_area" | "delete_area" | "list_areas" => {
+                self.handle_area(action, params)
+            }
+            other => Err(ToolError::internal(format!("Unknown action: {other}"))),
         }
     }
 }
@@ -391,6 +244,8 @@ mod tests {
         }
         pool
     }
+
+    // --- Task CRUD ---
 
     #[tokio::test]
     async fn create_and_get_task() {
@@ -420,6 +275,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_tasks_with_status_filter() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        delegate
+            .execute_action("create", json!({"title": "Task A", "status": "in_progress"}))
+            .await
+            .unwrap();
+        delegate
+            .execute_action("create", json!({"title": "Task B"}))
+            .await
+            .unwrap();
+        let result = delegate
+            .execute_action("list", json!({"status": "in_progress"}))
+            .await
+            .unwrap();
+        assert_eq!(result["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_with_project_filter() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let proj = delegate
+            .execute_action("create_project", json!({"projectTitle": "P1"}))
+            .await
+            .unwrap();
+        let pid = proj["id"].as_str().unwrap().to_string();
+        delegate
+            .execute_action("create", json!({"title": "In Project", "projectId": pid}))
+            .await
+            .unwrap();
+        delegate
+            .execute_action("create", json!({"title": "No Project"}))
+            .await
+            .unwrap();
+        let result = delegate
+            .execute_action("list", json!({"projectId": pid}))
+            .await
+            .unwrap();
+        assert_eq!(result["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn search_tasks() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        delegate
+            .execute_action("create", json!({"title": "Fix authentication"}))
+            .await
+            .unwrap();
+        delegate
+            .execute_action("create", json!({"title": "Add logging"}))
+            .await
+            .unwrap();
+        let result = delegate
+            .execute_action("search", json!({"query": "authentication"}))
+            .await
+            .unwrap();
+        assert!(result["count"].as_u64().unwrap() >= 1);
+    }
+
+    #[tokio::test]
+    async fn log_time() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let task = delegate
+            .execute_action("create", json!({"title": "Time Track"}))
+            .await
+            .unwrap();
+        let tid = task["id"].as_str().unwrap().to_string();
+        let result = delegate
+            .execute_action("log_time", json!({"taskId": tid, "minutes": 30}))
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(result["minutesLogged"], 30);
+    }
+
+    #[tokio::test]
+    async fn delete_task() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let result = delegate
+            .execute_action("create", json!({"title": "To Delete"}))
+            .await
+            .unwrap();
+        let id = result["id"].as_str().unwrap().to_string();
+
+        let deleted = delegate
+            .execute_action("delete", json!({"taskId": id}))
+            .await
+            .unwrap();
+        assert_eq!(deleted["success"], true);
+    }
+
+    // --- Project CRUD ---
+
+    #[tokio::test]
     async fn create_and_list_project() {
         let delegate = SqliteTaskManagerDelegate::new(setup_pool());
         let result = delegate
@@ -434,6 +382,53 @@ mod tests {
             .unwrap();
         assert_eq!(list["count"], 1);
     }
+
+    #[tokio::test]
+    async fn get_project_returns_details() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let proj = delegate
+            .execute_action("create_project", json!({"projectTitle": "My Project"}))
+            .await
+            .unwrap();
+        let pid = proj["id"].as_str().unwrap().to_string();
+        let result = delegate
+            .execute_action("get_project", json!({"projectId": pid}))
+            .await
+            .unwrap();
+        assert_eq!(result["title"], "My Project");
+    }
+
+    #[tokio::test]
+    async fn update_project() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let proj = delegate
+            .execute_action("create_project", json!({"projectTitle": "Original"}))
+            .await
+            .unwrap();
+        let pid = proj["id"].as_str().unwrap().to_string();
+        let result = delegate
+            .execute_action("update_project", json!({"projectId": pid, "title": "Updated"}))
+            .await
+            .unwrap();
+        assert_eq!(result["title"], "Updated");
+    }
+
+    #[tokio::test]
+    async fn delete_project() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let proj = delegate
+            .execute_action("create_project", json!({"projectTitle": "To Delete"}))
+            .await
+            .unwrap();
+        let pid = proj["id"].as_str().unwrap().to_string();
+        let result = delegate
+            .execute_action("delete_project", json!({"projectId": pid}))
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+    }
+
+    // --- Area CRUD ---
 
     #[tokio::test]
     async fn create_and_list_area() {
@@ -452,20 +447,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_task() {
+    async fn get_area_returns_details() {
         let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let area = delegate
+            .execute_action("create_area", json!({"areaTitle": "My Area"}))
+            .await
+            .unwrap();
+        let aid = area["id"].as_str().unwrap().to_string();
         let result = delegate
-            .execute_action("create", json!({"title": "To Delete"}))
+            .execute_action("get_area", json!({"areaId": aid}))
             .await
             .unwrap();
-        let id = result["id"].as_str().unwrap().to_string();
-
-        let deleted = delegate
-            .execute_action("delete", json!({"taskId": id}))
-            .await
-            .unwrap();
-        assert_eq!(deleted["success"], true);
+        assert_eq!(result["title"], "My Area");
     }
+
+    #[tokio::test]
+    async fn update_area() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let area = delegate
+            .execute_action("create_area", json!({"areaTitle": "Old Title"}))
+            .await
+            .unwrap();
+        let aid = area["id"].as_str().unwrap().to_string();
+        let result = delegate
+            .execute_action("update_area", json!({"areaId": aid, "title": "New Title"}))
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+    }
+
+    #[tokio::test]
+    async fn delete_area() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let area = delegate
+            .execute_action("create_area", json!({"areaTitle": "To Delete"}))
+            .await
+            .unwrap();
+        let aid = area["id"].as_str().unwrap().to_string();
+        let result = delegate
+            .execute_action("delete_area", json!({"areaId": aid}))
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+    }
+
+    // --- Error handling ---
 
     #[tokio::test]
     async fn unknown_action_returns_error() {

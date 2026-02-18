@@ -383,8 +383,7 @@ impl ProviderFactory for DefaultProviderFactory {
 
 /// Resolve the auth file path (`~/.tron/auth.json`).
 fn auth_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".tron").join("auth.json")
+    tron_settings::loader::auth_path()
 }
 
 #[cfg(test)]

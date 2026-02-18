@@ -24,6 +24,12 @@ pub fn settings_path() -> PathBuf {
     PathBuf::from(home).join(".tron").join("settings.json")
 }
 
+/// Resolve the path to the auth file (`~/.tron/auth.json`).
+pub fn auth_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".tron").join("auth.json")
+}
+
 /// Load settings from the default path with env var overrides.
 pub fn load_settings() -> Result<TronSettings> {
     load_settings_from_path(&settings_path())
@@ -223,6 +229,13 @@ fn read_env_usize(name: &str, min: usize, max: usize) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::errors::SettingsError;
+
+    #[test]
+    fn auth_path_under_tron_dir() {
+        let path = auth_path();
+        assert!(path.to_string_lossy().contains(".tron"));
+        assert!(path.to_string_lossy().ends_with("auth.json"));
+    }
 
     // ── deep_merge ──────────────────────────────────────────────────
 

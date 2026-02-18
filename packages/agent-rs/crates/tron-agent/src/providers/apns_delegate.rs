@@ -32,6 +32,14 @@ impl ApnsNotifyDelegate {
         Self { apns, pool }
     }
 
+    /// Query active device tokens from the database.
+    fn active_tokens(&self) -> Result<Vec<String>, ToolError> {
+        let conn = self.pool.get().map_err(|e| ToolError::internal(format!("Failed to get DB connection: {e}")))?;
+        let tokens = DeviceTokenRepo::get_all_active(&conn)
+            .map_err(|e| ToolError::internal(format!("Failed to query device tokens: {e}")))?;
+        Ok(tokens.into_iter().map(|t| t.device_token).collect())
+    }
+
     /// Convert a tool-level [`Notification`] to a platform-level [`ApnsNotification`].
     fn to_apns_notification(notification: &Notification) -> ApnsNotification {
         let mut data = HashMap::new();
@@ -68,15 +76,9 @@ impl NotifyDelegate for ApnsNotifyDelegate {
         &self,
         notification: &Notification,
     ) -> Result<NotifyResult, ToolError> {
-        let conn = self.pool.get().map_err(|e| ToolError::Internal {
-            message: format!("Failed to get DB connection: {e}"),
-        })?;
+        let token_strings = self.active_tokens()?;
 
-        let tokens = DeviceTokenRepo::get_all_active(&conn).map_err(|e| ToolError::Internal {
-            message: format!("Failed to query device tokens: {e}"),
-        })?;
-
-        if tokens.is_empty() {
+        if token_strings.is_empty() {
             info!("No active device tokens — skipping APNS send");
             return Ok(NotifyResult {
                 success: true,
@@ -84,7 +86,6 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             });
         }
 
-        let token_strings: Vec<String> = tokens.iter().map(|t| t.device_token.clone()).collect();
         let apns_notif = Self::to_apns_notification(notification);
         let total = token_strings.len();
 
@@ -121,7 +122,9 @@ impl NotifyDelegate for ApnsNotifyDelegate {
                         device_token = token_prefix(&result.device_token),
                         "Marking expired token as invalid"
                     );
-                    let _ = DeviceTokenRepo::mark_invalid(&conn, &result.device_token);
+                    if let Ok(conn) = self.pool.get() {
+                        let _ = DeviceTokenRepo::mark_invalid(&conn, &result.device_token);
+                    }
                 }
                 if let Some(ref err) = result.error {
                     errors.push(format!(
@@ -158,19 +161,11 @@ impl NotifyDelegate for ApnsNotifyDelegate {
     }
 
     async fn open_url_in_app(&self, url: &str) -> Result<(), ToolError> {
-        let conn = self.pool.get().map_err(|e| ToolError::Internal {
-            message: format!("Failed to get DB connection: {e}"),
-        })?;
+        let token_strings = self.active_tokens()?;
 
-        let tokens = DeviceTokenRepo::get_all_active(&conn).map_err(|e| ToolError::Internal {
-            message: format!("Failed to query device tokens: {e}"),
-        })?;
-
-        if tokens.is_empty() {
+        if token_strings.is_empty() {
             return Ok(());
         }
-
-        let token_strings: Vec<String> = tokens.iter().map(|t| t.device_token.clone()).collect();
 
         // Send silent push with URL data
         let mut data = HashMap::new();
@@ -186,7 +181,14 @@ impl NotifyDelegate for ApnsNotifyDelegate {
             thread_id: None,
         };
 
-        let _ = self.apns.send_to_many(&token_strings, &notif).await;
+        let results = self.apns.send_to_many(&token_strings, &notif).await;
+        let success_count = results.iter().filter(|r| r.success).count();
+        debug!(
+            url = url,
+            total = token_strings.len(),
+            success_count,
+            "open_url_in_app silent push results"
+        );
         Ok(())
     }
 }

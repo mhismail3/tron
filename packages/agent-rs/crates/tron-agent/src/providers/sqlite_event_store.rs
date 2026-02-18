@@ -37,9 +37,7 @@ impl SqliteEventStoreQuery {
 }
 
 fn tool_err(msg: impl std::fmt::Display) -> ToolError {
-    ToolError::Internal {
-        message: msg.to_string(),
-    }
+    ToolError::internal(msg)
 }
 
 #[async_trait]

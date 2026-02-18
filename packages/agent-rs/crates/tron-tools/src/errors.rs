@@ -106,6 +106,15 @@ pub enum ToolError {
     },
 }
 
+impl ToolError {
+    /// Create an `Internal` error from any `Display` type.
+    pub fn internal(msg: impl std::fmt::Display) -> Self {
+        Self::Internal {
+            message: msg.to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +150,19 @@ mod tests {
         let tool_err = ToolError::from(io_err);
         assert!(matches!(tool_err, ToolError::Io(_)));
         assert!(tool_err.to_string().contains("gone"));
+    }
+
+    #[test]
+    fn internal_constructor() {
+        let err = ToolError::internal("something broke");
+        assert!(matches!(err, ToolError::Internal { message } if message == "something broke"));
+    }
+
+    #[test]
+    fn internal_from_display_type() {
+        let io_err = io::Error::new(io::ErrorKind::NotFound, "file missing");
+        let err = ToolError::internal(io_err);
+        assert!(matches!(err, ToolError::Internal { message } if message.contains("file missing")));
     }
 
     #[test]

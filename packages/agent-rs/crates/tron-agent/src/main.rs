@@ -59,8 +59,7 @@ fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 
 /// Resolve the auth file path (`~/.tron/auth.json`).
 fn auth_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".tron").join("auth.json")
+    tron_settings::loader::auth_path()
 }
 
 /// Configuration for tool registry creation.
@@ -411,7 +410,7 @@ async fn main() -> Result<()> {
                 },
             );
             let http: Arc<dyn tron_tools::traits::HttpClient> =
-                Arc::new(tron_tools::providers::ReqwestHttpClient::new());
+                Arc::new(tron_tools::providers::ReqwestHttpClient::from_client(config.http_client.clone()));
             registry.register(Arc::new(
                 tron_tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
             ));
