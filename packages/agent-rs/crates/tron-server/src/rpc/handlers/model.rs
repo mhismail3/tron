@@ -383,6 +383,92 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": false,
         }),
+        // ── MiniMax Models ──
+        serde_json::json!({
+            "id": "MiniMax-M2.5",
+            "name": "MiniMax M2.5",
+            "provider": "minimax",
+            "contextWindow": 204_800,
+            "maxOutput": 128_000,
+            "supportsThinking": true,
+            "supportsImages": false,
+            "inputCostPerMillion": 0.3,
+            "outputCostPerMillion": 1.2,
+            "tier": "flagship",
+            "family": "MiniMax M2",
+            "description": "MiniMax M2.5 — latest and most capable MiniMax model.",
+            "supportsReasoning": false,
+            "recommended": true,
+            "isLegacy": false,
+        }),
+        serde_json::json!({
+            "id": "MiniMax-M2.5-highspeed",
+            "name": "MiniMax M2.5 Highspeed",
+            "provider": "minimax",
+            "contextWindow": 204_800,
+            "maxOutput": 128_000,
+            "supportsThinking": true,
+            "supportsImages": false,
+            "inputCostPerMillion": 0.3,
+            "outputCostPerMillion": 1.2,
+            "tier": "flagship",
+            "family": "MiniMax M2",
+            "description": "MiniMax M2.5 Highspeed — optimized for faster inference.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": false,
+        }),
+        serde_json::json!({
+            "id": "MiniMax-M2.1",
+            "name": "MiniMax M2.1",
+            "provider": "minimax",
+            "contextWindow": 204_800,
+            "maxOutput": 128_000,
+            "supportsThinking": true,
+            "supportsImages": false,
+            "inputCostPerMillion": 0.3,
+            "outputCostPerMillion": 1.2,
+            "tier": "flagship",
+            "family": "MiniMax M2",
+            "description": "MiniMax M2.1 — capable general-purpose model.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": false,
+        }),
+        serde_json::json!({
+            "id": "MiniMax-M2.1-highspeed",
+            "name": "MiniMax M2.1 Highspeed",
+            "provider": "minimax",
+            "contextWindow": 204_800,
+            "maxOutput": 128_000,
+            "supportsThinking": true,
+            "supportsImages": false,
+            "inputCostPerMillion": 0.3,
+            "outputCostPerMillion": 1.2,
+            "tier": "flagship",
+            "family": "MiniMax M2",
+            "description": "MiniMax M2.1 Highspeed — optimized for faster inference.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": false,
+        }),
+        serde_json::json!({
+            "id": "MiniMax-M2",
+            "name": "MiniMax M2",
+            "provider": "minimax",
+            "contextWindow": 204_800,
+            "maxOutput": 128_000,
+            "supportsThinking": true,
+            "supportsImages": false,
+            "inputCostPerMillion": 0.3,
+            "outputCostPerMillion": 1.2,
+            "tier": "flagship",
+            "family": "MiniMax M2",
+            "description": "MiniMax M2 — foundation model.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": false,
+        }),
     ]
 }
 
@@ -568,6 +654,46 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-flash-lite"));
         let google_count = models.iter().filter(|m| m["provider"] == "google").count();
         assert_eq!(google_count, 5);
+    }
+
+    #[tokio::test]
+    async fn list_models_includes_all_minimax() {
+        let ctx = make_test_context();
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.5"));
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.5-highspeed"));
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.1"));
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2.1-highspeed"));
+        assert!(models.iter().any(|m| m["id"] == "MiniMax-M2"));
+        let minimax_count = models
+            .iter()
+            .filter(|m| m["provider"] == "minimax")
+            .count();
+        assert_eq!(minimax_count, 5);
+    }
+
+    #[tokio::test]
+    async fn list_models_minimax_no_images() {
+        let ctx = make_test_context();
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+        for model in models.iter().filter(|m| m["provider"] == "minimax") {
+            assert_eq!(model["supportsImages"], false, "{} should not support images", model["id"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn list_models_minimax_has_required_fields() {
+        let ctx = make_test_context();
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+        for model in models.iter().filter(|m| m["provider"] == "minimax") {
+            assert!(model["id"].is_string());
+            assert!(model["name"].is_string());
+            assert!(model["provider"].is_string());
+            assert!(model["contextWindow"].is_number());
+        }
     }
 
     #[tokio::test]

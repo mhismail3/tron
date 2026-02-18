@@ -16,6 +16,9 @@ pub enum ProviderType {
     OpenAi,
     /// Google / Gemini
     Google,
+    /// `MiniMax` (M2 series)
+    #[serde(rename = "minimax")]
+    MiniMax,
 }
 
 impl ProviderType {
@@ -25,6 +28,7 @@ impl ProviderType {
             Self::Anthropic => "anthropic",
             Self::OpenAi => "openai",
             Self::Google => "google",
+            Self::MiniMax => "minimax",
         }
     }
 }
@@ -43,6 +47,7 @@ impl std::str::FromStr for ProviderType {
             "anthropic" => Ok(Self::Anthropic),
             "openai" | "openai-codex" => Ok(Self::OpenAi),
             "google" => Ok(Self::Google),
+            "minimax" => Ok(Self::MiniMax),
             _ => Err(format!("unknown provider: {s}")),
         }
     }
@@ -283,6 +288,33 @@ mod tests {
         let pt = ProviderType::Anthropic;
         let json = serde_json::to_string(&pt).unwrap();
         assert_eq!(json, "\"anthropic\"");
+        let back: ProviderType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, pt);
+    }
+
+    #[test]
+    fn provider_type_minimax_as_str() {
+        assert_eq!(ProviderType::MiniMax.as_str(), "minimax");
+    }
+
+    #[test]
+    fn provider_type_minimax_display() {
+        assert_eq!(ProviderType::MiniMax.to_string(), "minimax");
+    }
+
+    #[test]
+    fn provider_type_minimax_from_str() {
+        assert_eq!(
+            "minimax".parse::<ProviderType>().unwrap(),
+            ProviderType::MiniMax
+        );
+    }
+
+    #[test]
+    fn provider_type_minimax_serde_roundtrip() {
+        let pt = ProviderType::MiniMax;
+        let json = serde_json::to_string(&pt).unwrap();
+        assert_eq!(json, "\"minimax\"");
         let back: ProviderType = serde_json::from_str(&json).unwrap();
         assert_eq!(back, pt);
     }

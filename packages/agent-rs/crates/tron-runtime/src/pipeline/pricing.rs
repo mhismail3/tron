@@ -106,6 +106,16 @@ const GEMINI_FLASH: PricingTier = PricingTier {
     cache_read_multiplier: 0.25,
 };
 
+// ─── `MiniMax` ─────────────────────────────────────────────────────────────────
+
+const MINIMAX: PricingTier = PricingTier {
+    input_per_million: 0.3,
+    output_per_million: 1.2,
+    cache_write_5m_multiplier: 1.0,
+    cache_write_1h_multiplier: 1.0,
+    cache_read_multiplier: 1.0,
+};
+
 /// Look up the pricing tier for a model.
 ///
 /// Tries exact match first, then pattern-matches on model family substrings.
@@ -114,7 +124,8 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
     use tron_llm::models::model_ids::{
         CLAUDE_3_7_SONNET, CLAUDE_3_HAIKU, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4, CLAUDE_OPUS_4_1,
         CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6, CLAUDE_SONNET_4, CLAUDE_SONNET_4_5, GEMINI_2_5_FLASH,
-        GEMINI_2_5_PRO, GEMINI_3_FLASH_PREVIEW, GEMINI_3_PRO_PREVIEW,
+        GEMINI_2_5_PRO, GEMINI_3_FLASH_PREVIEW, GEMINI_3_PRO_PREVIEW, MINIMAX_M2,
+        MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
     };
 
     // Exact match
@@ -130,12 +141,17 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
         CLAUDE_3_HAIKU => return Some(&HAIKU_3),
         GEMINI_3_PRO_PREVIEW | GEMINI_2_5_PRO => return Some(&GEMINI_PRO),
         GEMINI_3_FLASH_PREVIEW | GEMINI_2_5_FLASH => return Some(&GEMINI_FLASH),
+        MINIMAX_M2_5 | MINIMAX_M2_5_HIGHSPEED | MINIMAX_M2_1 | MINIMAX_M2_1_HIGHSPEED
+        | MINIMAX_M2 => return Some(&MINIMAX),
         _ => {}
     }
 
     // Pattern matching on model family substrings
     let lower = model.to_lowercase();
 
+    if lower.contains("minimax") {
+        return Some(&MINIMAX);
+    }
     if lower.contains("opus-4-6") || lower.contains("opus-4.6") {
         return Some(&OPUS_4_6);
     }
@@ -426,6 +442,52 @@ mod tests {
         // output = (500/1M) * 15 = 0.0075
         // total = 0 + 0.00075 + 0.00285 + 0.0075 = 0.0111
         assert!(approx_eq(cost, 0.0111));
+    }
+
+    #[test]
+    fn exact_match_minimax() {
+        let tier = get_pricing_tier(MINIMAX_M2_5).unwrap();
+        assert!(approx_eq(tier.input_per_million, 0.3));
+        assert!(approx_eq(tier.output_per_million, 1.2));
+    }
+
+    #[test]
+    fn exact_match_minimax_all_models() {
+        for id in [
+            MINIMAX_M2_5,
+            MINIMAX_M2_5_HIGHSPEED,
+            MINIMAX_M2_1,
+            MINIMAX_M2_1_HIGHSPEED,
+            MINIMAX_M2,
+        ] {
+            assert!(
+                get_pricing_tier(id).is_some(),
+                "missing pricing for {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn pattern_match_minimax() {
+        let tier = get_pricing_tier("minimax-future-model").unwrap();
+        assert!(approx_eq(tier.input_per_million, 0.3));
+    }
+
+    #[test]
+    fn cost_minimax_no_cache_surcharge() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_creation_tokens: Some(500_000),
+            ..Default::default()
+        };
+        let cost = calculate_cost(MINIMAX_M2_5, &usage).unwrap();
+        // base_input = max(0, 1M - 0 - 500k) = 500k
+        // base_cost = (500k/1M) * 0.3 = 0.15
+        // cache_create = (500k/1M) * 0.3 * 1.0 = 0.15 (multiplier=1.0)
+        // output = (1M/1M) * 1.2 = 1.2
+        // total = 0.15 + 0.15 + 1.2 = 1.5
+        assert!(approx_eq(cost, 1.5));
     }
 
     #[test]

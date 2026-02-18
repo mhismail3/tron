@@ -134,6 +134,8 @@ pub fn detect_provider(model: &str) -> tron_core::messages::ProviderType {
         ProviderType::OpenAi
     } else if m.contains("gemini") || m.contains("google/") {
         ProviderType::Google
+    } else if m.contains("minimax") {
+        ProviderType::MiniMax
     } else {
         // Default to Anthropic
         ProviderType::Anthropic
@@ -144,7 +146,9 @@ pub fn detect_provider(model: &str) -> tron_core::messages::ProviderType {
 #[must_use]
 pub fn get_context_limit(model: &str) -> u64 {
     let m = model.to_lowercase();
-    if m.contains("claude") {
+    if m.contains("minimax") {
+        204_800
+    } else if m.contains("claude") {
         200_000
     } else if m.contains("gemini") {
         1_048_576
@@ -233,8 +237,23 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => openai_tier(0.40, 1.60),
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => openai_tier(0.10, 0.40),
 
+        // MiniMax — $0.3/M input, $1.2/M output (no cache)
+        "MiniMax-M2.5" | "MiniMax-M2.5-highspeed" | "MiniMax-M2.1" | "MiniMax-M2.1-highspeed"
+        | "MiniMax-M2" => minimax_tier(0.3, 1.2),
+
         _ => return None,
     })
+}
+
+/// Create a `MiniMax` pricing tier (no separate cache pricing).
+fn minimax_tier(input: f64, output: f64) -> PricingTier {
+    PricingTier {
+        input_per_million: input,
+        output_per_million: output,
+        cache_write_5m_multiplier: 1.0,
+        cache_write_1h_multiplier: 1.0,
+        cache_read_multiplier: 1.0,
+    }
 }
 
 /// Prefix/pattern-based matching for model families.
@@ -281,6 +300,11 @@ fn pattern_match(model: &str) -> Option<PricingTier> {
     }
     if m.contains("gpt-4.1") {
         return Some(openai_tier(2.0, 8.0));
+    }
+
+    // MiniMax family patterns
+    if m.contains("minimax") {
+        return Some(minimax_tier(0.3, 1.2));
     }
 
     None
@@ -521,6 +545,28 @@ mod tests {
     fn detect_openai_codex() {
         assert_eq!(detect_provider("o3"), ProviderType::OpenAiCodex);
         assert_eq!(detect_provider("o4-mini"), ProviderType::OpenAiCodex);
+    }
+
+    #[test]
+    fn detect_minimax() {
+        assert_eq!(detect_provider("MiniMax-M2.5"), ProviderType::MiniMax);
+    }
+
+    #[test]
+    fn detect_minimax_lowercase() {
+        assert_eq!(detect_provider("minimax-m2.5"), ProviderType::MiniMax);
+    }
+
+    #[test]
+    fn minimax_context_limit() {
+        assert_eq!(get_context_limit("MiniMax-M2.5"), 204_800);
+    }
+
+    #[test]
+    fn pricing_minimax_m2_5() {
+        let tier = get_pricing_tier("MiniMax-M2.5");
+        assert!((tier.input_per_million - 0.3).abs() < f64::EPSILON);
+        assert!((tier.output_per_million - 1.2).abs() < f64::EPSILON);
     }
 
     #[test]

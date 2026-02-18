@@ -17,6 +17,9 @@ pub struct ApiSettings {
     /// Google Gemini API settings (optional — absent if not configured).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google: Option<GoogleApiSettings>,
+    /// `MiniMax` API settings (optional — absent if not configured).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimax: Option<MiniMaxApiSettings>,
 }
 
 /// Anthropic API and OAuth settings.
@@ -168,6 +171,22 @@ impl Default for GoogleApiSettings {
     }
 }
 
+/// `MiniMax` API settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MiniMaxApiSettings {
+    /// Base URL for the `MiniMax` Anthropic-compatible API.
+    pub base_url: String,
+}
+
+impl Default for MiniMaxApiSettings {
+    fn default() -> Self {
+        Self {
+            base_url: "https://api.minimax.io/anthropic".to_string(),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +255,34 @@ mod tests {
         let g = GoogleApiSettings::default();
         assert_eq!(g.default_endpoint, GoogleEndpoint::CloudCodeAssist);
         assert_eq!(g.redirect_uri, "http://localhost:45289");
+    }
+
+    #[test]
+    fn api_settings_minimax_optional() {
+        let api = ApiSettings::default();
+        assert!(api.minimax.is_none());
+    }
+
+    #[test]
+    fn api_settings_minimax_serde() {
+        let json = serde_json::json!({
+            "anthropic": {},
+            "minimax": {
+                "baseUrl": "https://custom.minimax.io/anthropic"
+            }
+        });
+        let api: ApiSettings = serde_json::from_value(json).unwrap();
+        assert!(api.minimax.is_some());
+        assert_eq!(
+            api.minimax.unwrap().base_url,
+            "https://custom.minimax.io/anthropic"
+        );
+    }
+
+    #[test]
+    fn minimax_defaults() {
+        let m = MiniMaxApiSettings::default();
+        assert!(m.base_url.starts_with("https://api.minimax.io"));
     }
 
     #[test]

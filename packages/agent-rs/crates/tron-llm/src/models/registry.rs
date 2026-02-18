@@ -4,10 +4,13 @@
 //! Each provider maintains its own detailed model registry (pricing, capabilities, etc.)
 //! in its respective crate. This module provides cross-provider utilities.
 
-use super::model_ids::{ALL_ANTHROPIC_MODEL_IDS, ALL_GOOGLE_MODEL_IDS, ALL_OPENAI_MODEL_IDS};
+use super::model_ids::{
+    ALL_ANTHROPIC_MODEL_IDS, ALL_GOOGLE_MODEL_IDS, ALL_MINIMAX_MODEL_IDS, ALL_OPENAI_MODEL_IDS,
+};
 use super::types::ProviderType;
 use crate::anthropic::types::get_claude_model;
 use crate::google::types::get_gemini_model;
+use crate::minimax::types::get_minimax_model;
 use crate::openai::types::get_openai_model;
 
 /// Detect which provider serves a given model ID.
@@ -34,6 +37,9 @@ pub fn detect_provider_from_model(model_id: &str, strict: bool) -> Option<Provid
             "google" | "gemini" if ALL_GOOGLE_MODEL_IDS.contains(&bare_model) => {
                 Some(ProviderType::Google)
             }
+            "minimax" if ALL_MINIMAX_MODEL_IDS.contains(&bare_model) => {
+                Some(ProviderType::MiniMax)
+            }
             _ => None,
         };
     }
@@ -47,6 +53,9 @@ pub fn detect_provider_from_model(model_id: &str, strict: bool) -> Option<Provid
     }
     if ALL_GOOGLE_MODEL_IDS.contains(&model_id) {
         return Some(ProviderType::Google);
+    }
+    if ALL_MINIMAX_MODEL_IDS.contains(&model_id) {
+        return Some(ProviderType::MiniMax);
     }
 
     // Unknown model.
@@ -69,6 +78,7 @@ pub fn is_model_supported(model_id: &str) -> bool {
     ALL_ANTHROPIC_MODEL_IDS.contains(&bare)
         || ALL_OPENAI_MODEL_IDS.contains(&bare)
         || ALL_GOOGLE_MODEL_IDS.contains(&bare)
+        || ALL_MINIMAX_MODEL_IDS.contains(&bare)
 }
 
 /// Check if a model supports image inputs.
@@ -85,17 +95,24 @@ pub fn model_supports_images(model_id: &str) -> bool {
     if let Some(m) = get_gemini_model(bare) {
         return m.supports_images;
     }
+    if let Some(m) = get_minimax_model(bare) {
+        return m.supports_images;
+    }
     true
 }
 
 /// Get all known model IDs across all providers.
 pub fn all_model_ids() -> Vec<&'static str> {
     let mut ids = Vec::with_capacity(
-        ALL_ANTHROPIC_MODEL_IDS.len() + ALL_OPENAI_MODEL_IDS.len() + ALL_GOOGLE_MODEL_IDS.len(),
+        ALL_ANTHROPIC_MODEL_IDS.len()
+            + ALL_OPENAI_MODEL_IDS.len()
+            + ALL_GOOGLE_MODEL_IDS.len()
+            + ALL_MINIMAX_MODEL_IDS.len(),
     );
     ids.extend_from_slice(ALL_ANTHROPIC_MODEL_IDS);
     ids.extend_from_slice(ALL_OPENAI_MODEL_IDS);
     ids.extend_from_slice(ALL_GOOGLE_MODEL_IDS);
+    ids.extend_from_slice(ALL_MINIMAX_MODEL_IDS);
     ids
 }
 
@@ -316,15 +333,62 @@ mod tests {
 
     // ── all_model_ids ────────────────────────────────────────────────────
 
+    // ── MiniMax detection ─────────────────────────────────────────────────
+
+    #[test]
+    fn detect_registry_lookup_minimax() {
+        assert_eq!(
+            detect_provider_from_model(MINIMAX_M2_5, false),
+            Some(ProviderType::MiniMax)
+        );
+    }
+
+    #[test]
+    fn detect_registry_lookup_minimax_m2() {
+        assert_eq!(
+            detect_provider_from_model(MINIMAX_M2, false),
+            Some(ProviderType::MiniMax)
+        );
+    }
+
+    #[test]
+    fn detect_explicit_prefix_minimax() {
+        assert_eq!(
+            detect_provider_from_model("minimax/MiniMax-M2.5", false),
+            Some(ProviderType::MiniMax)
+        );
+    }
+
+    #[test]
+    fn supported_model_minimax() {
+        assert!(is_model_supported("MiniMax-M2.5"));
+    }
+
+    #[test]
+    fn supported_model_minimax_with_prefix() {
+        assert!(is_model_supported("minimax/MiniMax-M2.5"));
+    }
+
+    #[test]
+    fn minimax_no_image_support() {
+        assert!(!model_supports_images("MiniMax-M2.5"));
+    }
+
+    // ── all_model_ids ────────────────────────────────────────────────────
+
     #[test]
     fn all_model_ids_includes_all() {
         let ids = all_model_ids();
         assert!(ids.contains(&CLAUDE_OPUS_4_6));
         assert!(ids.contains(&GPT_5_3_CODEX));
         assert!(ids.contains(&GEMINI_2_5_FLASH));
+        assert!(ids.contains(&MINIMAX_M2_5));
         assert_eq!(
             ids.len(),
-            ALL_ANTHROPIC_MODEL_IDS.len() + ALL_OPENAI_MODEL_IDS.len() + ALL_GOOGLE_MODEL_IDS.len()
+            ALL_ANTHROPIC_MODEL_IDS.len()
+                + ALL_OPENAI_MODEL_IDS.len()
+                + ALL_GOOGLE_MODEL_IDS.len()
+                + ALL_MINIMAX_MODEL_IDS.len()
         );
     }
 }

@@ -76,6 +76,37 @@ pub const GEMINI_2_5_FLASH: &str = "gemini-2.5-flash";
 pub const GEMINI_2_5_FLASH_LITE: &str = "gemini-2.5-flash-lite";
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MiniMax
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `MiniMax` M2.5 — latest `MiniMax` model.
+pub const MINIMAX_M2_5: &str = "MiniMax-M2.5";
+
+/// `MiniMax` M2.5 Highspeed.
+pub const MINIMAX_M2_5_HIGHSPEED: &str = "MiniMax-M2.5-highspeed";
+
+/// `MiniMax` M2.1.
+pub const MINIMAX_M2_1: &str = "MiniMax-M2.1";
+
+/// `MiniMax` M2.1 Highspeed.
+pub const MINIMAX_M2_1_HIGHSPEED: &str = "MiniMax-M2.1-highspeed";
+
+/// `MiniMax` M2.
+pub const MINIMAX_M2: &str = "MiniMax-M2";
+
+/// All `MiniMax` model IDs.
+pub const ALL_MINIMAX_MODEL_IDS: &[&str] = &[
+    MINIMAX_M2_5,
+    MINIMAX_M2_5_HIGHSPEED,
+    MINIMAX_M2_1,
+    MINIMAX_M2_1_HIGHSPEED,
+    MINIMAX_M2,
+];
+
+/// Default `MiniMax` model.
+pub const DEFAULT_MINIMAX_MODEL: &str = MINIMAX_M2_5;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Role-Based Aliases
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -165,11 +196,28 @@ mod tests {
     }
 
     #[test]
+    fn minimax_ids_not_empty() {
+        assert!(!ALL_MINIMAX_MODEL_IDS.is_empty());
+        assert!(ALL_MINIMAX_MODEL_IDS.contains(&MINIMAX_M2_5));
+    }
+
+    #[test]
+    fn minimax_id_format() {
+        for id in ALL_MINIMAX_MODEL_IDS {
+            assert!(
+                id.starts_with("MiniMax-"),
+                "MiniMax model ID should start with 'MiniMax-': {id}"
+            );
+        }
+    }
+
+    #[test]
     fn no_duplicate_ids() {
         let mut all: Vec<&str> = Vec::new();
         all.extend_from_slice(ALL_ANTHROPIC_MODEL_IDS);
         all.extend_from_slice(ALL_OPENAI_MODEL_IDS);
         all.extend_from_slice(ALL_GOOGLE_MODEL_IDS);
+        all.extend_from_slice(ALL_MINIMAX_MODEL_IDS);
 
         let unique: std::collections::HashSet<&&str> = all.iter().collect();
         assert_eq!(all.len(), unique.len(), "duplicate model IDs found");

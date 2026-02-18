@@ -51,7 +51,7 @@ pub fn normalize_tokens(
 /// exclusive buckets. Other providers report the full context in `input_tokens`.
 fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
     match source.provider {
-        ProviderType::Anthropic => {
+        ProviderType::Anthropic | ProviderType::MiniMax => {
             let total = source.raw_input_tokens
                 + source.raw_cache_read_tokens
                 + source.raw_cache_creation_tokens;
@@ -73,7 +73,7 @@ fn compute_new_input_tokens(
     context_window_tokens: u64,
     previous_baseline: u64,
 ) -> u64 {
-    if source.provider == ProviderType::Anthropic {
+    if matches!(source.provider, ProviderType::Anthropic | ProviderType::MiniMax) {
         source.raw_input_tokens
     } else {
         if previous_baseline == 0 {

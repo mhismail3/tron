@@ -72,6 +72,7 @@ fn llm_to_core_provider(pt: ProviderType) -> tron_core::messages::ProviderType {
         ProviderType::Anthropic => tron_core::messages::ProviderType::Anthropic,
         ProviderType::OpenAi => tron_core::messages::ProviderType::OpenAi,
         ProviderType::Google => tron_core::messages::ProviderType::Google,
+        ProviderType::MiniMax => tron_core::messages::ProviderType::MiniMax,
     }
 }
 

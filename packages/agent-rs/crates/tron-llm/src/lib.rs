@@ -28,6 +28,7 @@ pub mod context_composition;
 pub mod google;
 pub mod health;
 pub mod id_remapping;
+pub mod minimax;
 pub mod models;
 pub mod openai;
 pub mod provider;

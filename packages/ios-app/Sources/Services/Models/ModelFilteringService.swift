@@ -89,9 +89,15 @@ enum ModelFilteringService {
             |> sortByGeminiTier
         legacyModels.append(contentsOf: legacyGemini)
 
-        // Unknown providers (not Anthropic, Codex, or Gemini)
+        // MiniMax models (all current generation)
+        let minimax = models.filter { $0.isMiniMax }
+        if !minimax.isEmpty {
+            groups.append(ModelGroup(tier: "MiniMax", models: minimax))
+        }
+
+        // Unknown providers (not Anthropic, Codex, Gemini, or MiniMax)
         let unknown = models.filter {
-            !$0.isAnthropic && !$0.isCodex && !$0.isGemini
+            !$0.isAnthropic && !$0.isCodex && !$0.isGemini && !$0.isMiniMax
         }
         legacyModels.append(contentsOf: unknown)
 
@@ -123,6 +129,8 @@ enum ModelFilteringService {
                         filter: { $0.isCodex }),
             ProviderDef(id: "google", displayName: "Google", color: .tronCyan, icon: "IconGoogle",
                         filter: { $0.isGemini }),
+            ProviderDef(id: "minimax", displayName: "MiniMax", color: .tronIndigo, icon: "IconMiniMax",
+                        filter: { $0.isMiniMax }),
         ]
 
         var groups: [ProviderGroup] = []
@@ -191,6 +199,10 @@ enum ModelFilteringService {
             if id.contains("gemini-2") { return "Gemini 2" }
             return "Gemini"
         }
+        // MiniMax
+        if id.contains("minimax") {
+            return "MiniMax M2"
+        }
         return model.name
     }
 
@@ -247,6 +259,11 @@ enum ModelFilteringService {
                 return codexVersionPriority(m1) > codexVersionPriority(m2)
             } else if m1.isGemini {
                 return geminiTierPriority(m1) < geminiTierPriority(m2)
+            } else if m1.isMiniMax {
+                // MiniMax: recommended first, then alphabetical
+                let r1 = m1.recommended ?? false
+                let r2 = m2.recommended ?? false
+                if r1 != r2 { return r1 }
             }
 
             // Fallback: alphabetical
@@ -283,6 +300,7 @@ enum ModelFilteringService {
         if model.isAnthropic { return 0 }
         if model.isCodex { return 1 }
         if model.isGemini { return 2 }
+        if model.isMiniMax { return 3 }
         return 99
     }
 

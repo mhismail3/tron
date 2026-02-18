@@ -154,10 +154,11 @@ pub fn normalize_is_error(block: &Value) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// LLM provider type for token normalization.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderType {
     /// Anthropic (Claude).
+    #[default]
     Anthropic,
     /// `OpenAI`.
     #[serde(rename = "openai")]
@@ -167,6 +168,9 @@ pub enum ProviderType {
     OpenAiCodex,
     /// Google (Gemini).
     Google,
+    /// `MiniMax` (M2 series).
+    #[serde(rename = "minimax")]
+    MiniMax,
 }
 
 /// Token usage information from an LLM response.
@@ -569,6 +573,27 @@ mod tests {
         assert_eq!(json["inputTokens"], 100);
         assert_eq!(json["cacheReadTokens"], 30);
         assert!(json.get("cacheCreationTokens").is_none());
+    }
+
+    #[test]
+    fn provider_type_minimax_serde_roundtrip() {
+        let pt = ProviderType::MiniMax;
+        let json = serde_json::to_string(&pt).unwrap();
+        assert_eq!(json, "\"minimax\"");
+        let back: ProviderType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ProviderType::MiniMax);
+    }
+
+    #[test]
+    fn token_usage_with_minimax_provider() {
+        let usage = TokenUsage {
+            input_tokens: 200,
+            output_tokens: 100,
+            provider_type: Some(ProviderType::MiniMax),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&usage).unwrap();
+        assert_eq!(json["providerType"], "minimax");
     }
 
     // -- StopReason --

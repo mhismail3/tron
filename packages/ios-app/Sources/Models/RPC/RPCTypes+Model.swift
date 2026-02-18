@@ -140,8 +140,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Properly formatted display name (e.g., "Claude Opus 4.5", "Claude Sonnet 4")
     var displayName: String {
-        // For OpenAI models, use the name directly
-        if provider == "openai-codex" || provider == "openai" {
+        // For OpenAI and MiniMax models, use the name directly
+        if provider == "openai-codex" || provider == "openai" || provider == "minimax" {
             return name
         }
         return id.fullModelName
@@ -149,8 +149,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Short tier name: "Opus", "Sonnet", "Haiku"
     var shortName: String {
-        // For OpenAI models, use the name directly
-        if provider == "openai-codex" || provider == "openai" {
+        // For OpenAI and MiniMax models, use the name directly
+        if provider == "openai-codex" || provider == "openai" || provider == "minimax" {
             return name
         }
         return ModelNameFormatter.format(id, style: .tierOnly, fallback: name)
@@ -168,6 +168,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
             // Gemini: Use the server-provided name or format nicely
             // e.g., "gemini-3-pro-preview" → "Gemini 3 Pro"
             return formatGeminiName()
+        }
+        if lowerId.contains("minimax") {
+            return name
         }
         // Claude: "Claude Opus 4.5" (full format with "Claude" prefix)
         return id.fullModelName
@@ -239,6 +242,11 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Whether this is a Google Gemini model
     var isGemini: Bool {
         provider == "google" || id.lowercased().contains("gemini")
+    }
+
+    /// Whether this is a MiniMax model
+    var isMiniMax: Bool {
+        provider == "minimax"
     }
 
     /// Whether this is a Gemini 3 model (latest Google models)

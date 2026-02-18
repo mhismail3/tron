@@ -11,13 +11,15 @@ use tracing::{info, warn};
 
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
-use tron_core::messages::{ProviderType, TokenUsage, ToolCall};
+use tron_core::messages::{TokenUsage, ToolCall};
 
 use super::types::{AnthropicSseEvent, SseContentBlock, SseDelta};
 
 /// Stream state accumulated across SSE events.
 #[derive(Clone, Debug, Default)]
 pub struct StreamState {
+    /// Provider type for token attribution in Done events.
+    pub provider_type: tron_core::messages::ProviderType,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
     /// Tool call ID for the current `tool_use` block.
@@ -61,10 +63,19 @@ pub enum BlockType {
     ToolUse,
 }
 
-/// Create a new stream state.
+/// Create a new stream state for a specific provider.
+#[must_use]
+pub fn create_stream_state_for(provider_type: tron_core::messages::ProviderType) -> StreamState {
+    StreamState {
+        provider_type,
+        ..StreamState::default()
+    }
+}
+
+/// Create a new stream state (defaults to Anthropic).
 #[must_use]
 pub fn create_stream_state() -> StreamState {
-    StreamState::default()
+    create_stream_state_for(tron_core::messages::ProviderType::Anthropic)
 }
 
 /// Process a single Anthropic SSE event and return zero or more [`StreamEvent`]s.
@@ -268,7 +279,7 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
             } else {
                 None
             },
-            provider_type: Some(ProviderType::Anthropic),
+            provider_type: Some(state.provider_type.clone()),
         })
     } else {
         None
@@ -290,6 +301,8 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tron_core::messages::ProviderType;
+
     use crate::anthropic::types::{
         SseCacheCreation, SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta,
     };
@@ -301,6 +314,46 @@ mod tests {
             cache_creation_input_tokens: cache_create,
             cache_read_input_tokens: cache_read,
             cache_creation: None,
+        }
+    }
+
+    // ── stream state creation ──────────────────────────────────────────
+
+    #[test]
+    fn stream_state_default_is_anthropic() {
+        let state = create_stream_state();
+        assert_eq!(
+            state.provider_type,
+            tron_core::messages::ProviderType::Anthropic
+        );
+    }
+
+    #[test]
+    fn stream_state_for_minimax() {
+        let state =
+            create_stream_state_for(tron_core::messages::ProviderType::MiniMax);
+        assert_eq!(
+            state.provider_type,
+            tron_core::messages::ProviderType::MiniMax
+        );
+    }
+
+    #[test]
+    fn done_event_uses_state_provider_type() {
+        let mut state =
+            create_stream_state_for(tron_core::messages::ProviderType::MiniMax);
+        state.input_tokens = 100;
+        state.output_tokens = 50;
+        let event = build_done_event(&mut state);
+        match event {
+            StreamEvent::Done { message, .. } => {
+                let usage = message.token_usage.as_ref().unwrap();
+                assert_eq!(
+                    usage.provider_type,
+                    Some(tron_core::messages::ProviderType::MiniMax)
+                );
+            }
+            _ => panic!("expected Done"),
         }
     }
 

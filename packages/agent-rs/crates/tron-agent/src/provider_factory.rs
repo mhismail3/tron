@@ -41,6 +41,8 @@ pub struct DefaultProviderFactory {
     auth_path: PathBuf,
     anthropic: AnthropicSettings,
     retry: CapturedRetrySettings,
+    /// `MiniMax` base URL override from settings.
+    minimax_base_url: Option<String>,
     /// Shared HTTP client — connection pool reused across all providers.
     http_client: reqwest::Client,
 }
@@ -70,6 +72,7 @@ impl DefaultProviderFactory {
                 max_delay_ms: settings.retry.max_delay_ms,
                 jitter_factor: settings.retry.jitter_factor,
             },
+            minimax_base_url: settings.api.minimax.as_ref().map(|m| m.base_url.clone()),
             http_client,
         }
     }
@@ -314,6 +317,49 @@ impl DefaultProviderFactory {
             ),
         ))
     }
+    fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+        // Priority: env var > auth.json
+        let api_key = if let Ok(key) = std::env::var("MINIMAX_API_KEY") {
+            info!("using MINIMAX_API_KEY env var");
+            key
+        } else if let Some(pa) = tron_llm::auth::storage::get_provider_auth(&self.auth_path, "minimax") {
+            if let Some(key) = pa.api_key {
+                info!("using MiniMax API key from auth.json");
+                key
+            } else {
+                return Err(ProviderError::Auth {
+                    message: "MiniMax entry in auth.json has no apiKey".into(),
+                });
+            }
+        } else {
+            return Err(ProviderError::Auth {
+                message: "no MiniMax auth available (set MINIMAX_API_KEY or add to auth.json)".into(),
+            });
+        };
+
+        let config = tron_llm::minimax::types::MiniMaxConfig {
+            model: model.to_string(),
+            auth: tron_llm::minimax::types::MiniMaxAuth::ApiKey { api_key },
+            max_tokens: None,
+            base_url: self.minimax_base_url.clone(),
+            retry: Some(tron_llm::StreamRetryConfig {
+                retry: tron_core::retry::RetryConfig {
+                    max_retries: self.retry.max_retries,
+                    base_delay_ms: self.retry.base_delay_ms,
+                    max_delay_ms: self.retry.max_delay_ms,
+                    jitter_factor: self.retry.jitter_factor,
+                },
+                emit_retry_events: true,
+                cancel_token: None,
+            }),
+        };
+        Ok(Arc::new(
+            tron_llm::minimax::provider::MiniMaxProvider::with_client(
+                config,
+                self.http_client.clone(),
+            ),
+        ))
+    }
 }
 
 #[async_trait]
@@ -330,6 +376,7 @@ impl ProviderFactory for DefaultProviderFactory {
             ProviderType::Anthropic => self.create_anthropic(bare_model).await,
             ProviderType::OpenAi => self.create_openai(bare_model).await,
             ProviderType::Google => self.create_google(bare_model).await,
+            ProviderType::MiniMax => self.create_minimax(bare_model),
         }
     }
 }
@@ -446,6 +493,30 @@ mod tests {
         // "openai/gpt-5.3-codex" should route to OpenAI
         let err = expect_auth_error(&factory, "openai/gpt-5.3-codex").await;
         assert!(err.to_string().contains("OpenAI"));
+    }
+
+    #[tokio::test]
+    async fn factory_rejects_minimax_without_auth() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "MiniMax-M2.5").await;
+        assert_eq!(err.category(), "auth");
+        assert!(err.to_string().contains("MiniMax"));
+    }
+
+    #[tokio::test]
+    async fn factory_detects_minimax_from_model_id() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "MiniMax-M2.5").await;
+        // Should route to MiniMax (auth error, not unsupported model)
+        assert_eq!(err.category(), "auth");
+    }
+
+    #[tokio::test]
+    async fn factory_strips_minimax_prefix() {
+        let factory = no_auth_factory();
+        let err = expect_auth_error(&factory, "minimax/MiniMax-M2.5").await;
+        assert_eq!(err.category(), "auth");
+        assert!(err.to_string().contains("MiniMax"));
     }
 
     #[tokio::test]
