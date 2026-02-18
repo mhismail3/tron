@@ -49,6 +49,8 @@ pub struct CompactorSettings {
     /// Number of recent turns to keep in the alert zone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alert_turn_fallback: Option<usize>,
+    /// Number of recent messages to preserve during compaction.
+    pub preserve_recent_count: usize,
 }
 
 impl Default for CompactorSettings {
@@ -65,6 +67,7 @@ impl Default for CompactorSettings {
             alert_zone_threshold: Some(0.50),
             default_turn_fallback: Some(8),
             alert_turn_fallback: Some(5),
+            preserve_recent_count: 5,
         }
     }
 }
@@ -211,6 +214,7 @@ mod tests {
         assert!((c.compaction_threshold - 0.85).abs() < f64::EPSILON);
         assert!((c.preserve_ratio - 0.20).abs() < f64::EPSILON);
         assert_eq!(c.trigger_token_threshold, Some(0.70));
+        assert_eq!(c.preserve_recent_count, 5);
     }
 
     #[test]
@@ -220,6 +224,25 @@ mod tests {
         assert!(json.get("maxTokens").is_some());
         assert!(json.get("compactionThreshold").is_some());
         assert!(json.get("charsPerToken").is_some());
+        assert_eq!(json["preserveRecentCount"], 5);
+    }
+
+    #[test]
+    fn compactor_preserve_recent_count_round_trip() {
+        let json = serde_json::json!({
+            "preserveRecentCount": 8
+        });
+        let c: CompactorSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(c.preserve_recent_count, 8);
+        let serialized = serde_json::to_value(&c).unwrap();
+        assert_eq!(serialized["preserveRecentCount"], 8);
+    }
+
+    #[test]
+    fn compactor_preserve_recent_count_defaults_when_absent() {
+        let json = serde_json::json!({});
+        let c: CompactorSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(c.preserve_recent_count, 5);
     }
 
     #[test]

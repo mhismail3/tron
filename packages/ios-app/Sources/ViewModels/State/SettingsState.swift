@@ -17,7 +17,7 @@ final class SettingsState {
     var triggerTokenThreshold: Double = 0.70
     var defaultTurnFallback: Int = 8
     var memoryLedgerEnabled: Bool = true
-    var memoryAutoInject: Bool = false
+    var memoryAutoInject: Bool = true
     var memoryAutoInjectCount: Int = 5
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true

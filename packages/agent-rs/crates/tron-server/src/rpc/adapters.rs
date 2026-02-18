@@ -1310,4 +1310,15 @@ mod tests {
         let rendered = adapt_tool_execution_result_for_ios("Read", true, "plain output", None);
         assert_eq!(rendered, "plain output");
     }
+
+    #[test]
+    fn adapt_settings_get_preserves_recent_count_from_rust_struct() {
+        let ctx = make_test_context();
+        let settings = tron_settings::TronSettings::default();
+        let mut result = serde_json::to_value(&settings).unwrap();
+        adapt_rpc_result_for_ios("settings.get", &mut result, &ctx);
+        // preserveRecentCount should be renamed to preserveRecentTurns
+        assert_eq!(result["compaction"]["preserveRecentTurns"], 5);
+        assert!(result["compaction"].get("preserveRecentCount").is_none());
+    }
 }

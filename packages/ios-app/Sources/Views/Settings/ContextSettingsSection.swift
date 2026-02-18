@@ -44,7 +44,7 @@ struct ContextSettingsSection: View {
 
             if memoryAutoInject {
                 HStack {
-                    Label("Entries to load", systemImage: "list.number")
+                    Label("Maximum entries to load", systemImage: "list.number")
                         .font(TronTypography.subheadline)
                     Spacer()
                     Text("\(memoryAutoInjectCount)")
