@@ -6,8 +6,7 @@
 
 use serde_json::{Value, json};
 use tron_core::content::AssistantContent;
-use tron_core::messages::TokenUsage;
-use tron_llm::models::types::ProviderType;
+use tron_core::messages::{Provider, TokenUsage};
 use tron_llm::tokens::normalization::normalize_tokens;
 use tron_llm::tokens::types::{TokenMeta, TokenSource};
 
@@ -40,14 +39,14 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
 /// delta calculation using cross-turn baseline tracking.
 pub fn build_token_record(
     usage: &TokenUsage,
-    provider_type: ProviderType,
+    provider_type: Provider,
     session_id: &str,
     turn: u32,
     previous_baseline: u64,
 ) -> Value {
     let now = chrono::Utc::now().to_rfc3339();
     let source = TokenSource {
-        provider: llm_to_core_provider(provider_type),
+        provider: provider_type,
         timestamp: now.clone(),
         raw_input_tokens: usage.input_tokens,
         raw_output_tokens: usage.output_tokens,
@@ -64,16 +63,6 @@ pub fn build_token_record(
     };
     let record = normalize_tokens(source, previous_baseline, meta);
     serde_json::to_value(&record).unwrap_or_default()
-}
-
-/// Convert `tron_llm` provider type to `tron_core` provider type.
-fn llm_to_core_provider(pt: ProviderType) -> tron_core::messages::ProviderType {
-    match pt {
-        ProviderType::Anthropic => tron_core::messages::ProviderType::Anthropic,
-        ProviderType::OpenAi => tron_core::messages::ProviderType::OpenAi,
-        ProviderType::Google => tron_core::messages::ProviderType::Google,
-        ProviderType::MiniMax => tron_core::messages::ProviderType::MiniMax,
-    }
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
@@ -251,13 +240,13 @@ mod tests {
             ..Default::default()
         };
 
-        let anthropic = build_token_record(&usage, ProviderType::Anthropic, "sess-1", 1, 0);
+        let anthropic = build_token_record(&usage, Provider::Anthropic, "sess-1", 1, 0);
         assert_eq!(anthropic["source"]["provider"], "anthropic");
 
-        let google = build_token_record(&usage, ProviderType::Google, "sess-1", 1, 0);
+        let google = build_token_record(&usage, Provider::Google, "sess-1", 1, 0);
         assert_eq!(google["source"]["provider"], "google");
 
-        let openai = build_token_record(&usage, ProviderType::OpenAi, "sess-1", 1, 0);
+        let openai = build_token_record(&usage, Provider::OpenAi, "sess-1", 1, 0);
         assert_eq!(openai["source"]["provider"], "openai");
     }
 
@@ -268,7 +257,7 @@ mod tests {
             output_tokens: 50,
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "sess-1", 3, 0);
+        let record = build_token_record(&usage, Provider::Anthropic, "sess-1", 3, 0);
         assert!(record.get("source").is_some());
         assert!(record.get("computed").is_some());
         assert!(record.get("meta").is_some());
@@ -285,7 +274,7 @@ mod tests {
             cache_creation_tokens: Some(5),
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
+        let record = build_token_record(&usage, Provider::Anthropic, "s1", 1, 0);
         // contextWindowTokens = input + cacheRead + cacheCreation
         assert_eq!(record["computed"]["contextWindowTokens"], 115);
         // Anthropic: newInputTokens = rawInputTokens only (non-cached)
@@ -307,7 +296,7 @@ mod tests {
             ..Default::default()
         };
         // Previous baseline was 9521 (from turn 1 context window)
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 2, 9521);
+        let record = build_token_record(&usage, Provider::Anthropic, "s1", 2, 9521);
         assert_eq!(record["computed"]["contextWindowTokens"], 9735); // 14 + 9521 + 200
         // Anthropic: newInputTokens = rawInputTokens only (non-cached)
         assert_eq!(record["computed"]["newInputTokens"], 14);
@@ -322,7 +311,7 @@ mod tests {
             ..Default::default()
         };
         // Previous baseline was 10000, context shrank (compaction)
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 3, 10_000);
+        let record = build_token_record(&usage, Provider::Anthropic, "s1", 3, 10_000);
         assert_eq!(record["computed"]["contextWindowTokens"], 5000);
         // Anthropic: newInputTokens = rawInputTokens only (non-cached)
         assert_eq!(record["computed"]["newInputTokens"], 5000);
@@ -335,7 +324,7 @@ mod tests {
             output_tokens: 200,
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Google, "s1", 1, 0);
+        let record = build_token_record(&usage, Provider::Google, "s1", 1, 0);
         assert_eq!(record["computed"]["contextWindowTokens"], 5000);
         assert_eq!(record["computed"]["calculationMethod"], "direct");
     }
@@ -351,7 +340,7 @@ mod tests {
             cache_creation_1h_tokens: Some(3),
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
+        let record = build_token_record(&usage, Provider::Anthropic, "s1", 1, 0);
         let source = &record["source"];
         assert_eq!(source["rawInputTokens"], 200);
         assert_eq!(source["rawOutputTokens"], 100);
@@ -369,7 +358,7 @@ mod tests {
             output_tokens: 50,
             ..Default::default()
         };
-        let record = build_token_record(&usage, ProviderType::Anthropic, "s1", 1, 0);
+        let record = build_token_record(&usage, Provider::Anthropic, "s1", 1, 0);
         assert_eq!(record["source"]["rawCacheReadTokens"], 0);
         assert_eq!(record["source"]["rawCacheCreationTokens"], 0);
     }

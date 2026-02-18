@@ -58,7 +58,7 @@ impl<'a> LogStore<'a> {
             }
         }
 
-        let order = opts.order.as_deref().unwrap_or("asc");
+        let order = opts.order.unwrap_or_default().as_sql();
         let _ = write!(sql, " ORDER BY timestamp {order}");
 
         if let Some(limit) = opts.limit {
@@ -89,7 +89,7 @@ impl<'a> LogStore<'a> {
     pub fn get_session_logs(&self, session_id: &str) -> Vec<LogEntry> {
         self.query(&LogQueryOptions {
             session_id: Some(session_id.to_string()),
-            order: Some("asc".to_string()),
+            order: Some(super::types::SortOrder::Asc),
             ..Default::default()
         })
     }
@@ -98,7 +98,7 @@ impl<'a> LogStore<'a> {
     pub fn get_recent_errors(&self, limit: usize) -> Vec<LogEntry> {
         self.query(&LogQueryOptions {
             min_level: Some(LogLevel::Error.as_num()),
-            order: Some("desc".to_string()),
+            order: Some(super::types::SortOrder::Desc),
             limit: Some(limit),
             ..Default::default()
         })

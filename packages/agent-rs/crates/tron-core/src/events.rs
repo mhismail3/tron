@@ -182,43 +182,14 @@ impl BaseEvent {
     }
 }
 
-/// Token usage reported in turn-end events.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TurnTokenUsage {
-    /// Input tokens.
-    pub input_tokens: u64,
-    /// Output tokens.
-    pub output_tokens: u64,
-    /// Tokens read from prompt cache.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_read_tokens: Option<u64>,
-    /// Tokens written to prompt cache.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_creation_tokens: Option<u64>,
-}
+// `TurnTokenUsage` and `ResponseTokenUsage` were consolidated into
+// `crate::messages::TokenUsage` — all extra fields are `Option` with
+// `skip_serializing_if`, so the wire format is identical when unset.
 
-/// Extended token usage for response-complete events.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResponseTokenUsage {
-    /// Input tokens.
-    pub input_tokens: u64,
-    /// Output tokens.
-    pub output_tokens: u64,
-    /// Tokens read from prompt cache.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_read_tokens: Option<u64>,
-    /// Tokens written to prompt cache.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_creation_tokens: Option<u64>,
-    /// 5-minute cache creation tokens.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_creation_5m_tokens: Option<u64>,
-    /// 1-hour cache creation tokens.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_creation_1h_tokens: Option<u64>,
-}
+/// Backward-compatible alias for turn-end events.
+pub type TurnTokenUsage = crate::messages::TokenUsage;
+/// Backward-compatible alias for response-complete events.
+pub type ResponseTokenUsage = crate::messages::TokenUsage;
 
 /// Tool call summary in a batch event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -275,924 +246,571 @@ pub enum CompactionReason {
     Manual,
 }
 
-/// High-level agent event with session context.
+// ─────────────────────────────────────────────────────────────────────────────
+// tron_events! macro — generates TronEvent enum, base(), event_type()
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Declarative macro that generates [`TronEvent`], its `base()` and
+/// `event_type()` accessors, and a compile-time `VARIANT_COUNT`.
 ///
-/// These events are broadcast over WebSocket and may be persisted as
-/// session events. iOS relies on exact type strings and field names.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum TronEvent {
+/// Adding a new variant requires ONE edit (inside this invocation).
+/// The compiler enforces exhaustive matching everywhere else.
+macro_rules! tron_events {
+    ($(
+        $(#[doc = $doc:literal])*
+        $variant:ident {
+            $(
+                $(#[$fmeta:meta])*
+                $field:ident : $ty:ty
+            ),*
+            $(,)?
+        } => $rename:literal
+    ),* $(,)?) => {
+        /// High-level agent event with session context.
+        ///
+        /// These events are broadcast over WebSocket and may be persisted as
+        /// session events. iOS relies on exact type strings and field names.
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(tag = "type")]
+        #[allow(missing_docs)]
+        pub enum TronEvent {
+            $(
+                $(#[doc = $doc])*
+                #[serde(rename = $rename)]
+                $variant {
+                    #[serde(flatten)]
+                    base: BaseEvent,
+                    $(
+                        $(#[$fmeta])*
+                        $field: $ty,
+                    )*
+                },
+            )*
+        }
+
+        impl TronEvent {
+            /// Get the base event fields.
+            #[must_use]
+            pub fn base(&self) -> &BaseEvent {
+                match self {
+                    $(Self::$variant { base, .. } => base,)*
+                }
+            }
+
+            /// Get the event type string (for type discrimination).
+            #[must_use]
+            pub fn event_type(&self) -> &str {
+                match self {
+                    $(Self::$variant { .. } => $rename,)*
+                }
+            }
+        }
+
+        /// Number of `TronEvent` variants (compile-time constant for tests).
+        #[cfg(test)]
+        pub(crate) const VARIANT_COUNT: usize = [$($rename),*].len();
+    };
+}
+
+tron_events! {
     // -- Agent lifecycle --
+
     /// Agent started processing.
-    #[serde(rename = "agent_start")]
-    AgentStart {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    AgentStart {} => "agent_start",
 
     /// Agent finished processing.
-    #[serde(rename = "agent_end")]
     AgentEnd {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Error message if ended due to error.
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
-    },
+    } => "agent_end",
 
     /// Agent ready (post-processing complete, safe to send next message).
-    #[serde(rename = "agent_ready")]
-    AgentReady {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    AgentReady {} => "agent_ready",
 
     /// Agent interrupted by user.
-    #[serde(rename = "agent_interrupted")]
     AgentInterrupted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Turn number when interrupted.
         turn: u32,
-        /// Partial content captured before interruption.
         #[serde(rename = "partialContent", skip_serializing_if = "Option::is_none")]
         partial_content: Option<String>,
-        /// Tool that was running when interrupted.
         #[serde(rename = "activeTool", skip_serializing_if = "Option::is_none")]
         active_tool: Option<String>,
-    },
+    } => "agent_interrupted",
 
     // -- Turn lifecycle --
+
     /// Turn started.
-    #[serde(rename = "turn_start")]
     TurnStart {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Turn number.
         turn: u32,
-    },
+    } => "turn_start",
 
     /// Turn completed.
-    #[serde(rename = "turn_end")]
     TurnEnd {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Turn number.
         turn: u32,
-        /// Duration in milliseconds.
         duration: u64,
-        /// Token usage for this turn.
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<TurnTokenUsage>,
-        /// Canonical token record.
         #[serde(rename = "tokenRecord", skip_serializing_if = "Option::is_none")]
         token_record: Option<Value>,
-        /// Cost for this turn in USD.
         #[serde(skip_serializing_if = "Option::is_none")]
         cost: Option<f64>,
-        /// LLM stop reason (e.g., `end_turn`, `tool_use`).
         #[serde(rename = "stopReason", skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
-        /// Context window limit (for iOS sync after model switch).
         #[serde(rename = "contextLimit", skip_serializing_if = "Option::is_none")]
         context_limit: Option<u64>,
-        /// Model used for this turn.
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
-    },
+    } => "turn_end",
 
     /// Turn failed.
-    #[serde(rename = "agent.turn_failed")]
     TurnFailed {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Turn number.
         turn: u32,
-        /// Human-readable error message.
         error: String,
-        /// Error category code.
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<String>,
-        /// Human-readable error category.
         #[serde(skip_serializing_if = "Option::is_none")]
         category: Option<String>,
-        /// Whether the user can retry.
         recoverable: bool,
-        /// Content generated before failure.
         #[serde(rename = "partialContent", skip_serializing_if = "Option::is_none")]
         partial_content: Option<String>,
-    },
+    } => "agent.turn_failed",
 
     /// LLM response finished streaming (before tool execution).
-    #[serde(rename = "response_complete")]
     ResponseComplete {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Turn number.
         turn: u32,
-        /// Stop reason from LLM.
         #[serde(rename = "stopReason")]
         stop_reason: String,
-        /// Raw token usage.
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<ResponseTokenUsage>,
-        /// Whether the response contains tool calls.
         #[serde(rename = "hasToolCalls")]
         has_tool_calls: bool,
-        /// Number of tool calls.
         #[serde(rename = "toolCallCount")]
         tool_call_count: u32,
-        /// Canonical token record (iOS attaches stats from this).
         #[serde(rename = "tokenRecord", skip_serializing_if = "Option::is_none")]
         token_record: Option<Value>,
-        /// Model used for this response.
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
-    },
+    } => "response_complete",
 
     // -- Message --
+
     /// Message content update.
-    #[serde(rename = "message_update")]
     MessageUpdate {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Content delta.
         content: String,
-    },
+    } => "message_update",
 
     // -- Tool execution --
+
     /// All tool calls from the model's response (before execution).
-    #[serde(rename = "tool_use_batch")]
     ToolUseBatch {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Tool calls.
         #[serde(rename = "toolCalls")]
         tool_calls: Vec<ToolCallSummary>,
-    },
+    } => "tool_use_batch",
 
     /// Tool execution started.
-    #[serde(rename = "tool_execution_start")]
     ToolExecutionStart {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Tool call ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
-        /// Tool name.
         #[serde(rename = "toolName")]
         tool_name: String,
-        /// Tool arguments.
         #[serde(skip_serializing_if = "Option::is_none")]
         arguments: Option<serde_json::Map<String, Value>>,
-    },
+    } => "tool_execution_start",
 
     /// Tool execution progress update.
-    #[serde(rename = "tool_execution_update")]
     ToolExecutionUpdate {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Tool call ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
-        /// Progress update text.
         update: String,
-    },
+    } => "tool_execution_update",
 
     /// Tool execution completed.
-    #[serde(rename = "tool_execution_end")]
     ToolExecutionEnd {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Tool call ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
-        /// Tool name.
         #[serde(rename = "toolName")]
         tool_name: String,
-        /// Duration in milliseconds.
         duration: u64,
-        /// Whether execution resulted in error.
         #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
-        /// Detailed result.
         #[serde(skip_serializing_if = "Option::is_none")]
         result: Option<TronToolResult>,
-    },
+    } => "tool_execution_end",
 
     /// Tool call argument delta (during streaming).
-    #[serde(rename = "toolcall_delta")]
     ToolCallArgumentDelta {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Tool call ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
-        /// Tool name.
         #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
-        /// Partial JSON arguments delta.
         #[serde(rename = "argumentsDelta")]
         arguments_delta: String,
-    },
+    } => "toolcall_delta",
 
-    /// Tool call generating (`toolcall_start`, before arguments streamed).
-    #[serde(rename = "toolcall_generating")]
+    /// Tool call generating (before arguments streamed).
     ToolCallGenerating {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Tool call ID.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
-        /// Tool name.
         #[serde(rename = "toolName")]
         tool_name: String,
-    },
+    } => "toolcall_generating",
 
     // -- Hooks --
+
     /// Hook execution triggered.
-    #[serde(rename = "hook_triggered")]
     HookTriggered {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Hook names being executed.
         #[serde(rename = "hookNames")]
         hook_names: Vec<String>,
-        /// Hook event type.
         #[serde(rename = "hookEvent")]
         hook_event: String,
-        /// Tool name for tool-related hooks.
         #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
-        /// Tool call ID for tool-related hooks.
         #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
-    },
+    } => "hook_triggered",
 
     /// Hook execution completed.
-    #[serde(rename = "hook_completed")]
     HookCompleted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Hook names that were executed.
         #[serde(rename = "hookNames")]
         hook_names: Vec<String>,
-        /// Hook event type.
         #[serde(rename = "hookEvent")]
         hook_event: String,
-        /// Result action.
         result: HookResult,
-        /// Duration in milliseconds.
         #[serde(skip_serializing_if = "Option::is_none")]
         duration: Option<u64>,
-        /// Reason for block/modify.
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-        /// Tool name.
         #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
         tool_name: Option<String>,
-        /// Tool call ID.
         #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
-    },
+    } => "hook_completed",
 
     /// Background hook execution started.
-    #[serde(rename = "hook.background_started")]
     HookBackgroundStarted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Hook names.
         #[serde(rename = "hookNames")]
         hook_names: Vec<String>,
-        /// Hook event type.
         #[serde(rename = "hookEvent")]
         hook_event: String,
-        /// Correlation ID.
         #[serde(rename = "executionId")]
         execution_id: String,
-    },
+    } => "hook.background_started",
 
     /// Background hook execution completed.
-    #[serde(rename = "hook.background_completed")]
     HookBackgroundCompleted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Hook names.
         #[serde(rename = "hookNames")]
         hook_names: Vec<String>,
-        /// Hook event type.
         #[serde(rename = "hookEvent")]
         hook_event: String,
-        /// Correlation ID.
         #[serde(rename = "executionId")]
         execution_id: String,
-        /// Result.
         result: BackgroundHookResult,
-        /// Duration in milliseconds.
         duration: u64,
-        /// Error message if result is error.
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
-    },
+    } => "hook.background_completed",
 
     // -- Session --
+
     /// Session saved.
-    #[serde(rename = "session_saved")]
     SessionSaved {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// File path.
         #[serde(rename = "filePath")]
         file_path: String,
-    },
+    } => "session_saved",
 
     /// Session loaded.
-    #[serde(rename = "session_loaded")]
     SessionLoaded {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// File path.
         #[serde(rename = "filePath")]
         file_path: String,
-        /// Number of messages loaded.
         #[serde(rename = "messageCount")]
         message_count: u32,
-    },
+    } => "session_loaded",
 
     // -- Context --
+
     /// Context window warning.
-    #[serde(rename = "context_warning")]
     ContextWarning {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Usage percentage.
         #[serde(rename = "usagePercent")]
         usage_percent: f64,
-        /// Warning message.
         message: String,
-    },
+    } => "context_warning",
 
     // -- Compaction --
+
     /// Compaction started.
-    #[serde(rename = "compaction_start")]
     CompactionStart {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Trigger reason.
         reason: CompactionReason,
-        /// Token count before compaction.
         #[serde(rename = "tokensBefore")]
         tokens_before: u64,
-    },
+    } => "compaction_start",
 
     /// Compaction completed.
-    #[serde(rename = "compaction_complete")]
     CompactionComplete {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Whether compaction succeeded.
         success: bool,
-        /// Token count before compaction.
         #[serde(rename = "tokensBefore")]
         tokens_before: u64,
-        /// Token count after compaction.
         #[serde(rename = "tokensAfter")]
         tokens_after: u64,
-        /// Compression ratio (0-1, lower is better).
         #[serde(rename = "compressionRatio")]
         compression_ratio: f64,
-        /// Trigger reason.
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<CompactionReason>,
-        /// Summary of compacted context.
         #[serde(skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
-        /// Estimated total context tokens after compaction.
-        #[serde(
-            rename = "estimatedContextTokens",
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(rename = "estimatedContextTokens", skip_serializing_if = "Option::is_none")]
         estimated_context_tokens: Option<u64>,
-    },
+    } => "compaction_complete",
 
     // -- Error / Retry --
+
     /// Error event.
-    #[serde(rename = "error")]
     Error {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Error message.
         error: String,
-        /// Error context.
         #[serde(skip_serializing_if = "Option::is_none")]
         context: Option<String>,
-        /// Error code (e.g. `overloaded_error`).
         #[serde(skip_serializing_if = "Option::is_none")]
         code: Option<String>,
-        /// Provider that produced the error.
         #[serde(skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
-        /// Error category (e.g. `rate_limit`, `auth`, `network`).
         #[serde(skip_serializing_if = "Option::is_none")]
         category: Option<String>,
-        /// Suggested user action.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
-        /// Whether the error is retryable.
         #[serde(skip_serializing_if = "Option::is_none")]
         retryable: Option<bool>,
-        /// HTTP status code.
         #[serde(skip_serializing_if = "Option::is_none")]
         status_code: Option<u16>,
-        /// Error type classification.
         #[serde(skip_serializing_if = "Option::is_none")]
         error_type: Option<String>,
-        /// Model in use when error occurred.
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
-    },
+    } => "error",
 
     /// API retry event.
-    #[serde(rename = "api_retry")]
     ApiRetry {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Current attempt (1-based).
         attempt: u32,
-        /// Maximum retries configured.
         #[serde(rename = "maxRetries")]
         max_retries: u32,
-        /// Delay before next retry in ms.
         #[serde(rename = "delayMs")]
         delay_ms: u64,
-        /// Error category.
         #[serde(rename = "errorCategory")]
         error_category: String,
-        /// Error message.
         #[serde(rename = "errorMessage")]
         error_message: String,
-    },
+    } => "api_retry",
 
     // -- Thinking (agent-level with session context) --
+
     /// Thinking started.
-    #[serde(rename = "thinking_start")]
-    ThinkingStart {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    ThinkingStart {} => "thinking_start",
 
     /// Thinking delta.
-    #[serde(rename = "thinking_delta")]
     ThinkingDelta {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Thinking text fragment.
         delta: String,
-    },
+    } => "thinking_delta",
 
     /// Thinking ended.
-    #[serde(rename = "thinking_end")]
     ThinkingEnd {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Full thinking text.
         thinking: String,
-    },
+    } => "thinking_end",
 
     // -- Session lifecycle --
+
     /// Session created.
-    #[serde(rename = "session_created")]
     SessionCreated {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Model used for the session.
         model: String,
-        /// Working directory for the session.
         #[serde(rename = "workingDirectory")]
         working_directory: String,
-    },
+    } => "session_created",
 
     /// Session archived.
-    #[serde(rename = "session_archived")]
-    SessionArchived {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    SessionArchived {} => "session_archived",
 
     /// Session unarchived.
-    #[serde(rename = "session_unarchived")]
-    SessionUnarchived {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    SessionUnarchived {} => "session_unarchived",
 
     /// Session forked.
-    #[serde(rename = "session_forked")]
     SessionForked {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// The new session ID.
         #[serde(rename = "newSessionId")]
         new_session_id: String,
-    },
+    } => "session_forked",
 
     /// Session deleted.
-    #[serde(rename = "session_deleted")]
-    SessionDeleted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    SessionDeleted {} => "session_deleted",
 
     /// Session metadata updated (live sync to iOS).
-    #[serde(rename = "session_updated")]
     SessionUpdated {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Session title.
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
-        /// Current model.
         model: String,
-        /// Message count.
         #[serde(rename = "messageCount")]
         message_count: i64,
-        /// Total input tokens.
         #[serde(rename = "inputTokens")]
         input_tokens: i64,
-        /// Total output tokens.
         #[serde(rename = "outputTokens")]
         output_tokens: i64,
-        /// Input tokens for last turn.
         #[serde(rename = "lastTurnInputTokens")]
         last_turn_input_tokens: i64,
-        /// Cache read tokens.
         #[serde(rename = "cacheReadTokens")]
         cache_read_tokens: i64,
-        /// Cache creation tokens.
         #[serde(rename = "cacheCreationTokens")]
         cache_creation_tokens: i64,
-        /// Cost in USD.
         cost: f64,
-        /// Last activity timestamp.
         #[serde(rename = "lastActivity")]
         last_activity: String,
-        /// Whether the session is active.
         #[serde(rename = "isActive")]
         is_active: bool,
-        /// Last user prompt preview.
         #[serde(rename = "lastUserPrompt", skip_serializing_if = "Option::is_none")]
         last_user_prompt: Option<String>,
-        /// Last assistant response preview.
-        #[serde(
-            rename = "lastAssistantResponse",
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(rename = "lastAssistantResponse", skip_serializing_if = "Option::is_none")]
         last_assistant_response: Option<String>,
-        /// Parent session ID (for forked sessions).
         #[serde(rename = "parentSessionId", skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
-    },
+    } => "session_updated",
 
     /// Memory updating (shows spinner in iOS).
-    #[serde(rename = "memory_updating")]
-    MemoryUpdating {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-    },
+    MemoryUpdating {} => "memory_updating",
 
     /// Memory updated.
-    #[serde(rename = "memory_updated")]
     MemoryUpdated {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Memory entry title.
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
-        /// Memory entry type.
         #[serde(rename = "entryType", skip_serializing_if = "Option::is_none")]
         entry_type: Option<String>,
-        /// Event ID of the persisted memory.ledger event (for iOS detail sheet lookup).
         #[serde(rename = "eventId", skip_serializing_if = "Option::is_none")]
         event_id: Option<String>,
-    },
+    } => "memory_updated",
 
     /// Context cleared.
-    #[serde(rename = "context_cleared")]
     ContextCleared {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Token count before clearing.
         #[serde(rename = "tokensBefore")]
         tokens_before: i64,
-        /// Token count after clearing.
         #[serde(rename = "tokensAfter")]
         tokens_after: i64,
-    },
+    } => "context_cleared",
 
     /// Message deleted.
-    #[serde(rename = "message_deleted")]
     MessageDeleted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// The event ID that was deleted.
         #[serde(rename = "targetEventId")]
         target_event_id: String,
-        /// The type of the deleted event.
         #[serde(rename = "targetType")]
         target_type: String,
-        /// Turn number of the deleted message.
         #[serde(rename = "targetTurn", skip_serializing_if = "Option::is_none")]
         target_turn: Option<i64>,
-        /// Reason for deletion.
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
-    },
+    } => "message_deleted",
 
     /// Rules loaded (workspace rules loaded into context).
-    #[serde(rename = "rules_loaded")]
     RulesLoaded {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Number of rule files loaded.
         #[serde(rename = "totalFiles")]
         total_files: u32,
-        /// Number of dynamic rules loaded.
         #[serde(rename = "dynamicRulesCount")]
         dynamic_rules_count: u32,
-    },
+    } => "rules_loaded",
 
     /// Scoped rules activated by file path touches.
-    #[serde(rename = "rules_activated")]
     RulesActivated {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Newly activated rules.
         rules: Vec<ActivatedRuleInfo>,
-        /// Total number of activated scoped rules (cumulative).
         #[serde(rename = "totalActivated")]
         total_activated: u32,
-    },
+    } => "rules_activated",
 
     /// Memory loaded (memory context loaded).
-    #[serde(rename = "memory_loaded")]
     MemoryLoaded {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Number of memory entries loaded.
         count: u32,
-    },
+    } => "memory_loaded",
 
     /// Skill removed.
-    #[serde(rename = "skill_removed")]
     SkillRemoved {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Name of the removed skill.
         #[serde(rename = "skillName")]
         skill_name: String,
-    },
+    } => "skill_removed",
 
     // -- Subagents --
+
     /// Subagent spawned.
-    #[serde(rename = "subagent_spawned")]
     SubagentSpawned {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Child session ID.
         #[serde(rename = "subagentSessionId")]
         subagent_session_id: String,
-        /// Task description.
         task: String,
-        /// Model used.
         model: String,
-        /// Maximum turns.
         #[serde(rename = "maxTurns")]
         max_turns: u32,
-        /// Nesting depth.
         #[serde(rename = "spawnDepth")]
         spawn_depth: u32,
-        /// Tool call ID that triggered the spawn.
         #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
-        /// Whether the subagent blocks the parent.
         blocking: bool,
-        /// Working directory for the subagent.
         #[serde(rename = "workingDirectory", skip_serializing_if = "Option::is_none")]
         working_directory: Option<String>,
-    },
+    } => "subagent_spawned",
 
     /// Subagent status update (forwarded child events).
-    #[serde(rename = "subagent_status_update")]
     SubagentStatusUpdate {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Child session ID.
         #[serde(rename = "subagentSessionId")]
         subagent_session_id: String,
-        /// Current status.
         status: String,
-        /// Current turn.
         #[serde(rename = "currentTurn")]
         current_turn: u32,
-        /// Activity description.
         #[serde(skip_serializing_if = "Option::is_none")]
         activity: Option<String>,
-    },
+    } => "subagent_status_update",
 
     /// Subagent completed.
-    #[serde(rename = "subagent_completed")]
     SubagentCompleted {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Child session ID.
         #[serde(rename = "subagentSessionId")]
         subagent_session_id: String,
-        /// Total turns executed.
         #[serde(rename = "totalTurns")]
         total_turns: u32,
-        /// Duration in milliseconds.
         duration: u64,
-        /// Full output text.
         #[serde(rename = "fullOutput", skip_serializing_if = "Option::is_none")]
         full_output: Option<String>,
-        /// Truncated result summary.
         #[serde(rename = "resultSummary", skip_serializing_if = "Option::is_none")]
         result_summary: Option<String>,
-        /// Token usage.
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<Value>,
-        /// Model used.
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
-    },
+    } => "subagent_completed",
 
     /// Subagent failed.
-    #[serde(rename = "subagent_failed")]
     SubagentFailed {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Child session ID.
         #[serde(rename = "subagentSessionId")]
         subagent_session_id: String,
-        /// Error message.
         error: String,
-        /// Duration in milliseconds.
         duration: u64,
-    },
+    } => "subagent_failed",
 
     /// Forwarded child event (streaming content for iOS detail sheet).
-    #[serde(rename = "subagent_event")]
     SubagentEvent {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Child session ID.
         #[serde(rename = "subagentSessionId")]
         subagent_session_id: String,
-        /// Mapped child event payload.
         event: Value,
-    },
+    } => "subagent_event",
 
     /// Non-blocking subagent result available (WebSocket notification).
-    #[serde(rename = "subagent_result_available")]
     SubagentResultAvailable {
-        /// Base fields.
-        #[serde(flatten)]
-        base: BaseEvent,
-        /// Parent session ID.
         #[serde(rename = "parentSessionId")]
         parent_session_id: String,
-        /// Child session ID.
         #[serde(rename = "subagentSessionId")]
         subagent_session_id: String,
-        /// Task description.
         task: String,
-        /// Truncated result summary.
         #[serde(rename = "resultSummary")]
         result_summary: String,
-        /// Whether the subagent succeeded.
         success: bool,
-        /// Total turns executed.
         #[serde(rename = "totalTurns")]
         total_turns: u32,
-        /// Duration in milliseconds.
         duration: u64,
-        /// Token usage.
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<Value>,
-        /// Error message (if failed).
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
-        /// ISO 8601 completion timestamp.
         #[serde(rename = "completedAt")]
         completed_at: String,
-    },
+    } => "subagent_result_available",
 }
 
 impl TronEvent {
-    /// Get the base event fields.
-    #[must_use]
-    pub fn base(&self) -> &BaseEvent {
-        match self {
-            Self::AgentStart { base, .. }
-            | Self::AgentEnd { base, .. }
-            | Self::AgentReady { base, .. }
-            | Self::AgentInterrupted { base, .. }
-            | Self::TurnStart { base, .. }
-            | Self::TurnEnd { base, .. }
-            | Self::TurnFailed { base, .. }
-            | Self::ResponseComplete { base, .. }
-            | Self::MessageUpdate { base, .. }
-            | Self::ToolUseBatch { base, .. }
-            | Self::ToolExecutionStart { base, .. }
-            | Self::ToolExecutionUpdate { base, .. }
-            | Self::ToolExecutionEnd { base, .. }
-            | Self::ToolCallArgumentDelta { base, .. }
-            | Self::ToolCallGenerating { base, .. }
-            | Self::HookTriggered { base, .. }
-            | Self::HookCompleted { base, .. }
-            | Self::HookBackgroundStarted { base, .. }
-            | Self::HookBackgroundCompleted { base, .. }
-            | Self::SessionSaved { base, .. }
-            | Self::SessionLoaded { base, .. }
-            | Self::ContextWarning { base, .. }
-            | Self::CompactionStart { base, .. }
-            | Self::CompactionComplete { base, .. }
-            | Self::Error { base, .. }
-            | Self::ApiRetry { base, .. }
-            | Self::ThinkingStart { base, .. }
-            | Self::ThinkingDelta { base, .. }
-            | Self::ThinkingEnd { base, .. }
-            | Self::SessionCreated { base, .. }
-            | Self::SessionArchived { base, .. }
-            | Self::SessionUnarchived { base, .. }
-            | Self::SessionForked { base, .. }
-            | Self::SessionDeleted { base, .. }
-            | Self::SessionUpdated { base, .. }
-            | Self::MemoryUpdating { base, .. }
-            | Self::MemoryUpdated { base, .. }
-            | Self::ContextCleared { base, .. }
-            | Self::MessageDeleted { base, .. }
-            | Self::RulesLoaded { base, .. }
-            | Self::RulesActivated { base, .. }
-            | Self::MemoryLoaded { base, .. }
-            | Self::SkillRemoved { base, .. }
-            | Self::SubagentSpawned { base, .. }
-            | Self::SubagentStatusUpdate { base, .. }
-            | Self::SubagentCompleted { base, .. }
-            | Self::SubagentFailed { base, .. }
-            | Self::SubagentEvent { base, .. }
-            | Self::SubagentResultAvailable { base, .. } => base,
-        }
-    }
-
     /// Get the session ID.
     #[must_use]
     pub fn session_id(&self) -> &str {
@@ -1203,62 +821,6 @@ impl TronEvent {
     #[must_use]
     pub fn timestamp(&self) -> &str {
         &self.base().timestamp
-    }
-
-    /// Get the event type string (for type discrimination).
-    #[must_use]
-    pub fn event_type(&self) -> &str {
-        match self {
-            Self::AgentStart { .. } => "agent_start",
-            Self::AgentEnd { .. } => "agent_end",
-            Self::AgentReady { .. } => "agent_ready",
-            Self::AgentInterrupted { .. } => "agent_interrupted",
-            Self::TurnStart { .. } => "turn_start",
-            Self::TurnEnd { .. } => "turn_end",
-            Self::TurnFailed { .. } => "agent.turn_failed",
-            Self::ResponseComplete { .. } => "response_complete",
-            Self::MessageUpdate { .. } => "message_update",
-            Self::ToolUseBatch { .. } => "tool_use_batch",
-            Self::ToolExecutionStart { .. } => "tool_execution_start",
-            Self::ToolExecutionUpdate { .. } => "tool_execution_update",
-            Self::ToolExecutionEnd { .. } => "tool_execution_end",
-            Self::ToolCallArgumentDelta { .. } => "toolcall_delta",
-            Self::ToolCallGenerating { .. } => "toolcall_generating",
-            Self::HookTriggered { .. } => "hook_triggered",
-            Self::HookCompleted { .. } => "hook_completed",
-            Self::HookBackgroundStarted { .. } => "hook.background_started",
-            Self::HookBackgroundCompleted { .. } => "hook.background_completed",
-            Self::SessionSaved { .. } => "session_saved",
-            Self::SessionLoaded { .. } => "session_loaded",
-            Self::ContextWarning { .. } => "context_warning",
-            Self::CompactionStart { .. } => "compaction_start",
-            Self::CompactionComplete { .. } => "compaction_complete",
-            Self::Error { .. } => "error",
-            Self::ApiRetry { .. } => "api_retry",
-            Self::ThinkingStart { .. } => "thinking_start",
-            Self::ThinkingDelta { .. } => "thinking_delta",
-            Self::ThinkingEnd { .. } => "thinking_end",
-            Self::SessionCreated { .. } => "session_created",
-            Self::SessionArchived { .. } => "session_archived",
-            Self::SessionUnarchived { .. } => "session_unarchived",
-            Self::SessionForked { .. } => "session_forked",
-            Self::SessionDeleted { .. } => "session_deleted",
-            Self::SessionUpdated { .. } => "session_updated",
-            Self::MemoryUpdating { .. } => "memory_updating",
-            Self::MemoryUpdated { .. } => "memory_updated",
-            Self::ContextCleared { .. } => "context_cleared",
-            Self::MessageDeleted { .. } => "message_deleted",
-            Self::RulesLoaded { .. } => "rules_loaded",
-            Self::RulesActivated { .. } => "rules_activated",
-            Self::MemoryLoaded { .. } => "memory_loaded",
-            Self::SkillRemoved { .. } => "skill_removed",
-            Self::SubagentSpawned { .. } => "subagent_spawned",
-            Self::SubagentStatusUpdate { .. } => "subagent_status_update",
-            Self::SubagentCompleted { .. } => "subagent_completed",
-            Self::SubagentFailed { .. } => "subagent_failed",
-            Self::SubagentEvent { .. } => "subagent_event",
-            Self::SubagentResultAvailable { .. } => "subagent_result_available",
-        }
     }
 
     /// Whether this is a tool execution event.
@@ -1587,6 +1149,7 @@ mod tests {
                 output_tokens: 50,
                 cache_read_tokens: Some(20),
                 cache_creation_tokens: None,
+                ..TurnTokenUsage::default()
             }),
             token_record: None,
             cost: Some(0.005),
@@ -1883,6 +1446,18 @@ mod tests {
                 base: base.clone(),
                 thinking: "t".into(),
             },
+            TronEvent::SessionCreated {
+                base: base.clone(),
+                model: "m".into(),
+                working_directory: "/tmp".into(),
+            },
+            TronEvent::SessionArchived { base: base.clone() },
+            TronEvent::SessionUnarchived { base: base.clone() },
+            TronEvent::SessionForked {
+                base: base.clone(),
+                new_session_id: "new-s1".into(),
+            },
+            TronEvent::SessionDeleted { base: base.clone() },
             TronEvent::SessionUpdated {
                 base: base.clone(),
                 title: None,
@@ -1994,13 +1569,12 @@ mod tests {
             },
         ];
 
-        // All 44 variants
-        assert_eq!(events.len(), 44);
+        assert_eq!(events.len(), VARIANT_COUNT);
 
         let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
         types.sort();
         types.dedup();
-        assert_eq!(types.len(), 44);
+        assert_eq!(types.len(), VARIANT_COUNT);
     }
 
     #[test]

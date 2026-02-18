@@ -374,9 +374,14 @@ impl ProviderFactory for DefaultProviderFactory {
 
         match provider_type {
             ProviderType::Anthropic => self.create_anthropic(bare_model).await,
-            ProviderType::OpenAi => self.create_openai(bare_model).await,
+            ProviderType::OpenAi | ProviderType::OpenAiCodex => {
+                self.create_openai(bare_model).await
+            }
             ProviderType::Google => self.create_google(bare_model).await,
             ProviderType::MiniMax => self.create_minimax(bare_model),
+            ProviderType::Unknown => Err(ProviderError::UnsupportedModel {
+                model: bare_model.to_string(),
+            }),
         }
     }
 }

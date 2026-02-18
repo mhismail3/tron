@@ -434,13 +434,7 @@ mod tests {
                 name: "read".into(),
             },
             StreamEvent::ToolCallEnd {
-                tool_call: tron_core::messages::ToolCall {
-                    content_type: "tool_use".into(),
-                    id: "tc-1".into(),
-                    name: "read".into(),
-                    arguments: Map::new(),
-                    thought_signature: None,
-                },
+                tool_call: tron_core::messages::ToolCall::new("tc-1", "read", Map::new()),
             },
             StreamEvent::Done {
                 message: AssistantMessage {
@@ -560,13 +554,7 @@ mod tests {
                 name: "echo".into(),
             },
             StreamEvent::ToolCallEnd {
-                tool_call: tron_core::messages::ToolCall {
-                    content_type: "tool_use".into(),
-                    id: "tc-1".into(),
-                    name: "echo".into(),
-                    arguments: Map::new(),
-                    thought_signature: None,
-                },
+                tool_call: tron_core::messages::ToolCall::new("tc-1", "echo", Map::new()),
             },
             StreamEvent::Done {
                 message: AssistantMessage {
@@ -1106,13 +1094,7 @@ mod tests {
                 name: "read".into(),
             },
             StreamEvent::ToolCallEnd {
-                tool_call: tron_core::messages::ToolCall {
-                    content_type: "tool_use".into(),
-                    id: "tc-1".into(),
-                    name: "read".into(),
-                    arguments: Map::new(),
-                    thought_signature: None,
-                },
+                tool_call: tron_core::messages::ToolCall::new("tc-1", "read", Map::new()),
             },
             StreamEvent::Done {
                 message: AssistantMessage {
@@ -1387,13 +1369,7 @@ mod tests {
                 name: name.into(),
             });
             events.push(StreamEvent::ToolCallEnd {
-                tool_call: tron_core::messages::ToolCall {
-                    content_type: "tool_use".into(),
-                    id: id.into(),
-                    name: name.into(),
-                    arguments: Map::new(),
-                    thought_signature: None,
-                },
+                tool_call: tron_core::messages::ToolCall::new(id, name, Map::new()),
             });
             content.push(AssistantContent::ToolUse {
                 id: id.into(),

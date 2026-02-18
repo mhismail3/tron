@@ -255,13 +255,7 @@ fn finalize_tool_call(
     if let (Some(id), Some(name)) = (current_id.take(), current_name.take()) {
         let arguments: Map<String, serde_json::Value> =
             serde_json::from_str(current_args).unwrap_or_default();
-        tool_calls.push(ToolCall {
-            content_type: "tool_use".into(),
-            id,
-            name,
-            arguments,
-            thought_signature: None,
-        });
+        tool_calls.push(ToolCall::new(id, name, arguments));
         current_args.clear();
     }
 }
@@ -372,17 +366,11 @@ mod tests {
             yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "bash".into() });
             yield Ok(StreamEvent::ToolCallDelta { tool_call_id: "tc-1".into(), arguments_delta: r#"{"command":"ls"}"#.into() });
             yield Ok(StreamEvent::ToolCallEnd {
-                tool_call: ToolCall {
-                    content_type: "tool_use".into(),
-                    id: "tc-1".into(),
-                    name: "bash".into(),
-                    arguments: {
-                        let mut m = Map::new();
-                        let _ = m.insert("command".into(), serde_json::json!("ls"));
-                        m
-                    },
-                    thought_signature: None,
-                },
+                tool_call: ToolCall::new("tc-1", "bash", {
+                    let mut m = Map::new();
+                    let _ = m.insert("command".into(), serde_json::json!("ls"));
+                    m
+                }),
             });
             yield Ok(StreamEvent::Done {
                 message: AssistantMessage {
@@ -478,19 +466,11 @@ mod tests {
             yield Ok(StreamEvent::Start);
             yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-1".into(), name: "read".into() });
             yield Ok(StreamEvent::ToolCallEnd {
-                tool_call: ToolCall {
-                    content_type: "tool_use".into(),
-                    id: "tc-1".into(), name: "read".into(),
-                    arguments: Map::new(), thought_signature: None,
-                },
+                tool_call: ToolCall::new("tc-1", "read", Map::new()),
             });
             yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-2".into(), name: "write".into() });
             yield Ok(StreamEvent::ToolCallEnd {
-                tool_call: ToolCall {
-                    content_type: "tool_use".into(),
-                    id: "tc-2".into(), name: "write".into(),
-                    arguments: Map::new(), thought_signature: None,
-                },
+                tool_call: ToolCall::new("tc-2", "write", Map::new()),
             });
             yield Ok(StreamEvent::Done {
                 message: AssistantMessage { content: vec![], token_usage: None },

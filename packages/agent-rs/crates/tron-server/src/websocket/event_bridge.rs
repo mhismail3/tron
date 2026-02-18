@@ -1055,7 +1055,7 @@ mod tests {
                 input_tokens: 100,
                 output_tokens: 50,
                 cache_read_tokens: Some(10),
-                cache_creation_tokens: None,
+                ..Default::default()
             }),
             token_record: Some(token_record.clone()),
             cost: None,
@@ -1078,8 +1078,7 @@ mod tests {
             token_usage: Some(tron_core::events::TurnTokenUsage {
                 input_tokens: 50,
                 output_tokens: 25,
-                cache_read_tokens: None,
-                cache_creation_tokens: None,
+                ..Default::default()
             }),
             token_record: None,
             cost: None,
@@ -1102,7 +1101,7 @@ mod tests {
                 input_tokens: 100,
                 output_tokens: 50,
                 cache_read_tokens: Some(10),
-                cache_creation_tokens: None,
+                ..Default::default()
             }),
             token_record: None,
             cost: Some(0.005),

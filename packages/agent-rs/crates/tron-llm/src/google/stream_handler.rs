@@ -222,12 +222,11 @@ fn process_function_call(
         arguments_delta: args_str,
     });
 
-    let tool_call = ToolCall {
-        content_type: "tool_use".into(),
-        id: id.clone(),
-        name: fc.name.clone(),
-        arguments: arguments.clone(),
-        thought_signature: thought_signature.map(String::from),
+    let tool_call = ToolCall::new(id.clone(), fc.name.clone(), arguments.clone());
+    let tool_call = if let Some(sig) = thought_signature {
+        tool_call.with_thought_signature(sig)
+    } else {
+        tool_call
     };
 
     events.push(StreamEvent::ToolCallEnd { tool_call });

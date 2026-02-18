@@ -28,7 +28,7 @@ final class ToolEventCoordinator {
     ) {
         // Skip tools with custom UI flows or side-effects that require full ToolStartResult
         let kind = ToolKind(toolName: pluginResult.toolName)
-        if kind == .askUserQuestion || kind == .renderAppUI || kind == .openURL { return }
+        if kind == .renderAppUI || kind == .openURL { return }
 
         // Finalize any active thinking message before tool chip appears
         context.finalizeThinkingMessageIfNeeded()
@@ -38,6 +38,30 @@ final class ToolEventCoordinator {
 
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()
+
+        // AskUserQuestion gets its own chip type with a .generating spinner
+        if kind == .askUserQuestion {
+            let toolData = AskUserQuestionToolData(
+                toolCallId: pluginResult.toolCallId,
+                params: AskUserQuestionParams(questions: [], context: nil),
+                answers: [:],
+                status: .generating,
+                result: nil
+            )
+            let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
+            context.messages.append(message)
+            context.currentToolMessages[message.id] = message
+            context.makeToolVisible(pluginResult.toolCallId)
+            context.appendToMessageWindow(message)
+
+            let record = ToolCallRecord(
+                toolCallId: pluginResult.toolCallId,
+                toolName: pluginResult.toolName,
+                arguments: ""
+            )
+            context.currentTurnToolCalls.append(record)
+            return
+        }
 
         // Create chip with .running status, empty arguments
         let tool = ToolUseData(
@@ -270,7 +294,7 @@ final class ToolEventCoordinator {
 
     // MARK: - Private Helpers
 
-    /// Handle AskUserQuestion tool start - creates special message
+    /// Handle AskUserQuestion tool start - creates or updates special message
     private func handleAskUserQuestionToolStart(
         _ pluginResult: ToolStartPlugin.Result,
         params: AskUserQuestionParams?,
@@ -282,10 +306,34 @@ final class ToolEventCoordinator {
         // This suppresses any subsequent text deltas (question should be final entry)
         context.askUserQuestionCalledInTurn = true
 
+        // Check if a generating chip already exists from tool_generating
+        if let existingIndex = MessageFinder.lastIndexOfAskUserQuestion(toolCallId: pluginResult.toolCallId, in: context.messages) {
+            // Update existing generating chip with real params
+            if case .askUserQuestion(var toolData) = context.messages[existingIndex].content {
+                if let params = params {
+                    toolData.params = params
+                    toolData.status = .pending
+                } else {
+                    context.logError("Failed to parse AskUserQuestion params: \(pluginResult.formattedArguments.prefix(500))")
+                    toolData.status = .pending
+                }
+                context.messages[existingIndex].content = .askUserQuestion(toolData)
+                context.currentToolMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
+                context.updateInMessageWindow(context.messages[existingIndex])
+            }
+
+            // Update tracked tool call arguments
+            if let idx = context.currentTurnToolCalls.firstIndex(where: { $0.toolCallId == pluginResult.toolCallId }) {
+                context.currentTurnToolCalls[idx].arguments = pluginResult.formattedArguments
+            }
+            return
+        }
+
+        // No existing chip — create fresh (e.g. reconstruction without tool_generating)
+
         // Use pre-parsed params, fall back to regular tool display if parsing failed
         guard let params = params else {
             context.logError("Failed to parse AskUserQuestion params: \(pluginResult.formattedArguments.prefix(500))")
-            // Fall back to regular tool display
             let tool = ToolUseData(
                 toolName: pluginResult.toolName,
                 toolCallId: pluginResult.toolCallId,
@@ -307,7 +355,6 @@ final class ToolEventCoordinator {
             result: nil
         )
 
-        // Create message with AskUserQuestion content
         let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
         context.messages.append(message)
 
@@ -318,8 +365,6 @@ final class ToolEventCoordinator {
             arguments: pluginResult.formattedArguments
         )
         context.currentTurnToolCalls.append(record)
-
-        // Note: Sheet auto-opens on tool.end, not tool.start (async mode)
     }
 
     /// Handle OpenURL tool start - opens Safari in-app browser

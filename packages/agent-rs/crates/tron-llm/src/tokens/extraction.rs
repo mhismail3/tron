@@ -137,7 +137,7 @@ pub fn extract_openai(
     provider: ProviderType,
 ) -> Result<TokenSource> {
     let usage = usage.ok_or_else(|| TokenError::MissingData {
-        provider: Some(provider.clone()),
+        provider: Some(provider),
         turn: meta.turn,
         session_id: meta.session_id.clone(),
         has_partial_data: false,

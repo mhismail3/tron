@@ -74,6 +74,8 @@ struct AskUserQuestionResult: Codable, Equatable {
 /// Status for AskUserQuestion in async mode
 /// In async mode, the tool returns immediately and user answers as a new prompt
 enum AskUserQuestionStatus: Equatable {
+    /// Tool arguments still streaming — chip shows spinner
+    case generating
     /// Awaiting user response - the question chip is answerable
     case pending
     /// User submitted answers - chip shows completion
@@ -86,8 +88,8 @@ enum AskUserQuestionStatus: Equatable {
 struct AskUserQuestionToolData: Equatable {
     /// The tool call ID from the agent
     let toolCallId: String
-    /// The question parameters
-    let params: AskUserQuestionParams
+    /// The question parameters (mutable: set to placeholder during .generating, updated on tool_start)
+    var params: AskUserQuestionParams
     /// Current answers keyed by question ID
     var answers: [String: AskUserQuestionAnswer]
     /// Status in async mode (pending/answered/superseded)

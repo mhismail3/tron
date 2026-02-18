@@ -271,13 +271,11 @@ fn process_completed_response(
             };
             let arguments = parse_tool_call_arguments(Some(&tc.args), Some(&ctx));
             events.push(StreamEvent::ToolCallEnd {
-                tool_call: tron_core::messages::ToolCall {
-                    content_type: "tool_use".into(),
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    arguments: arguments.clone(),
-                    thought_signature: None,
-                },
+                tool_call: tron_core::messages::ToolCall::new(
+                    tc.id.clone(),
+                    tc.name.clone(),
+                    arguments.clone(),
+                ),
             });
         }
     }

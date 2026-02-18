@@ -1,7 +1,7 @@
 //! Package-level constants.
 
-/// Current version of the Tron agent.
-pub const VERSION: &str = "0.1.0";
+/// Current version of the Tron agent (sourced from Cargo.toml).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Package name.
 pub const NAME: &str = "tron";
@@ -17,6 +17,11 @@ mod tests {
         for part in parts {
             let _: u32 = part.parse().expect("each semver segment must be a number");
         }
+    }
+
+    #[test]
+    fn version_matches_cargo_toml() {
+        assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

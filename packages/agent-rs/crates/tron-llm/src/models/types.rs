@@ -6,52 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Provider type identifier.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProviderType {
-    /// Anthropic / Claude
-    Anthropic,
-    /// `OpenAI` / GPT (Codex)
-    OpenAi,
-    /// Google / Gemini
-    Google,
-    /// `MiniMax` (M2 series)
-    #[serde(rename = "minimax")]
-    MiniMax,
-}
+// Re-export from tron-core as the canonical Provider type.
+pub use tron_core::messages::Provider;
 
-impl ProviderType {
-    /// String identifier for this provider.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Anthropic => "anthropic",
-            Self::OpenAi => "openai",
-            Self::Google => "google",
-            Self::MiniMax => "minimax",
-        }
-    }
-}
-
-impl std::fmt::Display for ProviderType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl std::str::FromStr for ProviderType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "anthropic" => Ok(Self::Anthropic),
-            "openai" | "openai-codex" => Ok(Self::OpenAi),
-            "google" => Ok(Self::Google),
-            "minimax" => Ok(Self::MiniMax),
-            _ => Err(format!("unknown provider: {s}")),
-        }
-    }
-}
+/// Backward-compatible alias — use [`Provider`] in new code.
+pub type ProviderType = Provider;
 
 /// Model tier classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -274,13 +233,13 @@ mod tests {
         );
         assert_eq!(
             "openai-codex".parse::<ProviderType>().unwrap(),
-            ProviderType::OpenAi
+            ProviderType::OpenAiCodex
         );
         assert_eq!(
             "google".parse::<ProviderType>().unwrap(),
             ProviderType::Google
         );
-        assert!("unknown".parse::<ProviderType>().is_err());
+        assert!("nonexistent".parse::<ProviderType>().is_err());
     }
 
     #[test]

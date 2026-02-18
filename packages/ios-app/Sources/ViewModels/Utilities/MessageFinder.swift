@@ -52,6 +52,8 @@ enum MessageFinder {
                 return result.toolCallId == toolCallId
             case .subagent(let data):
                 return data.toolCallId == toolCallId
+            case .askUserQuestion(let data):
+                return data.toolCallId == toolCallId
             default:
                 return false
             }

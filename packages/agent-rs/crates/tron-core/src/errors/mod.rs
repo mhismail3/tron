@@ -347,30 +347,7 @@ impl PersistenceError {
 // ProviderError
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// LLM provider identifier.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderName {
-    /// Anthropic / Claude.
-    Anthropic,
-    /// `OpenAI`.
-    Openai,
-    /// Google / Gemini.
-    Google,
-    /// Unknown provider.
-    Unknown,
-}
-
-impl fmt::Display for ProviderName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Anthropic => write!(f, "anthropic"),
-            Self::Openai => write!(f, "openai"),
-            Self::Google => write!(f, "google"),
-            Self::Unknown => write!(f, "unknown"),
-        }
-    }
-}
+use crate::messages::Provider;
 
 /// Rate limit information from a provider error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -386,7 +363,7 @@ pub struct RateLimitInfo {
 #[error("Provider {provider} error ({model}): {message}")]
 pub struct ProviderError {
     /// Provider name.
-    pub provider: ProviderName,
+    pub provider: Provider,
     /// Model being used.
     pub model: String,
     /// Human-readable message.
@@ -410,7 +387,7 @@ impl ProviderError {
     /// Create a new provider error.
     #[must_use]
     pub fn new(
-        provider: ProviderName,
+        provider: Provider,
         model: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
@@ -471,7 +448,7 @@ impl ProviderError {
     /// Create from an error string, parsing it for category and retry info.
     #[must_use]
     pub fn from_error_string(
-        provider: ProviderName,
+        provider: Provider,
         model: impl Into<String>,
         error_str: &str,
         status_code: Option<u16>,
@@ -741,7 +718,7 @@ mod tests {
     #[test]
     fn tron_error_from_provider() {
         let provider_err =
-            ProviderError::new(ProviderName::Anthropic, "claude-opus-4-6", "overloaded")
+            ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "overloaded")
                 .with_status(529);
         let err = TronError::from(provider_err);
         assert!(err.to_string().contains("anthropic"));
@@ -848,8 +825,8 @@ mod tests {
 
     #[test]
     fn provider_error_basic() {
-        let err = ProviderError::new(ProviderName::Anthropic, "claude-opus-4-6", "server error");
-        assert_eq!(err.provider, ProviderName::Anthropic);
+        let err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "server error");
+        assert_eq!(err.provider, Provider::Anthropic);
         assert_eq!(err.model, "claude-opus-4-6");
         assert_eq!(err.code, "PROVIDER_ANTHROPIC_ERROR");
         assert!(!err.retryable);
@@ -857,7 +834,7 @@ mod tests {
 
     #[test]
     fn provider_error_with_401_status() {
-        let err = ProviderError::new(ProviderName::Anthropic, "claude-opus-4-6", "unauthorized")
+        let err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "unauthorized")
             .with_status(401);
         assert_eq!(err.category, ErrorCategory::Authentication);
         assert!(!err.retryable);
@@ -866,14 +843,14 @@ mod tests {
     #[test]
     fn provider_error_with_429_status() {
         let err =
-            ProviderError::new(ProviderName::Openai, "gpt-4", "rate limited").with_status(429);
+            ProviderError::new(Provider::OpenAi, "gpt-4", "rate limited").with_status(429);
         assert_eq!(err.category, ErrorCategory::RateLimit);
         assert!(err.retryable);
     }
 
     #[test]
     fn provider_error_with_500_status() {
-        let err = ProviderError::new(ProviderName::Google, "gemini-2.0", "internal error")
+        let err = ProviderError::new(Provider::Google, "gemini-2.0", "internal error")
             .with_status(500);
         assert_eq!(err.category, ErrorCategory::Server);
         assert!(err.retryable);
@@ -881,7 +858,7 @@ mod tests {
 
     #[test]
     fn provider_error_with_rate_limit_info() {
-        let err = ProviderError::new(ProviderName::Anthropic, "claude-opus-4-6", "rate limited")
+        let err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "rate limited")
             .with_status(429)
             .with_rate_limit(RateLimitInfo {
                 retry_after_ms: 5000,
@@ -896,7 +873,7 @@ mod tests {
     #[test]
     fn provider_error_from_error_string() {
         let err = ProviderError::from_error_string(
-            ProviderName::Anthropic,
+            Provider::Anthropic,
             "claude-opus-4-6",
             "429 rate limit exceeded",
             Some(429),
@@ -909,16 +886,16 @@ mod tests {
     #[test]
     fn provider_error_explicit_retryable() {
         let err =
-            ProviderError::new(ProviderName::Openai, "gpt-4", "temporary").with_retryable(true);
+            ProviderError::new(Provider::OpenAi, "gpt-4", "temporary").with_retryable(true);
         assert!(err.retryable);
     }
 
     #[test]
     fn provider_name_display() {
-        assert_eq!(ProviderName::Anthropic.to_string(), "anthropic");
-        assert_eq!(ProviderName::Openai.to_string(), "openai");
-        assert_eq!(ProviderName::Google.to_string(), "google");
-        assert_eq!(ProviderName::Unknown.to_string(), "unknown");
+        assert_eq!(Provider::Anthropic.to_string(), "anthropic");
+        assert_eq!(Provider::OpenAi.to_string(), "openai");
+        assert_eq!(Provider::Google.to_string(), "google");
+        assert_eq!(Provider::Unknown.to_string(), "unknown");
     }
 
     // -- ToolError --
@@ -1061,7 +1038,7 @@ mod tests {
 
     #[test]
     fn provider_error_is_std_error() {
-        let err = ProviderError::new(ProviderName::Unknown, "m", "err");
+        let err = ProviderError::new(Provider::Unknown, "m", "err");
         let _: &dyn std::error::Error = &err;
     }
 
@@ -1103,7 +1080,7 @@ mod tests {
     #[test]
     fn tron_error_severity_from_provider_retryable() {
         let provider_err =
-            ProviderError::new(ProviderName::Anthropic, "model", "overloaded").with_retryable(true);
+            ProviderError::new(Provider::Anthropic, "model", "overloaded").with_retryable(true);
         let err = TronError::from(provider_err);
         assert_eq!(err.severity(), ErrorSeverity::Transient);
     }
@@ -1118,7 +1095,7 @@ mod tests {
     #[test]
     fn tron_error_category_from_provider_status() {
         let provider_err =
-            ProviderError::new(ProviderName::Openai, "gpt-4", "forbidden").with_status(403);
+            ProviderError::new(Provider::OpenAi, "gpt-4", "forbidden").with_status(403);
         let err = TronError::from(provider_err);
         assert_eq!(err.category(), ErrorCategory::Authorization);
     }

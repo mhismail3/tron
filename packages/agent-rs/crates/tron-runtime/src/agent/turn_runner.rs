@@ -337,6 +337,7 @@ pub async fn execute_turn(
             cache_creation_tokens: u.cache_creation_tokens,
             cache_creation_5m_tokens: u.cache_creation_5m_tokens,
             cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+            provider_type: None,
         });
 
     let _ = emitter.emit(TronEvent::ResponseComplete {
@@ -573,6 +574,7 @@ pub async fn execute_turn(
         output_tokens: u.output_tokens,
         cache_read_tokens: u.cache_read_tokens,
         cache_creation_tokens: u.cache_creation_tokens,
+        ..TurnTokenUsage::default()
     });
 
     let _ = emitter.emit(TronEvent::TurnEnd {
@@ -789,13 +791,7 @@ mod tests {
     use tron_core::messages::ToolCall;
 
     fn tc(name: &str) -> ToolCall {
-        ToolCall {
-            content_type: "tool_use".into(),
-            id: format!("tc-{name}"),
-            name: name.into(),
-            arguments: Map::new(),
-            thought_signature: None,
-        }
+        ToolCall::new(format!("tc-{name}"), name, Map::new())
     }
 
     /// Stub tool for wave builder tests — always Parallel.

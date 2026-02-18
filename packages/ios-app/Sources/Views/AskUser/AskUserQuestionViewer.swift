@@ -26,15 +26,15 @@ struct AskUserQuestionToolViewer: View {
                     .foregroundStyle(textColor)
                     .lineLimit(1)
 
-                // Question count badge (for multiple questions)
-                if questionCount > 1 {
+                // Question count badge (for multiple questions, not during generating)
+                if data.status != .generating && questionCount > 1 {
                     Text("(\(questionCount))")
                         .font(TronTypography.codeSM)
                         .foregroundStyle(textColor.opacity(0.7))
                 }
 
-                // Chevron for tappable states
-                if data.status != .superseded {
+                // Chevron for tappable states (not during generating)
+                if data.status != .superseded && data.status != .generating {
                     Image(systemName: "chevron.right")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(textColor.opacity(0.6))
@@ -57,13 +57,17 @@ struct AskUserQuestionToolViewer: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(data.status == .superseded)
+        .disabled(data.status == .superseded || data.status == .generating)
         .opacity(data.status == .superseded ? 0.6 : 1.0)
     }
 
     @ViewBuilder
     private var statusIcon: some View {
         switch data.status {
+        case .generating:
+            ProgressView()
+                .controlSize(.small)
+                .tint(.tronAmber)
         case .pending:
             Image(systemName: "questionmark.circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -81,6 +85,8 @@ struct AskUserQuestionToolViewer: View {
 
     private var statusText: String {
         switch data.status {
+        case .generating:
+            return "Preparing question\u{2026}"
         case .pending:
             return questionCount == 1 ? "Answer question" : "Answer questions"
         case .answered:
@@ -92,7 +98,7 @@ struct AskUserQuestionToolViewer: View {
 
     private var textColor: Color {
         switch data.status {
-        case .pending:
+        case .generating, .pending:
             return .tronAmber
         case .answered:
             return .tronSuccess
@@ -103,7 +109,7 @@ struct AskUserQuestionToolViewer: View {
 
     private var tintColor: Color {
         switch data.status {
-        case .pending:
+        case .generating, .pending:
             return .tronAmber
         case .answered:
             return .tronSuccess

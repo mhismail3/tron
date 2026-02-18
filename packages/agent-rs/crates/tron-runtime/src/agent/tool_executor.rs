@@ -349,13 +349,7 @@ mod tests {
     }
 
     fn make_tool_call(name: &str, args: Map<String, Value>) -> ToolCall {
-        ToolCall {
-            content_type: "tool_use".into(),
-            id: "tc-1".into(),
-            name: name.into(),
-            arguments: args,
-            thought_signature: None,
-        }
+        ToolCall::new("tc-1", name, args)
     }
 
     #[tokio::test]

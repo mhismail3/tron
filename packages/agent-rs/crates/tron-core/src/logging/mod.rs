@@ -25,7 +25,7 @@ pub mod types;
 pub use store::LogStore;
 pub use test_utils::{CapturedLogs, capture_logs};
 pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
-pub use types::{LogEntry, LogLevel, LogQueryOptions};
+pub use types::{LogEntry, LogLevel, LogQueryOptions, SortOrder};
 
 /// Initialize the global tracing subscriber with stderr output only.
 ///

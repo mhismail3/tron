@@ -226,13 +226,7 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
             let id = state.current_tool_call_id.take().unwrap_or_default();
             let name = state.current_tool_name.take().unwrap_or_default();
 
-            let tool_call = ToolCall {
-                content_type: "tool_use".into(),
-                id: id.clone(),
-                name: name.clone(),
-                arguments: arguments.clone(),
-                thought_signature: None,
-            };
+            let tool_call = ToolCall::new(id.clone(), name.clone(), arguments.clone());
 
             state.content_blocks.push(AssistantContent::ToolUse {
                 id,
@@ -279,7 +273,7 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
             } else {
                 None
             },
-            provider_type: Some(state.provider_type.clone()),
+            provider_type: Some(state.provider_type),
         })
     } else {
         None

@@ -57,9 +57,10 @@ fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
                 + source.raw_cache_creation_tokens;
             (total, CalculationMethod::AnthropicCacheAware)
         }
-        ProviderType::OpenAi | ProviderType::OpenAiCodex | ProviderType::Google => {
-            (source.raw_input_tokens, CalculationMethod::Direct)
-        }
+        ProviderType::OpenAi
+        | ProviderType::OpenAiCodex
+        | ProviderType::Google
+        | ProviderType::Unknown => (source.raw_input_tokens, CalculationMethod::Direct),
     }
 }
 

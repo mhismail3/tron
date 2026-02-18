@@ -14,12 +14,16 @@ use crate::tools::Tool;
 // Tool call
 // ─────────────────────────────────────────────────────────────────────────────
 
+fn default_tool_use() -> String {
+    "tool_use".into()
+}
+
 /// A tool call emitted by the assistant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
-    /// Discriminator tag.
-    #[serde(rename = "type")]
-    pub content_type: String,
+    /// Discriminator — always `"tool_use"`.
+    #[serde(rename = "type", default = "default_tool_use")]
+    content_type: String,
     /// Unique tool call ID.
     pub id: String,
     /// Tool name.
@@ -43,79 +47,28 @@ impl Default for ToolCall {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// API format types (for persistence / wire format)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Canonical `tool_use` block shape.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ApiToolUseBlock {
-    /// Discriminator.
-    #[serde(rename = "type")]
-    pub content_type: String,
-    /// Tool call ID.
-    pub id: String,
-    /// Tool name.
-    pub name: String,
-    /// Tool arguments.
-    pub arguments: Map<String, Value>,
-}
-
-/// API-format `tool_result` block.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ApiToolResultBlock {
-    /// Discriminator.
-    #[serde(rename = "type")]
-    pub content_type: String,
-    /// ID of the tool call this result corresponds to.
-    pub tool_use_id: String,
-    /// Result content.
-    pub content: String,
-    /// Whether the tool execution errored.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_error: Option<bool>,
-}
-
-/// Internal-format `tool_result` block (camelCase field names).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InternalToolResultBlock {
-    /// Discriminator.
-    #[serde(rename = "type")]
-    pub content_type: String,
-    /// Tool call ID.
-    pub tool_call_id: String,
-    /// Result content.
-    pub content: String,
-    /// Whether the tool execution errored.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_error: Option<bool>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Conversion: internal ↔ API format
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Convert an internal [`ToolCall`] to an [`ApiToolUseBlock`].
-#[must_use]
-pub fn to_api_tool_use(tc: &ToolCall) -> ApiToolUseBlock {
-    ApiToolUseBlock {
-        content_type: "tool_use".into(),
-        id: tc.id.clone(),
-        name: tc.name.clone(),
-        arguments: tc.arguments.clone(),
+impl ToolCall {
+    /// Create a new tool call.
+    #[must_use]
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: Map<String, Value>,
+    ) -> Self {
+        Self {
+            content_type: "tool_use".into(),
+            id: id.into(),
+            name: name.into(),
+            arguments,
+            thought_signature: None,
+        }
     }
-}
 
-/// Convert an [`ApiToolUseBlock`] to an internal [`ToolCall`].
-#[must_use]
-pub fn from_api_tool_use(api: &ApiToolUseBlock) -> ToolCall {
-    ToolCall {
-        content_type: "tool_use".into(),
-        id: api.id.clone(),
-        name: api.name.clone(),
-        arguments: api.arguments.clone(),
-        thought_signature: None,
+    /// Create a new tool call with a thought signature.
+    #[must_use]
+    pub fn with_thought_signature(mut self, sig: impl Into<String>) -> Self {
+        self.thought_signature = Some(sig.into());
+        self
     }
 }
 
@@ -153,17 +106,17 @@ pub fn normalize_is_error(block: &Value) -> bool {
 // Token and cost tracking
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// LLM provider type for token normalization.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// LLM provider identity — single canonical enum used across all crates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ProviderType {
+pub enum Provider {
     /// Anthropic (Claude).
     #[default]
     Anthropic,
     /// `OpenAI`.
     #[serde(rename = "openai")]
     OpenAi,
-    /// `OpenAI` Codex.
+    /// `OpenAI` Codex (o-series pricing).
     #[serde(rename = "openai-codex")]
     OpenAiCodex,
     /// Google (Gemini).
@@ -171,7 +124,48 @@ pub enum ProviderType {
     /// `MiniMax` (M2 series).
     #[serde(rename = "minimax")]
     MiniMax,
+    /// Unrecognized provider (defensive deserialization).
+    #[serde(other, rename = "unknown")]
+    Unknown,
 }
+
+impl Provider {
+    /// Wire-format string for this provider.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+            Self::OpenAiCodex => "openai-codex",
+            Self::Google => "google",
+            Self::MiniMax => "minimax",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl std::fmt::Display for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for Provider {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "anthropic" => Ok(Self::Anthropic),
+            "openai" => Ok(Self::OpenAi),
+            "openai-codex" => Ok(Self::OpenAiCodex),
+            "google" => Ok(Self::Google),
+            "minimax" => Ok(Self::MiniMax),
+            _ => Err(format!("unknown provider: {s}")),
+        }
+    }
+}
+
+/// Backward-compatible alias (use [`Provider`] in new code).
+pub type ProviderType = Provider;
 
 /// Token usage information from an LLM response.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -195,7 +189,7 @@ pub struct TokenUsage {
     pub cache_creation_1h_tokens: Option<u64>,
     /// Provider type for normalization.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_type: Option<ProviderType>,
+    pub provider_type: Option<Provider>,
 }
 
 /// Cost information in USD.
@@ -445,8 +439,25 @@ mod tests {
     #[test]
     fn tool_call_default() {
         let tc = ToolCall::default();
-        assert_eq!(tc.content_type, "tool_use");
         assert!(tc.id.is_empty());
+    }
+
+    #[test]
+    fn tool_call_serializes_type_field() {
+        let tc = ToolCall {
+            id: "tc_1".into(),
+            name: "test".into(),
+            ..ToolCall::default()
+        };
+        let json = serde_json::to_value(&tc).unwrap();
+        assert_eq!(json["type"], "tool_use");
+    }
+
+    #[test]
+    fn tool_call_deserializes_type_field() {
+        let json = r#"{"type":"tool_use","id":"tc_1","name":"test","arguments":{}}"#;
+        let tc: ToolCall = serde_json::from_str(json).unwrap();
+        assert_eq!(tc.id, "tc_1");
     }
 
     #[test]
@@ -454,39 +465,14 @@ mod tests {
         let mut args = Map::new();
         let _ = args.insert("cmd".into(), json!("ls"));
         let tc = ToolCall {
-            content_type: "tool_use".into(),
             id: "call-1".into(),
             name: "bash".into(),
             arguments: args,
-            thought_signature: None,
+            ..ToolCall::default()
         };
         let json = serde_json::to_value(&tc).unwrap();
         let back: ToolCall = serde_json::from_value(json).unwrap();
         assert_eq!(tc, back);
-    }
-
-    // -- API format conversion --
-
-    #[test]
-    fn to_and_from_api_tool_use() {
-        let mut args = Map::new();
-        let _ = args.insert("path".into(), json!("/tmp"));
-        let tc = ToolCall {
-            content_type: "tool_use".into(),
-            id: "tc-1".into(),
-            name: "read".into(),
-            arguments: args.clone(),
-            thought_signature: None,
-        };
-        let api = to_api_tool_use(&tc);
-        assert_eq!(api.id, "tc-1");
-        assert_eq!(api.name, "read");
-        assert_eq!(api.arguments, args);
-
-        let back = from_api_tool_use(&api);
-        assert_eq!(back.id, tc.id);
-        assert_eq!(back.name, tc.name);
-        assert_eq!(back.arguments, tc.arguments);
     }
 
     // -- normalize helpers --
@@ -567,7 +553,7 @@ mod tests {
             cache_creation_tokens: None,
             cache_creation_5m_tokens: None,
             cache_creation_1h_tokens: None,
-            provider_type: Some(ProviderType::Anthropic),
+            provider_type: Some(Provider::Anthropic),
         };
         let json = serde_json::to_value(&usage).unwrap();
         assert_eq!(json["inputTokens"], 100);
@@ -576,12 +562,12 @@ mod tests {
     }
 
     #[test]
-    fn provider_type_minimax_serde_roundtrip() {
-        let pt = ProviderType::MiniMax;
+    fn provider_minimax_serde_roundtrip() {
+        let pt = Provider::MiniMax;
         let json = serde_json::to_string(&pt).unwrap();
         assert_eq!(json, "\"minimax\"");
-        let back: ProviderType = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, ProviderType::MiniMax);
+        let back: Provider = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, Provider::MiniMax);
     }
 
     #[test]
@@ -589,7 +575,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 200,
             output_tokens: 100,
-            provider_type: Some(ProviderType::MiniMax),
+            provider_type: Some(Provider::MiniMax),
             ..Default::default()
         };
         let json = serde_json::to_value(&usage).unwrap();
@@ -781,25 +767,56 @@ mod tests {
         assert_eq!(ctx, back);
     }
 
-    // -- ProviderType --
+    // -- Provider --
 
     #[test]
-    fn provider_type_serde() {
-        assert_eq!(
-            serde_json::to_string(&ProviderType::Anthropic).unwrap(),
-            "\"anthropic\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ProviderType::OpenAi).unwrap(),
-            "\"openai\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ProviderType::OpenAiCodex).unwrap(),
-            "\"openai-codex\""
-        );
-        assert_eq!(
-            serde_json::to_string(&ProviderType::Google).unwrap(),
-            "\"google\""
-        );
+    fn provider_serde_roundtrip() {
+        assert_eq!(serde_json::to_string(&Provider::Anthropic).unwrap(), "\"anthropic\"");
+        assert_eq!(serde_json::to_string(&Provider::OpenAi).unwrap(), "\"openai\"");
+        assert_eq!(serde_json::to_string(&Provider::OpenAiCodex).unwrap(), "\"openai-codex\"");
+        assert_eq!(serde_json::to_string(&Provider::Google).unwrap(), "\"google\"");
+        assert_eq!(serde_json::to_string(&Provider::MiniMax).unwrap(), "\"minimax\"");
+        assert_eq!(serde_json::to_string(&Provider::Unknown).unwrap(), "\"unknown\"");
+
+        let back: Provider = serde_json::from_str("\"anthropic\"").unwrap();
+        assert_eq!(back, Provider::Anthropic);
+
+        // Unknown catches unrecognized strings via #[serde(other)]
+        let unknown: Provider = serde_json::from_str("\"some-future-provider\"").unwrap();
+        assert_eq!(unknown, Provider::Unknown);
+    }
+
+    #[test]
+    fn provider_display() {
+        assert_eq!(Provider::Anthropic.to_string(), "anthropic");
+        assert_eq!(Provider::OpenAi.to_string(), "openai");
+        assert_eq!(Provider::OpenAiCodex.to_string(), "openai-codex");
+        assert_eq!(Provider::MiniMax.to_string(), "minimax");
+        assert_eq!(Provider::Unknown.to_string(), "unknown");
+    }
+
+    #[test]
+    fn provider_from_str() {
+        assert_eq!("anthropic".parse::<Provider>().unwrap(), Provider::Anthropic);
+        assert_eq!("openai".parse::<Provider>().unwrap(), Provider::OpenAi);
+        assert_eq!("openai-codex".parse::<Provider>().unwrap(), Provider::OpenAiCodex);
+        assert_eq!("google".parse::<Provider>().unwrap(), Provider::Google);
+        assert_eq!("minimax".parse::<Provider>().unwrap(), Provider::MiniMax);
+        assert!("nonexistent".parse::<Provider>().is_err());
+    }
+
+    #[test]
+    fn provider_as_str() {
+        assert_eq!(Provider::Anthropic.as_str(), "anthropic");
+        assert_eq!(Provider::OpenAi.as_str(), "openai");
+        assert_eq!(Provider::OpenAiCodex.as_str(), "openai-codex");
+        assert_eq!(Provider::Google.as_str(), "google");
+    }
+
+    #[test]
+    fn provider_type_alias_works() {
+        // ProviderType alias is backward-compatible
+        let pt: ProviderType = Provider::Anthropic;
+        assert_eq!(pt, Provider::Anthropic);
     }
 }

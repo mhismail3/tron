@@ -107,12 +107,81 @@ final class ToolEventCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages.count, 1)
     }
 
-    func testToolGeneratingSkipsAskUserQuestion() async throws {
+    func testToolGeneratingCreatesGeneratingChipForAskUserQuestion() async throws {
         let result = ToolGeneratingPlugin.Result(toolName: "AskUserQuestion", toolCallId: "gen_ask")
 
         coordinator.handleToolGenerating(result, context: mockContext)
 
-        XCTAssertEqual(mockContext.messages.count, 0)
+        // Should create a message with .generating status
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .askUserQuestion(let data) = mockContext.messages[0].content {
+            XCTAssertEqual(data.toolCallId, "gen_ask")
+            XCTAssertEqual(data.status, .generating)
+            XCTAssertTrue(data.params.questions.isEmpty)
+        } else {
+            XCTFail("Expected askUserQuestion content")
+        }
+        XCTAssertTrue(mockContext.visibleToolCallIds.contains("gen_ask"))
+    }
+
+    func testToolStartUpdatesGeneratingAskUserQuestionChip() async throws {
+        // Given: tool_generating already created a .generating chip
+        let genResult = ToolGeneratingPlugin.Result(toolName: "AskUserQuestion", toolCallId: "gen_ask_update")
+        coordinator.handleToolGenerating(genResult, context: mockContext)
+        XCTAssertEqual(mockContext.messages.count, 1)
+
+        // When: tool_start arrives with real params
+        let params = AskUserQuestionParams(
+            questions: [
+                AskUserQuestion(
+                    id: "q1",
+                    question: "Pick one?",
+                    options: [
+                        AskUserQuestionOption(label: "A", value: nil, description: nil),
+                        AskUserQuestionOption(label: "B", value: nil, description: nil)
+                    ],
+                    mode: .single,
+                    allowOther: false,
+                    otherPlaceholder: nil
+                )
+            ],
+            context: nil
+        )
+        let event = ToolStartPlugin.Result(
+            toolName: "AskUserQuestion",
+            toolCallId: "gen_ask_update",
+            arguments: nil,
+            formattedArguments: "{}"
+        )
+        let startResult = ToolStartResult(
+            tool: ToolUseData(
+                toolName: "AskUserQuestion",
+                toolCallId: "gen_ask_update",
+                arguments: "{}",
+                status: .running
+            ),
+            isAskUserQuestion: true,
+            isBrowserTool: false,
+            isOpenURL: false,
+            askUserQuestionParams: params,
+            openURL: nil
+        )
+        coordinator.handleToolStart(event, result: startResult, context: mockContext)
+
+        // Then: No duplicate message (still just 1)
+        XCTAssertEqual(mockContext.messages.count, 1)
+        // Then: Status updated from .generating to .pending with real params
+        if case .askUserQuestion(let data) = mockContext.messages[0].content {
+            XCTAssertEqual(data.status, .pending)
+            XCTAssertEqual(data.params.questions.count, 1)
+            XCTAssertEqual(data.params.questions[0].question, "Pick one?")
+        } else {
+            XCTFail("Expected askUserQuestion content")
+        }
+        // Then: calledInTurn is set
+        XCTAssertTrue(mockContext.askUserQuestionCalledInTurn)
+        // Then: Message window is updated
+        XCTAssertEqual(mockContext.updatedInMessageWindow.count, 1)
     }
 
     func testToolGeneratingSkipsRenderAppUI() async throws {

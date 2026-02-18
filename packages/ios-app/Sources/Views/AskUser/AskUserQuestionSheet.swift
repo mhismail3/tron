@@ -160,7 +160,7 @@ struct AskUserQuestionSheet: View {
 
     private var statusAccentColor: Color {
         switch toolData.status {
-        case .pending:
+        case .generating, .pending:
             return .tronAmber
         case .answered:
             return .tronSuccess
@@ -210,7 +210,7 @@ struct QuestionCardView: View {
 
     private var accentColor: Color {
         switch status {
-        case .pending:
+        case .generating, .pending:
             return .tronAmber
         case .answered:
             return .tronSuccess

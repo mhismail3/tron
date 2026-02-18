@@ -114,6 +114,27 @@ pub struct LogEntry {
     pub error_stack: Option<String>,
 }
 
+/// Sort direction for log queries.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortOrder {
+    /// Ascending (oldest first).
+    #[default]
+    Asc,
+    /// Descending (newest first).
+    Desc,
+}
+
+impl SortOrder {
+    /// SQL keyword for this sort direction.
+    #[must_use]
+    pub fn as_sql(self) -> &'static str {
+        match self {
+            Self::Asc => "ASC",
+            Self::Desc => "DESC",
+        }
+    }
+}
+
 /// Options for querying logs.
 #[derive(Clone, Debug, Default)]
 pub struct LogQueryOptions {
@@ -133,8 +154,8 @@ pub struct LogQueryOptions {
     pub limit: Option<usize>,
     /// Offset for pagination.
     pub offset: Option<usize>,
-    /// Sort order (`"asc"` or `"desc"`).
-    pub order: Option<String>,
+    /// Sort order.
+    pub order: Option<SortOrder>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,5 +273,16 @@ mod tests {
         let opts = LogQueryOptions::default();
         assert!(opts.session_id.is_none());
         assert!(opts.limit.is_none());
+    }
+
+    #[test]
+    fn sort_order_display() {
+        assert_eq!(SortOrder::Asc.as_sql(), "ASC");
+        assert_eq!(SortOrder::Desc.as_sql(), "DESC");
+    }
+
+    #[test]
+    fn sort_order_default_is_asc() {
+        assert_eq!(SortOrder::default(), SortOrder::Asc);
     }
 }

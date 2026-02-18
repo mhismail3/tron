@@ -394,8 +394,8 @@ pub struct SummaryResult {
     pub narrative: String,
 }
 
-/// Provider type re-export for context module convenience.
-pub use tron_core::messages::ProviderType;
+/// Provider re-exports for context module convenience.
+pub use tron_core::messages::{Provider, ProviderType};
 
 // =============================================================================
 // Tests
