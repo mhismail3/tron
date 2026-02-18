@@ -198,7 +198,7 @@ struct CommandToolTypesTests {
         let config = CommandToolRegistry.config(for: "search")
 
         #expect(config.icon == "magnifyingglass")
-        #expect(config.displayName == "Search")
+        #expect(config.displayName == "File Search")
     }
 
     @Test("Registry returns correct config for OpenURL tool")
@@ -214,7 +214,7 @@ struct CommandToolTypesTests {
         let config = CommandToolRegistry.config(for: "webfetch")
 
         #expect(config.icon == "arrow.down.doc")
-        #expect(config.displayName == "Fetch")
+        #expect(config.displayName == "Web Fetch")
     }
 
     @Test("Registry returns correct config for WebSearch tool")
@@ -222,7 +222,7 @@ struct CommandToolTypesTests {
         let config = CommandToolRegistry.config(for: "websearch")
 
         #expect(config.icon == "magnifyingglass.circle")
-        #expect(config.displayName == "Search")
+        #expect(config.displayName == "Web Search")
     }
 
     @Test("Registry returns correct config for Task tool")

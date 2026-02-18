@@ -333,8 +333,7 @@ struct MarkdownTableView: View {
         let alignment = column < table.alignments.count ? table.alignments[column] : .left
         let isLastColumn = column == table.headers.count - 1
 
-        Text(content)
-            .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: isHeader ? .semibold : .regular))
+        Text(inlineMarkdown(from: content, size: TronTypography.sizeBodySM, weight: isHeader ? .bold : .regular))
             .foregroundStyle(isHeader ? .tronTextPrimary : .tronTextSecondary)
             .lineLimit(nil)
             .multilineTextAlignment(textAlignment(for: alignment))

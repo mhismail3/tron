@@ -40,7 +40,7 @@ struct ToolRegistryTests {
     func testSearchDescriptor() {
         let d = ToolRegistry.descriptor(for: "search")
         #expect(d.icon == "magnifyingglass")
-        #expect(d.displayName == "Search")
+        #expect(d.displayName == "File Search")
     }
 
     @Test("Glob tool has correct icon and display name")
@@ -75,14 +75,14 @@ struct ToolRegistryTests {
     func testWebFetchDescriptor() {
         let d = ToolRegistry.descriptor(for: "webfetch")
         #expect(d.icon == "arrow.down.doc")
-        #expect(d.displayName == "Fetch")
+        #expect(d.displayName == "Web Fetch")
     }
 
     @Test("WebSearch tool has correct icon and display name")
     func testWebSearchDescriptor() {
         let d = ToolRegistry.descriptor(for: "websearch")
         #expect(d.icon == "magnifyingglass.circle")
-        #expect(d.displayName == "Search")
+        #expect(d.displayName == "Web Search")
     }
 
     @Test("Task tool has correct icon and display name")

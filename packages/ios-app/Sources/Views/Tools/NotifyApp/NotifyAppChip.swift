@@ -27,6 +27,7 @@ struct NotifyAppChip: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .contentShape(Capsule())
+            .animation(.smooth(duration: 0.3), value: data.status)
         }
         .buttonStyle(.plain)
         .glassEffect(
@@ -37,18 +38,20 @@ struct NotifyAppChip: View {
 
     @ViewBuilder
     private var statusIcon: some View {
+        let iconSize = TronTypography.sizeBodySM
         switch data.status {
         case .sending:
             ProgressView()
-                .scaleEffect(0.7)
+                .scaleEffect(0.6)
+                .frame(width: iconSize, height: iconSize)
                 .tint(.tronAmber)
         case .sent:
             Image(systemName: "bell.badge.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .failed:
             Image(systemName: "bell.slash.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }
@@ -87,24 +90,27 @@ struct NotifyAppChipFallback: View {
             .padding(.vertical, 6)
             .chipFill(statusColor)
             .contentShape(Capsule())
+            .animation(.smooth(duration: 0.3), value: data.status)
         }
         .buttonStyle(.plain)
     }
 
     @ViewBuilder
     private var statusIcon: some View {
+        let iconSize = TronTypography.sizeBodySM
         switch data.status {
         case .sending:
             ProgressView()
-                .scaleEffect(0.7)
+                .scaleEffect(0.6)
+                .frame(width: iconSize, height: iconSize)
                 .tint(.tronAmber)
         case .sent:
             Image(systemName: "bell.badge.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronSuccess)
         case .failed:
             Image(systemName: "bell.slash.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .font(TronTypography.sans(size: iconSize, weight: .medium))
                 .foregroundStyle(.tronError)
         }
     }

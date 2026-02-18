@@ -926,10 +926,24 @@ struct ToolResultParser {
 
     /// Parse NotifyApp tool to create NotifyAppChipData for chip display
     static func parseNotifyApp(from tool: ToolUseData) -> NotifyAppChipData? {
-        guard let title = ToolArgumentParser.string("title", from: tool.arguments),
-              let body = ToolArgumentParser.string("body", from: tool.arguments) else {
+        let title = ToolArgumentParser.string("title", from: tool.arguments)
+        let body = ToolArgumentParser.string("body", from: tool.arguments)
+
+        // During tool_generating, arguments are empty — show placeholder pill
+        if title == nil && body == nil {
+            if tool.status == .running {
+                return NotifyAppChipData(
+                    toolCallId: tool.toolCallId,
+                    title: "Sending notification...",
+                    body: "",
+                    sheetContent: nil,
+                    status: .sending
+                )
+            }
             return nil
         }
+
+        guard let title, let body else { return nil }
 
         let sheetContent = ToolArgumentParser.string("sheetContent", from: tool.arguments)
 
