@@ -10,24 +10,25 @@ use tracing::{debug, instrument};
 use uuid::Uuid;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::Duration;
 
 use crate::errors::{EventStoreError, Result};
-use crate::reconstruct::{reconstruct_from_events, ReconstructionResult};
+use crate::reconstruct::{ReconstructionResult, reconstruct_from_events};
 use crate::sqlite::connection::{ConnectionPool, PooledConnection};
 use crate::sqlite::repositories::blob::BlobRepo;
 use crate::sqlite::repositories::branch::BranchRepo;
+use crate::sqlite::repositories::device_token::{DeviceTokenRepo, RegisterTokenResult};
 use crate::sqlite::repositories::event::{EventRepo, ListEventsOptions, TokenUsageSummary};
 use crate::sqlite::repositories::search::{SearchOptions, SearchRepo};
 use crate::sqlite::repositories::session::{
     CreateSessionOptions, IncrementCounters, ListSessionsOptions, MessagePreview, SessionRepo,
 };
-use crate::sqlite::repositories::device_token::{DeviceTokenRepo, RegisterTokenResult};
 use crate::sqlite::repositories::workspace::WorkspaceRepo;
 use crate::sqlite::row_types::{BlobRow, DeviceTokenRow, EventRow, SessionRow, WorkspaceRow};
+use crate::types::EventType;
 use crate::types::base::SessionEvent;
 use crate::types::state::{SearchResult, SessionState};
-use crate::types::EventType;
 
 /// Result of creating a new session.
 #[derive(Debug)]
@@ -74,16 +75,102 @@ pub struct ForkOptions<'a> {
 /// blocks so callers never see partial state.
 pub struct EventStore {
     pool: ConnectionPool,
-    write_lock: Mutex<()>,
+    global_write_lock: Mutex<()>,
+    session_write_locks: Mutex<HashMap<String, Weak<Mutex<()>>>>,
 }
 
 impl EventStore {
+    const SQLITE_BUSY_MAX_RETRIES: u32 = 32;
     /// Create a new `EventStore` with the given connection pool.
     pub fn new(pool: ConnectionPool) -> Self {
         Self {
             pool,
-            write_lock: Mutex::new(()),
+            global_write_lock: Mutex::new(()),
+            session_write_locks: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn lock_global_write(&self) -> Result<MutexGuard<'_, ()>> {
+        self.global_write_lock
+            .lock()
+            .map_err(|_| EventStoreError::Internal("global write lock poisoned".into()))
+    }
+
+    fn acquire_session_write_lock(&self, session_id: &str) -> Result<Arc<Mutex<()>>> {
+        let mut locks = self
+            .session_write_locks
+            .lock()
+            .map_err(|_| EventStoreError::Internal("session lock map poisoned".into()))?;
+
+        // Opportunistically prune dead weak refs when the map grows.
+        if locks.len() > 1024 {
+            locks.retain(|_, weak| weak.strong_count() > 0);
+        }
+
+        if let Some(existing) = locks.get(session_id).and_then(Weak::upgrade) {
+            return Ok(existing);
+        }
+
+        let lock = Arc::new(Mutex::new(()));
+        let _ = locks.insert(session_id.to_string(), Arc::downgrade(&lock));
+        Ok(lock)
+    }
+
+    fn with_session_write_lock<T>(
+        &self,
+        session_id: &str,
+        f: impl FnMut() -> Result<T>,
+    ) -> Result<T> {
+        let session_lock = self.acquire_session_write_lock(session_id)?;
+        let _guard = session_lock
+            .lock()
+            .map_err(|_| EventStoreError::Internal("session write lock poisoned".into()))?;
+        self.retry_on_sqlite_busy(f)
+    }
+
+    fn with_global_write_lock<T>(&self, f: impl FnMut() -> Result<T>) -> Result<T> {
+        let _guard = self.lock_global_write()?;
+        self.retry_on_sqlite_busy(f)
+    }
+
+    fn retry_on_sqlite_busy<T>(&self, mut f: impl FnMut() -> Result<T>) -> Result<T> {
+        let mut attempts = 0;
+
+        loop {
+            match f() {
+                Ok(value) => return Ok(value),
+                Err(err)
+                    if Self::is_sqlite_busy_or_locked(&err)
+                        && attempts < Self::SQLITE_BUSY_MAX_RETRIES =>
+                {
+                    attempts += 1;
+                    let backoff_ms = (attempts as u64).saturating_mul(10).min(500);
+                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    fn is_sqlite_busy_or_locked(err: &EventStoreError) -> bool {
+        match err {
+            EventStoreError::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => {
+                matches!(
+                    code.code,
+                    rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                )
+            }
+            _ => false,
+        }
+    }
+
+    fn remove_session_write_lock(&self, session_id: &str) -> Result<()> {
+        let mut locks = self
+            .session_write_locks
+            .lock()
+            .map_err(|_| EventStoreError::Internal("session lock map poisoned".into()))?;
+        let _ = locks.remove(session_id);
+        Ok(())
     }
 
     /// Get a connection from the pool.
@@ -107,90 +194,93 @@ impl EventStore {
         workspace_path: &str,
         title: Option<&str>,
     ) -> Result<CreateSessionResult> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        let tx = conn.unchecked_transaction()?;
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            let tx = conn.unchecked_transaction()?;
 
-        // 1. Get or create workspace
-        let ws = WorkspaceRepo::get_or_create(&tx, workspace_path, None)?;
+            // 1. Get or create workspace
+            let ws = WorkspaceRepo::get_or_create(&tx, workspace_path, None)?;
 
-        // 2. Create session
-        let session = SessionRepo::create(
-            &tx,
-            &CreateSessionOptions {
-                workspace_id: &ws.id,
-                model,
-                working_directory: workspace_path,
-                title,
-                tags: None,
-                parent_session_id: None,
-                fork_from_event_id: None,
-                spawning_session_id: None,
-                spawn_type: None,
-                spawn_task: None,
-            },
-        )?;
+            // 2. Create session
+            let session = SessionRepo::create(
+                &tx,
+                &CreateSessionOptions {
+                    workspace_id: &ws.id,
+                    model,
+                    working_directory: workspace_path,
+                    title,
+                    tags: None,
+                    parent_session_id: None,
+                    fork_from_event_id: None,
+                    spawning_session_id: None,
+                    spawn_type: None,
+                    spawn_task: None,
+                },
+            )?;
 
-        // 3. Create root session.start event
-        let event_id = format!("evt_{}", Uuid::now_v7());
-        let now = chrono::Utc::now().to_rfc3339();
-        let provider = if model.starts_with("claude-") {
-            "anthropic"
-        } else if model.starts_with("gpt-") || model.starts_with("o1-") || model.starts_with("o3-") {
-            "openai"
-        } else if model.starts_with("gemini-") {
-            "google"
-        } else {
-            "anthropic"
-        };
-        let payload = serde_json::json!({
-            "workingDirectory": workspace_path,
-            "model": model,
-            "provider": provider,
-        });
-        let event = SessionEvent {
-            id: event_id,
-            session_id: session.id.clone(),
-            parent_id: None,
-            workspace_id: ws.id.clone(),
-            timestamp: now,
-            event_type: EventType::SessionStart,
-            sequence: 0,
-            checksum: None,
-            payload,
-        };
-        EventRepo::insert(&tx, &event)?;
+            // 3. Create root session.start event
+            let event_id = format!("evt_{}", Uuid::now_v7());
+            let now = chrono::Utc::now().to_rfc3339();
+            let provider = if model.starts_with("claude-") {
+                "anthropic"
+            } else if model.starts_with("gpt-")
+                || model.starts_with("o1-")
+                || model.starts_with("o3-")
+            {
+                "openai"
+            } else if model.starts_with("gemini-") {
+                "google"
+            } else {
+                "anthropic"
+            };
+            let payload = serde_json::json!({
+                "workingDirectory": workspace_path,
+                "model": model,
+                "provider": provider,
+            });
+            let event = SessionEvent {
+                id: event_id,
+                session_id: session.id.clone(),
+                parent_id: None,
+                workspace_id: ws.id.clone(),
+                timestamp: now,
+                event_type: EventType::SessionStart,
+                sequence: 0,
+                checksum: None,
+                payload,
+            };
+            EventRepo::insert(&tx, &event)?;
 
-        // 4. Update session root and head
-        let _ = SessionRepo::update_root(&tx, &session.id, &event.id)?;
-        let _ = SessionRepo::update_head(&tx, &session.id, &event.id)?;
+            // 4. Update session root and head
+            let _ = SessionRepo::update_root(&tx, &session.id, &event.id)?;
+            let _ = SessionRepo::update_head(&tx, &session.id, &event.id)?;
 
-        // 5. Increment event count
-        let _ = SessionRepo::increment_counters(
-            &tx,
-            &session.id,
-            &IncrementCounters {
-                event_count: Some(1),
-                ..Default::default()
-            },
-        )?;
+            // 5. Increment event count
+            let _ = SessionRepo::increment_counters(
+                &tx,
+                &session.id,
+                &IncrementCounters {
+                    event_count: Some(1),
+                    ..Default::default()
+                },
+            )?;
 
-        tx.commit()?;
+            tx.commit()?;
 
-        // Re-fetch session to get updated head/root/counters
-        let updated_session = SessionRepo::get_by_id(&conn, &session.id)?
-            .ok_or(EventStoreError::SessionNotFound(session.id))?;
+            // Re-fetch session to get updated head/root/counters
+            let updated_session = SessionRepo::get_by_id(&conn, &session.id)?
+                .ok_or(EventStoreError::SessionNotFound(session.id))?;
 
-        // Re-read the event row to get denormalized fields
-        let root_event = EventRepo::get_by_id(&conn, &event.id)?
-            .ok_or(EventStoreError::EventNotFound(event.id))?;
+            // Re-read the event row to get denormalized fields
+            let root_event = EventRepo::get_by_id(&conn, &event.id)?
+                .ok_or(EventStoreError::EventNotFound(event.id))?;
 
-        debug!(session_id = %updated_session.id, "session created");
+            debug!(session_id = %updated_session.id, "session created");
 
-        Ok(CreateSessionResult {
-            session: updated_session,
-            root_event,
+            Ok(CreateSessionResult {
+                session: updated_session,
+                root_event,
+            })
         })
     }
 
@@ -200,9 +290,7 @@ impl EventStore {
     /// increments all happen in a single transaction.
     #[instrument(skip(self, opts), fields(session_id = opts.session_id, event_type = %opts.event_type))]
     pub fn append(&self, opts: &AppendOptions<'_>) -> Result<EventRow> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        self.append_inner(opts)
+        self.with_session_write_lock(opts.session_id, || self.append_inner(opts))
     }
 
     /// Inner append without acquiring the write lock.
@@ -271,8 +359,7 @@ impl EventStore {
             counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
             counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
             counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
-            counters.cache_creation_tokens =
-                tu.get("cacheCreationTokens").and_then(Value::as_i64);
+            counters.cache_creation_tokens = tu.get("cacheCreationTokens").and_then(Value::as_i64);
 
             // Last turn context window: prefer tokenRecord.computed.contextWindowTokens
             // (includes cache reads for Anthropic), fall back to raw inputTokens
@@ -308,94 +395,90 @@ impl EventStore {
     /// pointing into the source session's event tree. Ancestor walks from the
     /// fork event traverse back through the shared history.
     #[instrument(skip(self, opts), fields(from_event_id))]
-    pub fn fork(
-        &self,
-        from_event_id: &str,
-        opts: &ForkOptions<'_>,
-    ) -> Result<ForkResult> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        let tx = conn.unchecked_transaction()?;
+    pub fn fork(&self, from_event_id: &str, opts: &ForkOptions<'_>) -> Result<ForkResult> {
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            let tx = conn.unchecked_transaction()?;
 
-        // 1. Fetch source event
-        let source_event = EventRepo::get_by_id(&tx, from_event_id)?
-            .ok_or_else(|| EventStoreError::EventNotFound(from_event_id.to_string()))?;
+            // 1. Fetch source event
+            let source_event = EventRepo::get_by_id(&tx, from_event_id)?
+                .ok_or_else(|| EventStoreError::EventNotFound(from_event_id.to_string()))?;
 
-        // 2. Fetch source session
-        let source_session = SessionRepo::get_by_id(&tx, &source_event.session_id)?
-            .ok_or_else(|| EventStoreError::SessionNotFound(source_event.session_id.clone()))?;
+            // 2. Fetch source session
+            let source_session = SessionRepo::get_by_id(&tx, &source_event.session_id)?
+                .ok_or_else(|| EventStoreError::SessionNotFound(source_event.session_id.clone()))?;
 
-        // 3. Create forked session
-        let model = opts.model.unwrap_or(&source_session.latest_model);
-        let session = SessionRepo::create(
-            &tx,
-            &CreateSessionOptions {
-                workspace_id: &source_session.workspace_id,
-                model,
-                working_directory: &source_session.working_directory,
-                title: opts.title,
-                tags: None,
-                parent_session_id: Some(&source_session.id),
-                fork_from_event_id: Some(from_event_id),
-                spawning_session_id: None,
-                spawn_type: None,
-                spawn_task: None,
-            },
-        )?;
+            // 3. Create forked session
+            let model = opts.model.unwrap_or(&source_session.latest_model);
+            let session = SessionRepo::create(
+                &tx,
+                &CreateSessionOptions {
+                    workspace_id: &source_session.workspace_id,
+                    model,
+                    working_directory: &source_session.working_directory,
+                    title: opts.title,
+                    tags: None,
+                    parent_session_id: Some(&source_session.id),
+                    fork_from_event_id: Some(from_event_id),
+                    spawning_session_id: None,
+                    spawn_type: None,
+                    spawn_task: None,
+                },
+            )?;
 
-        // 4. Create fork event (parentId points into source tree)
-        let event_id = format!("evt_{}", Uuid::now_v7());
-        let now = chrono::Utc::now().to_rfc3339();
-        let payload = serde_json::json!({
-            "sourceSessionId": source_session.id,
-            "sourceEventId": from_event_id,
-        });
+            // 4. Create fork event (parentId points into source tree)
+            let event_id = format!("evt_{}", Uuid::now_v7());
+            let now = chrono::Utc::now().to_rfc3339();
+            let payload = serde_json::json!({
+                "sourceSessionId": source_session.id,
+                "sourceEventId": from_event_id,
+            });
 
-        let fork_event = SessionEvent {
-            id: event_id,
-            session_id: session.id.clone(),
-            parent_id: Some(from_event_id.to_string()),
-            workspace_id: source_session.workspace_id.clone(),
-            timestamp: now,
-            event_type: EventType::SessionFork,
-            sequence: 0,
-            checksum: None,
-            payload,
-        };
-        EventRepo::insert(&tx, &fork_event)?;
+            let fork_event = SessionEvent {
+                id: event_id,
+                session_id: session.id.clone(),
+                parent_id: Some(from_event_id.to_string()),
+                workspace_id: source_session.workspace_id.clone(),
+                timestamp: now,
+                event_type: EventType::SessionFork,
+                sequence: 0,
+                checksum: None,
+                payload,
+            };
+            EventRepo::insert(&tx, &fork_event)?;
 
-        // 5. Set root and head
-        let _ = SessionRepo::update_root(&tx, &session.id, &fork_event.id)?;
-        let _ = SessionRepo::update_head(&tx, &session.id, &fork_event.id)?;
+            // 5. Set root and head
+            let _ = SessionRepo::update_root(&tx, &session.id, &fork_event.id)?;
+            let _ = SessionRepo::update_head(&tx, &session.id, &fork_event.id)?;
 
-        // 6. Increment event count
-        let _ = SessionRepo::increment_counters(
-            &tx,
-            &session.id,
-            &IncrementCounters {
-                event_count: Some(1),
-                ..Default::default()
-            },
-        )?;
+            // 6. Increment event count
+            let _ = SessionRepo::increment_counters(
+                &tx,
+                &session.id,
+                &IncrementCounters {
+                    event_count: Some(1),
+                    ..Default::default()
+                },
+            )?;
 
-        tx.commit()?;
+            tx.commit()?;
 
-        let updated_session = SessionRepo::get_by_id(&conn, &session.id)?
-            .ok_or(EventStoreError::SessionNotFound(session.id))?;
+            let updated_session = SessionRepo::get_by_id(&conn, &session.id)?
+                .ok_or(EventStoreError::SessionNotFound(session.id))?;
 
-        let fork_event_row = EventRepo::get_by_id(&conn, &fork_event.id)?
-            .ok_or(EventStoreError::EventNotFound(fork_event.id))?;
+            let fork_event_row = EventRepo::get_by_id(&conn, &fork_event.id)?
+                .ok_or(EventStoreError::EventNotFound(fork_event.id))?;
 
-        debug!(
-            new_session_id = %updated_session.id,
-            source_session_id = %source_session.id,
-            "session forked"
-        );
+            debug!(
+                new_session_id = %updated_session.id,
+                source_session_id = %source_session.id,
+                "session forked"
+            );
 
-        Ok(ForkResult {
-            session: updated_session,
-            fork_event: fork_event_row,
+            Ok(ForkResult {
+                session: updated_session,
+                fork_event: fork_event_row,
+            })
         })
     }
 
@@ -411,39 +494,39 @@ impl EventStore {
         target_event_id: &str,
         reason: Option<&str>,
     ) -> Result<EventRow> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
+        self.with_session_write_lock(session_id, || {
+            // Validate target exists and is a message type
+            let conn = self.conn()?;
+            let target = EventRepo::get_by_id(&conn, target_event_id)?
+                .ok_or_else(|| EventStoreError::EventNotFound(target_event_id.to_string()))?;
 
-        // Validate target exists and is a message type
-        let conn = self.conn()?;
-        let target = EventRepo::get_by_id(&conn, target_event_id)?
-            .ok_or_else(|| EventStoreError::EventNotFound(target_event_id.to_string()))?;
+            let target_type: EventType =
+                target
+                    .event_type
+                    .parse()
+                    .map_err(|_| EventStoreError::InvalidOperation("Unknown event type".to_string()))?;
 
-        let target_type: EventType = target
-            .event_type
-            .parse()
-            .map_err(|_| EventStoreError::InvalidOperation("Unknown event type".to_string()))?;
+            if !matches!(
+                target_type,
+                EventType::MessageUser | EventType::MessageAssistant | EventType::ToolResult
+            ) {
+                return Err(EventStoreError::InvalidOperation(format!(
+                    "Cannot delete event of type '{}' — only message and tool result events can be deleted",
+                    target.event_type
+                )));
+            }
 
-        if !matches!(
-            target_type,
-            EventType::MessageUser | EventType::MessageAssistant | EventType::ToolResult
-        ) {
-            return Err(EventStoreError::InvalidOperation(format!(
-                "Cannot delete event of type '{}' — only message and tool result events can be deleted",
-                target.event_type
-            )));
-        }
-
-        // Append message.deleted event (uses append_inner to avoid re-acquiring lock)
-        self.append_inner(&AppendOptions {
-            session_id,
-            event_type: EventType::MessageDeleted,
-            payload: serde_json::json!({
-                "targetEventId": target_event_id,
-                "targetType": target.event_type,
-                "reason": reason.unwrap_or("user_request"),
-            }),
-            parent_id: None,
+            // Append message.deleted event (uses append_inner to avoid re-acquiring lock)
+            self.append_inner(&AppendOptions {
+                session_id,
+                event_type: EventType::MessageDeleted,
+                payload: serde_json::json!({
+                    "targetEventId": target_event_id,
+                    "targetType": target.event_type,
+                    "reason": reason.unwrap_or("user_request"),
+                }),
+                parent_id: None,
+            })
         })
     }
 
@@ -486,11 +569,7 @@ impl EventStore {
     }
 
     /// Get events inserted after a specific sequence number.
-    pub fn get_events_since(
-        &self,
-        session_id: &str,
-        after_sequence: i64,
-    ) -> Result<Vec<EventRow>> {
+    pub fn get_events_since(&self, session_id: &str, after_sequence: i64) -> Result<Vec<EventRow>> {
         let conn = self.conn()?;
         EventRepo::get_since(&conn, session_id, after_sequence)
     }
@@ -667,50 +746,55 @@ impl EventStore {
 
     /// Mark a session as ended.
     pub fn end_session(&self, session_id: &str) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        SessionRepo::mark_ended(&conn, session_id)
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            SessionRepo::mark_ended(&conn, session_id)
+        })
     }
 
     /// Reactivate an ended session.
     pub fn clear_session_ended(&self, session_id: &str) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        SessionRepo::clear_ended(&conn, session_id)
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            SessionRepo::clear_ended(&conn, session_id)
+        })
     }
 
     /// Update the latest model for a session.
     pub fn update_latest_model(&self, session_id: &str, model: &str) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        SessionRepo::update_latest_model(&conn, session_id, model)
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            SessionRepo::update_latest_model(&conn, session_id, model)
+        })
     }
 
     /// Update session title.
     pub fn update_session_title(&self, session_id: &str, title: Option<&str>) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        SessionRepo::update_title(&conn, session_id, title)
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            SessionRepo::update_title(&conn, session_id, title)
+        })
     }
 
     /// Delete a session and all its events.
     #[instrument(skip(self), fields(session_id))]
     pub fn delete_session(&self, session_id: &str) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        let tx = conn.unchecked_transaction()?;
+        let deleted = self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            let tx = conn.unchecked_transaction()?;
 
-        // Delete events first (foreign key constraint)
-        let _ = EventRepo::delete_by_session(&tx, session_id)?;
-        let _ = BranchRepo::delete_by_session(&tx, session_id)?;
-        let deleted = SessionRepo::delete(&tx, session_id)?;
+            // Delete events first (foreign key constraint)
+            let _ = EventRepo::delete_by_session(&tx, session_id)?;
+            let _ = BranchRepo::delete_by_session(&tx, session_id)?;
+            let deleted = SessionRepo::delete(&tx, session_id)?;
 
-        tx.commit()?;
+            tx.commit()?;
+            Ok(deleted)
+        })?;
+
+        if deleted {
+            self.remove_session_write_lock(session_id)?;
+        }
         Ok(deleted)
     }
 
@@ -723,10 +807,7 @@ impl EventStore {
     /// Batch-fetch sessions by IDs.
     ///
     /// Returns a map of `session_id → SessionRow`. IDs not found are omitted.
-    pub fn get_sessions_by_ids(
-        &self,
-        session_ids: &[&str],
-    ) -> Result<HashMap<String, SessionRow>> {
+    pub fn get_sessions_by_ids(&self, session_ids: &[&str]) -> Result<HashMap<String, SessionRow>> {
         let conn = self.conn()?;
         SessionRepo::get_by_ids(&conn, session_ids)
     }
@@ -750,14 +831,14 @@ impl EventStore {
         spawn_type: &str,
         spawn_task: &str,
     ) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        let changed = conn.execute(
-            "UPDATE sessions SET spawning_session_id = ?1, spawn_type = ?2, spawn_task = ?3 WHERE id = ?4",
-            rusqlite::params![spawning_session_id, spawn_type, spawn_task, session_id],
-        )?;
-        Ok(changed > 0)
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            let changed = conn.execute(
+                "UPDATE sessions SET spawning_session_id = ?1, spawn_type = ?2, spawn_task = ?3 WHERE id = ?4",
+                rusqlite::params![spawning_session_id, spawn_type, spawn_task, session_id],
+            )?;
+            Ok(changed > 0)
+        })
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -771,15 +852,11 @@ impl EventStore {
     }
 
     /// Get or create workspace by path.
-    pub fn get_or_create_workspace(
-        &self,
-        path: &str,
-        name: Option<&str>,
-    ) -> Result<WorkspaceRow> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        WorkspaceRepo::get_or_create(&conn, path, name)
+    pub fn get_or_create_workspace(&self, path: &str, name: Option<&str>) -> Result<WorkspaceRow> {
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            WorkspaceRepo::get_or_create(&conn, path, name)
+        })
     }
 
     /// List all workspaces.
@@ -794,10 +871,10 @@ impl EventStore {
 
     /// Store blob content (SHA-256 deduplicated).
     pub fn store_blob(&self, content: &[u8], mime_type: &str) -> Result<String> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        BlobRepo::store(&conn, content, mime_type)
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            BlobRepo::store(&conn, content, mime_type)
+        })
     }
 
     /// Get blob content by ID.
@@ -863,18 +940,18 @@ impl EventStore {
         workspace_id: Option<&str>,
         environment: &str,
     ) -> Result<RegisterTokenResult> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        DeviceTokenRepo::register(&conn, device_token, session_id, workspace_id, environment)
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            DeviceTokenRepo::register(&conn, device_token, session_id, workspace_id, environment)
+        })
     }
 
     /// Unregister (deactivate) a device token.
     pub fn unregister_device_token(&self, device_token: &str) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        DeviceTokenRepo::unregister(&conn, device_token)
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            DeviceTokenRepo::unregister(&conn, device_token)
+        })
     }
 
     /// Get all active device tokens.
@@ -885,10 +962,10 @@ impl EventStore {
 
     /// Mark a device token as invalid (e.g., after APNS 410 response).
     pub fn mark_device_token_invalid(&self, device_token: &str) -> Result<bool> {
-        let _guard = self.write_lock.lock()
-            .map_err(|_| EventStoreError::Internal("write lock poisoned".into()))?;
-        let conn = self.conn()?;
-        DeviceTokenRepo::mark_invalid(&conn, device_token)
+        self.with_global_write_lock(|| {
+            let conn = self.conn()?;
+            DeviceTokenRepo::mark_invalid(&conn, device_token)
+        })
     }
 }
 
@@ -908,10 +985,7 @@ fn rows_to_session_events(rows: &[EventRow]) -> Vec<SessionEvent> {
             session_id: row.session_id.clone(),
             workspace_id: row.workspace_id.clone(),
             timestamp: row.timestamp.clone(),
-            event_type: row
-                .event_type
-                .parse()
-                .unwrap_or(EventType::SessionStart),
+            event_type: row.event_type.parse().unwrap_or(EventType::SessionStart),
             sequence: row.sequence,
             checksum: row.checksum.clone(),
             payload: serde_json::from_str(&row.payload).unwrap_or(Value::Null),
@@ -1033,10 +1107,7 @@ mod tests {
         assert_eq!(result.root_event.sequence, 0);
         assert_eq!(result.root_event.depth, 0);
         assert_eq!(result.root_event.event_type, "session.start");
-        assert_eq!(
-            result.root_event.session_id,
-            result.session.id
-        );
+        assert_eq!(result.root_event.session_id, result.session.id);
     }
 
     // ── Event appending ───────────────────────────────────────────────
@@ -1062,10 +1133,7 @@ mod tests {
         assert_eq!(event.event_type, "message.user");
         assert_eq!(event.sequence, 1);
         assert_eq!(event.depth, 1);
-        assert_eq!(
-            event.parent_id.as_deref(),
-            Some(cr.root_event.id.as_str())
-        );
+        assert_eq!(event.parent_id.as_deref(), Some(cr.root_event.id.as_str()));
     }
 
     #[test]
@@ -1275,10 +1343,7 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(
-            evt2.parent_id.as_deref(),
-            Some(cr.root_event.id.as_str())
-        );
+        assert_eq!(evt2.parent_id.as_deref(), Some(cr.root_event.id.as_str()));
         assert_ne!(evt1.id, evt2.id);
     }
 
@@ -1382,9 +1447,7 @@ mod tests {
             })
             .unwrap();
 
-        let fork = store
-            .fork(&user_msg.id, &ForkOptions::default())
-            .unwrap();
+        let fork = store.fork(&user_msg.id, &ForkOptions::default()).unwrap();
 
         assert!(fork.session.id.starts_with("sess_"));
         assert_ne!(fork.session.id, cr.session.id);
@@ -1420,9 +1483,7 @@ mod tests {
             })
             .unwrap();
 
-        let fork = store
-            .fork(&user_msg.id, &ForkOptions::default())
-            .unwrap();
+        let fork = store.fork(&user_msg.id, &ForkOptions::default()).unwrap();
 
         // Ancestor walk from fork event traverses back through source session
         let ancestors = store.get_ancestors(&fork.fork_event.id).unwrap();
@@ -1616,9 +1677,7 @@ mod tests {
             })
             .unwrap();
 
-        let results = store
-            .search("rust", &SearchOptions::default())
-            .unwrap();
+        let results = store.search("rust", &SearchOptions::default()).unwrap();
         assert_eq!(results.len(), 1);
     }
 
@@ -1664,9 +1723,7 @@ mod tests {
         let ws1 = store
             .get_or_create_workspace("/tmp/project", Some("Project"))
             .unwrap();
-        let ws2 = store
-            .get_or_create_workspace("/tmp/project", None)
-            .unwrap();
+        let ws2 = store.get_or_create_workspace("/tmp/project", None).unwrap();
         assert_eq!(ws1.id, ws2.id);
     }
 
@@ -1708,7 +1765,7 @@ mod tests {
                 session_id: &cr.session.id,
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "tool_1", "name": "Bash", "input": {"command": "ls"}}],
+                    "content": [{"type": "tool_use", "id": "tool_1", "name": "Bash", "arguments": {"command": "ls"}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
                 }),
@@ -1784,9 +1841,7 @@ mod tests {
             .unwrap();
 
         // Fork from user message (before assistant response)
-        let fork = store
-            .fork(&user_msg.id, &ForkOptions::default())
-            .unwrap();
+        let fork = store.fork(&user_msg.id, &ForkOptions::default()).unwrap();
 
         // Add different continuation in fork
         let fork_response = store
@@ -2153,9 +2208,7 @@ mod tests {
             })
             .unwrap();
 
-        let state = store
-            .get_state_at(&cr.session.id, &user_evt.id)
-            .unwrap();
+        let state = store.get_state_at(&cr.session.id, &user_evt.id).unwrap();
         assert_eq!(state.head_event_id, user_evt.id);
         assert_eq!(state.messages_with_event_ids.len(), 1);
         assert_eq!(state.messages_with_event_ids[0].message.role, "user");
@@ -2188,7 +2241,7 @@ mod tests {
                 session_id: &cr.session.id,
                 event_type: EventType::MessageAssistant,
                 payload: serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "c1", "name": "Bash", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "c1", "name": "Bash", "arguments": {}}],
                     "turn": 1,
                 }),
                 parent_id: None,
@@ -2219,10 +2272,7 @@ mod tests {
         assert_eq!(state.messages_with_event_ids.len(), 4);
         assert_eq!(state.messages_with_event_ids[0].message.role, "user");
         assert_eq!(state.messages_with_event_ids[1].message.role, "assistant");
-        assert_eq!(
-            state.messages_with_event_ids[2].message.role,
-            "toolResult"
-        );
+        assert_eq!(state.messages_with_event_ids[2].message.role, "toolResult");
         assert_eq!(state.messages_with_event_ids[3].message.role, "assistant");
     }
 
@@ -2261,12 +2311,14 @@ mod tests {
         let state = store.get_state_at_head(&cr.session.id).unwrap();
         // synthetic user (summary), synthetic assistant (ack), new user
         assert_eq!(state.messages_with_event_ids.len(), 3);
-        assert!(state.messages_with_event_ids[0]
-            .message
-            .content
-            .as_str()
-            .unwrap()
-            .contains("Context from earlier"));
+        assert!(
+            state.messages_with_event_ids[0]
+                .message
+                .content
+                .as_str()
+                .unwrap()
+                .contains("Context from earlier")
+        );
         assert_eq!(
             state.messages_with_event_ids[2].message.content,
             "New message"
@@ -2399,10 +2451,7 @@ mod tests {
         for handle in threads {
             let ids = handle.join().unwrap();
             for (_id, seq) in ids {
-                assert!(
-                    all_sequences.insert(seq),
-                    "duplicate sequence: {seq}"
-                );
+                assert!(all_sequences.insert(seq), "duplicate sequence: {seq}");
             }
         }
 
@@ -2422,11 +2471,7 @@ mod tests {
                 let store = Arc::clone(&store);
                 std::thread::spawn(move || {
                     let cr = store
-                        .create_session(
-                            "claude-opus-4-6",
-                            &format!("/tmp/project-{i}"),
-                            None,
-                        )
+                        .create_session("claude-opus-4-6", &format!("/tmp/project-{i}"), None)
                         .unwrap();
                     for _ in 0..5 {
                         store
@@ -2493,17 +2538,11 @@ mod tests {
                     let mut read_count = 0u64;
                     while !done.load(Ordering::SeqCst) {
                         let events = store
-                            .get_events_by_session(
-                                &sid,
-                                &ListEventsOptions::default(),
-                            )
+                            .get_events_by_session(&sid, &ListEventsOptions::default())
                             .unwrap();
                         // Events should always be ordered by sequence
                         for pair in events.windows(2) {
-                            assert!(
-                                pair[0].sequence < pair[1].sequence,
-                                "events not ordered"
-                            );
+                            assert!(pair[0].sequence < pair[1].sequence, "events not ordered");
                         }
                         read_count += 1;
                     }

@@ -4,20 +4,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde_json::json;
-use tron_tools::traits::ExecutionMode;
 use crate::context::context_manager::ContextManager;
-use tron_core::content::AssistantContent;
-use tron_core::events::{
-    ActivatedRuleInfo, BaseEvent, CompactionReason, ResponseTokenUsage, ToolCallSummary,
-    TronEvent, TurnTokenUsage,
-};
-use tron_core::messages::{Message, ToolResultMessageContent};
 use crate::guardrails::GuardrailEngine;
 use crate::hooks::engine::HookEngine;
+use serde_json::json;
+use tron_core::content::AssistantContent;
+use tron_core::events::{
+    ActivatedRuleInfo, BaseEvent, CompactionReason, ResponseTokenUsage, ToolCallSummary, TronEvent,
+    TurnTokenUsage,
+};
+use tron_core::messages::{Message, ToolResultMessageContent};
 use tron_llm::provider::{Provider, ProviderStreamOptions};
 use tron_llm::{ProviderHealthTracker, StreamFactory, StreamRetryConfig, with_provider_retry};
 use tron_tools::registry::ToolRegistry;
+use tron_tools::traits::ExecutionMode;
 
 use metrics::{counter, histogram};
 use tracing::{debug, error, info, instrument, warn};
@@ -34,7 +34,11 @@ use crate::pipeline::{persistence, pricing};
 use crate::types::{RunContext, TurnResult};
 
 /// Execute a single turn of the agent loop.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines, clippy::cast_possible_truncation)]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::cast_possible_truncation
+)]
 #[instrument(skip_all, fields(session_id, turn, model = provider.model()))]
 pub async fn execute_turn(
     turn: u32,
@@ -88,9 +92,13 @@ pub async fn execute_turn(
         turn,
     });
     if let Some(p) = persister {
-        p.append_fire_and_forget(session_id, EventType::StreamTurnStart, json!({
-            "turn": turn,
-        }));
+        p.append_fire_and_forget(
+            session_id,
+            EventType::StreamTurnStart,
+            json!({
+                "turn": turn,
+            }),
+        );
     }
     debug!(session_id, turn, "turn started");
 
@@ -100,20 +108,17 @@ pub async fn execute_turn(
         system_prompt: Some(context_manager.get_system_prompt().to_owned()),
         messages,
         tools: Some(registry.definitions()),
-        working_directory: Some(
-            context_manager
-                .get_working_directory()
-                .to_owned(),
-        ),
+        working_directory: Some(context_manager.get_working_directory().to_owned()),
         rules_content: context_manager.get_rules_content().map(String::from),
         memory_content: context_manager.get_full_memory_content(),
         skill_context: run_context.skill_context.clone(),
         subagent_results_context: run_context.subagent_results.clone(),
         task_context: run_context.task_context.clone(),
-        dynamic_rules_context: run_context
-            .dynamic_rules_context
-            .clone()
-            .or_else(|| context_manager.get_dynamic_rules_content().map(String::from)),
+        dynamic_rules_context: run_context.dynamic_rules_context.clone().or_else(|| {
+            context_manager
+                .get_dynamic_rules_content()
+                .map(String::from)
+        }),
     };
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
@@ -267,7 +272,10 @@ pub async fn execute_turn(
                 if let Some(ref usage) = stream_result.token_usage {
                     payload["tokenUsage"] = persistence::build_token_usage_json(usage);
                 }
-                if let Err(e) = p.append(session_id, EventType::MessageAssistant, payload).await {
+                if let Err(e) = p
+                    .append(session_id, EventType::MessageAssistant, payload)
+                    .await
+                {
                     tracing::error!(session_id, error = %e, "failed to persist interrupted message.assistant");
                 }
             }
@@ -284,7 +292,7 @@ pub async fn execute_turn(
     }
 
     // 7. Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
-    let token_record_json = stream_result.token_usage.as_ref().map(|usage| {
+    let mut token_record_json = stream_result.token_usage.as_ref().map(|usage| {
         persistence::build_token_record(
             usage,
             provider.provider_type(),
@@ -297,17 +305,35 @@ pub async fn execute_turn(
     let cost = stream_result
         .token_usage
         .as_ref()
-        .map(|u| pricing::calculate_cost(provider.model(), u));
+        .and_then(|u| pricing::calculate_cost(provider.model(), u));
+
+    // Explicit pricing metadata: unknown models should not silently receive
+    // default pricing assumptions.
+    if let Some(record) = token_record_json.as_mut() {
+        let pricing_available = cost.is_some();
+        record["pricing"] = if pricing_available {
+            json!({ "available": true })
+        } else {
+            json!({
+                "available": false,
+                "reason": "unsupported_model_pricing",
+                "model": provider.model(),
+            })
+        };
+    }
 
     // 7b. Emit ResponseComplete (BEFORE tool execution)
-    let response_token_usage = stream_result.token_usage.as_ref().map(|u| ResponseTokenUsage {
-        input_tokens: u.input_tokens,
-        output_tokens: u.output_tokens,
-        cache_read_tokens: u.cache_read_tokens,
-        cache_creation_tokens: u.cache_creation_tokens,
-        cache_creation_5m_tokens: u.cache_creation_5m_tokens,
-        cache_creation_1h_tokens: u.cache_creation_1h_tokens,
-    });
+    let response_token_usage = stream_result
+        .token_usage
+        .as_ref()
+        .map(|u| ResponseTokenUsage {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            cache_creation_tokens: u.cache_creation_tokens,
+            cache_creation_5m_tokens: u.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+        });
 
     let _ = emitter.emit(TronEvent::ResponseComplete {
         base: BaseEvent::now(session_id),
@@ -326,22 +352,15 @@ pub async fn execute_turn(
         .content
         .iter()
         .any(|c| matches!(c, AssistantContent::Thinking { .. }));
-    let thinking_text = stream_result
-        .message
-        .content
-        .iter()
-        .find_map(|c| {
-            if let AssistantContent::Thinking { thinking, .. } = c {
-                Some(thinking.clone())
-            } else {
-                None
-            }
-        });
+    let thinking_text = stream_result.message.content.iter().find_map(|c| {
+        if let AssistantContent::Thinking { thinking, .. } = c {
+            Some(thinking.clone())
+        } else {
+            None
+        }
+    });
     let stop_reason_for_context: Option<tron_core::messages::StopReason> =
-        serde_json::from_value(serde_json::Value::String(
-            stream_result.stop_reason.clone(),
-        ))
-        .ok();
+        serde_json::from_value(serde_json::Value::String(stream_result.stop_reason.clone())).ok();
 
     let assistant_content = stream_result.message.content.clone();
     context_manager.add_message(Message::Assistant {
@@ -378,7 +397,10 @@ pub async fn execute_turn(
         if let Some(c) = cost {
             payload["cost"] = json!(c);
         }
-        if let Err(e) = p.append(session_id, EventType::MessageAssistant, payload).await {
+        if let Err(e) = p
+            .append(session_id, EventType::MessageAssistant, payload)
+            .await
+        {
             tracing::error!(session_id, error = %e, "failed to persist message.assistant");
         }
     }
@@ -405,19 +427,21 @@ pub async fn execute_turn(
             tool_calls: summaries,
         });
 
-        let working_dir = context_manager
-            .get_working_directory()
-            .to_owned();
+        let working_dir = context_manager.get_working_directory().to_owned();
 
         // --- Phase 1: Persist all tool.call events upfront ---
         for tc in &stream_result.tool_calls {
             if let Some(p) = persister {
-                p.append_fire_and_forget(session_id, EventType::ToolCall, json!({
-                    "toolCallId": tc.id,
-                    "name": tc.name,
-                    "arguments": tc.arguments,
-                    "turn": turn,
-                }));
+                p.append_fire_and_forget(
+                    session_id,
+                    EventType::ToolCall,
+                    json!({
+                        "toolCallId": tc.id,
+                        "name": tc.name,
+                        "arguments": tc.arguments,
+                        "turn": turn,
+                    }),
+                );
             }
         }
 
@@ -476,13 +500,17 @@ pub async fn execute_turn(
             let is_error = exec_result.result.is_error.unwrap_or(false);
 
             if let Some(p) = persister {
-                p.append_fire_and_forget(session_id, EventType::ToolResult, json!({
-                    "toolCallId": tc.id,
-                    "name": tc.name,
-                    "content": result_text,
-                    "isError": is_error,
-                    "duration": exec_result.duration_ms,
-                }));
+                p.append_fire_and_forget(
+                    session_id,
+                    EventType::ToolResult,
+                    json!({
+                        "toolCallId": tc.id,
+                        "name": tc.name,
+                        "content": result_text,
+                        "isError": is_error,
+                        "duration": exec_result.duration_ms,
+                    }),
+                );
             }
 
             context_manager.add_message(Message::ToolResult {
@@ -511,7 +539,9 @@ pub async fn execute_turn(
 
     // 9b. Emit batched rules.activated if any new rules were activated this turn
     if !all_activations.is_empty() {
-        let total = context_manager.rules_tracker().activated_scoped_rules_count() as u32;
+        let total = context_manager
+            .rules_tracker()
+            .activated_scoped_rules_count() as u32;
         let _ = emitter.emit(TronEvent::RulesActivated {
             base: BaseEvent::now(session_id),
             rules: all_activations.clone(),
@@ -651,10 +681,7 @@ fn build_execution_waves(
         .collect();
 
     // Fast path: all parallel → single wave
-    if modes
-        .iter()
-        .all(|m| matches!(m, ExecutionMode::Parallel))
-    {
+    if modes.iter().all(|m| matches!(m, ExecutionMode::Parallel)) {
         return vec![(0..tool_calls.len()).collect()];
     }
 
@@ -770,50 +797,77 @@ mod tests {
     struct ParallelStub(&'static str);
     #[async_trait::async_trait]
     impl tron_tools::traits::TronTool for ParallelStub {
-        fn name(&self) -> &str { self.0 }
-        fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn category(&self) -> tron_core::tools::ToolCategory {
+            tron_core::tools::ToolCategory::Custom
+        }
         fn definition(&self) -> tron_core::tools::Tool {
             tron_core::tools::Tool {
                 name: self.0.into(),
                 description: String::new(),
                 parameters: tron_core::tools::ToolParameterSchema {
                     schema_type: "object".into(),
-                    properties: None, required: None, description: None,
+                    properties: None,
+                    required: None,
+                    description: None,
                     extra: Map::new(),
                 },
             }
         }
-        async fn execute(&self, _: serde_json::Value, _: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+        async fn execute(
+            &self,
+            _: serde_json::Value,
+            _: &tron_tools::traits::ToolContext,
+        ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
             Ok(tron_core::tools::text_result("ok", false))
         }
     }
 
     /// Stub tool that returns Serialized(group).
-    struct SerializedStub { name: &'static str, group: &'static str }
+    struct SerializedStub {
+        name: &'static str,
+        group: &'static str,
+    }
     #[async_trait::async_trait]
     impl tron_tools::traits::TronTool for SerializedStub {
-        fn name(&self) -> &str { self.name }
-        fn category(&self) -> tron_core::tools::ToolCategory { tron_core::tools::ToolCategory::Custom }
-        fn execution_mode(&self) -> ExecutionMode { ExecutionMode::Serialized(self.group.into()) }
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn category(&self) -> tron_core::tools::ToolCategory {
+            tron_core::tools::ToolCategory::Custom
+        }
+        fn execution_mode(&self) -> ExecutionMode {
+            ExecutionMode::Serialized(self.group.into())
+        }
         fn definition(&self) -> tron_core::tools::Tool {
             tron_core::tools::Tool {
                 name: self.name.into(),
                 description: String::new(),
                 parameters: tron_core::tools::ToolParameterSchema {
                     schema_type: "object".into(),
-                    properties: None, required: None, description: None,
+                    properties: None,
+                    required: None,
+                    description: None,
                     extra: Map::new(),
                 },
             }
         }
-        async fn execute(&self, _: serde_json::Value, _: &tron_tools::traits::ToolContext) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
+        async fn execute(
+            &self,
+            _: serde_json::Value,
+            _: &tron_tools::traits::ToolContext,
+        ) -> Result<tron_core::tools::TronToolResult, tron_tools::errors::ToolError> {
             Ok(tron_core::tools::text_result("ok", false))
         }
     }
 
     fn wave_registry(tools: Vec<Arc<dyn tron_tools::traits::TronTool>>) -> ToolRegistry {
         let mut reg = ToolRegistry::new();
-        for t in tools { reg.register(t); }
+        for t in tools {
+            reg.register(t);
+        }
         reg
     }
 
@@ -835,21 +889,30 @@ mod tests {
         // [Read(parallel), Browse₁(serialized:browser), Read(parallel), Browse₂(serialized:browser)]
         let reg = wave_registry(vec![
             Arc::new(ParallelStub("read")),
-            Arc::new(SerializedStub { name: "browse", group: "browser" }),
+            Arc::new(SerializedStub {
+                name: "browse",
+                group: "browser",
+            }),
         ]);
         let calls = vec![tc("read"), tc("browse"), tc("read"), tc("browse")];
         let waves = build_execution_waves(&calls, &reg);
         assert_eq!(waves.len(), 2);
         assert_eq!(waves[0], vec![0, 1, 2]); // parallel + first browser
-        assert_eq!(waves[1], vec![3]);        // second browser
+        assert_eq!(waves[1], vec![3]); // second browser
     }
 
     #[test]
     fn build_execution_waves_multiple_groups() {
         // [Browse₁(browser), Bash₁(shell), Browse₂(browser), Bash₂(shell)]
         let reg = wave_registry(vec![
-            Arc::new(SerializedStub { name: "browse", group: "browser" }),
-            Arc::new(SerializedStub { name: "bash", group: "shell" }),
+            Arc::new(SerializedStub {
+                name: "browse",
+                group: "browser",
+            }),
+            Arc::new(SerializedStub {
+                name: "bash",
+                group: "shell",
+            }),
         ]);
         let calls = vec![tc("browse"), tc("bash"), tc("browse"), tc("bash")];
         let waves = build_execution_waves(&calls, &reg);
@@ -878,9 +941,10 @@ mod tests {
 
     #[test]
     fn build_execution_waves_only_serialized() {
-        let reg = wave_registry(vec![
-            Arc::new(SerializedStub { name: "browse", group: "browser" }),
-        ]);
+        let reg = wave_registry(vec![Arc::new(SerializedStub {
+            name: "browse",
+            group: "browser",
+        })]);
         let calls = vec![tc("browse"), tc("browse"), tc("browse")];
         let waves = build_execution_waves(&calls, &reg);
         assert_eq!(waves.len(), 3);

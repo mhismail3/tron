@@ -227,7 +227,7 @@ mod tests {
             tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
-            tron_events::run_migrations(&conn).unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
         }
         let store = Arc::new(tron_events::EventStore::new(pool));
         let mgr = Arc::new(

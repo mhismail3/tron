@@ -20,8 +20,7 @@ use crate::models::types::ProviderType;
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
 /// Boxed stream of [`StreamEvent`]s returned by [`Provider::stream`].
-pub type StreamEventStream =
-    Pin<Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>>;
+pub type StreamEventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, ProviderError>> + Send>>;
 
 /// Errors that can occur during provider operations.
 #[derive(Debug, thiserror::Error)]
@@ -46,6 +45,13 @@ pub enum ProviderError {
     Auth {
         /// Error description.
         message: String,
+    },
+
+    /// Requested model is not supported by the registry.
+    #[error("Unsupported model: {model}")]
+    UnsupportedModel {
+        /// The unsupported model identifier.
+        model: String,
     },
 
     /// Rate limited by the provider.
@@ -90,14 +96,14 @@ impl ProviderError {
                 e.is_timeout()
                     || e.is_connect()
                     || e.status().is_some_and(|s| {
-                        s == reqwest::StatusCode::TOO_MANY_REQUESTS
-                            || s.is_server_error()
+                        s == reqwest::StatusCode::TOO_MANY_REQUESTS || s.is_server_error()
                     })
             }
             Self::RateLimited { .. } => true,
             Self::Api { retryable, .. } => *retryable,
             Self::SseParse { .. }
             | Self::Auth { .. }
+            | Self::UnsupportedModel { .. }
             | Self::Cancelled
             | Self::Json(_)
             | Self::Other { .. } => false,
@@ -118,6 +124,7 @@ impl ProviderError {
             Self::Http(_) => "network",
             Self::Json(_) | Self::SseParse { .. } => "parse",
             Self::Auth { .. } => "auth",
+            Self::UnsupportedModel { .. } => "invalid_model",
             Self::RateLimited { .. } => "rate_limit",
             Self::Api { .. } => "api",
             Self::Cancelled => "cancelled",
@@ -278,6 +285,16 @@ mod tests {
         assert!(!err.is_retryable());
         assert_eq!(err.category(), "auth");
         assert_eq!(err.retry_after_ms(), None);
+    }
+
+    #[test]
+    fn provider_error_unsupported_model_not_retryable() {
+        let err = ProviderError::UnsupportedModel {
+            model: "bad-model".into(),
+        };
+        assert!(!err.is_retryable());
+        assert_eq!(err.category(), "invalid_model");
+        assert_eq!(err.to_string(), "Unsupported model: bad-model");
     }
 
     #[test]

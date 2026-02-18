@@ -12,15 +12,25 @@ use super::types::ProviderType;
 /// Resolution order:
 /// 1. Explicit prefix (e.g., `"openai/gpt-5"` → `OpenAi`)
 /// 2. Registry lookup (exact match against known model IDs)
-/// 3. Family prefix (`"claude-*"` → Anthropic, `"gpt-*"` → `OpenAI`, `"gemini-*"` → Google)
-/// 4. Default to Anthropic (or `None` if `strict` is true)
+///
+/// Unknown model IDs always return `None` (strict fail-fast behavior).
 pub fn detect_provider_from_model(model_id: &str, strict: bool) -> Option<ProviderType> {
-    // 1. Explicit prefix: "provider/model"
-    if let Some((prefix, _)) = model_id.split_once('/') {
+    // Keep the parameter for API stability while enforcing strict behavior.
+    let _ = strict;
+
+    // 1. Explicit prefix: "provider/model". Prefix is accepted only when the
+    // bare model exists in that provider's registry.
+    if let Some((prefix, bare_model)) = model_id.split_once('/') {
         return match prefix {
-            "anthropic" => Some(ProviderType::Anthropic),
-            "openai" | "openai-codex" => Some(ProviderType::OpenAi),
-            "google" | "gemini" => Some(ProviderType::Google),
+            "anthropic" if ALL_ANTHROPIC_MODEL_IDS.contains(&bare_model) => {
+                Some(ProviderType::Anthropic)
+            }
+            "openai" | "openai-codex" if ALL_OPENAI_MODEL_IDS.contains(&bare_model) => {
+                Some(ProviderType::OpenAi)
+            }
+            "google" | "gemini" if ALL_GOOGLE_MODEL_IDS.contains(&bare_model) => {
+                Some(ProviderType::Google)
+            }
             _ => None,
         };
     }
@@ -36,23 +46,8 @@ pub fn detect_provider_from_model(model_id: &str, strict: bool) -> Option<Provid
         return Some(ProviderType::Google);
     }
 
-    // 3. Family prefix
-    if model_id.starts_with("claude-") {
-        return Some(ProviderType::Anthropic);
-    }
-    if model_id.starts_with("gpt-") {
-        return Some(ProviderType::OpenAi);
-    }
-    if model_id.starts_with("gemini-") {
-        return Some(ProviderType::Google);
-    }
-
-    // 4. Default
-    if strict {
-        None
-    } else {
-        Some(ProviderType::Anthropic)
-    }
+    // Unknown model.
+    None
 }
 
 /// Strip the explicit provider prefix from a model ID, if present.
@@ -191,38 +186,42 @@ mod tests {
     fn detect_family_prefix_claude() {
         assert_eq!(
             detect_provider_from_model("claude-some-future-model", false),
-            Some(ProviderType::Anthropic)
+            None
         );
     }
 
     #[test]
     fn detect_family_prefix_gpt() {
-        assert_eq!(
-            detect_provider_from_model("gpt-6-turbo", false),
-            Some(ProviderType::OpenAi)
-        );
+        assert_eq!(detect_provider_from_model("gpt-6-turbo", false), None);
     }
 
     #[test]
     fn detect_family_prefix_gemini() {
-        assert_eq!(
-            detect_provider_from_model("gemini-4-ultra", false),
-            Some(ProviderType::Google)
-        );
+        assert_eq!(detect_provider_from_model("gemini-4-ultra", false), None);
     }
 
     #[test]
-    fn detect_unknown_defaults_to_anthropic() {
-        assert_eq!(
-            detect_provider_from_model("some-random-model", false),
-            Some(ProviderType::Anthropic)
-        );
+    fn detect_unknown_returns_none() {
+        assert_eq!(detect_provider_from_model("some-random-model", false), None);
     }
 
     #[test]
     fn detect_unknown_strict_returns_none() {
+        assert_eq!(detect_provider_from_model("some-random-model", true), None);
+    }
+
+    #[test]
+    fn detect_prefixed_unknown_model_returns_none() {
         assert_eq!(
-            detect_provider_from_model("some-random-model", true),
+            detect_provider_from_model("openai/not-a-real-model", false),
+            None
+        );
+        assert_eq!(
+            detect_provider_from_model("anthropic/not-a-real-model", false),
+            None
+        );
+        assert_eq!(
+            detect_provider_from_model("google/not-a-real-model", false),
             None
         );
     }
@@ -231,7 +230,10 @@ mod tests {
 
     #[test]
     fn strip_prefix_with_prefix() {
-        assert_eq!(strip_provider_prefix("openai/gpt-5.3-codex"), "gpt-5.3-codex");
+        assert_eq!(
+            strip_provider_prefix("openai/gpt-5.3-codex"),
+            "gpt-5.3-codex"
+        );
     }
 
     #[test]

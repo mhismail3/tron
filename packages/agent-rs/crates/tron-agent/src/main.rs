@@ -14,14 +14,15 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use parking_lot::RwLock;
+use tron_agent::db_path_policy::resolve_production_db_path;
 use tron_events::{ConnectionConfig, EventStore};
 use tron_llm::provider::ProviderFactory;
-use tron_server::rpc::context::{AgentDeps, RpcContext};
-use tron_server::rpc::registry::MethodRegistry;
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_runtime::orchestrator::subagent_manager::SubagentManager;
 use tron_server::config::ServerConfig;
+use tron_server::rpc::context::{AgentDeps, RpcContext};
+use tron_server::rpc::registry::MethodRegistry;
 use tron_server::server::TronServer;
 use tron_server::websocket::event_bridge::EventBridge;
 use tron_skills::registry::SkillRegistry;
@@ -46,16 +47,6 @@ struct Cli {
     /// Maximum concurrent sessions (overrides settings if specified).
     #[arg(long)]
     max_sessions: Option<usize>,
-}
-
-impl Cli {
-    fn default_db_path() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home)
-            .join(".tron")
-            .join("database")
-            .join("beta-rs.db")
-    }
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
@@ -103,18 +94,15 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 
     let fs: Arc<dyn tron_tools::traits::FileSystemOps> = Arc::new(RealFileSystem);
     let runner: Arc<dyn tron_tools::traits::ProcessRunner> = Arc::new(TokioProcessRunner);
-    let http: Arc<dyn tron_tools::traits::HttpClient> = Arc::new(
-        ReqwestHttpClient::from_client(config.http_client.clone()),
-    );
+    let http: Arc<dyn tron_tools::traits::HttpClient> =
+        Arc::new(ReqwestHttpClient::from_client(config.http_client.clone()));
 
     // Real providers backed by SQLite
-    let mut store_query_builder =
-        providers::SqliteEventStoreQuery::new(config.event_store.clone());
+    let mut store_query_builder = providers::SqliteEventStoreQuery::new(config.event_store.clone());
     if let Some(ref ec) = config.embedding_controller {
         store_query_builder = store_query_builder.with_embedding_controller(ec.clone());
     }
-    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> =
-        Arc::new(store_query_builder);
+    let store_query: Arc<dyn tron_tools::traits::EventStoreQuery> = Arc::new(store_query_builder);
     let task_mgr: Arc<dyn tron_tools::traits::TaskManagerDelegate> = Arc::new(
         providers::SqliteTaskManagerDelegate::new(config.task_pool.clone()),
     );
@@ -133,16 +121,18 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
     )));
 
     // 5: Search
-    registry.register(Arc::new(
-        tron_tools::search::search_tool::SearchTool::new(runner),
-    ));
+    registry.register(Arc::new(tron_tools::search::search_tool::SearchTool::new(
+        runner,
+    )));
 
     // 6: Find
     registry.register(Arc::new(tron_tools::fs::find::FindTool::new()));
 
     // 7: BrowseTheWeb (real CDP delegate if Chrome found, otherwise stub)
-    let browser_delegate: Arc<dyn tron_tools::traits::BrowserDelegate> =
-        config.browser_delegate.clone().unwrap_or_else(|| Arc::new(StubBrowserDelegate));
+    let browser_delegate: Arc<dyn tron_tools::traits::BrowserDelegate> = config
+        .browser_delegate
+        .clone()
+        .unwrap_or_else(|| Arc::new(StubBrowserDelegate));
     registry.register(Arc::new(
         tron_tools::browser::browse_the_web::BrowseTheWebTool::new(browser_delegate),
     ));
@@ -214,7 +204,7 @@ async fn main() -> Result<()> {
 
     // Database (events + tasks share one SQLite file) — set up before logging
     // so that tracing events are persisted from the start.
-    let db_path = args.db_path.unwrap_or_else(Cli::default_db_path);
+    let db_path = resolve_production_db_path(args.db_path)?;
     ensure_parent_dir(&db_path)?;
     let db_str = db_path.to_string_lossy();
     let pool = tron_events::new_file(&db_str, &ConnectionConfig::default())
@@ -228,14 +218,14 @@ async fn main() -> Result<()> {
 
     // Load settings early (needed for log level before logging init)
     let settings_path = tron_settings::loader::settings_path();
-    let settings = tron_settings::loader::load_settings_from_path(&settings_path)
-        .unwrap_or_default();
+    let settings =
+        tron_settings::loader::load_settings_from_path(&settings_path).unwrap_or_default();
 
     // Initialize logging with SQLite persistence (dedicated connection, separate from pool).
     // Must set WAL + busy_timeout to match pool connections — without busy_timeout,
     // concurrent writes from the pool cause immediate SQLITE_BUSY errors.
-    let log_conn = rusqlite::Connection::open(&db_path)
-        .context("Failed to open logging DB connection")?;
+    let log_conn =
+        rusqlite::Connection::open(&db_path).context("Failed to open logging DB connection")?;
     log_conn
         .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
         .context("Failed to set logging connection pragmas")?;
@@ -252,10 +242,7 @@ async fn main() -> Result<()> {
         .max_sessions
         .unwrap_or(settings.server.max_concurrent_sessions);
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(
-        session_manager.clone(),
-        max_sessions,
-    ));
+    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
     // Load Brave API key for web search (matches TS server conditional registration)
@@ -278,8 +265,9 @@ async fn main() -> Result<()> {
     // Browser delegate for tool registry (real CDP if Chrome found)
     let browser_delegate: Option<Arc<dyn tron_tools::traits::BrowserDelegate>> =
         browser_service.as_ref().map(|svc| {
-            Arc::new(tron_tools::cdp::delegate::CdpBrowserDelegate::new(svc.clone()))
-                as Arc<dyn tron_tools::traits::BrowserDelegate>
+            Arc::new(tron_tools::cdp::delegate::CdpBrowserDelegate::new(
+                svc.clone(),
+            )) as Arc<dyn tron_tools::traits::BrowserDelegate>
         });
 
     // APNS service (optional — only if config exists at ~/.tron/mods/apns/)
@@ -301,7 +289,9 @@ async fn main() -> Result<()> {
     }
 
     // Embedding controller (optional — fire-and-forget ONNX model loading)
-    let embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>> = {
+    let embedding_controller: Option<
+        Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>,
+    > = {
         let emb_settings = &settings.context.memory.embedding;
         if emb_settings.enabled {
             let emb_config = tron_embeddings::EmbeddingConfig::from_settings(emb_settings);
@@ -309,8 +299,7 @@ async fn main() -> Result<()> {
 
             // Create vector repository with a dedicated connection (VectorRepository owns a
             // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
-            let vec_conn = rusqlite::Connection::open(&db_path)
-                .expect("db connection for vectors");
+            let vec_conn = rusqlite::Connection::open(&db_path).expect("db connection for vectors");
             vec_conn
                 .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
                 .expect("vector connection pragmas");
@@ -321,7 +310,9 @@ async fn main() -> Result<()> {
             let ctrl_arc = Arc::new(tokio::sync::Mutex::new(ctrl));
 
             // Fire-and-forget: load ONNX model + backfill unembedded entries
-            let service = Arc::new(tron_embeddings::ort_service::OnnxEmbeddingService::new(emb_config));
+            let service = Arc::new(tron_embeddings::ort_service::OnnxEmbeddingService::new(
+                emb_config,
+            ));
             let service_clone = Arc::clone(&service);
             let ctrl_for_init = Arc::clone(&ctrl_arc);
 
@@ -393,9 +384,9 @@ async fn main() -> Result<()> {
             registry.register(Arc::new(
                 tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
             ));
-            registry.register(Arc::new(
-                tron_tools::subagent::query::QueryAgentTool::new(spawner.clone()),
-            ));
+            registry.register(Arc::new(tron_tools::subagent::query::QueryAgentTool::new(
+                spawner.clone(),
+            )));
             registry.register(Arc::new(
                 tron_tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
             ));
@@ -428,7 +419,9 @@ async fn main() -> Result<()> {
             Some(subagent_manager) as Option<Arc<SubagentManager>>,
         )
     } else {
-        tracing::warn!("no auth found — agent execution disabled (sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)");
+        tracing::warn!(
+            "no auth found — agent execution disabled (sign in via the app, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)"
+        );
         (None, None)
     };
 
@@ -448,7 +441,9 @@ async fn main() -> Result<()> {
                 }
             }
         } else {
-            tracing::info!("transcription model not cached — sidecar fallback (call transcribe.downloadModel to enable native)");
+            tracing::info!(
+                "transcription model not cached — sidecar fallback (call transcribe.downloadModel to enable native)"
+            );
             None
         }
     };
@@ -498,14 +493,9 @@ async fn main() -> Result<()> {
     );
     let bridge_handle = tokio::spawn(bridge.run());
 
-    let (addr, server_handle) = server
-        .listen()
-        .await
-        .context("Failed to bind server")?;
+    let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
 
-    tracing::info!(
-        "Tron agent listening on http://{addr} ({method_count} RPC methods registered)"
-    );
+    tracing::info!("Tron agent listening on http://{addr} ({method_count} RPC methods registered)");
 
     // Wait for shutdown signal
     tokio::signal::ctrl_c()
@@ -535,6 +525,10 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use tron_agent::db_path_policy::{
+        PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
+        validate_production_db_path_for_home,
+    };
     use tron_settings::TronSettings;
 
     #[test]
@@ -581,9 +575,9 @@ mod tests {
 
     #[test]
     fn default_db_path_under_tron_dir() {
-        let path = Cli::default_db_path();
+        let path = default_production_db_path();
         assert!(path.to_string_lossy().contains(".tron"));
-        assert!(path.to_string_lossy().ends_with("beta-rs.db"));
+        assert!(path.to_string_lossy().ends_with(PRODUCTION_DB_FILENAME));
     }
 
     #[test]
@@ -595,14 +589,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn factory_unknown_model_returns_auth_error() {
-        // DefaultProviderFactory defaults unknown models to Anthropic,
-        // which returns an auth error when no credentials are available.
+    async fn factory_unknown_model_returns_unsupported_model_error() {
         let settings = TronSettings::default();
         let factory = provider_factory::DefaultProviderFactory::new(&settings)
             .with_auth_path(PathBuf::from("/tmp/tron-test-no-such-auth.json"));
         let result = factory.create_for_model("unknown-model").await;
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(tron_llm::provider::ProviderError::UnsupportedModel { .. })
+        ));
+    }
+
+    #[test]
+    fn db_policy_accepts_expected_home_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let db_path = production_db_dir_from_home(&home).join(PRODUCTION_DB_FILENAME);
+        validate_production_db_path_for_home(&db_path, &home).unwrap();
+    }
+
+    #[test]
+    fn db_policy_rejects_alternate_filename() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let db_path = production_db_dir_from_home(&home).join("not-beta.db");
+        let err = validate_production_db_path_for_home(&db_path, &home).unwrap_err();
+        assert!(err.to_string().contains(PRODUCTION_DB_FILENAME));
+    }
+
+    #[test]
+    fn db_policy_rejects_wrong_directory_without_creating_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let bad_parent = home.join("other-db-dir");
+        let bad_path = bad_parent.join(PRODUCTION_DB_FILENAME);
+        assert!(!bad_parent.exists());
+
+        let err = validate_production_db_path_for_home(&bad_path, &home).unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+        assert!(!bad_parent.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn db_policy_rejects_symlink_db_file() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let prod_dir = production_db_dir_from_home(&home);
+        std::fs::create_dir_all(&prod_dir).unwrap();
+
+        let target = dir.path().join("escape.db");
+        std::fs::write(&target, "x").unwrap();
+        let symlink_path = prod_dir.join(PRODUCTION_DB_FILENAME);
+        symlink(&target, &symlink_path).unwrap();
+
+        let err = validate_production_db_path_for_home(&symlink_path, &home).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
     }
 
     #[tokio::test]
@@ -696,8 +746,13 @@ mod tests {
             refresh_token: "ref2".to_string(),
             expires_at: tron_llm::auth::now_ms() + 3_600_000,
         };
-        tron_llm::auth::storage::save_account_oauth_tokens(&path, "anthropic", "work", &work_tokens)
-            .unwrap();
+        tron_llm::auth::storage::save_account_oauth_tokens(
+            &path,
+            "anthropic",
+            "work",
+            &work_tokens,
+        )
+        .unwrap();
         tron_llm::auth::storage::save_account_oauth_tokens(
             &path,
             "anthropic",
@@ -709,9 +764,10 @@ mod tests {
         let config = tron_llm::auth::anthropic::default_config();
 
         // Select "personal" account
-        let result = tron_llm::auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
-            .await
-            .unwrap();
+        let result =
+            tron_llm::auth::anthropic::load_server_auth(&path, &config, None, Some("personal"))
+                .await
+                .unwrap();
         assert_eq!(result.unwrap().token(), "personal-tok");
 
         // No preference → first account
@@ -837,18 +893,22 @@ mod tests {
 
         let config = ServerConfig::default();
         let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-            .build_recorder().handle();
+            .build_recorder()
+            .handle();
         let server = TronServer::new(config, registry, rpc_context, metrics_handle);
 
-        let bridge = EventBridge::new(orchestrator.subscribe(), server.broadcast().clone(), None, server.shutdown().token());
+        let bridge = EventBridge::new(
+            orchestrator.subscribe(),
+            server.broadcast().clone(),
+            None,
+            server.shutdown().token(),
+        );
         let _bridge = tokio::spawn(bridge.run());
 
         let (addr, handle) = server.listen().await.unwrap();
 
         // Health check
-        let resp = reqwest::get(format!("http://{addr}/health"))
-            .await
-            .unwrap();
+        let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
         assert!(resp.status().is_success());
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "ok");
@@ -948,7 +1008,12 @@ mod tests {
         let config = make_tool_config();
         let registry = create_tool_registry(&config);
         // 15 tools without Brave API key (no WebSearch), without subagent tools
-        assert_eq!(registry.len(), 14, "expected 14 tools (no WebSearch without Brave key), got: {:?}", registry.names());
+        assert_eq!(
+            registry.len(),
+            14,
+            "expected 14 tools (no WebSearch without Brave key), got: {:?}",
+            registry.names()
+        );
     }
 
     #[test]
@@ -958,7 +1023,12 @@ mod tests {
             ..make_tool_config()
         };
         let registry = create_tool_registry(&config);
-        assert_eq!(registry.len(), 15, "expected 15 tools with WebSearch, got: {:?}", registry.names());
+        assert_eq!(
+            registry.len(),
+            15,
+            "expected 15 tools with WebSearch, got: {:?}",
+            registry.names()
+        );
     }
 
     #[test]
@@ -1003,8 +1073,14 @@ mod tests {
         tron_server::rpc::handlers::register_all(&mut registry);
 
         let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-            .build_recorder().handle();
-        let server = TronServer::new(ServerConfig::default(), registry, rpc_context, metrics_handle);
+            .build_recorder()
+            .handle();
+        let server = TronServer::new(
+            ServerConfig::default(),
+            registry,
+            rpc_context,
+            metrics_handle,
+        );
         let (_, handle) = server.listen().await.unwrap();
 
         server.shutdown().shutdown();

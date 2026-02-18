@@ -25,7 +25,10 @@ pub struct ReconstructedState {
 }
 
 /// Reconstruct session state from the event store.
-pub fn reconstruct(event_store: &EventStore, session_id: &str) -> Result<ReconstructedState, RuntimeError> {
+pub fn reconstruct(
+    event_store: &EventStore,
+    session_id: &str,
+) -> Result<ReconstructedState, RuntimeError> {
     let state = event_store
         .get_state_at_head(session_id)
         .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
@@ -39,9 +42,7 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
     let messages: Vec<Message> = state
         .messages_with_event_ids
         .iter()
-        .filter_map(|m| {
-            serde_json::from_value(serde_json::to_value(&m.message).ok()?).ok()
-        })
+        .filter_map(|m| serde_json::from_value(serde_json::to_value(&m.message).ok()?).ok())
         .collect();
 
     let token_usage = TokenUsage {
@@ -84,7 +85,7 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tron_events::{new_in_memory, run_migrations, ConnectionConfig, EventType, AppendOptions};
+    use tron_events::{AppendOptions, ConnectionConfig, EventType, new_in_memory, run_migrations};
 
     fn make_store() -> EventStore {
         let pool = new_in_memory(&ConnectionConfig::default()).unwrap();
@@ -98,7 +99,9 @@ mod tests {
     #[test]
     fn reconstruct_empty_session() {
         let store = make_store();
-        let session = store.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
 
         let state = reconstruct(&store, &session.session.id).unwrap();
         assert_eq!(state.model, "test-model");
@@ -109,30 +112,36 @@ mod tests {
     #[test]
     fn reconstruct_with_messages() {
         let store = make_store();
-        let session = store.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
         let sid = &session.session.id;
 
         // Add user message event
-        let _ = store.append(&AppendOptions {
-            session_id: sid,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({
-                "role": "user",
-                "content": "hello"
-            }),
-            parent_id: None,
-        }).unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({
+                    "role": "user",
+                    "content": "hello"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
 
         // Add assistant message event
-        let _ = store.append(&AppendOptions {
-            session_id: sid,
-            event_type: EventType::MessageAssistant,
-            payload: serde_json::json!({
-                "role": "assistant",
-                "content": [{"type": "text", "text": "hi there"}]
-            }),
-            parent_id: None,
-        }).unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "hi there"}]
+                }),
+                parent_id: None,
+            })
+            .unwrap();
 
         let state = reconstruct(&store, sid).unwrap();
         assert_eq!(state.model, "test-model");
@@ -147,15 +156,19 @@ mod tests {
     #[test]
     fn reconstruct_tool_use_survives_serde_roundtrip() {
         let store = make_store();
-        let session = store.create_session("test-model", "/tmp", Some("test")).unwrap();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"))
+            .unwrap();
         let sid = &session.session.id;
 
-        let _ = store.append(&AppendOptions {
-            session_id: sid,
-            event_type: EventType::MessageUser,
-            payload: serde_json::json!({"content": "write a file"}),
-            parent_id: None,
-        }).unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "write a file"}),
+                parent_id: None,
+            })
+            .unwrap();
 
         // Assistant message with tool_use using "input" (API wire format, as persistence stores it)
         let _ = store.append(&AppendOptions {
@@ -164,7 +177,7 @@ mod tests {
             payload: serde_json::json!({
                 "content": [
                     {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
-                    {"type": "tool_use", "id": "toolu_01abc", "name": "Write", "input": {"file_path": "/tmp/test.txt", "content": "hello"}}
+                    {"type": "tool_use", "id": "toolu_01abc", "name": "Write", "arguments": {"file_path": "/tmp/test.txt", "content": "hello"}}
                 ],
                 "turn": 1
             }),
@@ -178,19 +191,30 @@ mod tests {
             parent_id: None,
         }).unwrap();
 
-        let _ = store.append(&AppendOptions {
-            session_id: sid,
-            event_type: EventType::MessageAssistant,
-            payload: serde_json::json!({
-                "content": [{"type": "text", "text": "Done!"}],
-                "turn": 2
-            }),
-            parent_id: None,
-        }).unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "Done!"}],
+                    "turn": 2
+                }),
+                parent_id: None,
+            })
+            .unwrap();
 
         let state = reconstruct(&store, sid).unwrap();
         // All 4 messages must survive: user, assistant(tool_use), toolResult, assistant(text)
-        assert_eq!(state.messages.len(), 4, "All messages must survive serde roundtrip, got: {:?}", state.messages.iter().map(|m| format!("{:?}", m)).collect::<Vec<_>>());
+        assert_eq!(
+            state.messages.len(),
+            4,
+            "All messages must survive serde roundtrip, got: {:?}",
+            state
+                .messages
+                .iter()
+                .map(|m| format!("{:?}", m))
+                .collect::<Vec<_>>()
+        );
         assert!(state.messages[0].is_user());
         assert!(state.messages[1].is_assistant());
         assert!(state.messages[2].is_tool_result());
@@ -198,8 +222,17 @@ mod tests {
 
         // Verify the tool_use arguments are preserved
         if let Message::Assistant { content, .. } = &state.messages[1] {
-            let tool_use = content.iter().find(|c| c.is_tool_use()).expect("should have tool_use");
-            if let tron_core::content::AssistantContent::ToolUse { id, name, arguments, .. } = tool_use {
+            let tool_use = content
+                .iter()
+                .find(|c| c.is_tool_use())
+                .expect("should have tool_use");
+            if let tron_core::content::AssistantContent::ToolUse {
+                id,
+                name,
+                arguments,
+                ..
+            } = tool_use
+            {
                 assert_eq!(id, "toolu_01abc");
                 assert_eq!(name, "Write");
                 assert_eq!(arguments["file_path"], "/tmp/test.txt");
@@ -228,19 +261,23 @@ mod tests {
     #[test]
     fn reconstruct_with_model_switch() {
         let store = make_store();
-        let session = store.create_session("model-a", "/tmp", Some("test")).unwrap();
+        let session = store
+            .create_session("model-a", "/tmp", Some("test"))
+            .unwrap();
         let sid = &session.session.id;
 
         // Switch model via event
-        let _ = store.append(&AppendOptions {
-            session_id: sid,
-            event_type: EventType::ConfigModelSwitch,
-            payload: serde_json::json!({
-                "model": "model-b",
-                "previousModel": "model-a"
-            }),
-            parent_id: None,
-        }).unwrap();
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::ConfigModelSwitch,
+                payload: serde_json::json!({
+                    "model": "model-b",
+                    "previousModel": "model-a"
+                }),
+                parent_id: None,
+            })
+            .unwrap();
 
         let state = reconstruct(&store, sid).unwrap();
         // The latest model should be reflected

@@ -15,9 +15,6 @@ use crate::tools::Tool;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A tool call emitted by the assistant.
-///
-/// This is the internal representation. The wire format uses `input` instead of
-/// `arguments`; see [`ApiToolUseBlock`] for the API format.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     /// Discriminator tag.
@@ -50,7 +47,7 @@ impl Default for ToolCall {
 // API format types (for persistence / wire format)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// API-format `tool_use` block. Uses `input` instead of `arguments`.
+/// Canonical `tool_use` block shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ApiToolUseBlock {
     /// Discriminator.
@@ -60,8 +57,8 @@ pub struct ApiToolUseBlock {
     pub id: String,
     /// Tool name.
     pub name: String,
-    /// Tool input (arguments in API naming).
-    pub input: Map<String, Value>,
+    /// Tool arguments.
+    pub arguments: Map<String, Value>,
 }
 
 /// API-format `tool_result` block.
@@ -106,7 +103,7 @@ pub fn to_api_tool_use(tc: &ToolCall) -> ApiToolUseBlock {
         content_type: "tool_use".into(),
         id: tc.id.clone(),
         name: tc.name.clone(),
-        input: tc.arguments.clone(),
+        arguments: tc.arguments.clone(),
     }
 }
 
@@ -117,17 +114,14 @@ pub fn from_api_tool_use(api: &ApiToolUseBlock) -> ToolCall {
         content_type: "tool_use".into(),
         id: api.id.clone(),
         name: api.name.clone(),
-        arguments: api.input.clone(),
+        arguments: api.arguments.clone(),
         thought_signature: None,
     }
 }
 
-/// Normalize tool arguments — handles both `input` and `arguments` naming.
+/// Normalize tool arguments from canonical `arguments`.
 #[must_use]
 pub fn normalize_tool_arguments(block: &Value) -> Map<String, Value> {
-    if let Some(input) = block.get("input").and_then(Value::as_object) {
-        return input.clone();
-    }
     if let Some(args) = block.get("arguments").and_then(Value::as_object) {
         return args.clone();
     }
@@ -349,10 +343,7 @@ impl Message {
 
 /// Extract tool use blocks from assistant content.
 pub fn extract_tool_calls(content: &[AssistantContent]) -> Vec<&AssistantContent> {
-    content
-        .iter()
-        .filter(|c| c.is_tool_use())
-        .collect()
+    content.iter().filter(|c| c.is_tool_use()).collect()
 }
 
 /// Extract text from assistant content blocks.
@@ -433,7 +424,7 @@ pub fn is_any_tool_result_block(block: &Value) -> bool {
 pub fn is_api_tool_use_block(block: &Value) -> bool {
     block.get("type").and_then(Value::as_str) == Some("tool_use")
         && block.get("id").and_then(Value::as_str).is_some()
-        && block.get("input").is_some()
+        && block.get("arguments").is_some()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -486,7 +477,7 @@ mod tests {
         let api = to_api_tool_use(&tc);
         assert_eq!(api.id, "tc-1");
         assert_eq!(api.name, "read");
-        assert_eq!(api.input, args);
+        assert_eq!(api.arguments, args);
 
         let back = from_api_tool_use(&api);
         assert_eq!(back.id, tc.id);
@@ -497,10 +488,10 @@ mod tests {
     // -- normalize helpers --
 
     #[test]
-    fn normalize_tool_arguments_from_input() {
+    fn normalize_tool_arguments_requires_arguments() {
         let v = json!({"input": {"a": 1}});
         let args = normalize_tool_arguments(&v);
-        assert_eq!(args["a"], 1);
+        assert!(args.is_empty());
     }
 
     #[test]
@@ -726,12 +717,12 @@ mod tests {
 
     #[test]
     fn is_api_tool_use_block_positive() {
-        let v = json!({"type": "tool_use", "id": "tc-1", "name": "bash", "input": {}});
+        let v = json!({"type": "tool_use", "id": "tc-1", "name": "bash", "arguments": {}});
         assert!(is_api_tool_use_block(&v));
     }
 
     #[test]
-    fn is_api_tool_use_block_negative_missing_input() {
+    fn is_api_tool_use_block_negative_missing_arguments() {
         let v = json!({"type": "tool_use", "id": "tc-1", "name": "bash"});
         assert!(!is_api_tool_use_block(&v));
     }

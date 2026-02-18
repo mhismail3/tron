@@ -259,11 +259,7 @@ fn handle_tool_result(event: &SessionEvent, st: &mut BuildState) {
 fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
     st.pending_tool_results.clear();
 
-    let content = event
-        .payload
-        .get("content")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
 
     if st.combined.last().is_some_and(|e| e.message.role == "user") {
         let last = st.combined.last_mut().unwrap();
@@ -286,23 +282,26 @@ fn handle_message_user(event: &SessionEvent, st: &mut BuildState) {
 /// Handle `message.assistant`: restore truncated inputs, flush tool results,
 /// merge consecutive, track turns.
 fn handle_message_assistant(event: &SessionEvent, metadata: &Metadata, st: &mut BuildState) {
-    let content = event
-        .payload
-        .get("content")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let content = event.payload.get("content").cloned().unwrap_or(Value::Null);
     let restored_content = restore_truncated_inputs(&content, &metadata.tool_call_args_map);
     let has_tool_use = content_has_tool_use(&restored_content);
 
     // CASE 1: Last was assistant with pending tool results → flush first
-    if st.combined.last().is_some_and(|e| e.message.role == "assistant")
+    if st
+        .combined
+        .last()
+        .is_some_and(|e| e.message.role == "assistant")
         && !st.pending_tool_results.is_empty()
     {
         flush_tool_results(&mut st.combined, &mut st.pending_tool_results);
     }
 
     // Re-check after potential flush — merge consecutive assistant messages
-    if st.combined.last().is_some_and(|e| e.message.role == "assistant") {
+    if st
+        .combined
+        .last()
+        .is_some_and(|e| e.message.role == "assistant")
+    {
         let last = st.combined.last_mut().unwrap();
         last.message.content =
             merge_message_content(&last.message.content, &restored_content, "assistant");
@@ -480,10 +479,9 @@ fn restore_truncated_inputs(
             let restored: Vec<Value> = arr
                 .iter()
                 .map(|block| {
-                    let is_tool_use =
-                        block.get("type").and_then(Value::as_str) == Some("tool_use");
+                    let is_tool_use = block.get("type").and_then(Value::as_str) == Some("tool_use");
                     let is_truncated = block
-                        .get("input")
+                        .get("arguments")
                         .and_then(|i| i.get("_truncated"))
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
@@ -493,7 +491,7 @@ fn restore_truncated_inputs(
                         if let Some(id) = block_id {
                             if let Some(full_args) = tool_call_args_map.get(id) {
                                 let mut restored_block = block.clone();
-                                restored_block["input"] = full_args.clone();
+                                restored_block["arguments"] = full_args.clone();
                                 return restored_block;
                             }
                         }
@@ -654,7 +652,7 @@ mod tests {
                 serde_json::json!({
                     "content": [
                         {"type": "text", "text": "I will use a tool."},
-                        {"type": "tool_use", "id": "call_123", "name": "TestTool", "input": {"arg": "value"}}
+                        {"type": "tool_use", "id": "call_123", "name": "TestTool", "arguments": {"arg": "value"}}
                     ],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 50, "outputTokens": 25}
@@ -702,8 +700,8 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "input": {}},
-                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "input": {}}
+                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}},
+                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}
                     ],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 60, "outputTokens": 30}
@@ -755,7 +753,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool1", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 45, "outputTokens": 20}
                 }),
@@ -768,7 +766,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_2", "name": "Tool2", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}],
                     "turn": 2,
                     "tokenUsage": {"inputTokens": 65, "outputTokens": 28}
                 }),
@@ -812,7 +810,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 40, "outputTokens": 18}
                 }),
@@ -925,7 +923,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 50, "outputTokens": 25}
                 }),
@@ -990,12 +988,20 @@ mod tests {
         // synthetic user (summary), synthetic assistant, real user
         assert_eq!(msgs.len(), 3);
         assert_eq!(msgs[0].role, "user");
-        assert!(msgs[0].content.as_str().unwrap().contains("Context from earlier"));
-        assert!(msgs[0]
-            .content
-            .as_str()
-            .unwrap()
-            .contains("Previous conversation summary"));
+        assert!(
+            msgs[0]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("Context from earlier")
+        );
+        assert!(
+            msgs[0]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("Previous conversation summary")
+        );
         assert_eq!(msgs[1].role, "assistant");
         assert_eq!(msgs[2].role, "user");
         assert_eq!(msgs[2].content, "New message");
@@ -1029,7 +1035,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
                     "turn": 1,
                 }),
             ),
@@ -1070,10 +1076,7 @@ mod tests {
                     "turn": 1,
                 }),
             ),
-            ev(
-                EventType::ContextCleared,
-                serde_json::json!({}),
-            ),
+            ev(EventType::ContextCleared, serde_json::json!({})),
             ev(
                 EventType::MessageUser,
                 serde_json::json!({"content": "Fresh start"}),
@@ -1239,7 +1242,7 @@ mod tests {
                         "type": "tool_use",
                         "id": "call_1",
                         "name": "BigTool",
-                        "input": {"_truncated": true}
+                        "arguments": {"_truncated": true}
                     }],
                     "turn": 1,
                     "tokenUsage": {"inputTokens": 55, "outputTokens": 22}
@@ -1264,9 +1267,9 @@ mod tests {
 
         // Assistant message should have restored arguments
         let tool_use = &msgs[1].content[0];
-        assert_eq!(tool_use["input"]["largeArg"], "Full argument value");
+        assert_eq!(tool_use["arguments"]["largeArg"], "Full argument value");
         // _truncated should be gone
-        assert!(tool_use["input"].get("_truncated").is_none());
+        assert!(tool_use["arguments"].get("_truncated").is_none());
     }
 
     #[test]
@@ -1284,7 +1287,7 @@ mod tests {
                         "type": "tool_use",
                         "id": "call_1",
                         "name": "Tool",
-                        "input": {"arg": "value"}
+                        "arguments": {"arg": "value"}
                     }],
                     "turn": 1,
                 }),
@@ -1295,7 +1298,7 @@ mod tests {
         let msgs = get_messages(&result);
 
         let tool_use = &msgs[1].content[0];
-        assert_eq!(tool_use["input"]["arg"], "value");
+        assert_eq!(tool_use["arguments"]["arg"], "value");
     }
 
     // ── Reasoning level ──────────────────────────────────────────────
@@ -1443,7 +1446,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Bash", "input": {"command": "ls"}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Bash", "arguments": {"command": "ls"}}],
                     "turn": 1,
                 }),
             ),
@@ -1459,7 +1462,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_2", "name": "Read", "input": {"path": "file1.txt"}}],
+                    "content": [{"type": "tool_use", "id": "call_2", "name": "Read", "arguments": {"path": "file1.txt"}}],
                     "turn": 2,
                 }),
             ),
@@ -1538,7 +1541,13 @@ mod tests {
 
         // synthetic user, synthetic assistant, new user, new assistant
         assert_eq!(msgs.len(), 4);
-        assert!(msgs[0].content.as_str().unwrap().contains("Context from earlier"));
+        assert!(
+            msgs[0]
+                .content
+                .as_str()
+                .unwrap()
+                .contains("Context from earlier")
+        );
         assert_eq!(msgs[1].role, "assistant");
         assert_eq!(msgs[2].content, "New question");
         assert_eq!(msgs[3].content[0]["text"], "New answer");
@@ -1557,7 +1566,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "T", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "T", "arguments": {}}],
                     "turn": 1,
                 }),
             ),
@@ -1581,22 +1590,10 @@ mod tests {
     fn irrelevant_events_ignored() {
         let events = vec![
             session_start(),
-            ev(
-                EventType::StreamTurnStart,
-                serde_json::json!({}),
-            ),
-            ev(
-                EventType::StreamTurnEnd,
-                serde_json::json!({}),
-            ),
-            ev(
-                EventType::SessionFork,
-                serde_json::json!({}),
-            ),
-            ev(
-                EventType::MetadataUpdate,
-                serde_json::json!({}),
-            ),
+            ev(EventType::StreamTurnStart, serde_json::json!({})),
+            ev(EventType::StreamTurnEnd, serde_json::json!({})),
+            ev(EventType::SessionFork, serde_json::json!({})),
+            ev(EventType::MetadataUpdate, serde_json::json!({})),
             ev(
                 EventType::MessageUser,
                 serde_json::json!({"content": "Hello"}),
@@ -1623,7 +1620,8 @@ mod tests {
 
     #[test]
     fn normalize_user_content_array() {
-        let content = serde_json::json!([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]);
+        let content =
+            serde_json::json!([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]);
         let blocks = normalize_user_content(&content);
         assert_eq!(blocks.len(), 2);
     }
@@ -1638,7 +1636,7 @@ mod tests {
     fn content_has_tool_use_true() {
         let content = serde_json::json!([
             {"type": "text", "text": "hi"},
-            {"type": "tool_use", "id": "call_1", "name": "T", "input": {}}
+            {"type": "tool_use", "id": "call_1", "name": "T", "arguments": {}}
         ]);
         assert!(content_has_tool_use(&content));
     }
@@ -1657,17 +1655,17 @@ mod tests {
     #[test]
     fn restore_truncated_inputs_no_truncation() {
         let content = serde_json::json!([
-            {"type": "tool_use", "id": "call_1", "input": {"arg": "val"}}
+            {"type": "tool_use", "id": "call_1", "arguments": {"arg": "val"}}
         ]);
         let map = std::collections::HashMap::new();
         let result = restore_truncated_inputs(&content, &map);
-        assert_eq!(result[0]["input"]["arg"], "val");
+        assert_eq!(result[0]["arguments"]["arg"], "val");
     }
 
     #[test]
     fn restore_truncated_inputs_with_truncation() {
         let content = serde_json::json!([
-            {"type": "tool_use", "id": "call_1", "input": {"_truncated": true}}
+            {"type": "tool_use", "id": "call_1", "arguments": {"_truncated": true}}
         ]);
         let mut map = std::collections::HashMap::new();
         map.insert(
@@ -1675,19 +1673,19 @@ mod tests {
             serde_json::json!({"fullArg": "restored"}),
         );
         let result = restore_truncated_inputs(&content, &map);
-        assert_eq!(result[0]["input"]["fullArg"], "restored");
-        assert!(result[0]["input"].get("_truncated").is_none());
+        assert_eq!(result[0]["arguments"]["fullArg"], "restored");
+        assert!(result[0]["arguments"].get("_truncated").is_none());
     }
 
     #[test]
     fn restore_truncated_inputs_missing_from_map() {
         let content = serde_json::json!([
-            {"type": "tool_use", "id": "call_unknown", "input": {"_truncated": true}}
+            {"type": "tool_use", "id": "call_unknown", "arguments": {"_truncated": true}}
         ]);
         let map = std::collections::HashMap::new();
         let result = restore_truncated_inputs(&content, &map);
         // Should leave as-is when not in map
-        assert_eq!(result[0]["input"]["_truncated"], true);
+        assert_eq!(result[0]["arguments"]["_truncated"], true);
     }
 
     // ── Synthetic tool results for interrupted sessions ──────────────
@@ -1707,8 +1705,8 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "input": {}},
-                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "input": {}}
+                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}},
+                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}
                     ],
                     "turn": 1,
                 }),
@@ -1760,7 +1758,7 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}
+                        {"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}
                     ],
                     "turn": 1,
                 }),
@@ -1791,7 +1789,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "input": {}}],
+                    "content": [{"type": "tool_use", "id": "call_1", "name": "Tool", "arguments": {}}],
                     "turn": 1,
                 }),
             ),
@@ -1831,8 +1829,8 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "input": {}},
-                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "input": {}}
+                        {"type": "tool_use", "id": "call_1", "name": "Tool1", "arguments": {}},
+                        {"type": "tool_use", "id": "call_2", "name": "Tool2", "arguments": {}}
                     ],
                     "turn": 1,
                 }),
@@ -1883,7 +1881,7 @@ mod tests {
             ev(
                 EventType::MessageAssistant,
                 serde_json::json!({
-                    "content": [{"type": "tool_use", "id": "toolu_abc", "name": "Read", "input": {"path": "file.txt"}}],
+                    "content": [{"type": "tool_use", "id": "toolu_abc", "name": "Read", "arguments": {"path": "file.txt"}}],
                     "turn": 1,
                 }),
             ),
@@ -1908,8 +1906,8 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "call_gpt_1", "name": "Write", "input": {"path": "out.txt"}},
-                        {"type": "tool_use", "id": "call_gpt_2", "name": "Bash", "input": {"command": "echo hi"}}
+                        {"type": "tool_use", "id": "call_gpt_1", "name": "Write", "arguments": {"path": "out.txt"}},
+                        {"type": "tool_use", "id": "call_gpt_2", "name": "Bash", "arguments": {"command": "echo hi"}}
                     ],
                     "turn": 3,
                 }),
@@ -1957,7 +1955,7 @@ mod tests {
                 serde_json::json!({
                     "content": [
                         {"type": "text", "text": "I'll help with"},
-                        {"type": "tool_use", "id": "tc_1", "name": "bash", "input": {"command": "ls"}}
+                        {"type": "tool_use", "id": "tc_1", "name": "bash", "arguments": {"command": "ls"}}
                     ],
                     "turn": 1,
                     "stopReason": "interrupted",
@@ -2019,7 +2017,7 @@ mod tests {
                 EventType::MessageAssistant,
                 serde_json::json!({
                     "content": [
-                        {"type": "tool_use", "id": "tc_1", "name": "bash", "input": {}}
+                        {"type": "tool_use", "id": "tc_1", "name": "bash", "arguments": {}}
                     ],
                     "turn": 1,
                     "stopReason": "interrupted",
@@ -2057,8 +2055,8 @@ mod tests {
     fn extract_tool_use_ids_from_content() {
         let content = serde_json::json!([
             {"type": "text", "text": "hello"},
-            {"type": "tool_use", "id": "call_1", "name": "T", "input": {}},
-            {"type": "tool_use", "id": "call_2", "name": "T2", "input": {}}
+            {"type": "tool_use", "id": "call_1", "name": "T", "arguments": {}},
+            {"type": "tool_use", "id": "call_2", "name": "T2", "arguments": {}}
         ]);
         let ids = extract_tool_use_ids(&content);
         assert_eq!(ids, vec!["call_1", "call_2"]);

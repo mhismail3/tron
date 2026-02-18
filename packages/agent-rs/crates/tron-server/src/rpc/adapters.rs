@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use serde_json::{json, Value};
+use crate::rpc::context::RpcContext;
+use serde_json::{Value, json};
 use tron_core::tools::Tool;
 
 /// ADAPTER(ios-compat): iOS splits tools on ":" to show name + description in context sheet.
@@ -40,18 +41,8 @@ pub fn adapt_tools_content(bare_names: &[String], tool_defs: &[Tool]) -> Vec<Str
 
 /// ADAPTER(ios-compat): iOS expects `input` not `arguments` on `tool_use` content blocks.
 ///
-/// Persistence stores assistant content with `"input"` (Anthropic API wire format)
-/// because iOS reads it directly. The Rust typed `AssistantContent::ToolUse` uses
-/// `arguments` internally. Currently handled by:
-///
-/// 1. **Write path**: `tron_runtime::pipeline::persistence::build_content_json()` renames
-///    `arguments` → `input` when persisting `message.assistant` events.
-/// 2. **Read path**: `#[serde(alias = "input")]` on `AssistantContent::ToolUse.arguments`
-///    allows deserialization from either field name during reconstruction.
-///
-/// REMOVE: When iOS is updated to read `arguments` natively, remove the alias from
-/// `AssistantContent`, remove the rename in `build_content_json`, and delete this comment.
-/// The Rust server should use `arguments` consistently; iOS adapts to the server's format.
+/// Core/runtime/persistence now use canonical `arguments` only. This adapter
+/// applies wire conversion at the protocol boundary.
 pub fn adapt_assistant_content_for_ios(content: &mut [Value]) {
     for block in content.iter_mut() {
         if block.get("type").and_then(Value::as_str) == Some("tool_use") {
@@ -91,6 +82,144 @@ pub fn adapt_ask_user_options(options: &mut Value) {
             }
         }
     }
+}
+
+/// Centralized outbound RPC adaptation for iOS compatibility.
+///
+/// This is the only response adaptation entrypoint used by WebSocket RPC.
+pub fn adapt_rpc_result_for_ios(method: &str, result: &mut Value, ctx: &RpcContext) {
+    match method {
+        "settings.get" => adapt_settings_get(result),
+        "skill.list" => adapt_skill_list(result),
+        "context.getDetailedSnapshot" => adapt_context_detailed_snapshot(result, ctx),
+        "session.getHistory" => adapt_session_get_history(result),
+        _ => {}
+    }
+}
+
+/// ADAPTER(ios-compat): iOS expects additional flat settings fields.
+fn adapt_settings_get(settings: &mut Value) {
+    let Some(obj) = settings.as_object_mut() else {
+        return;
+    };
+
+    if let Some(model) = obj.get("models").and_then(|m| m.get("default")).cloned() {
+        let _ = obj.insert("defaultModel".into(), model);
+    }
+
+    if let Some(val) = obj
+        .get("server")
+        .and_then(|s| s.get("maxConcurrentSessions"))
+        .cloned()
+    {
+        let _ = obj.insert("maxConcurrentSessions".into(), val);
+    }
+
+    if let Some(val) = obj
+        .get("server")
+        .and_then(|s| s.get("defaultWorkspace"))
+        .cloned()
+    {
+        let _ = obj.insert("defaultWorkspace".into(), val);
+    }
+
+    if let Some(context) = obj.get("context").cloned() {
+        if let Some(mut compaction) = context.get("compactor").cloned() {
+            if let Some(c) = compaction.as_object_mut()
+                && let Some(val) = c.remove("preserveRecentCount")
+            {
+                let _ = c.insert("preserveRecentTurns".into(), val);
+            }
+            let _ = obj.insert("compaction".into(), compaction);
+        }
+        if let Some(memory) = context.get("memory").cloned() {
+            let _ = obj.insert("memory".into(), memory);
+        }
+        if let Some(rules) = context.get("rules").cloned() {
+            let _ = obj.insert("rules".into(), rules);
+        }
+        if let Some(tasks) = context.get("tasks").cloned() {
+            let _ = obj.insert("tasks".into(), tasks);
+        }
+    }
+}
+
+/// ADAPTER(ios-compat): decorate `toolsContent` entries in detailed snapshots.
+fn adapt_context_detailed_snapshot(result: &mut Value, ctx: &RpcContext) {
+    let Some(raw) = result.get("toolsContent").and_then(Value::as_array) else {
+        return;
+    };
+    let bare_names: Option<Vec<String>> =
+        raw.iter().map(|v| v.as_str().map(String::from)).collect();
+    let Some(bare_names) = bare_names else {
+        return;
+    };
+
+    let tool_defs = ctx
+        .agent_deps
+        .as_ref()
+        .map(|d| (d.tool_factory)().definitions())
+        .unwrap_or_default();
+    result["toolsContent"] = json!(adapt_tools_content(&bare_names, &tool_defs));
+}
+
+/// ADAPTER(ios-compat): reconstruct `TaskManager` tool results as iOS text format.
+fn adapt_session_get_history(result: &mut Value) {
+    let Some(messages) = result.get_mut("messages").and_then(Value::as_array_mut) else {
+        return;
+    };
+
+    for msg in messages {
+        if msg
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| role == "assistant")
+            && let Some(blocks) = msg
+                .get_mut("content")
+                .and_then(Value::as_object_mut)
+                .and_then(|content| content.get_mut("content"))
+                .and_then(Value::as_array_mut)
+        {
+            adapt_assistant_content_for_ios(blocks);
+        }
+
+        let is_task_manager = msg
+            .get("toolUse")
+            .and_then(|t| t.get("name"))
+            .and_then(Value::as_str)
+            .is_some_and(|name| name == "TaskManager");
+        if !is_task_manager {
+            continue;
+        }
+        let Some(content) = msg.get_mut("content").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let Some(raw) = content.get("content").and_then(Value::as_str) else {
+            continue;
+        };
+        let _ = content.insert(
+            "content".into(),
+            Value::String(adapt_task_manager_result_auto(raw)),
+        );
+    }
+}
+
+/// ADAPTER(ios-compat): normalize tool execution output for WebSocket events.
+pub fn adapt_tool_execution_result_for_ios(
+    tool_name: &str,
+    success: bool,
+    result_text: &str,
+    details: Option<&Value>,
+) -> String {
+    if tool_name == "TaskManager"
+        && success
+        && let Some(action) = details
+            .and_then(|d| d.get("action"))
+            .and_then(Value::as_str)
+    {
+        return adapt_task_manager_result(action, result_text);
+    }
+    result_text.to_string()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,7 +379,10 @@ fn fmt_task_detail(task: &Value) -> String {
         lines.push(format!("Deferred until: {deferred}"));
     }
     if let Some(est) = task.get("estimatedMinutes").and_then(Value::as_i64) {
-        let actual = task.get("actualMinutes").and_then(Value::as_i64).unwrap_or(0);
+        let actual = task
+            .get("actualMinutes")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         lines.push(format!("Time: {actual}/{est}min"));
     }
     if let Some(tags) = task.get("tags").and_then(Value::as_array) {
@@ -343,8 +475,15 @@ fn fmt_task_action(action: &str, task: &Value) -> String {
     let id = str_field(task, "id").unwrap_or("?");
     let title = str_field(task, "title").unwrap_or("Untitled");
     let status = str_field(task, "status").unwrap_or("pending");
-    let verb = if action == "create" { "Created" } else { "Updated" };
-    format!("{verb} task {id}: {title} [{status}]\n\n{}", fmt_task_detail(task))
+    let verb = if action == "create" {
+        "Created"
+    } else {
+        "Updated"
+    };
+    format!(
+        "{verb} task {id}: {title} [{status}]\n\n{}",
+        fmt_task_detail(task)
+    )
 }
 
 fn fmt_task_list(json: &Value) -> String {
@@ -483,7 +622,10 @@ fn fmt_project_action(action: &str, project: &Value) -> String {
     } else {
         "Updated"
     };
-    format!("{verb} project {id}: {title}\n\n{}", fmt_project_detail(project))
+    format!(
+        "{verb} project {id}: {title}\n\n{}",
+        fmt_project_detail(project)
+    )
 }
 
 fn fmt_project_list(json: &Value) -> String {
@@ -616,13 +758,17 @@ fn fmt_delete(entity_type: &str, id_key: &str, json: &Value) -> String {
 
 fn fmt_log_time(json: &Value) -> String {
     let id = str_field(json, "taskId").unwrap_or("?");
-    let minutes = json.get("minutesLogged").and_then(Value::as_i64).unwrap_or(0);
+    let minutes = json
+        .get("minutesLogged")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     format!("Logged {minutes}min on {id}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
     use tron_core::tools::{Tool, ToolParameterSchema};
 
@@ -671,7 +817,10 @@ mod tests {
     #[test]
     fn adapt_tools_content_multiline_description_uses_first_line() {
         let names = vec!["bash".into()];
-        let tools = vec![make_tool("bash", "Execute shell commands\nWith great power comes great responsibility")];
+        let tools = vec![make_tool(
+            "bash",
+            "Execute shell commands\nWith great power comes great responsibility",
+        )];
         let result = adapt_tools_content(&names, &tools);
         assert_eq!(result[0], "bash: Execute shell commands");
     }
@@ -694,9 +843,8 @@ mod tests {
 
     #[test]
     fn adapt_assistant_content_already_has_input_unchanged() {
-        let mut content = vec![
-            json!({"type": "tool_use", "id": "tc1", "name": "bash", "input": {"cmd": "ls"}}),
-        ];
+        let mut content =
+            vec![json!({"type": "tool_use", "id": "tc1", "name": "bash", "input": {"cmd": "ls"}})];
         adapt_assistant_content_for_ios(&mut content);
         // Already has input, no arguments to rename
         assert_eq!(content[0]["input"]["cmd"], "ls");
@@ -1021,7 +1169,8 @@ mod tests {
 
     #[test]
     fn auto_detect_project_list() {
-        let list = json!({"projects": [{"id": "p1", "title": "Alpha", "status": "active"}], "total": 1});
+        let list =
+            json!({"projects": [{"id": "p1", "title": "Alpha", "status": "active"}], "total": 1});
         let input = serde_json::to_string_pretty(&list).unwrap();
         let result = adapt_task_manager_result_auto(&input);
         assert!(result.starts_with("Projects (1):"));
@@ -1115,5 +1264,54 @@ mod tests {
         let input = serde_json::to_string_pretty(&area).unwrap();
         let result = adapt_task_manager_result("get_area", &input);
         assert!(result.contains("1 project, 1 task (1 active)"));
+    }
+
+    #[test]
+    fn adapt_rpc_result_settings_get_adds_ios_flat_fields() {
+        let ctx = make_test_context();
+        let mut result = json!({
+            "models": {"default": "claude-opus-4-6"},
+            "server": {"maxConcurrentSessions": 3, "defaultWorkspace": "/tmp"},
+            "context": {
+                "compactor": {"preserveRecentCount": 8},
+                "memory": {"ledger": {}, "autoInject": {}},
+                "rules": {},
+                "tasks": {}
+            }
+        });
+        adapt_rpc_result_for_ios("settings.get", &mut result, &ctx);
+        assert_eq!(result["defaultModel"], "claude-opus-4-6");
+        assert_eq!(result["maxConcurrentSessions"], 3);
+        assert_eq!(result["defaultWorkspace"], "/tmp");
+        assert_eq!(result["compaction"]["preserveRecentTurns"], 8);
+    }
+
+    #[test]
+    fn adapt_rpc_result_session_history_maps_tool_use_arguments_to_input() {
+        let ctx = make_test_context();
+        let mut result = json!({
+            "messages": [{
+                "role": "assistant",
+                "content": {
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "tc1",
+                        "name": "bash",
+                        "arguments": {"cmd": "ls"}
+                    }]
+                }
+            }],
+            "hasMore": false
+        });
+        adapt_rpc_result_for_ios("session.getHistory", &mut result, &ctx);
+        let block = &result["messages"][0]["content"]["content"][0];
+        assert!(block.get("arguments").is_none());
+        assert_eq!(block["input"]["cmd"], "ls");
+    }
+
+    #[test]
+    fn adapt_tool_execution_result_passthrough_for_non_task_manager() {
+        let rendered = adapt_tool_execution_result_for_ios("Read", true, "plain output", None);
+        assert_eq!(rendered, "plain output");
     }
 }

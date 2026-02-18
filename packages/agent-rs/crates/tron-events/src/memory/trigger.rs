@@ -8,6 +8,7 @@
 //! The trigger maintains a turn counter that resets after each compaction.
 
 use regex::Regex;
+use std::sync::LazyLock;
 use tracing::debug;
 
 use super::types::{CompactionTriggerConfig, CompactionTriggerInput, CompactionTriggerResult};
@@ -16,15 +17,17 @@ use super::types::{CompactionTriggerConfig, CompactionTriggerInput, CompactionTr
 ///
 /// These indicate the user has reached a milestone and compaction would be
 /// a good checkpoint.
-fn progress_patterns() -> Vec<Regex> {
-    // These are compiled once per call; in a real hot path we'd use lazy_static.
-    // For the expected call rate (~once per turn), this is fine.
-    vec![
+static PROGRESS_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
+    [
         Regex::new(r"\bgit\s+push\b").expect("valid regex"),
         Regex::new(r"\bgh\s+pr\s+create\b").expect("valid regex"),
         Regex::new(r"\bgh\s+pr\s+merge\b").expect("valid regex"),
         Regex::new(r"\bgit\s+tag\b").expect("valid regex"),
     ]
+});
+
+fn progress_patterns() -> &'static [Regex; 4] {
+    &PROGRESS_PATTERNS
 }
 
 /// Multi-signal compaction trigger.
@@ -79,7 +82,11 @@ impl CompactionTrigger {
         }
 
         // 2. Progress signals — event types
-        if input.recent_event_types.iter().any(|t| t == "worktree.commit") {
+        if input
+            .recent_event_types
+            .iter()
+            .any(|t| t == "worktree.commit")
+        {
             return CompactionTriggerResult {
                 compact: true,
                 reason: "commit detected — good compaction point".to_string(),
@@ -89,7 +96,7 @@ impl CompactionTrigger {
         // 2b. Progress signals — tool call patterns
         let patterns = progress_patterns();
         for cmd in &input.recent_tool_calls {
-            for pattern in &patterns {
+            for pattern in patterns {
                 if pattern.is_match(cmd) {
                     return CompactionTriggerResult {
                         compact: true,
@@ -185,6 +192,13 @@ mod tests {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
         let result = trigger.should_compact(&default_input(0.0));
         assert!(!result.compact);
+    }
+
+    #[test]
+    fn test_progress_patterns_static_reference_is_reused() {
+        let first = progress_patterns().as_ptr();
+        let second = progress_patterns().as_ptr();
+        assert_eq!(first, second);
     }
 
     // --- Progress signals: event types ---

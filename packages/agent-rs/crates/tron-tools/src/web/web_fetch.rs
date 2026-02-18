@@ -267,7 +267,7 @@ mod tests {
             _task: &str,
             _parent_session_id: &str,
         ) -> Result<SummarizerResult, ToolError> {
-            self.call_count.fetch_add(1, Ordering::Relaxed);
+            let _ = self.call_count.fetch_add(1, Ordering::Relaxed);
             Ok(SummarizerResult {
                 answer: self.answer.clone(),
                 session_id: "sub-sess-1".into(),
@@ -436,7 +436,7 @@ mod tests {
         let fc = fetch_count.clone();
         let http = Arc::new(MockHttp {
             handler: Box::new(move |_| {
-                fc.fetch_add(1, Ordering::Relaxed);
+                let _ = fc.fetch_add(1, Ordering::Relaxed);
                 Ok(HttpResponse {
                     status: 200,
                     body: "<html><head><title>T</title></head><body>B</body></html>".into(),

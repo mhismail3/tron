@@ -31,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Per-turn metadata columns on events table",
         sql: include_str!("v002_turn_metadata.sql"),
     },
+    Migration {
+        version: 3,
+        description: "Unique per-session event sequence index",
+        sql: include_str!("v003_session_sequence_unique.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -112,20 +117,22 @@ fn ensure_version_table(conn: &Connection) -> Result<()> {
 }
 
 fn apply_migration(conn: &Connection, migration: &Migration) -> Result<()> {
-    let tx = conn.unchecked_transaction().map_err(|e| {
-        EventStoreError::Migration {
-            message: format!("failed to begin transaction for v{}: {e}", migration.version),
-        }
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| EventStoreError::Migration {
+            message: format!(
+                "failed to begin transaction for v{}: {e}",
+                migration.version
+            ),
+        })?;
 
-    tx.execute_batch(migration.sql).map_err(|e| {
-        EventStoreError::Migration {
+    tx.execute_batch(migration.sql)
+        .map_err(|e| EventStoreError::Migration {
             message: format!(
                 "migration v{} ({}) failed: {e}",
                 migration.version, migration.description
             ),
-        }
-    })?;
+        })?;
 
     let _ = tx.execute(
         "INSERT INTO schema_version (version, applied_at, description) VALUES (?1, datetime('now'), ?2)",
@@ -166,7 +173,7 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 2);
+        assert_eq!(applied, 3);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -224,7 +231,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first, 2);
+        assert_eq!(first, 3);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second, 0);
@@ -241,12 +248,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 2);
+        assert_eq!(current_version(&conn).unwrap(), 3);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 2);
+        assert_eq!(latest_version(), 3);
     }
 
     #[test]
@@ -295,12 +302,11 @@ mod tests {
             // v002 indexes
             "idx_events_model",
             "idx_events_latency",
+            // v003 index
+            "idx_events_session_sequence_unique",
         ];
         for idx in &expected {
-            assert!(
-                indexes.contains(&idx.to_string()),
-                "missing index: {idx}"
-            );
+            assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
         }
     }
 
@@ -659,5 +665,41 @@ mod tests {
             [],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn unique_session_sequence_constraint_enforced() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at)
+             VALUES ('sess_1', 'ws_1', 'claude-3', '/tmp/test', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('evt_1', 'sess_1', 1, 'message.user', '2025-01-01T00:00:00Z',
+                     '{\"content\": \"hello\"}', 'ws_1')",
+            [],
+        )
+        .unwrap();
+
+        let duplicate = conn.execute(
+            "INSERT INTO events (id, session_id, sequence, type, timestamp, payload, workspace_id)
+             VALUES ('evt_2', 'sess_1', 1, 'message.assistant', '2025-01-01T00:00:00Z',
+                     '{\"content\": \"world\"}', 'ws_1')",
+            [],
+        );
+
+        assert!(duplicate.is_err());
     }
 }

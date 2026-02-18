@@ -12,6 +12,20 @@ members = [
     "crates/tron-transcription",
     "crates/tron-server",
     "crates/tron-agent",
+    "crates/tron-bench",
+]
+default-members = [
+    "crates/tron-core",
+    "crates/tron-events",
+    "crates/tron-settings",
+    "crates/tron-embeddings",
+    "crates/tron-llm",
+    "crates/tron-runtime",
+    "crates/tron-tools",
+    "crates/tron-skills",
+    "crates/tron-transcription",
+    "crates/tron-server",
+    "crates/tron-agent",
 ]
 
 [workspace.package]

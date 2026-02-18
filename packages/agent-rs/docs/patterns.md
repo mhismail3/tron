@@ -1,163 +1,67 @@
-# Tron Agent (Rust) - Patterns & Conventions
+# Rust Server Patterns
 
-## Error Handling
+## Architectural Patterns
 
-### Per-Crate Error Enums
+### 1) Canonical-Internal, Adapted-Edge
 
-Each crate defines its own error enum via `thiserror`:
+- Core/runtime/storage keep canonical shapes only.
+- iOS/back-compat shaping is boundary-only in:
+  `crates/tron-server/src/rpc/adapters.rs`.
+- Example: internal `tool_use.arguments` remains canonical; adapter emits `input` only for wire compatibility.
 
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum EventStoreError {
-    #[error("session not found: {0}")]
-    SessionNotFound(SessionId),
-    #[error("event not found: {0}")]
-    EventNotFound(EventId),
-    #[error("database error: {0}")]
-    Database(#[from] rusqlite::Error),
-}
-```
+### 2) Fail-Fast Policy
 
-### Propagation
+- Unknown model/provider should return typed errors immediately.
+- No silent fallback provider/model substitution.
+- Pricing unknowns return explicit unavailable metadata, not default cost tier.
 
-Internal code uses `anyhow::Result` for convenience. Public APIs return typed errors. At RPC boundaries, errors are converted to `RpcError` with standard JSON-RPC error codes.
+### 3) Deterministic Event Sourcing
 
-## Serialization
+- Session state must reconstruct from immutable events only.
+- Per-session ordering is protected by:
+  - in-process session write locks
+  - sqlite uniqueness (`UNIQUE(session_id, sequence)`).
 
-### Wire Format Compatibility
+### 4) Minimal Global Locking
 
-All types that cross the WebSocket boundary use `#[serde(rename_all = "camelCase")]` to match the TypeScript JSON format:
+- Session mutation paths serialize by session ID.
+- Global lock is reserved for non-session/global mutation paths only.
+- SQLite busy conditions are retried with bounded backoff.
 
-```rust
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BaseEvent {
-    pub id: EventId,
-    pub session_id: SessionId,
-    pub workspace_id: WorkspaceId,
-    pub parent_id: Option<EventId>,
-    pub sequence: u64,
-    pub timestamp: DateTime<Utc>,
-}
-```
+## RPC Handler Patterns
 
-### Tagged Enums
+### 1) Keep Async Reactor Clean
 
-TypeScript discriminated unions map to Rust tagged enums:
+- Blocking filesystem work should run in `tokio::task::spawn_blocking`.
+- This is now applied in settings and skill refresh handlers and in session-create optimistic preload work.
 
-```rust
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum SessionEvent {
-    #[serde(rename = "session.start")]
-    SessionStart { /* ... */ },
-    #[serde(rename = "message.user")]
-    MessageUser { /* ... */ },
-}
-```
+### 2) Handler Responsibility
 
-### Roundtrip Tests
+- Validate params.
+- Call domain services/runtime.
+- Return canonical payload.
+- Never duplicate adapter logic in handler code.
 
-Every serializable type has roundtrip tests: `T -> JSON -> T` and `JSON fixture -> T -> JSON == fixture`.
+## Database Safety Pattern
 
-## Testing
+- Production startup must resolve DB path through policy module:
+  `crates/tron-agent/src/db_path_policy.rs`.
+- Any non-`beta-rs.db` or path outside `~/.tron/database` is rejected before opening SQLite.
 
-### Setup Pattern
+## Testing Pattern
 
-Since Rust doesn't have `beforeEach`, use a setup function:
+1. Red: add/adjust a focused test.
+2. Green: implement smallest change to pass.
+3. Refactor: simplify while keeping tests green.
 
-```rust
-struct TestContext {
-    store: EventStore,
-    _tmp: TempDir,  // dropped when test ends
-}
+Required suites during refactor:
 
-fn setup() -> TestContext {
-    let tmp = TempDir::new().unwrap();
-    let store = EventStore::open_in_memory().unwrap();
-    TestContext { store, _tmp: tmp }
-}
+- `cargo test -p tron-server --tests`
+- `cargo test -p tron-runtime -p tron-events -p tron-llm`
+- `cargo test -p tron-agent --tests`
 
-#[test]
-fn test_append_event() {
-    let ctx = setup();
-    // ...
-}
-```
+Benchmark workflow:
 
-### Async Tests
+- Baseline generation via `scripts/bench/run.sh`
+- Output JSON stored under `scripts/bench/baselines/`
 
-Use `#[tokio::test]` for async tests. Use `tokio::time::pause()` + `advance()` for time-dependent tests (replaces `vi.useFakeTimers()`).
-
-### Mocking
-
-- Use trait objects + `mockall` for mock generation
-- Manual mock implementations when `mockall` is too rigid
-- `wiremock` for HTTP endpoint mocking (SSE responses)
-- `tempfile::TempDir` for filesystem isolation (auto-cleanup)
-- `rusqlite::Connection::open_in_memory()` for database tests
-
-### Snapshot Tests
-
-Use `insta` for complex output verification:
-
-```rust
-insta::assert_json_snapshot!(event_envelope);
-```
-
-### Property Tests
-
-Use `proptest` for parser and serialization fuzzing:
-
-```rust
-proptest! {
-    #[test]
-    fn event_id_roundtrip(id in "[a-f0-9-]{36}") {
-        let eid = EventId::new(id.clone());
-        assert_eq!(eid.as_str(), &id);
-    }
-}
-```
-
-## Naming Conventions
-
-| Concept | Convention | Example |
-|---------|-----------|---------|
-| Crate names | `tron-<subsystem>` | `tron-events` |
-| Module files | `snake_case.rs` | `event_store.rs` |
-| Types | `PascalCase` | `SessionEvent` |
-| Functions | `snake_case` | `create_session()` |
-| Constants | `SCREAMING_SNAKE` | `MAX_CONTEXT_WINDOW` |
-| Feature flags | `kebab-case` | `vector-search` |
-| Test modules | `mod tests` in same file | `#[cfg(test)] mod tests` |
-| Integration tests | `tests/<name>.rs` | `tests/event_store.rs` |
-
-## Module Organization
-
-Each crate follows a consistent structure:
-
-```
-crates/tron-example/
-├── Cargo.toml
-├── src/
-│   ├── lib.rs           # public API re-exports, module-level docs
-│   ├── types.rs         # type definitions
-│   ├── errors.rs        # error enum
-│   ├── <feature>.rs     # implementation modules
-│   └── tests/           # integration-style tests (optional)
-└── tests/               # external integration tests
-    └── <name>.rs
-```
-
-## Lint Configuration
-
-Workspace-level lints in `Cargo.toml`:
-
-- `deny(unsafe_code)`: No unsafe anywhere
-- `warn(unused_results)`: Don't ignore Results
-- `warn(missing_docs)`: Every public item documented
-- Clippy pedantic enabled with targeted allows
-
-## Documentation
-
-Every public item gets rustdoc. Module-level `//!` docs explain purpose, design decisions, and key types. Documentation is detailed enough for an AI agent to understand and modify the code.

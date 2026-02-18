@@ -3,11 +3,11 @@
 
 use std::sync::Arc;
 
+use crate::rpc::types::RpcEvent;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use tron_tools::cdp::types::BrowserEvent;
 use tron_core::events::TronEvent;
-use crate::rpc::types::RpcEvent;
+use tron_tools::cdp::types::BrowserEvent;
 
 use super::broadcast::BroadcastManager;
 
@@ -169,12 +169,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
     let timestamp = event.timestamp();
 
     let data = match event {
-        TronEvent::MessageUpdate { content, .. } => {
-            Some(serde_json::json!({ "delta": content }))
-        }
-        TronEvent::TurnStart { turn, .. } => {
-            Some(serde_json::json!({ "turn": turn }))
-        }
+        TronEvent::MessageUpdate { content, .. } => Some(serde_json::json!({ "delta": content })),
+        TronEvent::TurnStart { turn, .. } => Some(serde_json::json!({ "turn": turn })),
         TronEvent::TurnEnd {
             turn,
             duration,
@@ -246,33 +242,24 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             if let Some(tool_result) = result {
                 let mut result_text = match &tool_result.content {
                     tron_core::tools::ToolResultBody::Text(t) => t.clone(),
-                    tron_core::tools::ToolResultBody::Blocks(blocks) => {
-                        blocks
-                            .iter()
-                            .filter_map(|b| {
-                                if let tron_core::content::ToolResultContent::Text { text } = b {
-                                    Some(text.as_str())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }
+                    tron_core::tools::ToolResultBody::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let tron_core::content::ToolResultContent::Text { text } = b {
+                                Some(text.as_str())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                 };
-                // ADAPTER(ios-compat): Format TaskManager JSON as text for iOS parsing.
-                // REMOVE: delete this block when iOS parses TaskManager JSON natively.
-                if tool_name == "TaskManager" && success {
-                    if let Some(action) = tool_result
-                        .details
-                        .as_ref()
-                        .and_then(|d| d.get("action"))
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        result_text =
-                            crate::rpc::adapters::adapt_task_manager_result(action, &result_text);
-                    }
-                }
+                result_text = crate::rpc::adapters::adapt_tool_execution_result_for_ios(
+                    tool_name,
+                    success,
+                    &result_text,
+                    tool_result.details.as_ref(),
+                );
                 if success {
                     data["output"] = serde_json::json!(result_text);
                     data["result"] = serde_json::json!(result_text);
@@ -568,9 +555,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "errorCategory": error_category,
             "errorMessage": error_message,
         })),
-        TronEvent::ThinkingDelta { delta, .. } => {
-            Some(serde_json::json!({ "delta": delta }))
-        }
+        TronEvent::ThinkingDelta { delta, .. } => Some(serde_json::json!({ "delta": delta })),
         TronEvent::ThinkingEnd { thinking, .. } => {
             Some(serde_json::json!({ "thinking": thinking }))
         }
@@ -589,9 +574,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "lastActivity": base.timestamp,
             "isActive": true,
         })),
-        TronEvent::SessionForked {
-            new_session_id, ..
-        } => Some(serde_json::json!({
+        TronEvent::SessionForked { new_session_id, .. } => Some(serde_json::json!({
             "newSessionId": new_session_id,
         })),
         TronEvent::SessionUpdated {
@@ -627,7 +610,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             "parentSessionId": parent_session_id,
         })),
         TronEvent::MemoryUpdated {
-            title, entry_type, event_id, ..
+            title,
+            entry_type,
+            event_id,
+            ..
         } => Some(serde_json::json!({
             "title": title,
             "entryType": entry_type,
@@ -979,8 +965,7 @@ mod tests {
 
         // Add a connection bound to session "s1"
         let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
-        let conn =
-            super::super::connection::ClientConnection::new("c1".into(), conn_tx);
+        let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
         conn.bind_session("s1".into());
         bm.add(Arc::new(conn)).await;
 
@@ -991,7 +976,7 @@ mod tests {
         let handle = tokio::spawn(bridge.run());
 
         // Send an event
-        tx.send(agent_start_event("s1")).unwrap();
+        let _ = tx.send(agent_start_event("s1")).unwrap();
 
         // Give bridge time to process
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1013,8 +998,7 @@ mod tests {
         let bm = Arc::new(BroadcastManager::new());
 
         let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
-        let conn =
-            super::super::connection::ClientConnection::new("c1".into(), conn_tx);
+        let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
@@ -1022,7 +1006,7 @@ mod tests {
         let handle = tokio::spawn(bridge.run());
 
         // Send event with empty session_id (global)
-        tx.send(TronEvent::AgentReady {
+        let _ = tx.send(TronEvent::AgentReady {
             base: BaseEvent::now(""),
         })
         .unwrap();
@@ -1140,7 +1124,7 @@ mod tests {
 
     #[test]
     fn tool_end_success_has_required_ios_fields() {
-        use tron_core::tools::{TronToolResult, ToolResultBody};
+        use tron_core::tools::{ToolResultBody, TronToolResult};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
@@ -1169,7 +1153,7 @@ mod tests {
 
     #[test]
     fn tool_end_error_has_required_ios_fields() {
-        use tron_core::tools::{TronToolResult, ToolResultBody};
+        use tron_core::tools::{ToolResultBody, TronToolResult};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
@@ -1195,7 +1179,7 @@ mod tests {
 
     #[test]
     fn tool_end_with_details() {
-        use tron_core::tools::{TronToolResult, ToolResultBody};
+        use tron_core::tools::{ToolResultBody, TronToolResult};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
@@ -1238,8 +1222,8 @@ mod tests {
 
     #[test]
     fn tool_end_content_blocks_joined() {
-        use tron_core::tools::{TronToolResult, ToolResultBody};
         use tron_core::content::ToolResultContent;
+        use tron_core::tools::{ToolResultBody, TronToolResult};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
             tool_call_id: "tc_1".into(),
@@ -1248,8 +1232,12 @@ mod tests {
             is_error: Some(false),
             result: Some(TronToolResult {
                 content: ToolResultBody::Blocks(vec![
-                    ToolResultContent::Text { text: "line 1".into() },
-                    ToolResultContent::Text { text: "line 2".into() },
+                    ToolResultContent::Text {
+                        text: "line 1".into(),
+                    },
+                    ToolResultContent::Text {
+                        text: "line 2".into(),
+                    },
                 ]),
                 details: None,
                 is_error: Some(false),
@@ -1482,26 +1470,117 @@ mod tests {
         let base = BaseEvent::now("s1");
         let events: Vec<TronEvent> = vec![
             TronEvent::AgentStart { base: base.clone() },
-            TronEvent::AgentEnd { base: base.clone(), error: None },
+            TronEvent::AgentEnd {
+                base: base.clone(),
+                error: None,
+            },
             TronEvent::AgentReady { base: base.clone() },
-            TronEvent::AgentInterrupted { base: base.clone(), turn: 1, partial_content: None, active_tool: None },
-            TronEvent::TurnStart { base: base.clone(), turn: 1 },
-            TronEvent::TurnEnd { base: base.clone(), turn: 1, duration: 0, token_usage: None, token_record: None, cost: None, stop_reason: None, context_limit: None, model: None },
-            TronEvent::TurnFailed { base: base.clone(), turn: 1, error: "e".into(), code: None, category: None, recoverable: false, partial_content: None },
-            TronEvent::ResponseComplete { base: base.clone(), turn: 1, stop_reason: "end_turn".into(), token_usage: None, has_tool_calls: false, tool_call_count: 0, token_record: None, model: None },
-            TronEvent::MessageUpdate { base: base.clone(), content: "c".into() },
-            TronEvent::ToolExecutionStart { base: base.clone(), tool_call_id: "id".into(), tool_name: "n".into(), arguments: None },
-            TronEvent::ToolExecutionEnd { base: base.clone(), tool_call_id: "id".into(), tool_name: "n".into(), duration: 0, is_error: None, result: None },
-            TronEvent::Error { base: base.clone(), error: "e".into(), context: None, code: None, provider: None, category: None, suggestion: None, retryable: None, status_code: None, error_type: None, model: None },
-            TronEvent::CompactionStart { base: base.clone(), reason: tron_core::events::CompactionReason::Manual, tokens_before: 0 },
-            TronEvent::CompactionComplete { base: base.clone(), success: true, tokens_before: 0, tokens_after: 0, compression_ratio: 0.0, reason: None, summary: None, estimated_context_tokens: None },
+            TronEvent::AgentInterrupted {
+                base: base.clone(),
+                turn: 1,
+                partial_content: None,
+                active_tool: None,
+            },
+            TronEvent::TurnStart {
+                base: base.clone(),
+                turn: 1,
+            },
+            TronEvent::TurnEnd {
+                base: base.clone(),
+                turn: 1,
+                duration: 0,
+                token_usage: None,
+                token_record: None,
+                cost: None,
+                stop_reason: None,
+                context_limit: None,
+                model: None,
+            },
+            TronEvent::TurnFailed {
+                base: base.clone(),
+                turn: 1,
+                error: "e".into(),
+                code: None,
+                category: None,
+                recoverable: false,
+                partial_content: None,
+            },
+            TronEvent::ResponseComplete {
+                base: base.clone(),
+                turn: 1,
+                stop_reason: "end_turn".into(),
+                token_usage: None,
+                has_tool_calls: false,
+                tool_call_count: 0,
+                token_record: None,
+                model: None,
+            },
+            TronEvent::MessageUpdate {
+                base: base.clone(),
+                content: "c".into(),
+            },
+            TronEvent::ToolExecutionStart {
+                base: base.clone(),
+                tool_call_id: "id".into(),
+                tool_name: "n".into(),
+                arguments: None,
+            },
+            TronEvent::ToolExecutionEnd {
+                base: base.clone(),
+                tool_call_id: "id".into(),
+                tool_name: "n".into(),
+                duration: 0,
+                is_error: None,
+                result: None,
+            },
+            TronEvent::Error {
+                base: base.clone(),
+                error: "e".into(),
+                context: None,
+                code: None,
+                provider: None,
+                category: None,
+                suggestion: None,
+                retryable: None,
+                status_code: None,
+                error_type: None,
+                model: None,
+            },
+            TronEvent::CompactionStart {
+                base: base.clone(),
+                reason: tron_core::events::CompactionReason::Manual,
+                tokens_before: 0,
+            },
+            TronEvent::CompactionComplete {
+                base: base.clone(),
+                success: true,
+                tokens_before: 0,
+                tokens_after: 0,
+                compression_ratio: 0.0,
+                reason: None,
+                summary: None,
+                estimated_context_tokens: None,
+            },
             TronEvent::ThinkingStart { base: base.clone() },
-            TronEvent::ThinkingDelta { base: base.clone(), delta: "d".into() },
-            TronEvent::ThinkingEnd { base: base.clone(), thinking: "t".into() },
-            TronEvent::SessionCreated { base: base.clone(), model: "m".into(), working_directory: "/".into() },
+            TronEvent::ThinkingDelta {
+                base: base.clone(),
+                delta: "d".into(),
+            },
+            TronEvent::ThinkingEnd {
+                base: base.clone(),
+                thinking: "t".into(),
+            },
+            TronEvent::SessionCreated {
+                base: base.clone(),
+                model: "m".into(),
+                working_directory: "/".into(),
+            },
             TronEvent::SessionArchived { base: base.clone() },
             TronEvent::SessionUnarchived { base: base.clone() },
-            TronEvent::SessionForked { base: base.clone(), new_session_id: "s2".into() },
+            TronEvent::SessionForked {
+                base: base.clone(),
+                new_session_id: "s2".into(),
+            },
             TronEvent::SessionDeleted { base: base.clone() },
             TronEvent::SessionUpdated {
                 base: base.clone(),
@@ -1521,19 +1600,97 @@ mod tests {
                 parent_session_id: None,
             },
             TronEvent::MemoryUpdating { base: base.clone() },
-            TronEvent::MemoryUpdated { base: base.clone(), title: None, entry_type: None, event_id: None },
-            TronEvent::ContextCleared { base: base.clone(), tokens_before: 0, tokens_after: 0 },
-            TronEvent::MessageDeleted { base: base.clone(), target_event_id: "id".into(), target_type: "t".into(), target_turn: None, reason: None },
-            TronEvent::RulesLoaded { base: base.clone(), total_files: 3, dynamic_rules_count: 1 },
-            TronEvent::RulesActivated { base: base.clone(), rules: vec![tron_core::events::ActivatedRuleInfo { relative_path: "src/.claude/CLAUDE.md".into(), scope_dir: "src".into() }], total_activated: 1 },
-            TronEvent::MemoryLoaded { base: base.clone(), count: 2 },
-            TronEvent::SkillRemoved { base: base.clone(), skill_name: "n".into() },
-            TronEvent::SubagentSpawned { base: base.clone(), subagent_session_id: "sub-1".into(), task: "t".into(), model: "m".into(), max_turns: 5, spawn_depth: 0, tool_call_id: None, blocking: true, working_directory: None },
-            TronEvent::SubagentStatusUpdate { base: base.clone(), subagent_session_id: "sub-1".into(), status: "running".into(), current_turn: 1, activity: None },
-            TronEvent::SubagentCompleted { base: base.clone(), subagent_session_id: "sub-1".into(), total_turns: 3, duration: 5000, full_output: None, result_summary: None, token_usage: None, model: None },
-            TronEvent::SubagentFailed { base: base.clone(), subagent_session_id: "sub-1".into(), error: "e".into(), duration: 1000 },
-            TronEvent::SubagentEvent { base: base.clone(), subagent_session_id: "sub-1".into(), event: serde_json::json!({"type": "text_delta"}) },
-            TronEvent::SubagentResultAvailable { base, parent_session_id: "p1".into(), subagent_session_id: "sub-1".into(), task: "t".into(), result_summary: "done".into(), success: true, total_turns: 2, duration: 3000, token_usage: None, error: None, completed_at: "2024-01-01T00:00:00Z".into() },
+            TronEvent::MemoryUpdated {
+                base: base.clone(),
+                title: None,
+                entry_type: None,
+                event_id: None,
+            },
+            TronEvent::ContextCleared {
+                base: base.clone(),
+                tokens_before: 0,
+                tokens_after: 0,
+            },
+            TronEvent::MessageDeleted {
+                base: base.clone(),
+                target_event_id: "id".into(),
+                target_type: "t".into(),
+                target_turn: None,
+                reason: None,
+            },
+            TronEvent::RulesLoaded {
+                base: base.clone(),
+                total_files: 3,
+                dynamic_rules_count: 1,
+            },
+            TronEvent::RulesActivated {
+                base: base.clone(),
+                rules: vec![tron_core::events::ActivatedRuleInfo {
+                    relative_path: "src/.claude/CLAUDE.md".into(),
+                    scope_dir: "src".into(),
+                }],
+                total_activated: 1,
+            },
+            TronEvent::MemoryLoaded {
+                base: base.clone(),
+                count: 2,
+            },
+            TronEvent::SkillRemoved {
+                base: base.clone(),
+                skill_name: "n".into(),
+            },
+            TronEvent::SubagentSpawned {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                task: "t".into(),
+                model: "m".into(),
+                max_turns: 5,
+                spawn_depth: 0,
+                tool_call_id: None,
+                blocking: true,
+                working_directory: None,
+            },
+            TronEvent::SubagentStatusUpdate {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                status: "running".into(),
+                current_turn: 1,
+                activity: None,
+            },
+            TronEvent::SubagentCompleted {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                total_turns: 3,
+                duration: 5000,
+                full_output: None,
+                result_summary: None,
+                token_usage: None,
+                model: None,
+            },
+            TronEvent::SubagentFailed {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                error: "e".into(),
+                duration: 1000,
+            },
+            TronEvent::SubagentEvent {
+                base: base.clone(),
+                subagent_session_id: "sub-1".into(),
+                event: serde_json::json!({"type": "text_delta"}),
+            },
+            TronEvent::SubagentResultAvailable {
+                base,
+                parent_session_id: "p1".into(),
+                subagent_session_id: "sub-1".into(),
+                task: "t".into(),
+                result_summary: "done".into(),
+                success: true,
+                total_turns: 2,
+                duration: 3000,
+                token_usage: None,
+                error: None,
+                completed_at: "2024-01-01T00:00:00Z".into(),
+            },
         ];
         for event in &events {
             let rpc = tron_event_to_rpc(event);
@@ -1584,7 +1741,9 @@ mod tests {
 
     #[test]
     fn memory_updating_wire_type() {
-        let event = TronEvent::MemoryUpdating { base: BaseEvent::now("s1") };
+        let event = TronEvent::MemoryUpdating {
+            base: BaseEvent::now("s1"),
+        };
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.memory_updating");
         assert_eq!(rpc.data, Some(serde_json::json!({})));
@@ -1775,8 +1934,7 @@ mod tests {
         let bm = Arc::new(BroadcastManager::new());
 
         let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
-        let conn =
-            super::super::connection::ClientConnection::new("c1".into(), conn_tx);
+        let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
         conn.bind_session("s1".into());
         bm.add(Arc::new(conn)).await;
 
@@ -1785,7 +1943,7 @@ mod tests {
         let handle = tokio::spawn(bridge.run());
 
         // Send CompactionStart
-        tx.send(TronEvent::CompactionStart {
+        let _ = tx.send(TronEvent::CompactionStart {
             base: BaseEvent::now("s1"),
             reason: tron_core::events::CompactionReason::ThresholdExceeded,
             tokens_before: 80_000,
@@ -1800,7 +1958,7 @@ mod tests {
         assert_eq!(parsed["data"]["tokensBefore"], 80_000);
 
         // Send CompactionComplete
-        tx.send(TronEvent::CompactionComplete {
+        let _ = tx.send(TronEvent::CompactionComplete {
             base: BaseEvent::now("s1"),
             success: true,
             tokens_before: 80_000,

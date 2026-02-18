@@ -171,7 +171,10 @@ impl DefaultProviderFactory {
             },
         };
         Ok(Arc::new(
-            tron_llm::anthropic::provider::AnthropicProvider::with_client(config, self.http_client.clone()),
+            tron_llm::anthropic::provider::AnthropicProvider::with_client(
+                config,
+                self.http_client.clone(),
+            ),
         ))
     }
 
@@ -228,7 +231,10 @@ impl DefaultProviderFactory {
             provider_settings: tron_llm::openai::types::OpenAIApiSettings::default(),
         };
         Ok(Arc::new(
-            tron_llm::openai::provider::OpenAIProvider::with_client(config, self.http_client.clone()),
+            tron_llm::openai::provider::OpenAIProvider::with_client(
+                config,
+                self.http_client.clone(),
+            ),
         ))
     }
 
@@ -302,7 +308,10 @@ impl DefaultProviderFactory {
             provider_settings: tron_llm::google::types::GoogleApiSettings::default(),
         };
         Ok(Arc::new(
-            tron_llm::google::provider::GoogleProvider::with_client(config, self.http_client.clone()),
+            tron_llm::google::provider::GoogleProvider::with_client(
+                config,
+                self.http_client.clone(),
+            ),
         ))
     }
 }
@@ -311,10 +320,11 @@ impl DefaultProviderFactory {
 impl ProviderFactory for DefaultProviderFactory {
     async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         let bare_model = strip_provider_prefix(model);
-        let provider_type = detect_provider_from_model(model, false).unwrap_or_else(|| {
-            warn!(model, "unknown model, defaulting to Anthropic");
-            ProviderType::Anthropic
-        });
+        let provider_type = detect_provider_from_model(model, true).ok_or_else(|| {
+            ProviderError::UnsupportedModel {
+                model: model.to_string(),
+            }
+        })?;
 
         match provider_type {
             ProviderType::Anthropic => self.create_anthropic(bare_model).await,
@@ -439,11 +449,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn factory_unknown_model_defaults_anthropic() {
+    async fn factory_unknown_model_returns_unsupported_model() {
         let factory = no_auth_factory();
 
-        // Unknown model → defaults to Anthropic
-        let err = expect_auth_error(&factory, "totally-unknown-model").await;
-        assert!(err.to_string().contains("Anthropic"));
+        let err = match factory.create_for_model("totally-unknown-model").await {
+            Err(e) => e,
+            Ok(_) => panic!("expected UnsupportedModel"),
+        };
+        match err {
+            ProviderError::UnsupportedModel { model } => {
+                assert_eq!(model, "totally-unknown-model");
+            }
+            _ => panic!("expected UnsupportedModel, got: {err}"),
+        }
     }
 }

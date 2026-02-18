@@ -17,9 +17,7 @@ use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
 use tron_core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use tron_core::tools::Tool;
 
-use super::constants::{
-    CHARS_PER_TOKEN, DEFAULT_URL_IMAGE_TOKENS, MIN_IMAGE_TOKENS, RULES_HEADER,
-};
+use super::constants::{CHARS_PER_TOKEN, DEFAULT_URL_IMAGE_TOKENS, MIN_IMAGE_TOKENS, RULES_HEADER};
 
 /// Shorthand for chars → tokens conversion.
 #[allow(clippy::cast_possible_truncation)]
@@ -55,7 +53,11 @@ pub enum ImageSource {
 ///
 /// For URL images, uses a conservative default (1500 tokens for ~1024×1024).
 #[must_use]
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 pub fn estimate_image_tokens(source: Option<&ImageSource>) -> u32 {
     match source {
         Some(ImageSource::Base64 { data }) => {
@@ -84,10 +86,7 @@ fn estimate_block_chars(block: &Value) -> usize {
     let block_type = obj.get("type").and_then(Value::as_str).unwrap_or("");
 
     match block_type {
-        "text" => obj
-            .get("text")
-            .and_then(Value::as_str)
-            .map_or(0, str::len),
+        "text" => obj.get("text").and_then(Value::as_str).map_or(0, str::len),
 
         "thinking" => obj
             .get("thinking")
@@ -103,10 +102,7 @@ fn estimate_block_chars(block: &Value) -> usize {
                 chars += name.len();
             }
             let empty_obj = Value::Object(serde_json::Map::new());
-            let input = obj
-                .get("input")
-                .or_else(|| obj.get("arguments"))
-                .unwrap_or(&empty_obj);
+            let input = obj.get("arguments").unwrap_or(&empty_obj);
             chars += input.to_string().len();
             chars
         }
@@ -126,11 +122,13 @@ fn estimate_block_chars(block: &Value) -> usize {
             let source = obj.get("source").and_then(|s| {
                 let src_type = s.get("type").and_then(Value::as_str)?;
                 match src_type {
-                    "base64" => s.get("data").and_then(Value::as_str).map(|d| {
-                        ImageSource::Base64 {
-                            data: d.to_string(),
-                        }
-                    }),
+                    "base64" => {
+                        s.get("data")
+                            .and_then(Value::as_str)
+                            .map(|d| ImageSource::Base64 {
+                                data: d.to_string(),
+                            })
+                    }
                     _ => None,
                 }
             });
@@ -261,10 +259,7 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> u32 {
 ///
 /// Optionally includes a tool clarification message (for Codex providers).
 #[must_use]
-pub fn estimate_system_prompt_tokens(
-    system_prompt: &str,
-    tool_clarification: Option<&str>,
-) -> u32 {
+pub fn estimate_system_prompt_tokens(system_prompt: &str, tool_clarification: Option<&str>) -> u32 {
     let total_length = system_prompt.len() + tool_clarification.map_or(0, str::len);
     chars_to_tokens(total_length)
 }
@@ -285,9 +280,7 @@ pub fn estimate_tools_tokens(tools: &[Tool]) -> u32 {
 #[must_use]
 pub fn estimate_rules_tokens(rules_content: Option<&str>) -> u32 {
     match rules_content {
-        Some(content) if !content.is_empty() => {
-            chars_to_tokens(content.len() + RULES_HEADER.len())
-        }
+        Some(content) if !content.is_empty() => chars_to_tokens(content.len() + RULES_HEADER.len()),
         _ => 0,
     }
 }

@@ -4,7 +4,7 @@
 //! and iOS client expect. Token normalization delegates to `tron-tokens`
 //! for correct per-turn deltas.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tron_core::content::AssistantContent;
 use tron_core::messages::TokenUsage;
 use tron_llm::models::types::ProviderType;
@@ -13,8 +13,7 @@ use tron_llm::tokens::types::{TokenMeta, TokenSource};
 
 /// Build a JSON content array from assistant content blocks.
 ///
-/// Renames `arguments` → `input` on `tool_use` blocks (Anthropic API wire format
-/// that iOS expects).
+/// Uses canonical `arguments` on `tool_use` blocks.
 pub fn build_content_json(content: &[AssistantContent]) -> Vec<Value> {
     content.iter().map(content_block_to_json).collect()
 }
@@ -99,12 +98,11 @@ fn content_block_to_json(block: &AssistantContent) -> Value {
             arguments,
             thought_signature,
         } => {
-            // Rename "arguments" → "input" for iOS/Anthropic API wire format
             let mut obj = json!({
                 "type": "tool_use",
                 "id": id,
                 "name": name,
-                "input": Value::Object(arguments.clone()),
+                "arguments": Value::Object(arguments.clone()),
             });
             if let Some(sig) = thought_signature {
                 obj["thoughtSignature"] = json!(sig);
@@ -121,7 +119,7 @@ fn content_block_to_json(block: &AssistantContent) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Map};
+    use serde_json::{Map, json};
 
     // ── build_content_json ───────────────────────────────────────────
 
@@ -135,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn build_content_json_tool_use_renames_arguments_to_input() {
+    fn build_content_json_tool_use_uses_arguments() {
         let mut args = Map::new();
         let _ = args.insert("command".into(), json!("ls"));
         let content = vec![AssistantContent::ToolUse {
@@ -146,14 +144,14 @@ mod tests {
         }];
         let json = build_content_json(&content);
         assert!(
-            json[0].get("input").is_some(),
-            "must rename arguments to input"
+            json[0].get("arguments").is_some(),
+            "must persist canonical arguments"
         );
         assert!(
-            json[0].get("arguments").is_none(),
-            "must not have arguments key"
+            json[0].get("input").is_none(),
+            "must not include legacy input key"
         );
-        assert_eq!(json[0]["input"]["command"], "ls");
+        assert_eq!(json[0]["arguments"]["command"], "ls");
     }
 
     #[test]
@@ -292,7 +290,10 @@ mod tests {
         // Anthropic: newInputTokens = rawInputTokens only (non-cached)
         assert_eq!(record["computed"]["newInputTokens"], 100);
         assert_eq!(record["computed"]["previousContextBaseline"], 0);
-        assert_eq!(record["computed"]["calculationMethod"], "anthropic_cache_aware");
+        assert_eq!(
+            record["computed"]["calculationMethod"],
+            "anthropic_cache_aware"
+        );
     }
 
     #[test]
@@ -371,5 +372,4 @@ mod tests {
         assert_eq!(record["source"]["rawCacheReadTokens"], 0);
         assert_eq!(record["source"]["rawCacheCreationTokens"], 0);
     }
-
 }
