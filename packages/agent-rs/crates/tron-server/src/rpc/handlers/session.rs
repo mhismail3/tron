@@ -4,10 +4,12 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
 use tron_core::events::{BaseEvent, TronEvent};
+use tron_runtime::agent::event_emitter::EventEmitter;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::session_context::{RuleFileLevel, load_session_context_artifacts};
 use crate::rpc::registry::MethodHandler;
 
 /// Create a new session.
@@ -35,15 +37,33 @@ impl MethodHandler for CreateSessionHandler {
                 message: e.to_string(),
             })?;
 
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionCreated {
-            base: BaseEvent::now(&session_id),
-            model: model.to_string(),
-            working_directory: working_dir.clone(),
-        });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionCreated {
+                base: BaseEvent::now(&session_id),
+                model: model.to_string(),
+                working_directory: working_dir.clone(),
+            });
 
         // Optimistically discover rules and memory so iOS can display pills
         // immediately when a session opens (content is loaded later at prompt time).
-        emit_optimistic_context_events(ctx, &session_id, &working_dir);
+        let event_store = ctx.event_store.clone();
+        let broadcast = ctx.orchestrator.broadcast().clone();
+        let session_id_for_task = session_id.clone();
+        let working_dir_for_task = working_dir.clone();
+        let join = tokio::task::spawn_blocking(move || {
+            emit_optimistic_context_events(
+                &event_store,
+                &broadcast,
+                &session_id_for_task,
+                &working_dir_for_task,
+            );
+        })
+        .await;
+        if let Err(e) = join {
+            tracing::warn!(error = %e, "optimistic context preload task panicked");
+        }
 
         Ok(serde_json::json!({
             "sessionId": session_id,
@@ -65,75 +85,40 @@ impl MethodHandler for CreateSessionHandler {
 ///
 /// This runs at session.create time so iOS can show "Loaded N rules" / "Loaded memory"
 /// pills immediately. The actual content is loaded later when the first prompt is sent.
-fn emit_optimistic_context_events(ctx: &RpcContext, session_id: &str, working_dir: &str) {
-    use tron_runtime::context::loader::{ContextLoader, ContextLoaderConfig, load_global_rules};
+fn emit_optimistic_context_events(
+    event_store: &std::sync::Arc<tron_events::EventStore>,
+    broadcast: &std::sync::Arc<EventEmitter>,
+    session_id: &str,
+    working_dir: &str,
+) {
+    let settings = tron_settings::get_settings();
+    let artifacts = load_session_context_artifacts(event_store.as_ref(), working_dir, settings);
 
-    let wd = std::path::Path::new(working_dir);
-
-    // Discover project rules files
-    let rules_settings = tron_settings::get_settings();
-    let mut loader = ContextLoader::new(ContextLoaderConfig {
-        project_root: wd.to_path_buf(),
-        discover_standalone_files: rules_settings.context.rules.discover_standalone_files,
-        ..ContextLoaderConfig::default()
-    });
-    let loaded_ctx = loader.load(wd).ok();
-
-    // Build files array from project rules
-    let mut files_json = Vec::new();
-    let mut merged_size: usize = 0;
-
-    if let Some(ref ctx_result) = loaded_ctx {
-        for f in &ctx_result.files {
-            let size_bytes = f.content.len();
-            merged_size += size_bytes;
-            let relative_path = f.path.strip_prefix(wd)
-                .unwrap_or(&f.path)
-                .to_string_lossy()
-                .to_string();
-            let level = match f.level {
-                tron_runtime::context::loader::ContextLevel::Project => "project",
-                tron_runtime::context::loader::ContextLevel::Directory => "directory",
+    let files_json: Vec<serde_json::Value> = artifacts
+        .rules
+        .files
+        .iter()
+        .map(|file| {
+            let depth = if file.level == RuleFileLevel::Global {
+                0
+            } else {
+                file.depth
             };
-            files_json.push(serde_json::json!({
-                "path": f.path.to_string_lossy(),
-                "relativePath": relative_path,
-                "level": level,
-                "depth": f.depth,
-                "sizeBytes": size_bytes,
-            }));
-        }
-    }
+            serde_json::json!({
+                "path": file.path.to_string_lossy(),
+                "relativePath": file.relative_path,
+                "level": file.level.as_str(),
+                "depth": depth,
+                "sizeBytes": file.size_bytes,
+            })
+        })
+        .collect();
 
-    let project_file_count = loaded_ctx.as_ref().map_or(0, |ctx| ctx.files.len());
-
-    // Discover global rules (~/.tron/CLAUDE.md)
-    let home_dir = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-    let global_content = home_dir.as_deref().and_then(load_global_rules);
-
-    if let Some(ref content) = global_content {
-        let size_bytes = content.len();
-        merged_size += size_bytes;
-        let path = home_dir.as_ref()
-            .map(|h| h.join(".tron").join("CLAUDE.md"))
-            .unwrap_or_default();
-        files_json.push(serde_json::json!({
-            "path": path.to_string_lossy(),
-            "relativePath": ".tron/CLAUDE.md",
-            "level": "global",
-            "depth": 0,
-            "sizeBytes": size_bytes,
-        }));
-    }
-
-    let total_files = project_file_count + usize::from(global_content.is_some());
-
-    if total_files > 0 {
+    if !files_json.is_empty() {
         #[allow(clippy::cast_possible_truncation)]
-        let total = total_files as u32;
-        #[allow(clippy::cast_possible_truncation)]
-        let merged_tokens = (merged_size / 4) as u32;
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+        let total = files_json.len() as u32;
+        let merged_tokens = artifacts.rules.merged_tokens_estimate();
+        let _ = event_store.append(&tron_events::AppendOptions {
             session_id,
             event_type: tron_events::EventType::RulesLoaded,
             payload: serde_json::json!({
@@ -144,58 +129,31 @@ fn emit_optimistic_context_events(ctx: &RpcContext, session_id: &str, working_di
             }),
             parent_id: None,
         });
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::RulesLoaded {
+        let _ = broadcast.emit(TronEvent::RulesLoaded {
             base: BaseEvent::now(session_id),
             total_files: total,
             dynamic_rules_count: 0,
         });
     }
 
-    // Discover workspace memory from ledger entries (auto-inject setting must be enabled)
-    let settings = tron_settings::get_settings();
-    let auto_inject = &settings.context.memory.auto_inject;
+    if let Some(memory) = artifacts.memory {
+        #[allow(clippy::cast_possible_truncation)]
+        let count = memory.raw_event_count as u32;
 
-    if auto_inject.enabled {
-        let workspace = ctx
-            .event_store
-            .get_workspace_by_path(working_dir)
-            .ok()
-            .flatten();
-
-        if let Some(ws) = workspace {
-            #[allow(clippy::cast_possible_wrap)]
-            let count_limit = auto_inject.count.clamp(1, 10) as i64;
-            let entries = ctx
-                .event_store
-                .get_events_by_workspace_and_types(
-                    &ws.id,
-                    &["memory.ledger"],
-                    Some(count_limit),
-                    None,
-                )
-                .unwrap_or_default();
-
-            if !entries.is_empty() {
-                #[allow(clippy::cast_possible_truncation)]
-                let count = entries.len() as u32;
-                let tokens: u64 = entries.iter().map(|e| e.payload.len() as u64 / 4).sum();
-
-                let _ = ctx.event_store.append(&tron_events::AppendOptions {
-                    session_id,
-                    event_type: tron_events::EventType::MemoryLoaded,
-                    payload: serde_json::json!({
-                        "count": count,
-                        "tokens": tokens,
-                        "workspaceId": ws.id,
-                    }),
-                    parent_id: None,
-                });
-                let _ = ctx.orchestrator.broadcast().emit(TronEvent::MemoryLoaded {
-                    base: BaseEvent::now(session_id),
-                    count,
-                });
-            }
-        }
+        let _ = event_store.append(&tron_events::AppendOptions {
+            session_id,
+            event_type: tron_events::EventType::MemoryLoaded,
+            payload: serde_json::json!({
+                "count": count,
+                "tokens": memory.raw_payload_tokens,
+                "workspaceId": memory.workspace_id,
+            }),
+            parent_id: None,
+        });
+        let _ = broadcast.emit(TronEvent::MemoryLoaded {
+            base: BaseEvent::now(session_id),
+            count,
+        });
     }
 }
 
@@ -208,12 +166,13 @@ impl MethodHandler for ResumeSessionHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        let active = ctx.session_manager.resume_session(&session_id).map_err(|e| {
-            RpcError::NotFound {
+        let active = ctx
+            .session_manager
+            .resume_session(&session_id)
+            .map_err(|e| RpcError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: e.to_string(),
-            }
-        })?;
+            })?;
 
         let message_count = active.state.messages.len();
         let last_activity = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -254,16 +213,19 @@ impl MethodHandler for ListSessionsHandler {
             ..Default::default()
         };
 
-        let sessions = ctx
-            .session_manager
-            .list_sessions(&filter)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?;
+        let sessions =
+            ctx.session_manager
+                .list_sessions(&filter)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?;
 
         // Get message previews for all sessions
         let session_ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
-        let previews = ctx.event_store.get_session_message_previews(&session_ids).unwrap_or_default();
+        let previews = ctx
+            .event_store
+            .get_session_message_previews(&session_ids)
+            .unwrap_or_default();
 
         let items: Vec<Value> = sessions
             .into_iter()
@@ -314,9 +276,12 @@ impl MethodHandler for DeleteSessionHandler {
                 message: e.to_string(),
             })?;
 
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionDeleted {
-            base: BaseEvent::now(&session_id),
-        });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionDeleted {
+                base: BaseEvent::now(&session_id),
+            });
 
         Ok(serde_json::json!({ "deleted": true }))
     }
@@ -405,17 +370,15 @@ impl MethodHandler for GetStateHandler {
                 message: format!("Session '{session_id}' not found"),
             })?;
 
-        let active = ctx.session_manager.resume_session(&session_id).map_err(|e| {
-            RpcError::NotFound {
+        let active = ctx
+            .session_manager
+            .resume_session(&session_id)
+            .map_err(|e| RpcError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: e.to_string(),
-            }
-        })?;
+            })?;
 
-        let event_count = ctx
-            .event_store
-            .count_events(&session_id)
-            .unwrap_or(0);
+        let event_count = ctx.event_store.count_events(&session_id).unwrap_or(0);
 
         Ok(serde_json::json!({
             "sessionId": session_id,
@@ -452,9 +415,12 @@ impl MethodHandler for ArchiveSessionHandler {
                 message: e.to_string(),
             })?;
 
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionArchived {
-            base: BaseEvent::now(&session_id),
-        });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionArchived {
+                base: BaseEvent::now(&session_id),
+            });
 
         Ok(serde_json::json!({ "archived": true }))
     }
@@ -500,11 +466,7 @@ impl MethodHandler for GetHistoryHandler {
         let type_strs: Vec<&str> = message_types.to_vec();
         let events = ctx
             .event_store
-            .get_events_by_type(
-                &session_id,
-                &type_strs,
-                None,
-            )
+            .get_events_by_type(&session_id, &type_strs, None)
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
             })?;
@@ -537,26 +499,7 @@ impl MethodHandler for GetHistoryHandler {
                     "tool.result" => "tool",
                     _ => "unknown",
                 };
-                let mut content = serde_json::from_str::<Value>(&e.payload)
-                    .unwrap_or(Value::Null);
-
-                // ADAPTER(ios-compat): Apply TaskManager adapter during reconstruction.
-                // tool.result events store raw JSON content, but iOS expects adapted text.
-                // During live streaming, event_bridge.rs applies the adapter; here we do
-                // the same for reconstruction using auto-detection since the action isn't stored.
-                if e.event_type == "tool.result" {
-                    if let Some(ref tn) = e.tool_name {
-                        if tn == "TaskManager" {
-                            if let Some(raw) =
-                                content.get("content").and_then(Value::as_str).map(String::from)
-                            {
-                                let adapted =
-                                    crate::rpc::adapters::adapt_task_manager_result_auto(&raw);
-                                content["content"] = Value::String(adapted);
-                            }
-                        }
-                    }
-                }
+                let content = serde_json::from_str::<Value>(&e.payload).unwrap_or(Value::Null);
 
                 let mut msg = serde_json::json!({
                     "id": e.id,
@@ -603,9 +546,12 @@ impl MethodHandler for UnarchiveSessionHandler {
                 message: e.to_string(),
             })?;
 
-        let _ = ctx.orchestrator.broadcast().emit(TronEvent::SessionUnarchived {
-            base: BaseEvent::now(&session_id),
-        });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionUnarchived {
+                base: BaseEvent::now(&session_id),
+            });
 
         Ok(serde_json::json!({ "unarchived": true }))
     }
@@ -689,8 +635,14 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_populated() {
         let ctx = make_test_context();
-        let _ = ctx.session_manager.create_session("m", "/a", Some("s1")).unwrap();
-        let _ = ctx.session_manager.create_session("m", "/b", Some("s2")).unwrap();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/a", Some("s1"))
+            .unwrap();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/b", Some("s2"))
+            .unwrap();
 
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         assert_eq!(result["sessions"].as_array().unwrap().len(), 2);
@@ -699,7 +651,10 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_has_cache_tokens() {
         let ctx = make_test_context();
-        let _ = ctx.session_manager.create_session("m", "/a", Some("s1")).unwrap();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/a", Some("s1"))
+            .unwrap();
 
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         let session = &result["sessions"][0];
@@ -712,7 +667,10 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_has_last_turn_input_tokens() {
         let ctx = make_test_context();
-        let _ = ctx.session_manager.create_session("m", "/a", Some("s1")).unwrap();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/a", Some("s1"))
+            .unwrap();
 
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         let session = &result["sessions"][0];
@@ -723,15 +681,21 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_has_message_previews() {
         let ctx = make_test_context();
-        let sid = ctx.session_manager.create_session("m", "/a", Some("s1")).unwrap();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/a", Some("s1"))
+            .unwrap();
 
         // Add a user message
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
-            payload: json!({"text": "hello user"}),
-            parent_id: None,
-        }).unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: json!({"text": "hello user"}),
+                parent_id: None,
+            })
+            .unwrap();
 
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         let session = &result["sessions"][0];
@@ -742,7 +706,10 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_empty_previews() {
         let ctx = make_test_context();
-        let _ = ctx.session_manager.create_session("m", "/a", Some("s1")).unwrap();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/a", Some("s1"))
+            .unwrap();
 
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         let session = &result["sessions"][0];
@@ -754,7 +721,10 @@ mod tests {
     #[tokio::test]
     async fn list_sessions_cost_field() {
         let ctx = make_test_context();
-        let _ = ctx.session_manager.create_session("m", "/a", Some("s1")).unwrap();
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/a", Some("s1"))
+            .unwrap();
 
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         let session = &result["sessions"][0];
@@ -831,8 +801,16 @@ mod tests {
             .await
             .unwrap();
         // forkedFromEventId and rootEventId should be real strings, not null
-        assert!(result["forkedFromEventId"].is_string(), "forkedFromEventId should be a string, got: {}", result["forkedFromEventId"]);
-        assert!(result["rootEventId"].is_string(), "rootEventId should be a string, got: {}", result["rootEventId"]);
+        assert!(
+            result["forkedFromEventId"].is_string(),
+            "forkedFromEventId should be a string, got: {}",
+            result["forkedFromEventId"]
+        );
+        assert!(
+            result["rootEventId"].is_string(),
+            "rootEventId should be a string, got: {}",
+            result["rootEventId"]
+        );
         assert!(!result["forkedFromEventId"].as_str().unwrap().is_empty());
         assert!(!result["rootEventId"].as_str().unwrap().is_empty());
     }
@@ -1159,10 +1137,7 @@ mod tests {
 
         // Get history before the second message
         let result = GetHistoryHandler
-            .handle(
-                Some(json!({"sessionId": sid, "beforeId": e1.id})),
-                &ctx,
-            )
+            .handle(Some(json!({"sessionId": sid, "beforeId": e1.id})), &ctx)
             .await
             .unwrap();
         let messages = result["messages"].as_array().unwrap();
@@ -1217,19 +1192,25 @@ mod tests {
             .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::ToolResult,
-            payload: json!({"toolCallId": "tc1", "content": "result data", "isError": false}),
-            parent_id: None,
-        }).unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::ToolResult,
+                payload: json!({"toolCallId": "tc1", "content": "result data", "isError": false}),
+                parent_id: None,
+            })
+            .unwrap();
 
         let result = GetHistoryHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
         let msg = &result["messages"][0];
-        assert_eq!(msg["toolCallId"], "tc1", "toolCallId should be hoisted to message level");
+        assert_eq!(
+            msg["toolCallId"], "tc1",
+            "toolCallId should be hoisted to message level"
+        );
     }
 
     #[tokio::test]
@@ -1240,12 +1221,15 @@ mod tests {
             .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::ToolResult,
-            payload: json!({"toolCallId": "tc1", "content": "file contents", "isError": false}),
-            parent_id: None,
-        }).unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::ToolResult,
+                payload: json!({"toolCallId": "tc1", "content": "file contents", "isError": false}),
+                parent_id: None,
+            })
+            .unwrap();
 
         let result = GetHistoryHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -1263,19 +1247,25 @@ mod tests {
             .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::ToolResult,
-            payload: json!({"toolCallId": "tc1", "content": "error msg", "isError": true}),
-            parent_id: None,
-        }).unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::ToolResult,
+                payload: json!({"toolCallId": "tc1", "content": "error msg", "isError": true}),
+                parent_id: None,
+            })
+            .unwrap();
 
         let result = GetHistoryHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
         let msg = &result["messages"][0];
-        assert_eq!(msg["isError"], true, "isError should be hoisted to message level");
+        assert_eq!(
+            msg["isError"], true,
+            "isError should be hoisted to message level"
+        );
     }
 
     #[tokio::test]
@@ -1286,22 +1276,28 @@ mod tests {
             .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageAssistant,
-            payload: json!({
-                "content": [{"type": "text", "text": "hello"}],
-                "latency": 1234
-            }),
-            parent_id: None,
-        }).unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageAssistant,
+                payload: json!({
+                    "content": [{"type": "text", "text": "hello"}],
+                    "latency": 1234
+                }),
+                parent_id: None,
+            })
+            .unwrap();
 
         let result = GetHistoryHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
         let msg = &result["messages"][0];
-        assert_eq!(msg["content"]["latency"], 1234, "latency should be preserved in content");
+        assert_eq!(
+            msg["content"]["latency"], 1234,
+            "latency should be preserved in content"
+        );
     }
 
     #[tokio::test]
@@ -1313,18 +1309,21 @@ mod tests {
             .unwrap();
 
         // User message
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::MessageUser,
-            payload: json!({"content": "read a file"}),
-            parent_id: None,
-        }).unwrap();
+        let _ = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: json!({"content": "read a file"}),
+                parent_id: None,
+            })
+            .unwrap();
 
         // Assistant message with tool_use block
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &sid,
             event_type: tron_events::EventType::MessageAssistant,
-            payload: json!({"content": [{"type": "tool_use", "id": "tc1", "name": "Read", "input": {"path": "/tmp/test"}}]}),
+            payload: json!({"content": [{"type": "tool_use", "id": "tc1", "name": "Read", "arguments": {"path": "/tmp/test"}}]}),
             parent_id: None,
         }).unwrap();
 
@@ -1341,7 +1340,11 @@ mod tests {
             .await
             .unwrap();
         let messages = result["messages"].as_array().unwrap();
-        assert_eq!(messages.len(), 3, "should include user, assistant, and tool result");
+        assert_eq!(
+            messages.len(),
+            3,
+            "should include user, assistant, and tool result"
+        );
         assert_eq!(messages[0]["role"], "user");
         assert_eq!(messages[1]["role"], "assistant");
         assert_eq!(messages[2]["role"], "tool");
@@ -1354,10 +1357,8 @@ mod tests {
     #[tokio::test]
     async fn create_session_emits_rules_loaded_when_rules_exist() {
         // Set up a temp dir with a CLAUDE.md file
-        let tmp = std::env::temp_dir().join(format!(
-            "tron-session-test-rules-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("tron-session-test-rules-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(tmp.join(".claude")).unwrap();
         std::fs::write(tmp.join(".claude").join("CLAUDE.md"), "# Rules").unwrap();
 
@@ -1379,7 +1380,11 @@ mod tests {
             .event_store
             .get_events_by_type(sid, &["rules.loaded"], Some(10))
             .unwrap();
-        assert_eq!(rules_events.len(), 1, "rules.loaded should be persisted once");
+        assert_eq!(
+            rules_events.len(),
+            1,
+            "rules.loaded should be persisted once"
+        );
 
         // Check broadcast events: session_created then rules_loaded
         let e1 = rx.try_recv().unwrap();
@@ -1424,10 +1429,8 @@ mod tests {
 
     #[tokio::test]
     async fn create_session_rules_loaded_has_correct_total_files() {
-        let tmp = std::env::temp_dir().join(format!(
-            "tron-session-test-rcount-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("tron-session-test-rcount-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(tmp.join(".claude")).unwrap();
         std::fs::write(tmp.join(".claude").join("CLAUDE.md"), "# Rules").unwrap();
 
@@ -1446,8 +1449,7 @@ mod tests {
             .event_store
             .get_events_by_type(sid, &["rules.loaded"], Some(1))
             .unwrap();
-        let payload: serde_json::Value =
-            serde_json::from_str(&rules_events[0].payload).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&rules_events[0].payload).unwrap();
         // At least 1 file (the project rules); may also have global rules
         assert!(
             payload["totalFiles"].as_u64().unwrap() >= 1,

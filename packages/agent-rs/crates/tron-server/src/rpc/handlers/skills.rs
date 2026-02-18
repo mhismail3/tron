@@ -2,12 +2,35 @@
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio::task;
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
+
+fn skill_to_wire(skill: &tron_skills::types::SkillMetadata) -> Value {
+    serde_json::json!({
+        "name": skill.name,
+        "displayName": skill.display_name,
+        "description": skill.description,
+        "source": skill.source,
+        "tags": skill.frontmatter.tags,
+        "content": skill.content,
+        "path": skill.path,
+        "additionalFiles": skill.additional_files,
+    })
+}
+
+fn remove_skill_name<'a>(params: Option<&'a Value>) -> Result<&'a str, RpcError> {
+    params
+        .and_then(|p| p.get("skillName").or_else(|| p.get("name")))
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::InvalidParams {
+            message: "Missing required parameter: skillName".into(),
+        })
+}
 
 /// List available skills.
 pub struct ListSkillsHandler;
@@ -18,11 +41,7 @@ impl MethodHandler for ListSkillsHandler {
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let registry = ctx.skill_registry.read();
         let skills = registry.list(None);
-        let mut response = serde_json::json!({ "skills": skills });
-        // ADAPTER(ios-compat): iOS expects totalCount in skill.list response.
-        // REMOVE: revert to `Ok(json!({ "skills": skills }))`
-        crate::rpc::adapters::adapt_skill_list(&mut response);
-        Ok(response)
+        Ok(serde_json::json!({ "skills": skills }))
     }
 }
 
@@ -41,22 +60,9 @@ impl MethodHandler for GetSkillHandler {
             message: format!("Skill '{name}' not found"),
         })?;
 
-        // Transform to iOS-compatible format: extract tags from frontmatter,
-        // omit internal fields (frontmatter, skillMdPath, lastModified)
-        let skill_json = serde_json::json!({
-            "name": skill.name,
-            "displayName": skill.display_name,
-            "description": skill.description,
-            "source": skill.source,
-            "tags": skill.frontmatter.tags,
-            "content": skill.content,
-            "path": skill.path,
-            "additionalFiles": skill.additional_files,
-        });
-
         // iOS expects { skill: SkillMetadata, found: bool } wrapper
         Ok(serde_json::json!({
-            "skill": skill_json,
+            "skill": skill_to_wire(skill),
             "found": true,
         }))
     }
@@ -75,9 +81,17 @@ impl MethodHandler for RefreshSkillsHandler {
             .and_then(Value::as_str)
             .unwrap_or("/tmp");
 
-        let mut registry = ctx.skill_registry.write();
-        registry.initialize(working_dir);
-        let count = registry.list(None).len();
+        let skill_registry = ctx.skill_registry.clone();
+        let working_dir = working_dir.to_string();
+        let count = task::spawn_blocking(move || {
+            let mut registry = skill_registry.write();
+            registry.initialize(&working_dir);
+            registry.list(None).len()
+        })
+        .await
+        .map_err(|e| RpcError::Internal {
+            message: format!("Failed to refresh skills in blocking task: {e}"),
+        })?;
 
         Ok(serde_json::json!({ "success": true, "skillCount": count }))
     }
@@ -90,13 +104,7 @@ pub struct RemoveSkillHandler;
 impl MethodHandler for RemoveSkillHandler {
     #[instrument(skip(self, ctx), fields(method = "skill.remove"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let name = params
-            .as_ref()
-            .and_then(|p| p.get("skillName").or_else(|| p.get("name")))
-            .and_then(Value::as_str)
-            .ok_or_else(|| RpcError::InvalidParams {
-                message: "Missing required parameter: skillName".into(),
-            })?;
+        let name = remove_skill_name(params.as_ref())?;
 
         let session_id = params
             .as_ref()
@@ -115,12 +123,13 @@ impl MethodHandler for RemoveSkillHandler {
 
         // Broadcast skill removed event
         if let Some(sid) = session_id {
-            let _ = ctx.orchestrator.broadcast().emit(
-                tron_core::events::TronEvent::SkillRemoved {
+            let _ = ctx
+                .orchestrator
+                .broadcast()
+                .emit(tron_core::events::TronEvent::SkillRemoved {
                     base: tron_core::events::BaseEvent::now(sid),
                     skill_name: name.to_owned(),
-                },
-            );
+                });
         }
 
         Ok(serde_json::json!({
@@ -204,7 +213,10 @@ mod tests {
         ctx.skill_registry.write().insert(make_skill("test-skill"));
 
         let result = RemoveSkillHandler
-            .handle(Some(json!({"skillName": "test-skill", "sessionId": "s1"})), &ctx)
+            .handle(
+                Some(json!({"skillName": "test-skill", "sessionId": "s1"})),
+                &ctx,
+            )
             .await
             .unwrap();
         assert_eq!(result["success"], true);
@@ -251,7 +263,10 @@ mod tests {
         let mut rx = ctx.orchestrator.subscribe();
 
         let _ = RemoveSkillHandler
-            .handle(Some(json!({"skillName": "my-skill", "sessionId": "s1"})), &ctx)
+            .handle(
+                Some(json!({"skillName": "my-skill", "sessionId": "s1"})),
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -284,12 +299,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_skills_has_total_count() {
+    async fn list_skills_returns_canonical_shape() {
         let ctx = make_test_context();
         ctx.skill_registry.write().insert(make_skill("alpha"));
         ctx.skill_registry.write().insert(make_skill("beta"));
 
         let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
-        assert_eq!(result["totalCount"], 2);
+        assert_eq!(result["skills"].as_array().map_or(0, Vec::len), 2);
+        assert!(result.get("totalCount").is_none());
     }
 }

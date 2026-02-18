@@ -1,20 +1,23 @@
 //! Context handlers: getSnapshot, getDetailedSnapshot, shouldCompact,
 //! previewCompaction, confirmCompaction, canAcceptTurn, clear, compact.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::instrument;
 
 use tron_runtime::context::context_manager::ContextManager;
-use tron_runtime::context::loader::{self, ContextLoader, ContextLoaderConfig};
 use tron_runtime::context::summarizer::KeywordSummarizer;
 use tron_runtime::context::types::{CompactionConfig, ContextManagerConfig};
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::session_context::{
+    RuleFileLevel, SessionContextArtifacts, collect_dynamic_rule_paths,
+    load_session_context_artifacts,
+};
 use crate::rpc::registry::MethodHandler;
 
 // =============================================================================
@@ -23,10 +26,16 @@ use crate::rpc::registry::MethodHandler;
 
 /// Build a temporary `ContextManager` for a session by reconstructing state
 /// from events and loading rules/memory from disk.
+struct PreparedSessionContext {
+    session: tron_events::sqlite::row_types::SessionRow,
+    artifacts: SessionContextArtifacts,
+    context_manager: ContextManager,
+}
+
 fn build_context_manager_for_session(
     session_id: &str,
     ctx: &RpcContext,
-) -> Result<ContextManager, RpcError> {
+) -> Result<PreparedSessionContext, RpcError> {
     // 1. Get session metadata
     let session = ctx
         .session_manager
@@ -49,60 +58,12 @@ fn build_context_manager_for_session(
         },
     };
 
-    // 3. Load project rules from working directory
-    let wd = &session.working_directory;
-    let rules_settings = tron_settings::get_settings();
-    let project_rules = {
-        let wd_path = Path::new(wd);
-        let mut ld = ContextLoader::new(ContextLoaderConfig {
-            project_root: wd_path.to_path_buf(),
-            discover_standalone_files: rules_settings.context.rules.discover_standalone_files,
-            ..Default::default()
-        });
-        ld.load(wd_path)
-            .ok()
-            .and_then(|c| if c.merged.is_empty() { None } else { Some(c.merged) })
-    };
-
-    // 4. Load global rules
-    let home_dir = std::env::var("HOME").ok().map(PathBuf::from);
-    let global_rules = home_dir
-        .as_deref()
-        .and_then(loader::load_global_rules);
-    let rules = loader::merge_rules(global_rules, project_rules);
-
-    // 5. Load workspace memory from ledger entries
-    let memory = {
-        let settings = tron_settings::get_settings();
-        let auto_inject = &settings.context.memory.auto_inject;
-        if auto_inject.enabled {
-            ctx.event_store.get_workspace_by_path(wd).ok().flatten().and_then(|ws| {
-                #[allow(clippy::cast_possible_wrap)]
-                let count = auto_inject.count.clamp(1, 10) as i64;
-                let events = ctx.event_store
-                    .get_events_by_workspace_and_types(&ws.id, &["memory.ledger"], Some(count), None)
-                    .unwrap_or_default();
-                if events.is_empty() { return None; }
-                let mut sections = vec!["# Memory\n\n## Recent sessions in this workspace".to_string()];
-                for event in events.iter().rev() {
-                    if let Ok(entry) = serde_json::from_str::<Value>(&event.payload) {
-                        let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
-                        let mut section = format!("\n### {title}");
-                        if let Some(lessons) = entry.get("lessons").and_then(|v| v.as_array()) {
-                            for lesson in lessons.iter().filter_map(|l| l.as_str()).filter(|t| !t.is_empty()) {
-                                section.push_str(&format!("\n- {lesson}"));
-                            }
-                        }
-                        sections.push(section);
-                    }
-                }
-                let content = sections.join("\n");
-                if content.trim().is_empty() { None } else { Some(content) }
-            })
-        } else {
-            None
-        }
-    };
+    let settings = tron_settings::get_settings();
+    let artifacts = load_session_context_artifacts(
+        ctx.event_store.as_ref(),
+        &session.working_directory,
+        settings,
+    );
 
     // 6. Get tool definitions
     let tools = ctx
@@ -111,15 +72,15 @@ fn build_context_manager_for_session(
         .map(|d| (d.tool_factory)().definitions())
         .unwrap_or_default();
 
-    // 7. Build ContextManager
+    // 4. Build ContextManager
     let context_limit = tron_llm::tokens::get_context_limit(&state.model);
-    let compactor_settings = &tron_settings::get_settings().context.compactor;
+    let compactor_settings = &settings.context.compactor;
     let mut cm = ContextManager::new(ContextManagerConfig {
         model: state.model.clone(),
         system_prompt: None,
         working_directory: state.working_directory.clone(),
         tools,
-        rules_content: rules,
+        rules_content: artifacts.rules.merged_content.clone(),
         compaction: CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
@@ -127,15 +88,15 @@ fn build_context_manager_for_session(
         },
     });
 
-    // 8. Restore messages and memory
+    // 5. Restore messages and memory
     if !state.messages.is_empty() {
         cm.set_messages(state.messages.clone());
     }
-    if memory.is_some() {
-        cm.set_memory_content(memory);
+    if let Some(memory) = artifacts.memory.as_ref() {
+        cm.set_memory_content(Some(memory.content.clone()));
     }
 
-    // 9. Set API tokens if available (ground truth from last turn's context window)
+    // 6. Set API tokens if available (ground truth from last turn's context window)
     // Use last_turn_input_tokens from session row (NOT accumulated totals)
     let last_turn = session.last_turn_input_tokens;
     if last_turn > 0 {
@@ -143,7 +104,11 @@ fn build_context_manager_for_session(
         cm.set_api_context_tokens(last_turn as u64);
     }
 
-    Ok(cm)
+    Ok(PreparedSessionContext {
+        session,
+        artifacts,
+        context_manager: cm,
+    })
 }
 
 // =============================================================================
@@ -158,8 +123,8 @@ impl MethodHandler for GetSnapshotHandler {
     #[instrument(skip(self, ctx), fields(method = "context.getSnapshot", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?;
-        let snapshot = cm.get_snapshot();
+        let prepared = build_context_manager_for_session(&session_id, ctx)?;
+        let snapshot = prepared.context_manager.get_snapshot();
         Ok(json!({
             "currentTokens": snapshot.current_tokens,
             "contextLimit": snapshot.context_limit,
@@ -180,23 +145,17 @@ pub struct GetDetailedSnapshotHandler;
 
 #[async_trait]
 impl MethodHandler for GetDetailedSnapshotHandler {
-    #[instrument(skip(self, ctx), fields(method = "context.getDetailedSnapshot", session_id))]
+    #[instrument(
+        skip(self, ctx),
+        fields(method = "context.getDetailedSnapshot", session_id)
+    )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        // Get session metadata for working directory
-        let session = ctx
-            .session_manager
-            .get_session(&session_id)
-            .map_err(|e| RpcError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| RpcError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{session_id}' not found"),
-            })?;
-
-        let cm = build_context_manager_for_session(&session_id, ctx)?;
+        let prepared = build_context_manager_for_session(&session_id, ctx)?;
+        let session = prepared.session;
+        let artifacts = prepared.artifacts;
+        let cm = prepared.context_manager;
         let detailed = cm.get_detailed_snapshot();
 
         // Build messages array matching iOS DetailedMessageInfo shape
@@ -212,12 +171,16 @@ impl MethodHandler for GetDetailedSnapshotHandler {
                     "content": m.content,
                 });
                 if let Some(ref tc) = m.tool_calls {
-                    msg["toolCalls"] = json!(tc.iter().map(|t| json!({
-                        "id": t.id,
-                        "name": t.name,
-                        "tokens": t.tokens,
-                        "arguments": t.arguments,
-                    })).collect::<Vec<_>>());
+                    msg["toolCalls"] = json!(
+                        tc.iter()
+                            .map(|t| json!({
+                                "id": t.id,
+                                "name": t.name,
+                                "tokens": t.tokens,
+                                "arguments": t.arguments,
+                            }))
+                            .collect::<Vec<_>>()
+                    );
                 }
                 if let Some(ref id) = m.tool_call_id {
                     msg["toolCallId"] = json!(id);
@@ -291,103 +254,47 @@ impl MethodHandler for GetDetailedSnapshotHandler {
         // Build rules matching iOS LoadedRules shape: { files, totalFiles, tokens }
         let rules_info: Option<Value> = {
             let wd_path = Path::new(&session.working_directory);
-            let ds_settings = tron_settings::get_settings();
-            let mut ld = ContextLoader::new(ContextLoaderConfig {
-                project_root: wd_path.to_path_buf(),
-                discover_standalone_files: ds_settings.context.rules.discover_standalone_files,
-                ..Default::default()
-            });
-            let project_files = ld.load(wd_path).ok();
-
-            let home_dir = std::env::var("HOME").ok().map(PathBuf::from);
-            let has_global = home_dir.as_deref().and_then(loader::load_global_rules).is_some();
-
-            let mut files = Vec::new();
-            if has_global {
-                if let Some(ref hd) = home_dir {
-                    for name in &["AGENTS.md", "RULES.md", "CLAUDE.md"] {
-                        let p = hd.join(".tron").join(name);
-                        if p.is_file() {
-                            files.push(json!({
-                                "path": p.to_string_lossy(),
-                                "relativePath": format!("~/.tron/{name}"),
-                                "level": "global",
-                                "depth": -1,
-                            }));
-                            break;
-                        }
-                    }
-                }
-            }
-            if let Some(ref loaded) = project_files {
-                for f in &loaded.files {
-                    let rel = f
-                        .path
-                        .strip_prefix(wd_path)
-                        .map_or_else(
-                            |_| f.path.to_string_lossy().to_string(),
-                            |p| p.to_string_lossy().to_string(),
-                        );
-                    let level = match f.level {
-                        loader::ContextLevel::Project => "project",
-                        loader::ContextLevel::Directory => "directory",
-                    };
-                    files.push(json!({
-                        "path": f.path.to_string_lossy(),
-                        "relativePath": rel,
-                        "level": level,
-                        "depth": f.depth,
-                    }));
-                }
-            }
-
-            // Include dynamically activated rules from rules.activated events.
-            // Respect compaction boundaries: only include activations after the
-            // latest compact.boundary / compact.summary / context.cleared event.
-            let activated_events = ctx.event_store
-                .get_events_by_type(
-                    &session_id,
-                    &["rules.activated", "compact.boundary", "compact.summary", "context.cleared"],
-                    None,
-                )
-                .unwrap_or_default();
-
-            // Walk events chronologically. Reset accumulated paths on boundaries.
-            let mut activated_paths = std::collections::HashSet::new();
-            let mut activated_entries: Vec<(String, String)> = Vec::new();
-            for event in &activated_events {
-                if event.event_type == "compact.boundary"
-                    || event.event_type == "compact.summary"
-                    || event.event_type == "context.cleared"
-                {
-                    activated_paths.clear();
-                    activated_entries.clear();
-                    continue;
-                }
-                if let Ok(payload) = serde_json::from_str::<Value>(&event.payload) {
-                    if let Some(rules) = payload.get("rules").and_then(Value::as_array) {
-                        for rule in rules {
-                            if let (Some(rel), Some(scope)) = (
-                                rule.get("relativePath").and_then(Value::as_str),
-                                rule.get("scopeDir").and_then(Value::as_str),
-                            ) {
-                                if activated_paths.insert(rel.to_string()) {
-                                    activated_entries.push((rel.to_string(), scope.to_string()));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Append activated rules as directory-level entries (deduped against static files)
-            let existing_paths: std::collections::HashSet<String> = files
+            let mut files: Vec<Value> = artifacts
+                .rules
+                .files
                 .iter()
-                .filter_map(|f| f.get("relativePath").and_then(Value::as_str).map(String::from))
+                .map(|file| {
+                    let relative_path = if file.level == RuleFileLevel::Global {
+                        format!("~/{}", file.relative_path)
+                    } else {
+                        file.relative_path.clone()
+                    };
+                    let depth = if file.level == RuleFileLevel::Global {
+                        -1_i64
+                    } else {
+                        #[allow(clippy::cast_possible_wrap)]
+                        {
+                            file.depth as i64
+                        }
+                    };
+                    json!({
+                        "path": file.path.to_string_lossy(),
+                        "relativePath": relative_path,
+                        "level": file.level.as_str(),
+                        "depth": depth,
+                    })
+                })
                 .collect();
-            for (rel_path, _scope_dir) in &activated_entries {
-                if !existing_paths.contains(rel_path) {
-                    let abs = wd_path.join(rel_path);
+
+            // Include dynamically activated rules from rules.activated events,
+            // resetting on compact boundaries.
+            let dynamic_paths = collect_dynamic_rule_paths(ctx.event_store.as_ref(), &session_id);
+            let mut existing_paths: std::collections::HashSet<String> = files
+                .iter()
+                .filter_map(|f| {
+                    f.get("relativePath")
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                })
+                .collect();
+            for rel_path in dynamic_paths {
+                if existing_paths.insert(rel_path.clone()) {
+                    let abs = wd_path.join(&rel_path);
                     files.push(json!({
                         "path": abs.to_string_lossy(),
                         "relativePath": rel_path,
@@ -410,36 +317,26 @@ impl MethodHandler for GetDetailedSnapshotHandler {
         };
 
         // Build memory matching iOS LoadedMemory shape: { count, tokens, entries }
-        let memory_info: Option<Value> = {
-            let settings = tron_settings::get_settings();
-            let auto_inject = &settings.context.memory.auto_inject;
-            if !auto_inject.enabled {
-                None
-            } else {
-                ctx.event_store.get_workspace_by_path(&session.working_directory).ok().flatten().and_then(|ws| {
-                    #[allow(clippy::cast_possible_wrap)]
-                    let count = auto_inject.count.clamp(1, 10) as i64;
-                    let events = ctx.event_store
-                        .get_events_by_workspace_and_types(&ws.id, &["memory.ledger"], Some(count), None)
-                        .unwrap_or_default();
-                    if events.is_empty() { return None; }
-                    let entries: Vec<Value> = events.iter().rev().filter_map(|e| {
-                        let payload: Value = serde_json::from_str(&e.payload).ok()?;
-                        let title = payload.get("title").and_then(Value::as_str).unwrap_or("Untitled");
-                        let mut summary = format!("### {title}");
-                        if let Some(lessons) = payload.get("lessons").and_then(Value::as_array) {
-                            for lesson in lessons.iter().filter_map(|l| l.as_str()).filter(|t| !t.is_empty()) {
-                                summary.push_str(&format!("\n- {lesson}"));
-                            }
-                        }
-                        Some(json!({ "title": title, "content": summary }))
-                    }).collect();
-                    if entries.is_empty() { return None; }
-                    let tokens = cm.get_full_memory_content().map(|c| c.len() / 4).unwrap_or(0);
-                    Some(json!({ "count": entries.len(), "tokens": tokens, "entries": entries }))
-                })
+        let memory_info: Option<Value> = artifacts.memory.as_ref().and_then(|memory| {
+            if memory.entries.is_empty() {
+                return None;
             }
-        };
+            let entries: Vec<Value> = memory
+                .entries
+                .iter()
+                .map(|entry| {
+                    json!({
+                        "title": entry.title,
+                        "content": entry.summary,
+                    })
+                })
+                .collect();
+            Some(json!({
+                "count": entries.len(),
+                "tokens": memory.content_tokens_estimate(),
+                "entries": entries,
+            }))
+        });
 
         // Build sessionMemories matching iOS LoadedMemory shape
         let session_memories: Option<Value> = {
@@ -460,16 +357,6 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             }
         };
 
-        // ADAPTER(ios-compat): iOS splits tools on ":" to show name + description.
-        // REMOVE: revert to `"toolsContent": detailed.tools_content,`
-        let tool_defs = ctx
-            .agent_deps
-            .as_ref()
-            .map(|d| (d.tool_factory)().definitions())
-            .unwrap_or_default();
-        let tools_content =
-            crate::rpc::adapters::adapt_tools_content(&detailed.tools_content, &tool_defs);
-
         Ok(json!({
             "currentTokens": detailed.snapshot.current_tokens,
             "contextLimit": detailed.snapshot.context_limit,
@@ -484,7 +371,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             "messages": messages,
             "systemPromptContent": detailed.system_prompt_content,
             "toolClarificationContent": detailed.tool_clarification_content,
-            "toolsContent": tools_content,
+            "toolsContent": detailed.tools_content,
             "addedSkills": added_skills,
             "rules": rules_info,
             "memory": memory_info,
@@ -502,7 +389,7 @@ impl MethodHandler for ShouldCompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.shouldCompact", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?;
+        let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
         Ok(json!({ "shouldCompact": cm.should_compact() }))
     }
 }
@@ -512,10 +399,13 @@ pub struct PreviewCompactionHandler;
 
 #[async_trait]
 impl MethodHandler for PreviewCompactionHandler {
-    #[instrument(skip(self, ctx), fields(method = "context.previewCompaction", session_id))]
+    #[instrument(
+        skip(self, ctx),
+        fields(method = "context.previewCompaction", session_id)
+    )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?;
+        let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
 
         let summarizer = KeywordSummarizer::new();
         let preview = cm
@@ -542,7 +432,10 @@ pub struct ConfirmCompactionHandler;
 
 #[async_trait]
 impl MethodHandler for ConfirmCompactionHandler {
-    #[instrument(skip(self, ctx), fields(method = "context.confirmCompaction", session_id))]
+    #[instrument(
+        skip(self, ctx),
+        fields(method = "context.confirmCompaction", session_id)
+    )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let edited_summary = params
@@ -551,7 +444,7 @@ impl MethodHandler for ConfirmCompactionHandler {
             .and_then(Value::as_str)
             .map(ToOwned::to_owned);
 
-        let mut cm = build_context_manager_for_session(&session_id, ctx)?;
+        let mut cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
         let summarizer = KeywordSummarizer::new();
 
         let result = cm
@@ -575,18 +468,19 @@ impl MethodHandler for ConfirmCompactionHandler {
         });
 
         // Broadcast compaction complete event
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::CompactionComplete {
-                base: tron_core::events::BaseEvent::now(&session_id),
-                success: result.success,
-                tokens_before: result.tokens_before,
-                tokens_after: result.tokens_after,
-                compression_ratio: result.compression_ratio,
-                reason: Some(tron_core::events::CompactionReason::Manual),
-                summary: Some(result.summary.clone()),
-                estimated_context_tokens: None,
-            },
-        );
+        let _ =
+            ctx.orchestrator
+                .broadcast()
+                .emit(tron_core::events::TronEvent::CompactionComplete {
+                    base: tron_core::events::BaseEvent::now(&session_id),
+                    success: result.success,
+                    tokens_before: result.tokens_before,
+                    tokens_after: result.tokens_after,
+                    compression_ratio: result.compression_ratio,
+                    reason: Some(tron_core::events::CompactionReason::Manual),
+                    summary: Some(result.summary.clone()),
+                    estimated_context_tokens: None,
+                });
 
         // Invalidate cached session
         ctx.session_manager.invalidate_session(&session_id);
@@ -610,7 +504,7 @@ impl MethodHandler for CanAcceptTurnHandler {
     #[instrument(skip(self, ctx), fields(method = "context.canAcceptTurn", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let cm = build_context_manager_for_session(&session_id, ctx)?;
+        let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
         let v = cm.can_accept_turn(4_000);
         Ok(json!({ "canAcceptTurn": v.can_proceed }))
     }
@@ -627,7 +521,7 @@ impl MethodHandler for ClearHandler {
 
         // Get tokens before clearing (best effort)
         let tokens_before = build_context_manager_for_session(&session_id, ctx)
-            .map(|cm| cm.get_snapshot().current_tokens)
+            .map(|prepared| prepared.context_manager.get_snapshot().current_tokens)
             .unwrap_or(0);
 
         // Persist context cleared event
@@ -646,13 +540,14 @@ impl MethodHandler for ClearHandler {
 
         // Broadcast event
         #[allow(clippy::cast_possible_wrap)]
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::ContextCleared {
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(tron_core::events::TronEvent::ContextCleared {
                 base: tron_core::events::BaseEvent::now(&session_id),
                 tokens_before: tokens_before as i64,
                 tokens_after: 0,
-            },
-        );
+            });
 
         Ok(json!({
             "success": true,
@@ -670,7 +565,7 @@ impl MethodHandler for CompactHandler {
     #[instrument(skip(self, ctx), fields(method = "context.compact", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let mut cm = build_context_manager_for_session(&session_id, ctx)?;
+        let mut cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
 
         let summarizer = KeywordSummarizer::new();
         let result = cm
@@ -694,18 +589,19 @@ impl MethodHandler for CompactHandler {
         });
 
         // Broadcast compaction complete event
-        let _ = ctx.orchestrator.broadcast().emit(
-            tron_core::events::TronEvent::CompactionComplete {
-                base: tron_core::events::BaseEvent::now(&session_id),
-                success: result.success,
-                tokens_before: result.tokens_before,
-                tokens_after: result.tokens_after,
-                compression_ratio: result.compression_ratio,
-                reason: Some(tron_core::events::CompactionReason::Manual),
-                summary: Some(result.summary.clone()),
-                estimated_context_tokens: None,
-            },
-        );
+        let _ =
+            ctx.orchestrator
+                .broadcast()
+                .emit(tron_core::events::TronEvent::CompactionComplete {
+                    base: tron_core::events::BaseEvent::now(&session_id),
+                    success: result.success,
+                    tokens_before: result.tokens_before,
+                    tokens_after: result.tokens_after,
+                    compression_ratio: result.compression_ratio,
+                    reason: Some(tron_core::events::CompactionReason::Manual),
+                    summary: Some(result.summary.clone()),
+                    estimated_context_tokens: None,
+                });
 
         // Invalidate cached session
         ctx.session_manager.invalidate_session(&session_id);
@@ -784,7 +680,10 @@ mod tests {
             .await
             .unwrap();
         let limit = result["contextLimit"].as_u64().unwrap();
-        assert_eq!(limit, tron_llm::tokens::get_context_limit("claude-opus-4-6"));
+        assert_eq!(
+            limit,
+            tron_llm::tokens::get_context_limit("claude-opus-4-6")
+        );
     }
 
     #[tokio::test]
@@ -857,8 +756,14 @@ mod tests {
             .await
             .unwrap();
         let required_fields = [
-            "currentTokens", "contextLimit", "usagePercent", "thresholdLevel",
-            "breakdown", "messages", "systemPromptContent", "toolsContent",
+            "currentTokens",
+            "contextLimit",
+            "usagePercent",
+            "thresholdLevel",
+            "breakdown",
+            "messages",
+            "systemPromptContent",
+            "toolsContent",
             "addedSkills",
         ];
         for field in &required_fields {
@@ -868,11 +773,17 @@ mod tests {
             );
         }
         let optional_fields = [
-            "toolClarificationContent", "rules", "memory",
-            "sessionMemories", "taskContext",
+            "toolClarificationContent",
+            "rules",
+            "memory",
+            "sessionMemories",
+            "taskContext",
         ];
         for field in &optional_fields {
-            assert!(result.get(field).is_some(), "missing optional field: {field}");
+            assert!(
+                result.get(field).is_some(),
+                "missing optional field: {field}"
+            );
         }
     }
 
@@ -884,7 +795,10 @@ mod tests {
             .await
             .unwrap();
         let content = result["systemPromptContent"].as_str().unwrap();
-        assert!(!content.is_empty(), "systemPromptContent should be non-empty");
+        assert!(
+            !content.is_empty(),
+            "systemPromptContent should be non-empty"
+        );
     }
 
     #[tokio::test]
@@ -915,7 +829,11 @@ mod tests {
             .await
             .unwrap();
         let messages = result["messages"].as_array().unwrap();
-        assert!(messages.len() >= 1, "expected at least 1 message, got {}", messages.len());
+        assert!(
+            messages.len() >= 1,
+            "expected at least 1 message, got {}",
+            messages.len()
+        );
     }
 
     #[tokio::test]
@@ -958,7 +876,10 @@ mod tests {
             .await
             .unwrap();
         let rules_obj = &result["rules"];
-        assert!(rules_obj.is_object(), "rules should be an object, got: {rules_obj}");
+        assert!(
+            rules_obj.is_object(),
+            "rules should be an object, got: {rules_obj}"
+        );
         assert!(rules_obj["totalFiles"].as_u64().unwrap() > 0);
         assert!(rules_obj["tokens"].as_u64().unwrap() > 0);
         let files = rules_obj["files"].as_array().unwrap();
@@ -1278,7 +1199,10 @@ mod tests {
             .event_store
             .get_events_by_type(&sid, &["context.cleared"], Some(10))
             .unwrap();
-        assert!(!events.is_empty(), "context.cleared event should be persisted");
+        assert!(
+            !events.is_empty(),
+            "context.cleared event should be persisted"
+        );
     }
 
     // ── Memory from workspace ledger ──
@@ -1316,7 +1240,10 @@ mod tests {
             .unwrap();
 
         let memory = &result["memory"];
-        assert!(memory.is_object(), "memory should be populated from ledger, got: {memory}");
+        assert!(
+            memory.is_object(),
+            "memory should be populated from ledger, got: {memory}"
+        );
         assert!(memory["count"].as_u64().unwrap() > 0);
         assert!(memory["tokens"].as_u64().is_some());
 
@@ -1324,8 +1251,14 @@ mod tests {
         assert!(!entries.is_empty());
         assert_eq!(entries[0]["title"], "Implemented dark mode");
         let content = entries[0]["content"].as_str().unwrap();
-        assert!(content.contains("dark mode"), "entry content should contain title");
-        assert!(content.contains("CSS variables"), "entry content should contain lessons");
+        assert!(
+            content.contains("dark mode"),
+            "entry content should contain title"
+        );
+        assert!(
+            content.contains("CSS variables"),
+            "entry content should contain lessons"
+        );
     }
 
     #[tokio::test]
@@ -1338,6 +1271,9 @@ mod tests {
             .unwrap();
 
         // /tmp has no workspace ledger entries → memory should be null
-        assert!(result["memory"].is_null(), "memory should be null with no ledger entries");
+        assert!(
+            result["memory"].is_null(),
+            "memory should be null with no ledger entries"
+        );
     }
 }

@@ -12,11 +12,12 @@ pub mod git;
 pub mod logs;
 pub mod memory;
 pub mod message;
-pub mod sandbox;
 pub mod model;
 pub mod plan;
+pub mod sandbox;
 pub mod search;
 pub mod session;
+pub(crate) mod session_context;
 pub mod settings;
 pub mod skills;
 pub mod system;
@@ -66,10 +67,19 @@ fn register_core(registry: &mut MethodRegistry) {
 
     // Context
     registry.register("context.getSnapshot", context::GetSnapshotHandler);
-    registry.register("context.getDetailedSnapshot", context::GetDetailedSnapshotHandler);
+    registry.register(
+        "context.getDetailedSnapshot",
+        context::GetDetailedSnapshotHandler,
+    );
     registry.register("context.shouldCompact", context::ShouldCompactHandler);
-    registry.register("context.previewCompaction", context::PreviewCompactionHandler);
-    registry.register("context.confirmCompaction", context::ConfirmCompactionHandler);
+    registry.register(
+        "context.previewCompaction",
+        context::PreviewCompactionHandler,
+    );
+    registry.register(
+        "context.confirmCompaction",
+        context::ConfirmCompactionHandler,
+    );
     registry.register("context.canAcceptTurn", context::CanAcceptTurnHandler);
     registry.register("context.clear", context::ClearHandler);
     registry.register("context.compact", context::CompactHandler);
@@ -168,7 +178,10 @@ fn register_platform(registry: &mut MethodRegistry) {
     // Transcription
     registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
     registry.register("transcribe.listModels", transcription::ListModelsHandler);
-    registry.register("transcribe.downloadModel", transcription::DownloadModelHandler);
+    registry.register(
+        "transcribe.downloadModel",
+        transcription::DownloadModelHandler,
+    );
 
     // Device
     registry.register("device.register", device::RegisterTokenHandler);
@@ -183,7 +196,10 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("communication.send", communication::SendHandler);
     registry.register("communication.receive", communication::ReceiveHandler);
     registry.register("communication.subscribe", communication::SubscribeHandler);
-    registry.register("communication.unsubscribe", communication::UnsubscribeHandler);
+    registry.register(
+        "communication.unsubscribe",
+        communication::UnsubscribeHandler,
+    );
 
     // Voice Notes
     registry.register("voiceNotes.save", voice_notes::SaveHandler);
@@ -270,10 +286,7 @@ pub(crate) mod test_helpers {
     pub struct MockProviderFactory;
     #[async_trait]
     impl ProviderFactory for MockProviderFactory {
-        async fn create_for_model(
-            &self,
-            _model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(Arc::new(MockProvider))
         }
     }
@@ -282,10 +295,7 @@ pub(crate) mod test_helpers {
     pub struct ModelAwareMockFactory;
     #[async_trait]
     impl ProviderFactory for ModelAwareMockFactory {
-        async fn create_for_model(
-            &self,
-            model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(Arc::new(ModelAwareMockProvider(model.to_owned())))
         }
     }
@@ -315,10 +325,7 @@ pub(crate) mod test_helpers {
     pub struct StrictMockFactory;
     #[async_trait]
     impl ProviderFactory for StrictMockFactory {
-        async fn create_for_model(
-            &self,
-            model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             if model.starts_with("mock") || model.starts_with("claude") {
                 Ok(Arc::new(MockProvider))
             } else {
@@ -334,10 +341,7 @@ pub(crate) mod test_helpers {
     pub struct FixedProviderFactory(pub Arc<dyn Provider>);
     #[async_trait]
     impl ProviderFactory for FixedProviderFactory {
-        async fn create_for_model(
-            &self,
-            _model: &str,
-        ) -> Result<Arc<dyn Provider>, ProviderError> {
+        async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
             Ok(self.0.clone())
         }
     }
@@ -354,8 +358,7 @@ pub(crate) mod test_helpers {
 
     /// Build an `RpcContext` backed by an in-memory event store.
     pub fn make_test_context() -> RpcContext {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
@@ -380,11 +383,9 @@ pub(crate) mod test_helpers {
         }
     }
 
-
     /// Build an `RpcContext` with task tables (same DB as events).
     pub fn make_test_context_with_tasks() -> RpcContext {
-        let pool =
-            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
             let conn = pool.get().unwrap();
             let _ = tron_events::run_migrations(&conn).unwrap();
