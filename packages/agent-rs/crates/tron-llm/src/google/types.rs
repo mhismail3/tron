@@ -453,6 +453,8 @@ pub struct GeminiModelInfo {
     pub max_output: u32,
     /// Whether the model supports tool use.
     pub supports_tools: bool,
+    /// Whether the model supports image inputs.
+    pub supports_images: bool,
     /// Whether the model supports thinking mode.
     pub supports_thinking: bool,
     /// Model tier.
@@ -479,6 +481,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             context_window: 1_048_576,
             max_output: 65_536,
             supports_tools: true,
+            supports_images: true,
             supports_thinking: true,
             tier: "pro",
             preview: true,
@@ -495,6 +498,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             context_window: 1_048_576,
             max_output: 65_536,
             supports_tools: true,
+            supports_images: true,
             supports_thinking: false,
             tier: "flash",
             preview: true,
@@ -511,6 +515,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             context_window: 2_097_152,
             max_output: 16_384,
             supports_tools: true,
+            supports_images: true,
             supports_thinking: true,
             tier: "pro",
             preview: false,
@@ -527,6 +532,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             context_window: 1_048_576,
             max_output: 16_384,
             supports_tools: true,
+            supports_images: true,
             supports_thinking: true,
             tier: "flash",
             preview: false,
@@ -543,6 +549,7 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             context_window: 1_048_576,
             max_output: 8_192,
             supports_tools: true,
+            supports_images: true,
             supports_thinking: false,
             tier: "flash-lite",
             preview: false,

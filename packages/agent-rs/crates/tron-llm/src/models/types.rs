@@ -115,6 +115,8 @@ pub struct ModelInfo {
     pub supports_reasoning: bool,
     /// Whether the model supports tool use.
     pub supports_tools: bool,
+    /// Whether the model supports image inputs.
+    pub supports_images: bool,
     /// Input cost per million tokens (USD).
     pub input_cost_per_million: f64,
     /// Output cost per million tokens (USD).
@@ -166,6 +168,8 @@ pub struct ModelCapabilities {
     pub default_thinking_level: Option<String>,
     /// Supports tool use.
     pub supports_tools: bool,
+    /// Supports image inputs.
+    pub supports_images: bool,
     /// Maximum output tokens.
     pub max_output: u64,
     /// Context window size.
@@ -345,6 +349,7 @@ mod tests {
             supports_thinking: true,
             supports_reasoning: false,
             supports_tools: true,
+            supports_images: true,
             input_cost_per_million: 15.0,
             output_cost_per_million: 75.0,
             cache_read_cost_per_million: Some(1.5),
@@ -375,6 +380,7 @@ mod tests {
             supports_thinking: false,
             supports_reasoning: false,
             supports_tools: true,
+            supports_images: true,
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
             cache_read_cost_per_million: None,

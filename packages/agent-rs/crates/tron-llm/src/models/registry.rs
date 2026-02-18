@@ -6,6 +6,9 @@
 
 use super::model_ids::{ALL_ANTHROPIC_MODEL_IDS, ALL_GOOGLE_MODEL_IDS, ALL_OPENAI_MODEL_IDS};
 use super::types::ProviderType;
+use crate::anthropic::types::get_claude_model;
+use crate::google::types::get_gemini_model;
+use crate::openai::types::get_openai_model;
 
 /// Detect which provider serves a given model ID.
 ///
@@ -66,6 +69,23 @@ pub fn is_model_supported(model_id: &str) -> bool {
     ALL_ANTHROPIC_MODEL_IDS.contains(&bare)
         || ALL_OPENAI_MODEL_IDS.contains(&bare)
         || ALL_GOOGLE_MODEL_IDS.contains(&bare)
+}
+
+/// Check if a model supports image inputs.
+///
+/// Looks up all three provider registries. Unknown models default to `true`.
+pub fn model_supports_images(model_id: &str) -> bool {
+    let bare = strip_provider_prefix(model_id);
+    if let Some(m) = get_claude_model(bare) {
+        return m.supports_images;
+    }
+    if let Some(m) = get_openai_model(bare) {
+        return m.supports_images;
+    }
+    if let Some(m) = get_gemini_model(bare) {
+        return m.supports_images;
+    }
+    true
 }
 
 /// Get all known model IDs across all providers.
@@ -268,6 +288,30 @@ mod tests {
     #[test]
     fn unsupported_model() {
         assert!(!is_model_supported("totally-unknown-model"));
+    }
+
+    // ── model_supports_images ─────────────────────────────────────────────
+
+    #[test]
+    fn known_model_supports_images() {
+        assert!(model_supports_images(CLAUDE_OPUS_4_6));
+        assert!(model_supports_images(GPT_5_3_CODEX));
+        assert!(model_supports_images(GEMINI_2_5_FLASH));
+    }
+
+    #[test]
+    fn spark_does_not_support_images() {
+        assert!(!model_supports_images("gpt-5.3-codex-spark"));
+    }
+
+    #[test]
+    fn unknown_model_defaults_to_supports_images() {
+        assert!(model_supports_images("unknown-model"));
+    }
+
+    #[test]
+    fn prefixed_model_supports_images() {
+        assert!(model_supports_images("anthropic/claude-opus-4-6"));
     }
 
     // ── all_model_ids ────────────────────────────────────────────────────

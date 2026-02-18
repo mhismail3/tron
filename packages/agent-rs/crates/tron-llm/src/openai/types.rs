@@ -148,6 +148,8 @@ pub struct OpenAIModelInfo {
     pub max_output: u32,
     /// Whether the model supports tool use.
     pub supports_tools: bool,
+    /// Whether the model supports image inputs.
+    pub supports_images: bool,
     /// Whether the model supports reasoning.
     pub supports_reasoning: bool,
     /// Supported reasoning effort levels.
@@ -177,6 +179,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
+            supports_images: true,
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "medium",
@@ -196,6 +199,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             context_window: 128_000,
             max_output: 32_000,
             supports_tools: true,
+            supports_images: false,
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high"],
             default_reasoning_level: "low",
@@ -216,6 +220,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
+            supports_images: true,
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "medium",
@@ -235,6 +240,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
+            supports_images: true,
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "high",
@@ -254,6 +260,7 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
+            supports_images: true,
             supports_reasoning: true,
             reasoning_levels: &["low", "medium", "high"],
             default_reasoning_level: "low",

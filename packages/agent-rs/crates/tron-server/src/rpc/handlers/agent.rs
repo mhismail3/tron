@@ -757,6 +757,11 @@ impl MethodHandler for PromptHandler {
                                 }
                             }
                         }
+                        // Strip images if model doesn't support them
+                        if !tron_llm::model_supports_images(&model) {
+                            blocks.retain(|b| !matches!(b, tron_core::content::UserContent::Image { .. }));
+                        }
+
                         if blocks.len() > 1 {
                             Some(tron_core::messages::UserMessageContent::Blocks(blocks))
                         } else {

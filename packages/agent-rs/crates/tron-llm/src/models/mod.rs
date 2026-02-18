@@ -8,7 +8,8 @@ pub mod types;
 
 pub use model_ids::*;
 pub use registry::{
-    all_model_ids, detect_provider_from_model, is_model_supported, strip_provider_prefix,
+    all_model_ids, detect_provider_from_model, is_model_supported, model_supports_images,
+    strip_provider_prefix,
 };
 pub use types::{
     ModelCapabilities, ModelCategory, ModelInfo, ModelTier, ProviderType, calculate_cost,
