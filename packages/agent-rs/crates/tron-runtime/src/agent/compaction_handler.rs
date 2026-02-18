@@ -131,6 +131,8 @@ pub struct CompactionHandler {
     is_compacting: AtomicBool,
     compaction_done: Arc<Notify>,
     subagent_manager: Option<Arc<SubagentManager>>,
+    /// Optional event persister for `compact.boundary` persistence.
+    persister: Option<Arc<crate::orchestrator::event_persister::EventPersister>>,
 }
 
 /// RAII guard that resets `is_compacting` and notifies waiters on drop.
@@ -154,6 +156,7 @@ impl CompactionHandler {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: None,
+            persister: None,
         }
     }
 
@@ -163,7 +166,16 @@ impl CompactionHandler {
             is_compacting: AtomicBool::new(false),
             compaction_done: Arc::new(Notify::new()),
             subagent_manager: Some(manager),
+            persister: None,
         }
+    }
+
+    /// Set the event persister for `compact.boundary` persistence.
+    pub fn set_persister(
+        &mut self,
+        persister: Arc<crate::orchestrator::event_persister::EventPersister>,
+    ) {
+        self.persister = Some(persister);
     }
 
     /// Whether a compaction is in progress.
@@ -297,6 +309,11 @@ impl CompactionHandler {
                 histogram!("compaction_duration_seconds")
                     .record(compaction_start.elapsed().as_secs_f64());
                 let tokens_after = context_manager.get_current_tokens();
+                let summary_text = if compaction_result.summary.is_empty() {
+                    None
+                } else {
+                    Some(compaction_result.summary)
+                };
                 info!(
                     session_id,
                     tokens_before, tokens_after, "compaction complete"
@@ -307,14 +324,31 @@ impl CompactionHandler {
                     tokens_before,
                     tokens_after,
                     compression_ratio: compaction_result.compression_ratio,
-                    reason: Some(reason),
-                    summary: if compaction_result.summary.is_empty() {
-                        None
-                    } else {
-                        Some(compaction_result.summary)
-                    },
+                    reason: Some(reason.clone()),
+                    summary: summary_text.clone(),
                     estimated_context_tokens: Some(tokens_after),
                 });
+
+                // Persist compact.boundary so iOS can reconstruct the pill on resume
+                if compaction_result.success {
+                    if let Some(ref persister) = self.persister {
+                        let reason_str = format!("{reason:?}");
+                        #[allow(clippy::cast_possible_wrap)]
+                        let payload = serde_json::json!({
+                            "originalTokens": tokens_before as i64,
+                            "compactedTokens": tokens_after as i64,
+                            "compressionRatio": compaction_result.compression_ratio,
+                            "reason": reason_str,
+                            "summary": summary_text,
+                            "estimatedContextTokens": tokens_after as i64,
+                        });
+                        persister.append_fire_and_forget(
+                            session_id,
+                            tron_events::EventType::CompactBoundary,
+                            payload,
+                        );
+                    }
+                }
                 Ok(true)
             }
             Err(e) => {

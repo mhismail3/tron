@@ -203,8 +203,9 @@ mod session_event_tests {
         let payload = event.typed_payload().unwrap();
         match payload {
             SessionEventPayload::CompactBoundary(p) => {
-                assert_eq!(p.range.from, "evt-1");
-                assert_eq!(p.range.to, "evt-10");
+                let range = p.range.unwrap();
+                assert_eq!(range.from, "evt-1");
+                assert_eq!(range.to, "evt-10");
                 assert_eq!(p.original_tokens, 50000);
             }
             other => panic!("expected CompactBoundary, got {other:?}"),

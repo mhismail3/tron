@@ -249,6 +249,9 @@ impl TronAgent {
 
     /// Set the inline event persister (e.g. from the orchestrator).
     pub fn set_persister(&mut self, persister: Option<Arc<EventPersister>>) {
+        if let Some(ref p) = persister {
+            self.compaction.set_persister(p.clone());
+        }
         self.persister = persister;
     }
 

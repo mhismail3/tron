@@ -454,15 +454,17 @@ impl MethodHandler for ConfirmCompactionHandler {
                 message: format!("Compaction failed: {e}"),
             })?;
 
-        // Persist compaction event
+        // Persist compact.boundary so iOS can reconstruct the pill on resume
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &session_id,
-            event_type: tron_events::EventType::CompactSummary,
+            event_type: tron_events::EventType::CompactBoundary,
             payload: json!({
-                "summary": result.summary,
-                "tokensBefore": result.tokens_before,
-                "tokensAfter": result.tokens_after,
+                "originalTokens": result.tokens_before,
+                "compactedTokens": result.tokens_after,
                 "compressionRatio": result.compression_ratio,
+                "reason": "Manual",
+                "summary": result.summary,
+                "estimatedContextTokens": result.tokens_after,
             }),
             parent_id: None,
         });
@@ -575,15 +577,17 @@ impl MethodHandler for CompactHandler {
                 message: format!("Compaction failed: {e}"),
             })?;
 
-        // Persist compaction event
+        // Persist compact.boundary so iOS can reconstruct the pill on resume
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &session_id,
-            event_type: tron_events::EventType::CompactSummary,
+            event_type: tron_events::EventType::CompactBoundary,
             payload: json!({
-                "summary": result.summary,
-                "tokensBefore": result.tokens_before,
-                "tokensAfter": result.tokens_after,
+                "originalTokens": result.tokens_before,
+                "compactedTokens": result.tokens_after,
                 "compressionRatio": result.compression_ratio,
+                "reason": "Manual",
+                "summary": result.summary,
+                "estimatedContextTokens": result.tokens_after,
             }),
             parent_id: None,
         });
