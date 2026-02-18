@@ -402,6 +402,27 @@ fn spawn_embed_memory_with_deps(
 // RPC Handlers
 // =============================================================================
 
+/// Transform an event row into the DTO shape expected by iOS `LedgerEntryDTO`.
+fn event_to_ledger_dto(event: &tron_events::sqlite::row_types::EventRow) -> Value {
+    let payload: Value = serde_json::from_str(&event.payload).unwrap_or_default();
+    serde_json::json!({
+        "id": event.id,
+        "sessionId": event.session_id,
+        "timestamp": event.timestamp,
+        "title": payload.get("title"),
+        "entryType": payload.get("entryType"),
+        "input": payload.get("input"),
+        "actions": payload.get("actions").unwrap_or(&serde_json::json!([])),
+        "decisions": payload.get("decisions").unwrap_or(&serde_json::json!([])),
+        "lessons": payload.get("lessons").unwrap_or(&serde_json::json!([])),
+        "insights": payload.get("thinkingInsights").unwrap_or(&serde_json::json!([])),
+        "tags": payload.get("tags").unwrap_or(&serde_json::json!([])),
+        "files": payload.get("files").unwrap_or(&serde_json::json!([])),
+        "model": payload.get("model"),
+        "tokenCost": payload.get("tokenCost"),
+    })
+}
+
 /// Get ledger entries for a workspace.
 pub struct GetLedgerHandler;
 
@@ -414,46 +435,100 @@ impl MethodHandler for GetLedgerHandler {
         let limit = params
             .as_ref()
             .and_then(|p| p.get("limit"))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(50);
+            .and_then(Value::as_u64)
+            .map_or(50i64, |v| i64::try_from(v).unwrap_or(50));
 
-        // Query ledger events from the event store for sessions matching this workspace
-        let filter = tron_runtime::SessionFilter {
-            workspace_path: Some(working_dir),
-            ..Default::default()
+        let offset = params
+            .as_ref()
+            .and_then(|p| p.get("offset"))
+            .and_then(Value::as_u64)
+            .map_or(0i64, |v| i64::try_from(v).unwrap_or(0));
+
+        let tags_filter: Option<Vec<String>> = params
+            .as_ref()
+            .and_then(|p| p.get("tags"))
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect());
+
+        // Resolve workspace from path
+        let workspace = ctx
+            .event_store
+            .get_workspace_by_path(&working_dir)
+            .unwrap_or(None);
+
+        let Some(workspace) = workspace else {
+            return Ok(serde_json::json!({
+                "entries": [],
+                "hasMore": false,
+                "totalCount": 0,
+            }));
         };
 
-        let sessions = ctx
-            .session_manager
-            .list_sessions(&filter)
-            .unwrap_or_default();
-
-        let mut entries = Vec::new();
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-
-        for session in sessions {
-            let events = ctx
+        // When tag filtering is active, we must fetch all events to filter in memory
+        if let Some(ref tags) = tags_filter {
+            let all_events = ctx
                 .event_store
-                .get_events_by_type(
-                    &session.id,
+                .get_events_by_workspace_and_types(
+                    &workspace.id,
                     &["memory.ledger"],
-                    Some(i64::try_from(limit).unwrap_or(i64::MAX)),
+                    None,
+                    None,
                 )
                 .unwrap_or_default();
 
-            for event in events {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
-                    entries.push(parsed);
-                }
-            }
-            if entries.len() >= limit {
-                break;
-            }
+            let filtered: Vec<Value> = all_events
+                .iter()
+                .map(event_to_ledger_dto)
+                .filter(|dto| {
+                    let entry_tags = dto["tags"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(Value::as_str)
+                                .map(String::from)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    tags.iter().any(|t| entry_tags.contains(t))
+                })
+                .collect();
+
+            let total_count = filtered.len();
+            let offset_usize = usize::try_from(offset).unwrap_or(0);
+            let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
+            let entries: Vec<Value> = filtered
+                .into_iter()
+                .skip(offset_usize)
+                .take(limit_usize)
+                .collect();
+            let has_more = offset_usize + limit_usize < total_count;
+
+            return Ok(serde_json::json!({
+                "entries": entries,
+                "hasMore": has_more,
+                "totalCount": total_count,
+            }));
         }
 
-        let total_count = entries.len();
-        let has_more = entries.len() > limit;
-        entries.truncate(limit);
+        // No tag filter — use efficient workspace-level query with SQL pagination
+        let total_count = ctx
+            .event_store
+            .count_events_by_workspace_and_types(&workspace.id, &["memory.ledger"])
+            .unwrap_or(0);
+
+        let events = ctx
+            .event_store
+            .get_events_by_workspace_and_types(
+                &workspace.id,
+                &["memory.ledger"],
+                Some(limit),
+                Some(offset),
+            )
+            .unwrap_or_default();
+
+        let entries: Vec<Value> = events.iter().map(event_to_ledger_dto).collect();
+        #[allow(clippy::cast_possible_wrap)]
+        let has_more = (offset + limit) < total_count;
 
         Ok(serde_json::json!({
             "entries": entries,
@@ -582,6 +657,33 @@ impl MethodHandler for UpdateLedgerHandler {
     }
 }
 
+/// Transform an event row into the DTO shape expected by iOS `MemoryEntry`.
+fn event_to_search_dto(event: &tron_events::sqlite::row_types::EventRow) -> Value {
+    let payload: Value = serde_json::from_str(&event.payload).unwrap_or_default();
+    let content = payload
+        .get("input")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("title").and_then(Value::as_str))
+        .unwrap_or("");
+    let entry_type = payload
+        .get("entryType")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let source = payload
+        .get("source")
+        .and_then(Value::as_str)
+        .unwrap_or("ledger");
+    serde_json::json!({
+        "id": event.id,
+        "type": entry_type,
+        "content": content,
+        "source": source,
+        "relevance": null,
+        "timestamp": event.timestamp,
+        "sessionId": event.session_id,
+    })
+}
+
 /// Search memory entries across sessions.
 pub struct SearchMemoryHandler;
 
@@ -607,7 +709,6 @@ impl MethodHandler for SearchMemoryHandler {
             .unwrap_or(20);
         let limit = usize::try_from(limit).unwrap_or(usize::MAX);
 
-        // Query all sessions for memory.ledger events
         let sessions = ctx
             .session_manager
             .list_sessions(&tron_runtime::SessionFilter {
@@ -626,36 +727,34 @@ impl MethodHandler for SearchMemoryHandler {
                 .unwrap_or_default();
 
             for event in events {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
-                    // Text filter (case-insensitive)
-                    if !search_lower.is_empty() {
-                        let payload_text = parsed.to_string().to_lowercase();
-                        if !payload_text.contains(&search_lower) {
-                            continue;
-                        }
-                    }
+                let payload: Value = match serde_json::from_str(&event.payload) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
 
-                    // Type filter
-                    if let Some(tf) = type_filter {
-                        let entry_type = parsed
-                            .get("entryType")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        if entry_type != tf {
-                            continue;
-                        }
+                // Text filter (case-insensitive)
+                if !search_lower.is_empty() {
+                    let payload_text = payload.to_string().to_lowercase();
+                    if !payload_text.contains(&search_lower) {
+                        continue;
                     }
+                }
 
-                    let mut entry = parsed;
-                    if let Some(obj) = entry.as_object_mut() {
-                        let _ = obj.insert("sessionId".into(), serde_json::json!(session.id));
-                        let _ = obj.insert("timestamp".into(), serde_json::json!(event.timestamp));
+                // Type filter
+                if let Some(tf) = type_filter {
+                    let entry_type = payload
+                        .get("entryType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    if entry_type != tf {
+                        continue;
                     }
-                    entries.push(entry);
+                }
 
-                    if entries.len() >= limit {
-                        break;
-                    }
+                entries.push(event_to_search_dto(&event));
+
+                if entries.len() >= limit {
+                    break;
                 }
             }
             if entries.len() >= limit {
@@ -690,7 +789,7 @@ impl MethodHandler for GetHandoffsHandler {
             .session_manager
             .list_sessions(&tron_runtime::SessionFilter {
                 include_archived: true,
-                limit: Some(limit * 2), // overfetch to ensure enough with ledger entries
+                limit: Some(limit * 2),
                 ..Default::default()
             })
             .unwrap_or_default();
@@ -705,11 +804,17 @@ impl MethodHandler for GetHandoffsHandler {
 
             if let Some(event) = events.first() {
                 if let Ok(parsed) = serde_json::from_str::<Value>(&event.payload) {
+                    let summary = parsed
+                        .get("input")
+                        .and_then(Value::as_str)
+                        .or_else(|| parsed.get("summary").and_then(Value::as_str))
+                        .unwrap_or("");
                     handoffs.push(serde_json::json!({
+                        "id": event.id,
                         "sessionId": session.id,
                         "title": parsed.get("title").and_then(Value::as_str).unwrap_or(""),
-                        "timestamp": event.timestamp,
-                        "summary": parsed.get("summary").and_then(Value::as_str).unwrap_or(""),
+                        "createdAt": event.timestamp,
+                        "summary": summary,
                         "lessons": parsed.get("lessons").cloned().unwrap_or(serde_json::json!([])),
                     }));
                 }
@@ -731,6 +836,273 @@ mod tests {
     use super::*;
     use crate::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
+
+    /// Helper: create a session and append a `memory.ledger` event with the given payload.
+    /// Returns `(session_id, event_id)`.
+    fn seed_ledger_event(ctx: &RpcContext, workspace: &str, payload: Value) -> (String, String) {
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", workspace, Some("test"))
+            .unwrap();
+        let row = ctx
+            .event_store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload,
+                parent_id: None,
+            })
+            .unwrap();
+        (sid, row.id)
+    }
+
+    // ── GetLedgerHandler: DTO shape tests ──
+
+    #[tokio::test]
+    async fn get_ledger_returns_dto_with_event_metadata() {
+        let ctx = make_test_context();
+        let (sid, eid) = seed_ledger_event(
+            &ctx,
+            "/tmp/proj",
+            json!({
+                "title": "Fix login bug",
+                "entryType": "bugfix",
+                "input": "Fix the login page crash",
+                "actions": ["patched auth.rs"],
+                "thinkingInsights": ["login flow was missing null check"],
+            }),
+        );
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+
+        // Event metadata fields
+        assert_eq!(entry["id"].as_str().unwrap(), eid);
+        assert_eq!(entry["sessionId"].as_str().unwrap(), sid);
+        assert!(entry["timestamp"].as_str().is_some());
+
+        // Payload fields
+        assert_eq!(entry["title"].as_str().unwrap(), "Fix login bug");
+        assert_eq!(entry["entryType"].as_str().unwrap(), "bugfix");
+        assert_eq!(entry["input"].as_str().unwrap(), "Fix the login page crash");
+    }
+
+    #[tokio::test]
+    async fn get_ledger_maps_thinking_insights_to_insights() {
+        let ctx = make_test_context();
+        let _ = seed_ledger_event(
+            &ctx,
+            "/tmp/proj",
+            json!({
+                "title": "Test",
+                "thinkingInsights": ["learned X", "discovered Y"],
+            }),
+        );
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entry = &result["entries"][0];
+        let insights = entry["insights"].as_array().unwrap();
+        assert_eq!(insights.len(), 2);
+        assert_eq!(insights[0].as_str().unwrap(), "learned X");
+        // thinkingInsights should NOT appear in the DTO
+        assert!(entry.get("thinkingInsights").is_none());
+    }
+
+    #[tokio::test]
+    async fn get_ledger_defaults_missing_arrays_to_empty() {
+        let ctx = make_test_context();
+        let _ = seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Minimal entry"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entry = &result["entries"][0];
+        assert_eq!(entry["actions"], json!([]));
+        assert_eq!(entry["decisions"], json!([]));
+        assert_eq!(entry["lessons"], json!([]));
+        assert_eq!(entry["insights"], json!([]));
+        assert_eq!(entry["tags"], json!([]));
+        assert_eq!(entry["files"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn get_ledger_supports_offset_pagination() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
+
+        for i in 0..5 {
+            let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({"title": format!("Entry {i}")}),
+                parent_id: None,
+            });
+            // Small sleep to ensure distinct timestamps for ordering
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let result = GetLedgerHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/proj", "limit": 2, "offset": 2})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(result["totalCount"], 5);
+        assert_eq!(result["hasMore"], true);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_supports_tag_filtering() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
+
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "iOS fix", "tags": ["ios", "bugfix"]}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Server fix", "tags": ["server"]}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "No tags"}),
+            parent_id: None,
+        });
+
+        let result = GetLedgerHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/proj", "tags": ["ios"]})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["title"].as_str().unwrap(), "iOS fix");
+        assert_eq!(result["totalCount"], 1);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_returns_accurate_total_count() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
+
+        for i in 0..5 {
+            let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({"title": format!("Entry {i}")}),
+                parent_id: None,
+            });
+        }
+
+        let result = GetLedgerHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/proj", "limit": 2})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["totalCount"], 5);
+        assert_eq!(result["hasMore"], true);
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_unknown_workspace_returns_empty() {
+        let ctx = make_test_context();
+        let result = GetLedgerHandler
+            .handle(
+                Some(json!({"workingDirectory": "/nonexistent/path"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"], json!([]));
+        assert_eq!(result["hasMore"], false);
+        assert_eq!(result["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_cross_session_aggregation() {
+        let ctx = make_test_context();
+
+        // Two sessions in the same workspace
+        let sid1 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid1,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Session 1 entry"}),
+            parent_id: None,
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let sid2 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/proj", Some("test2"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid2,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Session 2 entry"}),
+            parent_id: None,
+        });
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(result["totalCount"], 2);
+
+        // Verify both sessions are represented
+        let session_ids: Vec<&str> = entries
+            .iter()
+            .map(|e| e["sessionId"].as_str().unwrap())
+            .collect();
+        assert!(session_ids.contains(&sid1.as_str()));
+        assert!(session_ids.contains(&sid2.as_str()));
+    }
 
     #[tokio::test]
     async fn get_ledger_returns_entries() {
@@ -842,6 +1214,93 @@ mod tests {
         assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
+    // ── SearchMemoryHandler: DTO shape tests ──
+
+    #[tokio::test]
+    async fn search_memory_returns_dto_shape() {
+        let ctx = make_test_context();
+        let (sid, eid) = seed_ledger_event(
+            &ctx,
+            "/tmp/proj",
+            json!({
+                "title": "Add dark mode",
+                "entryType": "feature",
+                "input": "Implement dark mode for the dashboard",
+                "source": "auto",
+            }),
+        );
+
+        let result = SearchMemoryHandler
+            .handle(
+                Some(json!({"searchText": "dark mode"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+
+        assert_eq!(entry["id"].as_str().unwrap(), eid);
+        assert_eq!(entry["type"].as_str().unwrap(), "feature");
+        assert_eq!(
+            entry["content"].as_str().unwrap(),
+            "Implement dark mode for the dashboard"
+        );
+        assert_eq!(entry["source"].as_str().unwrap(), "auto");
+        assert!(entry["timestamp"].as_str().is_some());
+        assert_eq!(entry["sessionId"].as_str().unwrap(), sid);
+    }
+
+    #[tokio::test]
+    async fn search_memory_text_filter_matches() {
+        let ctx = make_test_context();
+        let _ = seed_ledger_event(
+            &ctx,
+            "/tmp/proj",
+            json!({"title": "Fix login bug", "entryType": "bugfix", "input": "Login crash"}),
+        );
+        let _ = seed_ledger_event(
+            &ctx,
+            "/tmp/proj2",
+            json!({"title": "Add feature", "entryType": "feature", "input": "New widget"}),
+        );
+
+        let result = SearchMemoryHandler
+            .handle(Some(json!({"searchText": "login"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["content"].as_str().unwrap(), "Login crash");
+    }
+
+    #[tokio::test]
+    async fn search_memory_type_filter_matches() {
+        let ctx = make_test_context();
+        let _ = seed_ledger_event(
+            &ctx,
+            "/tmp/proj",
+            json!({"title": "Fix bug", "entryType": "bugfix"}),
+        );
+        let _ = seed_ledger_event(
+            &ctx,
+            "/tmp/proj2",
+            json!({"title": "Add feat", "entryType": "feature"}),
+        );
+
+        let result = SearchMemoryHandler
+            .handle(Some(json!({"type": "bugfix"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["type"].as_str().unwrap(), "bugfix");
+    }
+
     #[tokio::test]
     async fn search_memory_returns_empty() {
         let ctx = make_test_context();
@@ -871,6 +1330,42 @@ mod tests {
             .await
             .unwrap();
         assert!(result["entries"].is_array());
+    }
+
+    // ── GetHandoffsHandler: DTO shape tests ──
+
+    #[tokio::test]
+    async fn get_handoffs_returns_dto_shape() {
+        let ctx = make_test_context();
+        let (sid, eid) = seed_ledger_event(
+            &ctx,
+            "/tmp/proj",
+            json!({
+                "title": "Implement auth",
+                "entryType": "feature",
+                "input": "Add OAuth2 authentication flow",
+                "lessons": ["Use PKCE for mobile"],
+            }),
+        );
+
+        let result = GetHandoffsHandler.handle(None, &ctx).await.unwrap();
+
+        let handoffs = result["handoffs"].as_array().unwrap();
+        assert_eq!(handoffs.len(), 1);
+        let h = &handoffs[0];
+
+        assert_eq!(h["id"].as_str().unwrap(), eid);
+        assert_eq!(h["sessionId"].as_str().unwrap(), sid);
+        assert_eq!(h["title"].as_str().unwrap(), "Implement auth");
+        assert_eq!(
+            h["summary"].as_str().unwrap(),
+            "Add OAuth2 authentication flow"
+        );
+        assert!(h["createdAt"].as_str().is_some());
+        // Should NOT have "timestamp" — iOS expects "createdAt"
+        assert!(h.get("timestamp").is_none());
+        let lessons = h["lessons"].as_array().unwrap();
+        assert_eq!(lessons.len(), 1);
     }
 
     #[tokio::test]
