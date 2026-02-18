@@ -73,8 +73,8 @@ pub struct ContextManagerConfig {
 pub struct CompactionConfig {
     /// Threshold ratio (0–1) to trigger compaction suggestion.
     pub threshold: f64,
-    /// Number of recent turns to preserve during compaction.
-    pub preserve_recent_turns: usize,
+    /// Ratio of messages to preserve during compaction (0.0–1.0).
+    pub preserve_ratio: f64,
     /// Model context limit in tokens.
     pub context_limit: u64,
 }
@@ -83,7 +83,7 @@ impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
             threshold: 0.70,
-            preserve_recent_turns: 5,
+            preserve_ratio: 0.20,
             context_limit: 200_000,
         }
     }
@@ -239,12 +239,8 @@ pub struct PreTurnValidation {
     pub can_proceed: bool,
     /// Whether compaction is recommended.
     pub needs_compaction: bool,
-    /// Whether the estimated tokens after turn would exceed the limit.
-    pub would_exceed_limit: bool,
     /// Current token count.
     pub current_tokens: u64,
-    /// Estimated token count after turn.
-    pub estimated_after_turn: u64,
     /// Model's context limit.
     pub context_limit: u64,
 }
@@ -263,10 +259,10 @@ pub struct CompactionPreview {
     pub tokens_after: u64,
     /// Compression ratio (`tokens_after / tokens_before`).
     pub compression_ratio: f64,
-    /// Number of turns preserved.
-    pub preserved_turns: usize,
-    /// Number of turns summarized.
-    pub summarized_turns: usize,
+    /// Number of messages preserved.
+    pub preserved_messages: usize,
+    /// Number of messages summarized.
+    pub summarized_messages: usize,
     /// Generated summary text.
     pub summary: String,
     /// Structured data extracted from the conversation.
@@ -442,7 +438,7 @@ mod tests {
     fn compaction_config_default() {
         let cfg = CompactionConfig::default();
         assert!((cfg.threshold - 0.70).abs() < f64::EPSILON);
-        assert_eq!(cfg.preserve_recent_turns, 5);
+        assert!((cfg.preserve_ratio - 0.20).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -509,9 +505,7 @@ mod tests {
         let v = PreTurnValidation {
             can_proceed: true,
             needs_compaction: false,
-            would_exceed_limit: false,
             current_tokens: 5000,
-            estimated_after_turn: 7000,
             context_limit: 200_000,
         };
         let json = serde_json::to_value(&v).unwrap();

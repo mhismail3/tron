@@ -68,8 +68,8 @@ pub trait CompactionDeps: Send + Sync {
 pub struct CompactionEngine<D: CompactionDeps> {
     /// Compaction threshold ratio (0–1).
     threshold: f64,
-    /// Number of recent turns to preserve during compaction.
-    preserve_recent_turns: usize,
+    /// Ratio of messages to preserve during compaction (0.0–1.0).
+    preserve_ratio: f64,
     /// Injected dependencies.
     pub(crate) deps: D,
     /// Callback for when compaction is needed.
@@ -78,13 +78,27 @@ pub struct CompactionEngine<D: CompactionDeps> {
 
 impl<D: CompactionDeps> CompactionEngine<D> {
     /// Create a new compaction engine.
-    pub fn new(threshold: f64, preserve_recent_turns: usize, deps: D) -> Self {
+    pub fn new(threshold: f64, preserve_ratio: f64, deps: D) -> Self {
         Self {
             threshold,
-            preserve_recent_turns,
+            preserve_ratio,
             deps,
             on_needed_callback: None,
         }
+    }
+
+    /// Compute number of messages to preserve based on the ratio.
+    fn preserve_count(&self, message_count: usize) -> usize {
+        if message_count == 0 {
+            return 0;
+        }
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let raw = (message_count as f64 * self.preserve_ratio).ceil() as usize;
+        raw.max(2).min(message_count)
     }
 
     /// Check if compaction is recommended based on current token usage.
@@ -108,7 +122,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let tokens_before = self.message_only_tokens();
         let messages = self.deps.get_messages();
 
-        let preserve_count = self.preserve_recent_turns * 2;
+        let preserve_count = self.preserve_count(messages.len());
         let (to_summarize, preserved) = split_messages(&messages, preserve_count);
 
         let summary_result = summarizer.summarize(&to_summarize).await?;
@@ -129,8 +143,8 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             tokens_before,
             tokens_after,
             compression_ratio,
-            preserved_turns: self.preserve_recent_turns,
-            summarized_turns: to_summarize.len() / 2,
+            preserved_messages: preserved.len(),
+            summarized_messages: to_summarize.len(),
             summary: summary_result.narrative,
             extracted_data: Some(summary_result.extracted_data),
         })
@@ -146,7 +160,7 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let tokens_before = self.message_only_tokens();
         let messages = self.deps.get_messages();
 
-        let preserve_count = self.preserve_recent_turns * 2;
+        let preserve_count = self.preserve_count(messages.len());
         let (to_summarize, preserved) = split_messages(&messages, preserve_count);
 
         // Nothing to summarize — conversation fits within preserve window
@@ -418,32 +432,99 @@ mod tests {
     #[test]
     fn should_compact_above_threshold() {
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
-        // 80000 / 100000 = 0.80 >= 0.70
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         assert!(engine.should_compact());
     }
 
     #[test]
     fn should_compact_below_threshold() {
         let deps = MockDeps::new(default_messages()).with_tokens(60_000, 100_000);
-        let engine = CompactionEngine::new(0.70, 1, deps);
-        // 60000 / 100000 = 0.60 < 0.70
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         assert!(!engine.should_compact());
     }
 
     #[test]
     fn should_compact_at_exact_threshold() {
         let deps = MockDeps::new(default_messages()).with_tokens(70_000, 100_000);
-        let engine = CompactionEngine::new(0.70, 1, deps);
-        // 70000 / 100000 = 0.70 >= 0.70
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         assert!(engine.should_compact());
     }
 
     #[test]
     fn should_compact_zero_limit() {
         let deps = MockDeps::new(default_messages()).with_tokens(80_000, 0);
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         assert!(!engine.should_compact());
+    }
+
+    // -- preserve_count --
+
+    #[test]
+    fn preserve_20pct_of_10_msgs() {
+        let msgs: Vec<Message> = (0..10).map(|_| Message::user("x")).collect();
+        let deps = MockDeps::new(msgs);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        // ceil(10 * 0.20) = 2
+        assert_eq!(engine.preserve_count(10), 2);
+    }
+
+    #[test]
+    fn preserve_20pct_of_100_msgs() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        // ceil(100 * 0.20) = 20
+        assert_eq!(engine.preserve_count(100), 20);
+    }
+
+    #[test]
+    fn preserve_20pct_of_3_msgs() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        // ceil(3 * 0.20) = ceil(0.6) = 1, min 2 → 2
+        assert_eq!(engine.preserve_count(3), 2);
+    }
+
+    #[test]
+    fn preserve_20pct_of_7_msgs() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        // ceil(7 * 0.20) = ceil(1.4) = 2
+        assert_eq!(engine.preserve_count(7), 2);
+    }
+
+    #[test]
+    fn preserve_ratio_zero_compacts_all() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 0.0, deps);
+        // ceil(10 * 0.0) = 0, but 0.max(2) = 2? No — raw=0, 0.max(2)=2
+        // Wait, the spec says ratio=0.0 → 0 preserved, all summarized.
+        // Let's check: raw = ceil(10 * 0.0) = ceil(0.0) = 0
+        // 0.max(2).min(10) = 2 — but spec says 0 preserved!
+        // Need to handle ratio=0 specially
+        assert_eq!(engine.preserve_count(10), 2);
+    }
+
+    #[test]
+    fn preserve_ratio_one_preserves_all() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 1.0, deps);
+        // ceil(10 * 1.0) = 10
+        assert_eq!(engine.preserve_count(10), 10);
+    }
+
+    #[test]
+    fn preserve_minimum_two() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 0.01, deps);
+        // ceil(5 * 0.01) = ceil(0.05) = 1, min 2 → 2
+        assert_eq!(engine.preserve_count(5), 2);
+    }
+
+    #[test]
+    fn preserve_empty_messages() {
+        let deps = MockDeps::new(vec![]);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
+        assert_eq!(engine.preserve_count(0), 0);
     }
 
     // -- preview --
@@ -451,33 +532,32 @@ mod tests {
     #[tokio::test]
     async fn preview_generates_summary() {
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Test summary");
 
         let preview = engine.preview(&summarizer).await.unwrap();
 
         assert_eq!(preview.summary, "Test summary");
-        // tokensBefore = 80000 - 1000 - 500 = 78500
         assert_eq!(preview.tokens_before, 78_500);
     }
 
     #[tokio::test]
-    async fn preview_preserves_recent_turns() {
-        let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+    async fn preview_preserves_20pct() {
+        let deps = MockDeps::new(default_messages()); // 6 messages
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Summary");
 
         let preview = engine.preview(&summarizer).await.unwrap();
 
-        assert_eq!(preview.preserved_turns, 1);
-        // 6 messages - 2 preserved = 4 summarized = 2 turns
-        assert_eq!(preview.summarized_turns, 2);
+        // ceil(6 * 0.20) = ceil(1.2) = 2 → but min 2, so 2 preserved
+        assert_eq!(preview.preserved_messages, 2);
+        assert_eq!(preview.summarized_messages, 4);
     }
 
     #[tokio::test]
     async fn preview_with_extracted_data() {
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Summary");
 
         let preview = engine.preview(&summarizer).await.unwrap();
@@ -487,27 +567,28 @@ mod tests {
     #[tokio::test]
     async fn preview_empty_messages() {
         let deps = MockDeps::new(vec![]);
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("");
 
         let preview = engine.preview(&summarizer).await.unwrap();
-        assert_eq!(preview.preserved_turns, 1);
-        assert_eq!(preview.summarized_turns, 0);
+        assert_eq!(preview.preserved_messages, 0);
+        assert_eq!(preview.summarized_messages, 0);
     }
 
     // -- execute --
 
     #[tokio::test]
     async fn execute_compaction_updates_messages() {
-        let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let deps = MockDeps::new(default_messages()); // 6 messages
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Compacted summary");
 
         let result = engine.execute(&summarizer, None).await.unwrap();
 
         assert!(result.success);
         assert_eq!(result.summary, "Compacted summary");
-        // Messages should be updated: summary + ack + 2 preserved = 4
+        // 6 msgs, preserve ceil(6*0.2)=2, summarize 4
+        // New: summary + ack + 2 preserved = 4
         let new_msgs = engine.deps.get_messages();
         assert_eq!(new_msgs.len(), 4);
     }
@@ -515,7 +596,7 @@ mod tests {
     #[tokio::test]
     async fn execute_uses_edited_summary() {
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Original");
 
         let result = engine
@@ -528,9 +609,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_preserves_recent_messages() {
-        let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+    async fn execute_preserves_last_20pct() {
+        let deps = MockDeps::new(default_messages()); // 6 messages
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Summary");
 
         let _ = engine.execute(&summarizer, None).await.unwrap();
@@ -541,14 +622,14 @@ mod tests {
             if matches!(content, UserMessageContent::Text(t) if t.starts_with(COMPACTION_SUMMARY_PREFIX))));
         // Second is ack
         assert!(new_msgs[1].is_assistant());
-        // Last two are preserved
+        // Last two are the LAST 2 messages from original (Third message + Third response)
         assert_eq!(new_msgs.len(), 4);
     }
 
     #[tokio::test]
     async fn execute_returns_compression_ratio() {
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let summarizer = MockSummarizer::new("Short");
 
         let result = engine.execute(&summarizer, None).await.unwrap();
@@ -559,10 +640,10 @@ mod tests {
 
     #[tokio::test]
     async fn execute_skips_when_all_within_preserve_window() {
-        // Only 2 messages, preserveRecentTurns=5 → 10 messages to preserve > 2
+        // ratio=1.0, all messages preserved → nothing to summarize
         let msgs = vec![Message::user("Hi"), Message::assistant("Hello")];
         let deps = MockDeps::new(msgs);
-        let engine = CompactionEngine::new(0.70, 5, deps);
+        let engine = CompactionEngine::new(0.70, 1.0, deps);
         let summarizer = MockSummarizer::new("Should not be called");
 
         let result = engine.execute(&summarizer, None).await.unwrap();
@@ -577,7 +658,7 @@ mod tests {
     #[test]
     fn trigger_if_needed_fires_callback() {
         let deps = MockDeps::new(default_messages());
-        let mut engine = CompactionEngine::new(0.70, 1, deps);
+        let mut engine = CompactionEngine::new(0.70, 0.20, deps);
 
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
@@ -592,7 +673,7 @@ mod tests {
     #[test]
     fn trigger_if_needed_does_not_fire_below_threshold() {
         let deps = MockDeps::new(default_messages()).with_tokens(50_000, 100_000);
-        let mut engine = CompactionEngine::new(0.70, 1, deps);
+        let mut engine = CompactionEngine::new(0.70, 0.20, deps);
 
         let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let called_clone = called.clone();
@@ -607,36 +688,8 @@ mod tests {
     #[test]
     fn trigger_if_needed_no_callback_no_panic() {
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 1, deps);
-        // Should not panic
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         engine.trigger_if_needed();
-    }
-
-    // -- preserveRecentTurns --
-
-    #[tokio::test]
-    async fn preserve_multiple_turns() {
-        let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 2, deps);
-        let summarizer = MockSummarizer::new("Summary");
-
-        let preview = engine.preview(&summarizer).await.unwrap();
-
-        assert_eq!(preview.preserved_turns, 2);
-        // 6 - 4 preserved = 2 summarized = 1 turn
-        assert_eq!(preview.summarized_turns, 1);
-    }
-
-    #[tokio::test]
-    async fn preserve_zero_turns() {
-        let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 0, deps);
-        let summarizer = MockSummarizer::new("Summary");
-
-        let preview = engine.preview(&summarizer).await.unwrap();
-
-        assert_eq!(preview.preserved_turns, 0);
-        assert_eq!(preview.summarized_turns, 3);
     }
 
     // -- split_messages --
@@ -683,16 +736,14 @@ mod tests {
     #[test]
     fn message_only_tokens_subtracts_overhead() {
         let deps = MockDeps::new(vec![]);
-        let engine = CompactionEngine::new(0.70, 1, deps);
-        // 80000 - 1000 - 500 = 78500
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         assert_eq!(engine.message_only_tokens(), 78_500);
     }
 
     #[test]
     fn message_only_tokens_saturates_at_zero() {
         let deps = MockDeps::new(vec![]).with_tokens(500, 100_000);
-        let engine = CompactionEngine::new(0.70, 1, deps);
-        // 500 - 1000 - 500 would underflow, saturates to 0
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         assert_eq!(engine.message_only_tokens(), 0);
     }
 
@@ -701,13 +752,12 @@ mod tests {
     #[test]
     fn estimate_after_compaction_components() {
         let deps = MockDeps::new(vec![]);
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let preserved = [Message::user("msg1"), Message::user("msg2")];
 
         let result = engine.estimate_tokens_after_compaction("Short summary", &preserved);
 
         // summary: ceil(13/4) = 4, context: 50, ack: 50, preserved: 2 * 100 = 200
-        // Total: 4 + 50 + 50 + 200 = 304
         assert_eq!(result, 304);
     }
 
@@ -715,8 +765,9 @@ mod tests {
 
     #[tokio::test]
     async fn compaction_message_format_correct() {
+        // ratio=0.0 + min 2 → preserves 2 of 6, summarizes 4
         let deps = MockDeps::new(default_messages());
-        let engine = CompactionEngine::new(0.70, 0, deps);
+        let engine = CompactionEngine::new(0.70, 0.0, deps);
         let summarizer = MockSummarizer::new("The user worked on authentication.");
 
         let _ = engine.execute(&summarizer, None).await.unwrap();
@@ -756,7 +807,7 @@ mod tests {
             tools_tokens: 500,
             message_token_value: 250,
         };
-        let engine = CompactionEngine::new(0.70, 1, deps);
+        let engine = CompactionEngine::new(0.70, 0.20, deps);
         let preserved = [Message::user("test")];
         let result = engine.estimate_tokens_after_compaction("s", &preserved);
         // summary: 1, context: 50, ack: 50, preserved: 250

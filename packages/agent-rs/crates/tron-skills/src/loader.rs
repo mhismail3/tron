@@ -184,7 +184,9 @@ fn load_skill(
 fn is_valid_skill_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         && name.as_bytes()[0].is_ascii_alphanumeric()
 }
 

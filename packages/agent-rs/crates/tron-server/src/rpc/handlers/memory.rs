@@ -215,6 +215,7 @@ pub(crate) struct LedgerWriteDeps {
 /// 6. Fire-and-forget embedding for semantic search
 ///
 /// Returns a `LedgerWriteResult` suitable for both callers.
+#[allow(clippy::too_many_lines)]
 pub(crate) async fn execute_ledger_write(
     session_id: &str,
     working_directory: &str,
@@ -344,14 +345,13 @@ pub(crate) async fn execute_ledger_write(
                 .get_workspace_by_path(working_directory)
                 .ok()
                 .flatten()
-                .map(|ws| ws.id)
-                .unwrap_or_else(|| working_directory.to_owned());
+                .map_or_else(|| working_directory.to_owned(), |ws| ws.id);
             spawn_embed_memory_with_deps(
-                &deps.embedding_controller,
+                deps.embedding_controller.as_ref(),
                 &event_id,
                 &embed_ws_id,
                 &payload,
-                &deps.shutdown_coordinator,
+                deps.shutdown_coordinator.as_ref(),
             );
 
             debug!(
@@ -373,13 +373,13 @@ pub(crate) async fn execute_ledger_write(
     }
 }
 
-/// Spawn a fire-and-forget embedding task (standalone version, not requiring RpcContext).
+/// Spawn a fire-and-forget embedding task (standalone version, not requiring `RpcContext`).
 fn spawn_embed_memory_with_deps(
-    controller: &Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    controller: Option<&Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     event_id: &str,
     workspace_id: &str,
     payload: &Value,
-    shutdown_coordinator: &Option<Arc<crate::shutdown::ShutdownCoordinator>>,
+    shutdown_coordinator: Option<&Arc<crate::shutdown::ShutdownCoordinator>>,
 ) {
     if let Some(ec) = controller {
         let ec = Arc::clone(ec);

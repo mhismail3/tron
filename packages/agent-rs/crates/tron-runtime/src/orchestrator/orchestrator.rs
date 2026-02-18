@@ -96,6 +96,7 @@ impl Orchestrator {
                 _permit: permit,
             },
         );
+        #[allow(clippy::cast_precision_loss)]
         gauge!("agent_runs_active").set(runs.len() as f64);
         info!(session_id, run_id, "run started");
         Ok(cancel)
@@ -107,6 +108,7 @@ impl Orchestrator {
         debug!(session_id, "run completed");
         let mut runs = self.active_runs.lock();
         let _ = runs.remove(session_id);
+        #[allow(clippy::cast_precision_loss)]
         gauge!("agent_runs_active").set(runs.len() as f64);
     }
 

@@ -33,7 +33,7 @@ pub enum ReasoningLevel {
 }
 
 impl ReasoningLevel {
-    /// Convert to Anthropic effort string (budget_tokens style).
+    /// Convert to Anthropic effort string (`budget_tokens` style).
     pub fn as_effort_str(&self) -> &str {
         match self {
             Self::None => "none",
@@ -45,21 +45,20 @@ impl ReasoningLevel {
         }
     }
 
-    /// Convert to OpenAI reasoning_effort string.
-    /// OpenAI supports: "low", "medium", "high" only.
+    /// Convert to `OpenAI` `reasoning_effort` string.
+    /// `OpenAI` supports: "low", "medium", "high" only.
     /// XHigh/Max clamp to "high".
     pub fn as_openai_reasoning_effort(&self) -> &str {
         match self {
-            Self::None => "low",
-            Self::Low => "low",
+            Self::None | Self::Low => "low",
             Self::Medium => "medium",
             Self::High | Self::XHigh | Self::Max => "high",
         }
     }
 
     /// Convert to Google Gemini thinking level string.
-    /// Gemini supports: "THINKING_DISABLED", "THINKING_LOW", "THINKING_MEDIUM", "THINKING_HIGH".
-    /// XHigh/Max clamp to "THINKING_HIGH".
+    /// Gemini supports: `THINKING_DISABLED`, `THINKING_LOW`, `THINKING_MEDIUM`, `THINKING_HIGH`.
+    /// XHigh/Max clamp to `THINKING_HIGH`.
     pub fn as_gemini_thinking_level(&self) -> &str {
         match self {
             Self::None => "THINKING_DISABLED",

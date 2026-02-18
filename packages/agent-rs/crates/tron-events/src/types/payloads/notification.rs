@@ -48,7 +48,7 @@ pub struct NotificationSubagentResultPayload {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubagentResultsConsumedPayload {
-    /// IDs of the notification.subagent_result events that were consumed.
+    /// IDs of the `notification.subagent_result` events that were consumed.
     pub consumed_event_ids: Vec<String>,
     /// Number of results consumed.
     pub count: usize,

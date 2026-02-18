@@ -72,20 +72,23 @@ impl ShutdownCoordinator {
         );
 
         // Collect abort handles before consuming into join_all
-        let abort_handles: Vec<_> = all_handles.iter().map(|h| h.abort_handle()).collect();
+        let abort_handles: Vec<_> = all_handles
+            .iter()
+            .map(tokio::task::JoinHandle::abort_handle)
+            .collect();
 
-        match tokio::time::timeout(timeout, futures::future::join_all(all_handles)).await {
-            Ok(_) => {
-                info!("all shutdown tasks completed");
-            }
-            Err(_) => {
-                warn!(
-                    timeout_secs = timeout.as_secs(),
-                    "shutdown timed out, aborting remaining tasks"
-                );
-                for handle in &abort_handles {
-                    handle.abort();
-                }
+        if tokio::time::timeout(timeout, futures::future::join_all(all_handles))
+            .await
+            .is_ok()
+        {
+            info!("all shutdown tasks completed");
+        } else {
+            warn!(
+                timeout_secs = timeout.as_secs(),
+                "shutdown timed out, aborting remaining tasks"
+            );
+            for handle in &abort_handles {
+                handle.abort();
             }
         }
     }
@@ -196,8 +199,8 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_aborts_slow_tasks() {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let coord = ShutdownCoordinator::new();
         let completed = Arc::new(AtomicBool::new(false));
@@ -215,13 +218,16 @@ mod tests {
 
         // Give a small window for any post-abort activity
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!completed.load(Ordering::SeqCst), "task should have been aborted, not completed");
+        assert!(
+            !completed.load(Ordering::SeqCst),
+            "task should have been aborted, not completed"
+        );
     }
 
     #[tokio::test]
     async fn shutdown_completes_fast_tasks_normally() {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let coord = ShutdownCoordinator::new();
         let completed = Arc::new(AtomicBool::new(false));
@@ -238,13 +244,16 @@ mod tests {
             .graceful_shutdown(vec![handle], Some(Duration::from_secs(5)))
             .await;
 
-        assert!(completed.load(Ordering::SeqCst), "fast task should complete normally");
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "fast task should complete normally"
+        );
     }
 
     #[tokio::test]
     async fn registered_tasks_included_in_shutdown() {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let coord = ShutdownCoordinator::new();
         let completed = Arc::new(AtomicBool::new(false));
@@ -263,7 +272,10 @@ mod tests {
             .graceful_shutdown(vec![], Some(Duration::from_secs(5)))
             .await;
 
-        assert!(completed.load(Ordering::SeqCst), "registered task should complete during shutdown");
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "registered task should complete during shutdown"
+        );
     }
 
     #[tokio::test]

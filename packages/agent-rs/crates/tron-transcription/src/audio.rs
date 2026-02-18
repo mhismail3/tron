@@ -5,7 +5,7 @@ use std::io::Cursor;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
@@ -23,7 +23,7 @@ const MAX_AUDIO_SAMPLES: usize = 30 * 60 * 16_000;
 /// Automatically resamples to 16kHz and mixes to mono if needed.
 pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), TranscriptionError> {
     let cursor = Cursor::new(data.to_vec());
-    let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+    let mss = MediaSourceStream::new(Box::new(cursor), MediaSourceStreamOptions::default());
 
     let mut hint = Hint::new();
     match mime_type {
@@ -57,7 +57,9 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
     let codec_params = track.codec_params.clone();
     let track_id = track.id;
     let source_rate = codec_params.sample_rate.unwrap_or(TARGET_SAMPLE_RATE);
-    let channels = codec_params.channels.map_or(1, |c| c.count());
+    let channels = codec_params
+        .channels
+        .map_or(1, symphonia::core::audio::Channels::count);
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&codec_params, &DecoderOptions::default())
@@ -80,19 +82,20 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
             continue;
         }
 
-        let decoded = decoder
+        let audio_buf = decoder
             .decode(&packet)
             .map_err(|e| TranscriptionError::AudioDecode(format!("decode: {e}")))?;
 
-        let spec = *decoded.spec();
-        let n_frames = decoded.capacity();
+        let spec = *audio_buf.spec();
+        let n_frames = audio_buf.capacity();
         let mut sample_buf = SampleBuffer::<f32>::new(n_frames as u64, spec);
-        sample_buf.copy_interleaved_ref(decoded);
+        sample_buf.copy_interleaved_ref(audio_buf);
         let samples = sample_buf.samples();
 
         // Mix to mono
         if channels > 1 {
             for chunk in samples.chunks(channels) {
+                #[allow(clippy::cast_precision_loss)]
                 let mono: f32 = chunk.iter().sum::<f32>() / channels as f32;
                 all_samples.push(mono);
             }
@@ -142,6 +145,11 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>, T
     let mut resampler = SincFixedIn::<f32>::new(ratio, 2.0, params, chunk_size, 1)
         .map_err(|e| TranscriptionError::Resample(format!("init: {e}")))?;
 
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let mut output = Vec::with_capacity((samples.len() as f64 * ratio) as usize + 1024);
 
     for chunk in samples.chunks(chunk_size) {
@@ -154,11 +162,11 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>, T
             vec![chunk.to_vec()]
         };
 
-        let resampled = resampler
+        let output_buf = resampler
             .process(&input, None)
             .map_err(|e| TranscriptionError::Resample(format!("process: {e}")))?;
 
-        if let Some(channel) = resampled.first() {
+        if let Some(channel) = output_buf.first() {
             output.extend_from_slice(channel);
         }
     }

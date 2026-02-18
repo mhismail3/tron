@@ -138,7 +138,7 @@ pub struct SubagentConfig {
     /// Maximum nesting depth (0 = no children, 1 = one level, etc.).
     #[serde(default)]
     pub max_depth: u32,
-    /// Current nesting depth (set by SubagentManager, not user).
+    /// Current nesting depth (set by `SubagentManager`, not user).
     #[serde(default)]
     pub current_depth: u32,
     /// Tool call ID that triggered the spawn (for iOS event correlation).

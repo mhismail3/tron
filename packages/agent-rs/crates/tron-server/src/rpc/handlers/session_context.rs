@@ -1,6 +1,7 @@
 //! Shared session-context data loading used by RPC handlers.
 
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -293,7 +294,7 @@ fn load_memory(
                 .filter_map(Value::as_str)
                 .filter(|text| !text.is_empty())
             {
-                summary.push_str(&format!("\n- {lesson}"));
+                write!(summary, "\n- {lesson}").unwrap();
             }
         }
         sections.push(format!("\n{summary}"));

@@ -111,7 +111,6 @@ impl BrowserSession {
                     tracing::warn!(port, attempt, error = %e, "port conflict, retrying");
                     let _ = child.kill().await;
                     last_err = Some(e);
-                    continue;
                 }
                 Err(e) => {
                     last_err = Some(e);

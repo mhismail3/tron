@@ -28,8 +28,8 @@ pub struct CompactorSettings {
     pub compaction_threshold: f64,
     /// Target token count after compaction.
     pub target_tokens: usize,
-    /// Number of recent turns to preserve during compaction.
-    pub preserve_recent_count: usize,
+    /// Ratio of messages to preserve during compaction (0.0–1.0).
+    pub preserve_ratio: f64,
     /// Approximate characters per token for estimation.
     pub chars_per_token: usize,
     /// Token buffer reserved for responses.
@@ -57,7 +57,7 @@ impl Default for CompactorSettings {
             max_tokens: 25_000,
             compaction_threshold: 0.85,
             target_tokens: 10_000,
-            preserve_recent_count: 5,
+            preserve_ratio: 0.20,
             chars_per_token: 4,
             buffer_tokens: 4000,
             force_always: None,
@@ -209,7 +209,7 @@ mod tests {
         let c = CompactorSettings::default();
         assert_eq!(c.max_tokens, 25_000);
         assert!((c.compaction_threshold - 0.85).abs() < f64::EPSILON);
-        assert_eq!(c.preserve_recent_count, 5);
+        assert!((c.preserve_ratio - 0.20).abs() < f64::EPSILON);
         assert_eq!(c.trigger_token_threshold, Some(0.70));
     }
 
@@ -264,7 +264,7 @@ mod tests {
         let ctx: ContextSettings = serde_json::from_value(json).unwrap();
         assert_eq!(ctx.compactor.max_tokens, 50_000);
         // Other compactor fields should be defaults
-        assert_eq!(ctx.compactor.preserve_recent_count, 5);
+        assert!((ctx.compactor.preserve_ratio - 0.20).abs() < f64::EPSILON);
         // Other sections should be defaults
         assert!(ctx.memory.embedding.enabled);
     }

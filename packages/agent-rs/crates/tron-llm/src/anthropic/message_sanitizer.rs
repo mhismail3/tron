@@ -29,8 +29,8 @@ const CONTINUED_CONTENT: &str = "[Continued]";
 /// Returns a new `Vec<Message>` with fixes applied:
 /// - Empty messages filtered out
 /// - Thinking-only assistant messages (no signature) filtered out
-/// - Duplicate tool_use IDs deduplicated
-/// - Synthetic tool results injected for unmatched tool_use blocks
+/// - Duplicate `tool_use` IDs deduplicated
+/// - Synthetic tool results injected for unmatched `tool_use` blocks
 /// - Placeholder user message prepended if first message isn't user
 pub fn sanitize_messages(messages: Vec<Message>) -> Vec<Message> {
     // PHASE 1: Filter invalid messages, deduplicate tool_use IDs

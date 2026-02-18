@@ -83,7 +83,7 @@ fn build_context_manager_for_session(
         rules_content: artifacts.rules.merged_content.clone(),
         compaction: CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
-            preserve_recent_turns: compactor_settings.preserve_recent_count,
+            preserve_ratio: compactor_settings.preserve_ratio,
             context_limit,
         },
     });
@@ -419,8 +419,8 @@ impl MethodHandler for PreviewCompactionHandler {
             "tokensBefore": preview.tokens_before,
             "tokensAfter": preview.tokens_after,
             "compressionRatio": preview.compression_ratio,
-            "preservedTurns": preview.preserved_turns,
-            "summarizedTurns": preview.summarized_turns,
+            "preservedMessages": preview.preserved_messages,
+            "summarizedMessages": preview.summarized_messages,
             "summary": preview.summary,
             "extractedData": preview.extracted_data,
         }))
@@ -505,7 +505,7 @@ impl MethodHandler for CanAcceptTurnHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
-        let v = cm.can_accept_turn(4_000);
+        let v = cm.can_accept_turn();
         Ok(json!({ "canAcceptTurn": v.can_proceed }))
     }
 }
@@ -1038,8 +1038,8 @@ mod tests {
         assert!(result["tokensBefore"].is_number());
         assert!(result["tokensAfter"].is_number());
         assert!(result["compressionRatio"].is_number());
-        assert!(result["preservedTurns"].is_number());
-        assert!(result["summarizedTurns"].is_number());
+        assert!(result["preservedMessages"].is_number());
+        assert!(result["summarizedMessages"].is_number());
         assert!(result["summary"].is_string());
     }
 

@@ -331,7 +331,9 @@ async fn main() -> Result<()> {
                         tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
                     }
                     Err(_) => {
-                        tracing::error!("embedding service init timed out after 120s — semantic memory disabled");
+                        tracing::error!(
+                            "embedding service init timed out after 120s — semantic memory disabled"
+                        );
                     }
                 }
             });

@@ -87,6 +87,7 @@ impl ApnsService {
     }
 
     /// Send a notification to a single device.
+    #[allow(clippy::too_many_lines)]
     pub async fn send(
         &self,
         device_token: &str,

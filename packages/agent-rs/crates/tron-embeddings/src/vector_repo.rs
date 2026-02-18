@@ -556,9 +556,20 @@ mod tests {
         repo.store("e1", "ws1", &v).unwrap();
         // Query with wrong dimensions
         let wrong_query = vec![1.0; 8];
-        let result = repo.search(&wrong_query, &SearchOptions { limit: 5, ..Default::default() });
+        let result = repo.search(
+            &wrong_query,
+            &SearchOptions {
+                limit: 5,
+                ..Default::default()
+            },
+        );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("dimension mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("dimension mismatch")
+        );
     }
 
     #[test]
@@ -567,7 +578,13 @@ mod tests {
         let v = vec![0.5, 0.5, 0.5, 0.5];
         repo.store("e1", "ws1", &v).unwrap();
         let query = vec![0.5, 0.5, 0.5, 0.5];
-        let result = repo.search(&query, &SearchOptions { limit: 5, ..Default::default() });
+        let result = repo.search(
+            &query,
+            &SearchOptions {
+                limit: 5,
+                ..Default::default()
+            },
+        );
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 1);
     }
@@ -575,7 +592,13 @@ mod tests {
     #[test]
     fn search_empty_query_returns_error() {
         let repo = make_repo(4);
-        let result = repo.search(&[], &SearchOptions { limit: 5, ..Default::default() });
+        let result = repo.search(
+            &[],
+            &SearchOptions {
+                limit: 5,
+                ..Default::default()
+            },
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Empty"));
     }

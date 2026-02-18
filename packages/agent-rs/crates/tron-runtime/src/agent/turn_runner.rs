@@ -244,8 +244,11 @@ pub async fn execute_turn(
 
     // Record time-to-first-token if available
     if let Some(ttft) = stream_result.ttft_ms {
-        histogram!("provider_ttft_seconds", "provider" => provider_name)
-            .record(ttft as f64 / 1000.0);
+        histogram!("provider_ttft_seconds", "provider" => provider_name).record({
+            #[allow(clippy::cast_precision_loss)]
+            let secs = ttft as f64 / 1000.0;
+            secs
+        });
     }
 
     // Record LLM token counts

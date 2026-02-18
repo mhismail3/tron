@@ -799,7 +799,11 @@ mod tests {
 
         assert!(result.interrupted);
         // The thinking signature must be preserved on the message
-        let thinking_block = result.message.content.iter().find(|c| matches!(c, AssistantContent::Thinking { .. }));
+        let thinking_block = result
+            .message
+            .content
+            .iter()
+            .find(|c| matches!(c, AssistantContent::Thinking { .. }));
         assert!(thinking_block.is_some(), "should have thinking block");
         if let AssistantContent::Thinking { signature, .. } = thinking_block.unwrap() {
             assert_eq!(signature.as_deref(), Some("sig-xyz"));

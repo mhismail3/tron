@@ -27,10 +27,10 @@ pub fn validate_string_param(value: &str, name: &str, max_len: usize) -> Result<
 /// internal details (file paths, stack traces) from internal errors.
 pub fn sanitize_error_message(err: &RpcError) -> String {
     match err {
-        RpcError::InvalidParams { message } => message.clone(),
-        RpcError::NotFound { message, .. } => message.clone(),
-        RpcError::NotAvailable { message } => message.clone(),
-        RpcError::Custom { message, .. } => message.clone(),
+        RpcError::InvalidParams { message }
+        | RpcError::NotFound { message, .. }
+        | RpcError::NotAvailable { message }
+        | RpcError::Custom { message, .. } => message.clone(),
         RpcError::Internal { .. } => "Internal error".to_string(),
     }
 }

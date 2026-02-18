@@ -213,7 +213,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(result.timed_out);
-        assert!(elapsed.as_millis() < 2_000, "should exit quickly, not wait for sleep 60");
+        assert!(
+            elapsed.as_millis() < 2_000,
+            "should exit quickly, not wait for sleep 60"
+        );
     }
 
     #[tokio::test]

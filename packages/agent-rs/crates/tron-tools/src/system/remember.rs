@@ -93,6 +93,7 @@ fn format_json_entries(entries: &[Value]) -> String {
 }
 
 #[async_trait]
+#[allow(clippy::too_many_lines)]
 impl TronTool for RememberTool {
     fn name(&self) -> &str {
         "Remember"

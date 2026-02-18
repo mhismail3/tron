@@ -33,6 +33,7 @@ const OUTBOUND_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// 3. Forwards outbound events/responses via the send channel
 /// 4. Sends periodic Ping frames and disconnects unresponsive clients
 /// 5. Cleans up on disconnect
+#[allow(clippy::too_many_lines)]
 #[instrument(skip_all, fields(client_id = %client_id))]
 pub async fn run_ws_session(
     ws: WebSocket,
@@ -68,6 +69,10 @@ pub async fn run_ws_session(
         let _ = ws_tx.send(Message::Text(json.into())).await;
     }
 
+    // Shutdown signal for the outbound forwarder.
+    let shutdown = Arc::new(tokio::sync::Notify::new());
+    let shutdown_signal = shutdown.clone();
+
     // Spawn outbound forwarder with periodic Ping frames.
     let outbound_conn = connection.clone();
     let outbound = tokio::spawn(async move {
@@ -102,9 +107,20 @@ pub async fn run_ws_session(
                         break;
                     }
                 }
+                () = shutdown_signal.notified() => {
+                    // Drain any remaining queued messages
+                    while let Ok(text) = send_rx.try_recv() {
+                        let s = Arc::unwrap_or_clone(text);
+                        if ws_tx.send(Message::Text(s.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    break;
+                }
             }
         }
     });
+    let outbound_abort = outbound.abort_handle();
 
     // Process incoming messages
     while let Some(Ok(msg)) = ws_rx.next().await {
@@ -162,23 +178,28 @@ pub async fn run_ws_session(
         }
     }
 
-    // Clean up — let outbound forwarder drain rather than aborting mid-send
+    // Clean up — signal outbound forwarder to drain and exit
     info!(client_id, "client disconnected");
     counter!("ws_disconnections_total").increment(1);
     gauge!("ws_connections_active").decrement(1.0);
     gauge!("sessions_active").decrement(1.0);
     histogram!("ws_connection_duration_seconds").record(connection_start.elapsed().as_secs_f64());
 
-    // Drop the connection (closes send channel), allowing forwarder to drain
-    drop(connection);
-    match tokio::time::timeout(OUTBOUND_DRAIN_TIMEOUT, outbound).await {
-        Ok(_) => debug!(client_id, "outbound forwarder drained"),
-        Err(_) => {
-            warn!(client_id, "outbound forwarder drain timed out, aborting");
-        }
-    }
-
+    // Remove from broadcast first (releases its Arc<ClientConnection>)
     broadcast.remove(&client_id).await;
+    // Signal outbound task to drain remaining messages and exit
+    shutdown.notify_one();
+    // Drop our Arc (outbound_conn inside the task is the last holder)
+    drop(connection);
+    if tokio::time::timeout(OUTBOUND_DRAIN_TIMEOUT, outbound)
+        .await
+        .is_ok()
+    {
+        debug!(client_id, "outbound forwarder drained");
+    } else {
+        warn!(client_id, "outbound forwarder drain timed out, aborting");
+        outbound_abort.abort();
+    }
 }
 
 #[cfg(test)]

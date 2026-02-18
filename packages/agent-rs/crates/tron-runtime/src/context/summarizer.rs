@@ -282,6 +282,7 @@ fn cap_transcript(text: &str, max_chars: usize) -> String {
     let head = tron_core::text::truncate_str(text, quarter);
     // For the tail, walk forward from the target start to find a char boundary.
     let tail_start = text.len().saturating_sub(quarter);
+    #[allow(clippy::incompatible_msrv)]
     let tail_boundary = text.ceil_char_boundary(tail_start);
     let tail = &text[tail_boundary..];
     let omitted = text.len().saturating_sub(head.len() + tail.len());

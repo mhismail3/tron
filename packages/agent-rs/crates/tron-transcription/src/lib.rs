@@ -1,6 +1,6 @@
 //! Rust-native transcription engine using ONNX Runtime with the parakeet-tdt-0.6b-v3 model.
 //!
-//! Replaces the Python FastAPI sidecar with zero external dependencies.
+//! Replaces the Python `FastAPI` sidecar with zero external dependencies.
 //!
 //! # Architecture
 //!

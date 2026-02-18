@@ -25,7 +25,7 @@ use tron_events::{AppendOptions, ConnectionConfig, EventStore, EventType};
     about = "Benchmark runner for agent-rs server hot paths"
 )]
 struct Args {
-    /// Scenario to run: prompt_text_only, prompt_with_tools, concurrent_sessions, all.
+    /// Scenario to run: `prompt_text_only`, `prompt_with_tools`, `concurrent_sessions`, `all`.
     #[arg(long, default_value = "all")]
     scenario: String,
 
@@ -379,6 +379,7 @@ fn summarize_latencies(latencies_ms: &[f64]) -> LatencyStats {
     let mut sorted = latencies_ms.to_vec();
     sorted.sort_by(f64::total_cmp);
     let len = sorted.len();
+    #[allow(clippy::cast_precision_loss)]
     let mean = sorted.iter().sum::<f64>() / len as f64;
     let p50_idx = percentile_index(len, 0.50);
     let p95_idx = percentile_index(len, 0.95);
@@ -396,6 +397,11 @@ fn percentile_index(len: usize, percentile: f64) -> usize {
     if len <= 1 {
         return 0;
     }
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let rank = ((len - 1) as f64 * percentile).round() as usize;
     rank.min(len - 1)
 }
@@ -406,7 +412,7 @@ fn current_process_memory_bytes() -> u64 {
         return 0;
     };
     let _ = system.refresh_processes(ProcessesToUpdate::Some(&[pid]), false);
-    system.process(pid).map_or(0, |process| process.memory())
+    system.process(pid).map_or(0, sysinfo::Process::memory)
 }
 
 fn sample_peak_memory(peak: &AtomicU64) {
@@ -446,8 +452,14 @@ fn evaluate_gates(baseline: &Report, current: &Report) -> GateEvaluation {
             current_scenario.latency_ms.p95,
         );
         let memory_improvement_pct = improvement_pct(
-            base_scenario.peak_memory_bytes as f64,
-            current_scenario.peak_memory_bytes as f64,
+            #[allow(clippy::cast_precision_loss)]
+            {
+                base_scenario.peak_memory_bytes as f64
+            },
+            #[allow(clippy::cast_precision_loss)]
+            {
+                current_scenario.peak_memory_bytes as f64
+            },
         );
         let p95_regression_pct = regression_pct(
             base_scenario.latency_ms.p95,

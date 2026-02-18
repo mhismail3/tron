@@ -1,4 +1,12 @@
-//! TDT greedy decoding loop for the parakeet-tdt model.
+//! TDT greedy decoding loop for the `parakeet-tdt` model.
+//!
+//! ONNX tensor shapes use `i64` dimensions while Rust indexing needs `usize`.
+//! These casts are safe because tensor dimensions are always small positive values.
+#![allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 
 use ndarray::{Array2, Array3};
 use ort::session::Session;
@@ -10,9 +18,9 @@ use crate::types::TranscriptionError;
 /// TDT duration buckets: how many encoder frames to advance per step.
 pub const DURATIONS: [usize; 5] = [0, 1, 2, 3, 4];
 
-/// Greedy TDT decoding: walk encoder output frame-by-frame using the decoder+joint network.
+/// Greedy TDT decoding: walk encoder output frame-by-frame using the `decoder_joint` network.
 ///
-/// The decoder_joint model takes encoder frames + previous token + LSTM states,
+/// The `decoder_joint` model takes encoder frames + previous token + LSTM states,
 /// and outputs token logits + duration logits. The token with highest logit is
 /// emitted (if not blank), and we advance by the predicted duration.
 pub fn greedy_decode(
@@ -49,7 +57,6 @@ pub fn greedy_decode(
             .map_err(|e| TranscriptionError::Inference(format!("encoder frame tensor: {e}")))?;
 
         // Target token: [1, 1]
-        #[allow(clippy::cast_possible_wrap)]
         let target = Tensor::from_array(([1i64, 1], vec![prev_token as i64]))
             .map_err(|e| TranscriptionError::Inference(format!("target tensor: {e}")))?;
         let target_length = Tensor::from_array(([1i64], vec![1i64]))
@@ -122,7 +129,7 @@ pub fn greedy_decode(
     // Convert token IDs to text
     let text: String = tokens
         .iter()
-        .filter_map(|&t| vocab.get(t).map(|s| s.as_str()))
+        .filter_map(|&t| vocab.get(t).map(String::as_str))
         .collect::<String>()
         .replace('\u{2581}', " ") // SentencePiece ▁ → space
         .trim()
@@ -144,14 +151,13 @@ fn argmax(slice: &[f32]) -> usize {
         .iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(i, _)| i)
-        .unwrap_or(0)
+        .map_or(0, |(i, _)| i)
 }
 
 /// Run the encoder model on mel features.
 ///
-/// Input: mel features [1, 128, T] from preprocessor
-/// Output: encoder output [T', hidden_dim] (squeezed from [1, T', hidden_dim])
+/// Input: mel features `[1, 128, T]` from preprocessor
+/// Output: encoder output `[T', hidden_dim]` (squeezed from `[1, T', hidden_dim]`)
 pub fn run_encoder(
     encoder: &mut Session,
     features: &Array3<f32>,
@@ -204,7 +210,6 @@ pub fn run_preprocessor(
     let waveform = Tensor::from_array(([1i64, n as i64], samples.to_vec()))
         .map_err(|e| TranscriptionError::Inference(format!("waveform tensor: {e}")))?;
 
-    #[allow(clippy::cast_possible_wrap)]
     let waveform_lens = Tensor::from_array(([1i64], vec![n as i64]))
         .map_err(|e| TranscriptionError::Inference(format!("waveform_lens tensor: {e}")))?;
 

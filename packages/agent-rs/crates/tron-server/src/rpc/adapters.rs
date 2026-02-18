@@ -226,7 +226,7 @@ pub fn adapt_tool_execution_result_for_ios(
 // TaskManager result formatting
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// ADAPTER(ios-compat): Format TaskManager JSON results as text for iOS parsing,
+/// ADAPTER(ios-compat): Format `TaskManager` JSON results as text for iOS parsing,
 /// auto-detecting the action from JSON structure.
 ///
 /// Used during session reconstruction where the action is not available.
@@ -243,7 +243,7 @@ pub fn adapt_task_manager_result_auto(result_text: &str) -> String {
     adapt_task_manager_result(action, result_text)
 }
 
-/// Detect the TaskManager action from JSON result structure.
+/// Detect the `TaskManager` action from JSON result structure.
 fn detect_task_manager_action(json: &Value) -> &str {
     // List results: arrays with count/total metadata
     if json.get("tasks").and_then(Value::as_array).is_some() {
@@ -303,9 +303,9 @@ fn detect_task_manager_action(json: &Value) -> &str {
     "unknown"
 }
 
-/// ADAPTER(ios-compat): Format TaskManager JSON results as text for iOS parsing.
+/// ADAPTER(ios-compat): Format `TaskManager` JSON results as text for iOS parsing.
 ///
-/// The Rust TaskManager tool returns raw JSON objects via `serde_json::to_string_pretty`,
+/// The Rust `TaskManager` tool returns raw JSON objects via `serde_json::to_string_pretty`,
 /// but the iOS app's `parseEntityDetail()` expects a specific text format with `# Title`
 /// headers, `ID: ... | Status: ...` metadata lines, and key-value pairs.
 ///
@@ -330,8 +330,7 @@ pub fn adapt_task_manager_result(action: &str, result_text: &str) -> String {
         "get_project" => fmt_project_detail(&json),
         "delete_project" => fmt_delete("project", "projectId", &json),
         "list_projects" => fmt_project_list(&json),
-        "create_area" => fmt_area_action(action, &json),
-        "update_area" => fmt_area_action(action, &json),
+        "create_area" | "update_area" => fmt_area_action(action, &json),
         "get_area" => fmt_area_detail(&json),
         "delete_area" => fmt_delete("area", "areaId", &json),
         "list_areas" => fmt_area_list(&json),
@@ -345,6 +344,7 @@ fn str_field<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 
 // ── Task formatting ──────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn fmt_task_detail(task: &Value) -> String {
     let title = str_field(task, "title").unwrap_or("Untitled");
     let id = str_field(task, "id").unwrap_or("?");
@@ -487,9 +487,8 @@ fn fmt_task_action(action: &str, task: &Value) -> String {
 }
 
 fn fmt_task_list(json: &Value) -> String {
-    let tasks = match json.get("tasks").and_then(Value::as_array) {
-        Some(arr) => arr,
-        None => return json.to_string(),
+    let Some(tasks) = json.get("tasks").and_then(Value::as_array) else {
+        return json.to_string();
     };
     if tasks.is_empty() {
         return "No tasks found.".to_string();
@@ -534,9 +533,8 @@ fn fmt_task_list(json: &Value) -> String {
 }
 
 fn fmt_task_search(json: &Value) -> String {
-    let tasks = match json.get("tasks").and_then(Value::as_array) {
-        Some(arr) => arr,
-        None => return json.to_string(),
+    let Some(tasks) = json.get("tasks").and_then(Value::as_array) else {
+        return json.to_string();
     };
     if tasks.is_empty() {
         return "No tasks found.".to_string();
@@ -601,12 +599,12 @@ fn fmt_project_detail(project: &Value) -> String {
                     _ => " ",
                 };
                 let tid = str_field(task, "id").unwrap_or("?");
-                let ttitle = str_field(task, "title").unwrap_or("Untitled");
+                let task_title = str_field(task, "title").unwrap_or("Untitled");
                 let priority_suffix = match str_field(task, "priority") {
                     Some(p) if p != "medium" => format!(" [{p}]"),
                     _ => String::new(),
                 };
-                lines.push(format!("  [{mark}] {tid}: {ttitle}{priority_suffix}"));
+                lines.push(format!("  [{mark}] {tid}: {task_title}{priority_suffix}"));
             }
         }
     }
@@ -629,9 +627,8 @@ fn fmt_project_action(action: &str, project: &Value) -> String {
 }
 
 fn fmt_project_list(json: &Value) -> String {
-    let projects = match json.get("projects").and_then(Value::as_array) {
-        Some(arr) => arr,
-        None => return json.to_string(),
+    let Some(projects) = json.get("projects").and_then(Value::as_array) else {
+        return json.to_string();
     };
     if projects.is_empty() {
         return "No projects found.".to_string();
@@ -669,8 +666,8 @@ fn fmt_area_detail(area: &Value) -> String {
     let task_count = area.get("taskCount").and_then(Value::as_u64);
     let active_count = area.get("activeTaskCount").and_then(Value::as_u64);
     if let (Some(pc), Some(tc), Some(ac)) = (project_count, task_count, active_count) {
-        let ps = if pc != 1 { "s" } else { "" };
-        let ts = if tc != 1 { "s" } else { "" };
+        let ps = if pc == 1 { "" } else { "s" };
+        let ts = if tc == 1 { "" } else { "s" };
         lines.push(format!("{pc} project{ps}, {tc} task{ts} ({ac} active)"));
     }
 
@@ -721,9 +718,8 @@ fn fmt_area_action(action: &str, area: &Value) -> String {
 }
 
 fn fmt_area_list(json: &Value) -> String {
-    let areas = match json.get("areas").and_then(Value::as_array) {
-        Some(arr) => arr,
-        None => return json.to_string(),
+    let Some(areas) = json.get("areas").and_then(Value::as_array) else {
+        return json.to_string();
     };
     if areas.is_empty() {
         return "No areas found.".to_string();

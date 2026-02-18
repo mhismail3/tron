@@ -177,7 +177,7 @@ impl ContextManager {
         self.rules_tracker.pre_activate(rule_relative_path)
     }
 
-    /// Rebuild dynamic_rules_content from current tracker state.
+    /// Rebuild `dynamic_rules_content` from current tracker state.
     ///
     /// Call after `pre_activate_rule()` batch to update the content field.
     pub fn finalize_rule_activations(&mut self) {
@@ -364,10 +364,9 @@ impl ContextManager {
 
     /// Check if a new turn can be accepted.
     #[must_use]
-    pub fn can_accept_turn(&self, estimated_response_tokens: u64) -> PreTurnValidation {
+    pub fn can_accept_turn(&self) -> PreTurnValidation {
         let current = self.get_current_tokens();
         let limit = self.get_context_limit();
-        let estimated_after = current + estimated_response_tokens;
 
         #[allow(clippy::cast_precision_loss)]
         let ratio = if limit > 0 {
@@ -378,10 +377,8 @@ impl ContextManager {
 
         PreTurnValidation {
             can_proceed: ratio < Thresholds::CRITICAL,
-            needs_compaction: ratio >= Thresholds::ALERT,
-            would_exceed_limit: estimated_after > limit,
+            needs_compaction: ratio >= self.config.compaction.threshold,
             current_tokens: current,
-            estimated_after_turn: estimated_after,
             context_limit: limit,
         }
     }
@@ -408,7 +405,7 @@ impl ContextManager {
         let deps = ManagerCompactionDeps::from_manager(self);
         let engine = CompactionEngine::new(
             self.config.compaction.threshold,
-            self.config.compaction.preserve_recent_turns,
+            self.config.compaction.preserve_ratio,
             deps,
         );
         engine.preview(summarizer).await
@@ -423,7 +420,7 @@ impl ContextManager {
         let deps = ManagerCompactionDeps::from_manager(self);
         let engine = CompactionEngine::new(
             self.config.compaction.threshold,
-            self.config.compaction.preserve_recent_turns,
+            self.config.compaction.preserve_ratio,
             deps,
         );
         let result = engine.execute(summarizer, edited_summary).await?;
@@ -510,10 +507,14 @@ impl ContextManager {
     // ── Model switching ─────────────────────────────────────────────────
 
     /// Switch to a different model and context limit.
+    ///
+    /// Clears API tokens and triggers compaction callback if the new limit
+    /// is smaller and current usage exceeds the threshold.
     pub fn switch_model(&mut self, new_model: String, context_limit: u64) {
         self.config.model = new_model;
         self.config.compaction.context_limit = context_limit;
         self.api_context_tokens = None;
+        self.trigger_compaction_if_needed();
     }
 
     // ── Export ───────────────────────────────────────────────────────────
@@ -650,7 +651,7 @@ mod tests {
             rules_content: None,
             compaction: CompactionConfig {
                 threshold: 0.70,
-                preserve_recent_turns: 2,
+                preserve_ratio: 0.20,
                 context_limit: 100_000,
             },
         }
@@ -1017,19 +1018,51 @@ mod tests {
     #[test]
     fn can_accept_turn_normal() {
         let cm = ContextManager::new(test_config());
-        let v = cm.can_accept_turn(1_000);
+        let v = cm.can_accept_turn();
         assert!(v.can_proceed);
         assert!(!v.needs_compaction);
     }
 
     #[test]
-    fn can_accept_turn_near_limit() {
+    fn can_accept_turn_at_alert() {
         let mut cm = ContextManager::new(test_config());
-        cm.set_api_context_tokens(90_000);
-        let v = cm.can_accept_turn(15_000);
-        assert!(!v.can_proceed); // 90% >= critical (85%)
+        cm.set_api_context_tokens(70_000); // 70% = threshold
+        let v = cm.can_accept_turn();
+        assert!(v.can_proceed);
         assert!(v.needs_compaction);
-        assert!(v.would_exceed_limit); // 90_000 + 15_000 > 100_000
+    }
+
+    #[test]
+    fn can_accept_turn_at_critical() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_api_context_tokens(85_000); // 85% = critical
+        let v = cm.can_accept_turn();
+        assert!(!v.can_proceed);
+        assert!(v.needs_compaction);
+    }
+
+    #[test]
+    fn can_accept_turn_at_exceeded() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_api_context_tokens(95_000); // 95% = exceeded
+        let v = cm.can_accept_turn();
+        assert!(!v.can_proceed);
+        assert!(v.needs_compaction);
+    }
+
+    #[test]
+    fn can_accept_turn_zero_limit() {
+        let config = ContextManagerConfig {
+            compaction: CompactionConfig {
+                context_limit: 0,
+                ..CompactionConfig::default()
+            },
+            ..test_config()
+        };
+        let cm = ContextManager::new(config);
+        let v = cm.can_accept_turn();
+        assert!(v.can_proceed); // ratio=0.0 < critical
+        assert!(!v.needs_compaction); // ratio=0.0 < threshold
     }
 
     // -- compaction --
@@ -1110,17 +1143,89 @@ mod tests {
         );
     }
 
+    // -- compaction config --
+
+    #[test]
+    fn compaction_config_default_ratio() {
+        let config = CompactionConfig::default();
+        assert!((config.preserve_ratio - 0.20).abs() < f64::EPSILON);
+    }
+
     // -- model switching --
 
     #[test]
-    fn switch_model() {
+    fn switch_model_updates_limit() {
+        let mut cm = ContextManager::new(test_config());
+        cm.switch_model("claude-opus-4-6".into(), 128_000);
+        assert_eq!(cm.get_context_limit(), 128_000);
+    }
+
+    #[test]
+    fn switch_model_clears_api_tokens() {
         let mut cm = ContextManager::new(test_config());
         cm.set_api_context_tokens(50_000);
         cm.switch_model("claude-opus-4-6".into(), 200_000);
         assert_eq!(cm.get_model(), "claude-opus-4-6");
         assert_eq!(cm.get_context_limit(), 200_000);
-        // API tokens cleared on model switch
         assert!(cm.get_api_context_tokens().is_none());
+    }
+
+    #[test]
+    fn switch_model_triggers_callback() {
+        let mut cm = ContextManager::new(test_config());
+        // Set tokens at 150k — will be above threshold for 128k model
+        cm.set_api_context_tokens(150_000);
+
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called_clone = called.clone();
+        cm.on_compaction_needed(move || {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // Switch to 128k limit → 150/128 = 1.17 > 0.70 threshold
+        // Note: api_context_tokens is cleared, so estimation is used.
+        // Force high token count by setting tokens before switch, then clearing API
+        // Actually, switch_model clears api_context_tokens, so we need actual messages.
+        // Simpler: just set api_tokens high, switch to small limit — callback fires
+        // before api_tokens is cleared? No — switch_model clears first, then calls trigger.
+        // So we need enough estimated tokens from messages + system prompt.
+        // Let's use a different approach: context_limit=100k, tokens already high from estimation
+        drop(cm);
+
+        // Better: use a manager where estimate is high
+        let mut cm2 = ContextManager::new(test_config());
+        let called2 = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called2_clone = called2.clone();
+        cm2.on_compaction_needed(move || {
+            called2_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // Add enough messages to get estimated tokens high
+        for _ in 0..500 {
+            cm2.add_message(Message::user("x".repeat(400)));
+            cm2.add_message(Message::assistant("y".repeat(400)));
+        }
+
+        // Current estimated tokens should be substantial. Switch to small limit.
+        let tokens = cm2.get_current_tokens();
+        assert!(tokens > 10_000, "need substantial tokens, got {tokens}");
+        cm2.switch_model("small-model".into(), 1_000);
+        // tokens/1000 should be >> 0.70
+        assert!(called2.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn switch_model_no_callback_under_threshold() {
+        let mut cm = ContextManager::new(test_config());
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called_clone = called.clone();
+        cm.on_compaction_needed(move || {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // Low token usage, switch to larger model — should not fire
+        cm.switch_model("claude-opus-4-6".into(), 500_000);
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     // -- export --

@@ -73,14 +73,13 @@ fn compute_new_input_tokens(
     context_window_tokens: u64,
     previous_baseline: u64,
 ) -> u64 {
-    match source.provider {
-        ProviderType::Anthropic => source.raw_input_tokens,
-        _ => {
-            if previous_baseline == 0 {
-                return context_window_tokens;
-            }
-            context_window_tokens.saturating_sub(previous_baseline)
+    if source.provider == ProviderType::Anthropic {
+        source.raw_input_tokens
+    } else {
+        if previous_baseline == 0 {
+            return context_window_tokens;
         }
+        context_window_tokens.saturating_sub(previous_baseline)
     }
 }
 

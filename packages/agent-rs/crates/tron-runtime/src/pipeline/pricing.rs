@@ -111,7 +111,11 @@ const GEMINI_FLASH: PricingTier = PricingTier {
 /// Tries exact match first, then pattern-matches on model family substrings.
 /// Returns `None` for unknown models (no implicit fallback pricing).
 fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
-    use tron_llm::models::model_ids::*;
+    use tron_llm::models::model_ids::{
+        CLAUDE_3_7_SONNET, CLAUDE_3_HAIKU, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4, CLAUDE_OPUS_4_1,
+        CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6, CLAUDE_SONNET_4, CLAUDE_SONNET_4_5, GEMINI_2_5_FLASH,
+        GEMINI_2_5_PRO, GEMINI_3_FLASH_PREVIEW, GEMINI_3_PRO_PREVIEW,
+    };
 
     // Exact match
     match model {
@@ -124,10 +128,8 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
         CLAUDE_SONNET_4 => return Some(&SONNET_4),
         CLAUDE_3_7_SONNET => return Some(&SONNET_3_7),
         CLAUDE_3_HAIKU => return Some(&HAIKU_3),
-        GEMINI_3_PRO_PREVIEW => return Some(&GEMINI_PRO),
-        GEMINI_3_FLASH_PREVIEW => return Some(&GEMINI_FLASH),
-        GEMINI_2_5_PRO => return Some(&GEMINI_PRO),
-        GEMINI_2_5_FLASH => return Some(&GEMINI_FLASH),
+        GEMINI_3_PRO_PREVIEW | GEMINI_2_5_PRO => return Some(&GEMINI_PRO),
+        GEMINI_3_FLASH_PREVIEW | GEMINI_2_5_FLASH => return Some(&GEMINI_FLASH),
         _ => {}
     }
 
@@ -171,26 +173,32 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
 pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Option<f64> {
     let pricing = get_pricing_tier(model)?;
 
+    #[allow(clippy::cast_precision_loss)]
     let input_tokens = usage.input_tokens as f64;
+    #[allow(clippy::cast_precision_loss)]
     let output_tokens = usage.output_tokens as f64;
+    #[allow(clippy::cast_precision_loss)]
     let cache_creation_tokens = usage.cache_creation_tokens.unwrap_or(0) as f64;
+    #[allow(clippy::cast_precision_loss)]
     let cache_read_tokens = usage.cache_read_tokens.unwrap_or(0) as f64;
-    let cache_creation_5m_tokens = usage.cache_creation_5m_tokens.unwrap_or(0) as f64;
-    let cache_creation_1h_tokens = usage.cache_creation_1h_tokens.unwrap_or(0) as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let cache_write_short = usage.cache_creation_5m_tokens.unwrap_or(0) as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let cache_write_long = usage.cache_creation_1h_tokens.unwrap_or(0) as f64;
 
     // Base input tokens (excluding cache tokens billed separately)
     let base_input_tokens = (input_tokens - cache_read_tokens - cache_creation_tokens).max(0.0);
     let base_input_cost = (base_input_tokens / 1_000_000.0) * pricing.input_per_million;
 
     // Cache creation cost — use per-TTL pricing when breakdown is available
-    let cache_creation_cost = if cache_creation_5m_tokens > 0.0 || cache_creation_1h_tokens > 0.0 {
-        let cost_5m = (cache_creation_5m_tokens / 1_000_000.0)
+    let cache_creation_cost = if cache_write_short > 0.0 || cache_write_long > 0.0 {
+        let short_cost = (cache_write_short / 1_000_000.0)
             * pricing.input_per_million
             * pricing.cache_write_5m_multiplier;
-        let cost_1h = (cache_creation_1h_tokens / 1_000_000.0)
+        let long_cost = (cache_write_long / 1_000_000.0)
             * pricing.input_per_million
             * pricing.cache_write_1h_multiplier;
-        cost_5m + cost_1h
+        short_cost + long_cost
     } else {
         // Backward compat: fall back to 5m multiplier for total
         (cache_creation_tokens / 1_000_000.0)

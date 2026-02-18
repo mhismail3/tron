@@ -56,11 +56,8 @@ impl MethodRegistry {
         };
 
         let start = std::time::Instant::now();
-        let result = tokio::time::timeout(
-            Self::HANDLER_TIMEOUT,
-            handler.handle(request.params, ctx),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(Self::HANDLER_TIMEOUT, handler.handle(request.params, ctx)).await;
 
         let response = match result {
             Ok(Ok(result)) => RpcResponse::success(&request.id, result),
@@ -79,8 +76,13 @@ impl MethodRegistry {
                 }
             }
             Err(_elapsed) => {
-                counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "timeout").increment(1);
-                tracing::error!(method, "RPC handler timed out after {:?}", Self::HANDLER_TIMEOUT);
+                counter!("rpc_errors_total", "method" => method.clone(), "error_type" => "timeout")
+                    .increment(1);
+                tracing::error!(
+                    method,
+                    "RPC handler timed out after {:?}",
+                    Self::HANDLER_TIMEOUT
+                );
                 RpcResponse::error(
                     &request.id,
                     errors::INTERNAL_ERROR,
@@ -377,9 +379,7 @@ mod tests {
             },
         );
 
-        let resp = reg
-            .dispatch(make_request("r1", "fast", None), &ctx)
-            .await;
+        let resp = reg.dispatch(make_request("r1", "fast", None), &ctx).await;
         assert!(resp.success);
         assert_eq!(resp.result.unwrap(), "done");
     }

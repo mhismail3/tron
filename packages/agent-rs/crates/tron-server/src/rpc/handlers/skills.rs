@@ -23,7 +23,7 @@ fn skill_to_wire(skill: &tron_skills::types::SkillMetadata) -> Value {
     })
 }
 
-fn remove_skill_name<'a>(params: Option<&'a Value>) -> Result<&'a str, RpcError> {
+fn remove_skill_name(params: Option<&Value>) -> Result<&str, RpcError> {
     params
         .and_then(|p| p.get("skillName").or_else(|| p.get("name")))
         .and_then(Value::as_str)

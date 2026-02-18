@@ -133,10 +133,11 @@ impl EventStore {
         self.retry_on_sqlite_busy(f)
     }
 
-    /// Retry an operation on SQLite BUSY/LOCKED with linear backoff + jitter.
+    /// Retry an operation on `SQLite` BUSY/LOCKED with linear backoff + jitter.
     ///
     /// Backoff: base = min(attempts * 10, 500) ms, jitter ±25% to prevent
     /// thundering herd when multiple writers contend on the same database.
+    #[allow(clippy::unused_self)]
     fn retry_on_sqlite_busy<T>(&self, mut f: impl FnMut() -> Result<T>) -> Result<T> {
         let mut attempts = 0;
 
@@ -148,7 +149,7 @@ impl EventStore {
                         && attempts < Self::SQLITE_BUSY_MAX_RETRIES =>
                 {
                     attempts += 1;
-                    let base_ms = (attempts as u64).saturating_mul(10).min(500);
+                    let base_ms = u64::from(attempts).saturating_mul(10).min(500);
                     let jitter_range = base_ms / 4;
                     let jitter = if jitter_range > 0 {
                         rand::random::<u64>() % (jitter_range * 2 + 1)

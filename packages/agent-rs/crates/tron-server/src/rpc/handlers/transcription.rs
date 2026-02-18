@@ -155,6 +155,7 @@ async fn transcribe_audio_full(
     if let Some(ref engine) = ctx.transcription_engine {
         match engine.transcribe(audio_bytes, mime_type).await {
             Ok(result) => {
+                #[allow(clippy::cast_possible_truncation)]
                 let elapsed_ms = start.elapsed().as_millis() as u64;
                 info!(
                     "native transcription succeeded ({:.1}s audio)",
@@ -182,6 +183,7 @@ async fn transcribe_audio_full(
     match transcribe_audio_via_sidecar(&ctx.settings_path, audio_bytes, mime_type, file_name).await
     {
         Ok(result) => {
+            #[allow(clippy::cast_possible_truncation)]
             let elapsed_ms = start.elapsed().as_millis() as u64;
             // Sidecar returns snake_case — map to camelCase for iOS
             let text = result.get("text").and_then(Value::as_str).unwrap_or("");

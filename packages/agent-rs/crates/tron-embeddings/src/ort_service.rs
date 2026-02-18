@@ -81,7 +81,7 @@ impl OnnxEmbeddingService {
     }
 }
 
-/// Download model files via hf-hub, returning (model_path, tokenizer_path).
+/// Download model files via `hf-hub`, returning (`model_path`, `tokenizer_path`).
 fn download_model(config: &EmbeddingConfig) -> Result<(PathBuf, PathBuf)> {
     let cache_dir = config.resolved_cache_dir();
     debug!(cache_dir, model = %config.model, "downloading model via hf-hub");
@@ -152,7 +152,10 @@ fn run_inference(
             attention_mask[offset + j] = i64::from(m);
             // position_ids: sequential positions for non-padded tokens, 0 for padding
             if m != 0 {
-                position_ids[offset + j] = j as i64;
+                #[allow(clippy::cast_possible_wrap)]
+                {
+                    position_ids[offset + j] = j as i64;
+                }
             }
         }
     }
@@ -185,7 +188,7 @@ fn run_inference(
         .map_err(|e| EmbeddingError::Inference(format!("extract tensor: {e}")))?;
 
     // Shape derefs to &[i64]; should be [batch_size, seq_len, hidden_dim]
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let dims: Vec<usize> = output_shape.iter().map(|&d| d as usize).collect();
     if dims.len() != 3 || dims[0] != batch_size {
         return Err(EmbeddingError::Inference(format!(

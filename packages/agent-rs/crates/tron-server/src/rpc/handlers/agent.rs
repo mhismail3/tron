@@ -1,6 +1,7 @@
 //! Agent handlers: prompt, abort, getState.
 
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -99,43 +100,44 @@ fn format_subagent_results(results: &[(String, Value)]) -> Option<String> {
     for (_event_id, payload) in results {
         let success = payload
             .get("success")
-            .and_then(|v| v.as_bool())
+            .and_then(Value::as_bool)
             .unwrap_or(false);
         let icon = if success { "+" } else { "x" };
         let subagent_id = payload
             .get("subagentSessionId")
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .unwrap_or("unknown");
         let task = payload
             .get("task")
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .unwrap_or("unknown");
         let total_turns = payload
             .get("totalTurns")
-            .and_then(|v| v.as_i64())
+            .and_then(Value::as_i64)
             .unwrap_or(0);
-        let duration = payload
-            .get("duration")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        let duration = payload.get("duration").and_then(Value::as_i64).unwrap_or(0);
 
-        ctx.push_str(&format!("## [{icon}] Sub-Agent: `{subagent_id}`\n\n"));
-        ctx.push_str(&format!("**Task**: {task}\n"));
-        ctx.push_str(&format!(
-            "**Status**: {}\n",
+        writeln!(ctx, "## [{icon}] Sub-Agent: `{subagent_id}`\n").unwrap();
+        writeln!(ctx, "**Task**: {task}").unwrap();
+        writeln!(
+            ctx,
+            "**Status**: {}",
             if success { "Completed" } else { "Failed" }
-        ));
-        ctx.push_str(&format!("**Turns**: {total_turns}\n"));
-        ctx.push_str(&format!("**Duration**: {:.1}s\n", duration as f64 / 1000.0));
+        )
+        .unwrap();
+        writeln!(ctx, "**Turns**: {total_turns}").unwrap();
+        #[allow(clippy::cast_precision_loss)]
+        let duration_secs = duration as f64 / 1000.0;
+        writeln!(ctx, "**Duration**: {duration_secs:.1}s").unwrap();
 
-        if let Some(output) = payload.get("output").and_then(|v| v.as_str()) {
+        if let Some(output) = payload.get("output").and_then(Value::as_str) {
             if !output.is_empty() {
                 let truncated = if output.len() > 2000 {
                     format!("{}\n\n... [Output truncated]", &output[..2000])
                 } else {
                     output.to_string()
                 };
-                ctx.push_str(&format!("\n**Output**:\n```\n{truncated}\n```\n"));
+                write!(ctx, "\n**Output**:\n```\n{truncated}\n```\n").unwrap();
             }
         }
         ctx.push_str("\n---\n\n");
@@ -649,14 +651,14 @@ impl MethodHandler for PromptHandler {
                 let cs = &settings.context.compactor;
 
                 let config = AgentConfig {
-                    model,
+                    model: model.clone(),
                     working_directory: Some(working_dir),
                     enable_thinking: true,
                     max_turns: settings.agent.max_turns,
                     compaction: tron_runtime::context::types::CompactionConfig {
                         threshold: cs.compaction_threshold,
-                        preserve_recent_turns: cs.preserve_recent_count,
-                        ..Default::default()
+                        preserve_ratio: cs.preserve_ratio,
+                        context_limit: tron_llm::tokens::get_context_limit(&model),
                     },
                     retry: Some(tron_core::retry::RetryConfig {
                         max_retries: settings.retry.max_retries,
@@ -766,7 +768,9 @@ impl MethodHandler for PromptHandler {
                 // Subagent results (from event store — works for both live and resumed sessions)
                 let subagent_results_context = {
                     let pending = get_pending_subagent_results(&event_store, &session_id_clone);
-                    if !pending.is_empty() {
+                    if pending.is_empty() {
+                        None
+                    } else {
                         let event_ids: Vec<String> =
                             pending.iter().map(|(id, _)| id.clone()).collect();
                         let formatted = format_subagent_results(&pending);
@@ -783,8 +787,6 @@ impl MethodHandler for PromptHandler {
                             });
                         }
                         formatted
-                    } else {
-                        None
                     }
                 };
 
@@ -918,8 +920,7 @@ impl MethodHandler for PromptHandler {
                         .get_workspace_by_path(&working_dir_for_memory)
                         .ok()
                         .flatten()
-                        .map(|ws| ws.id)
-                        .unwrap_or_else(|| working_dir_for_memory.clone());
+                        .map_or_else(|| working_dir_for_memory.clone(), |ws| ws.id);
 
                     let memory_deps = RuntimeMemoryDeps {
                         subagent_manager: subagent_manager.clone(),

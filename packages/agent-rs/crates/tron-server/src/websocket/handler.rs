@@ -7,8 +7,7 @@ use crate::rpc::types::{RpcRequest, RpcResponse};
 use tracing::{debug, instrument, warn};
 
 /// Fallback JSON for when response serialization itself fails.
-const SERIALIZATION_FALLBACK: &str =
-    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal serialization error"}}"#;
+const SERIALIZATION_FALLBACK: &str = r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal serialization error"}}"#;
 
 /// Result of handling a WebSocket message.
 pub struct HandleResult {
@@ -404,6 +403,11 @@ mod tests {
     fn serialization_fallback_is_valid_json() {
         let parsed: serde_json::Value = serde_json::from_str(SERIALIZATION_FALLBACK).unwrap();
         assert_eq!(parsed["error"]["code"], -32603);
-        assert!(parsed["error"]["message"].as_str().unwrap().contains("serialization"));
+        assert!(
+            parsed["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("serialization")
+        );
     }
 }

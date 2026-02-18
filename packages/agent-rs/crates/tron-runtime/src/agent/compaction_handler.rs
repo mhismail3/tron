@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Notify;
 
 use crate::context::context_manager::ContextManager;
 use crate::context::summarizer::KeywordSummarizer;
@@ -128,7 +129,22 @@ impl tron_tools::traits::ContentSummarizer for SubagentContentSummarizer {
 /// Compaction handler state.
 pub struct CompactionHandler {
     is_compacting: AtomicBool,
+    compaction_done: Arc<Notify>,
     subagent_manager: Option<Arc<SubagentManager>>,
+}
+
+/// RAII guard that resets `is_compacting` and notifies waiters on drop.
+/// Handles both normal completion and future cancellation.
+struct CompactionGuard<'a> {
+    is_compacting: &'a AtomicBool,
+    done: &'a Notify,
+}
+
+impl Drop for CompactionGuard<'_> {
+    fn drop(&mut self) {
+        self.is_compacting.store(false, Ordering::SeqCst);
+        self.done.notify_waiters();
+    }
 }
 
 impl CompactionHandler {
@@ -136,6 +152,7 @@ impl CompactionHandler {
     pub fn new() -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
+            compaction_done: Arc::new(Notify::new()),
             subagent_manager: None,
         }
     }
@@ -144,6 +161,7 @@ impl CompactionHandler {
     pub fn with_subagent_manager(manager: Arc<SubagentManager>) -> Self {
         Self {
             is_compacting: AtomicBool::new(false),
+            compaction_done: Arc::new(Notify::new()),
             subagent_manager: Some(manager),
         }
     }
@@ -151,6 +169,16 @@ impl CompactionHandler {
     /// Whether a compaction is in progress.
     pub fn is_compacting(&self) -> bool {
         self.is_compacting.load(Ordering::Relaxed)
+    }
+
+    /// Wait for an in-progress compaction to complete, with timeout.
+    ///
+    /// Returns immediately if no compaction is running.
+    pub async fn wait_for_compaction(&self, timeout: std::time::Duration) {
+        if !self.is_compacting.load(Ordering::SeqCst) {
+            return;
+        }
+        let _ = tokio::time::timeout(timeout, self.compaction_done.notified()).await;
     }
 
     /// Check if compaction is needed and execute if so.
@@ -192,6 +220,12 @@ impl CompactionHandler {
         {
             return Ok(false);
         }
+        // RAII guard resets is_compacting and notifies waiters on drop
+        // (handles normal return, early return, error, and future cancellation)
+        let _guard = CompactionGuard {
+            is_compacting: &self.is_compacting,
+            done: &self.compaction_done,
+        };
 
         let tokens_before = context_manager.get_current_tokens();
 
@@ -227,7 +261,6 @@ impl CompactionHandler {
                 tool_call_id: None,
             });
             if result.action == HookAction::Block {
-                self.is_compacting.store(false, Ordering::SeqCst);
                 return Ok(false);
             }
         }
@@ -257,8 +290,6 @@ impl CompactionHandler {
             let summarizer = KeywordSummarizer;
             context_manager.execute_compaction(&summarizer, None).await
         };
-
-        self.is_compacting.store(false, Ordering::SeqCst);
 
         match result {
             Ok(compaction_result) => {
@@ -340,6 +371,86 @@ mod tests {
         let limit: u64 = 200_000;
         let target = (limit * 7) / 10;
         assert_ne!(target, limit / 2);
+    }
+
+    // -- wait_for_compaction --
+
+    #[tokio::test]
+    async fn wait_returns_immediately_when_idle() {
+        let handler = CompactionHandler::new();
+        // Should return immediately since nothing is compacting
+        handler
+            .wait_for_compaction(std::time::Duration::from_millis(10))
+            .await;
+        assert!(!handler.is_compacting());
+    }
+
+    // -- CompactionGuard --
+
+    #[test]
+    fn guard_resets_on_drop() {
+        let is_compacting = AtomicBool::new(true);
+        let done = Arc::new(Notify::new());
+        {
+            let _guard = CompactionGuard {
+                is_compacting: &is_compacting,
+                done: &done,
+            };
+            assert!(is_compacting.load(Ordering::SeqCst));
+        }
+        // After guard drops, is_compacting should be false
+        assert!(!is_compacting.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn guard_notifies_on_drop() {
+        let is_compacting = AtomicBool::new(true);
+        let done = Arc::new(Notify::new());
+        let done_clone = done.clone();
+
+        // Spawn a waiter
+        let waiter = tokio::spawn(async move {
+            done_clone.notified().await;
+            true
+        });
+
+        // Small yield to let the waiter register
+        tokio::task::yield_now().await;
+
+        // Drop the guard — should notify the waiter
+        {
+            let _guard = CompactionGuard {
+                is_compacting: &is_compacting,
+                done: &done,
+            };
+        }
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), waiter)
+            .await
+            .expect("waiter should complete")
+            .expect("waiter should not panic");
+        assert!(result);
+    }
+
+    #[test]
+    fn concurrent_compaction_rejected() {
+        let handler = CompactionHandler::new();
+        // Simulate first compaction holding the lock
+        handler.is_compacting.store(true, Ordering::SeqCst);
+        // CAS should fail
+        let cas =
+            handler
+                .is_compacting
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst);
+        assert!(cas.is_err());
+    }
+
+    #[test]
+    fn is_compacting_true_during_execution() {
+        let handler = CompactionHandler::new();
+        assert!(!handler.is_compacting());
+        handler.is_compacting.store(true, Ordering::SeqCst);
+        assert!(handler.is_compacting());
     }
 
     // SubagentManagerSpawner is tested end-to-end through subagent_manager::tests::spawn_subsession_*

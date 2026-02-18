@@ -25,7 +25,7 @@ pub fn render(handle: &PrometheusHandle) -> String {
 
 /// RPC requests total (counter, labels: method).
 pub const RPC_REQUESTS_TOTAL: &str = "rpc_requests_total";
-/// RPC errors total (counter, labels: method, error_type).
+/// RPC errors total (counter, labels: method, `error_type`).
 pub const RPC_ERRORS_TOTAL: &str = "rpc_errors_total";
 /// RPC request duration seconds (histogram, labels: method).
 pub const RPC_REQUEST_DURATION_SECONDS: &str = "rpc_request_duration_seconds";

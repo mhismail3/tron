@@ -178,6 +178,7 @@ impl SessionEvent {
     /// Deserialize the payload into the typed variant matching [`event_type`](Self::event_type).
     ///
     /// Returns `Err` if the payload JSON doesn't match the expected shape.
+    #[allow(clippy::too_many_lines)]
     pub fn typed_payload(&self) -> std::result::Result<SessionEventPayload, serde_json::Error> {
         match self.event_type {
             EventType::SessionStart => Ok(SessionEventPayload::SessionStart(

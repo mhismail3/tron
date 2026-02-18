@@ -71,6 +71,7 @@ pub fn create_stream_state() -> StreamState {
 
 /// Process a single SSE event and return corresponding [`StreamEvent`]s.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn process_stream_event(
     event: &ResponsesSseEvent,
     state: &mut StreamState,

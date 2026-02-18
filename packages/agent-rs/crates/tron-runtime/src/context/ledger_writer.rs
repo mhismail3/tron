@@ -111,8 +111,9 @@ pub fn parse_ledger_response(output: &str) -> Result<LedgerParseResult, String> 
 
 /// Extract JSON from an LLM response that may contain code fences and surrounding text.
 ///
-/// Strategy 1: Code fence extraction — find `` ```json `` or `` ``` `` followed by a
-/// newline, then find `\n````. Extract only the content between the fences.
+/// Strategy 1: Code fence extraction — find opening triple-backtick fences
+/// (with or without `json` tag), then find the closing fence. Extract only the
+/// content between the fences.
 ///
 /// Strategy 2: Brace matching — locate first `{` and walk forward tracking brace
 /// depth while respecting JSON string literals (handle `\"` escapes). Extract the

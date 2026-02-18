@@ -69,6 +69,7 @@ fn is_excluded(path: &std::path::Path, exclude_matchers: &[globset::GlobMatcher]
 }
 
 /// Collect matching entries from a directory walk.
+#[allow(clippy::too_many_arguments)]
 fn collect_entries(
     search_root: &std::path::Path,
     glob: &globset::GlobMatcher,

@@ -1,5 +1,6 @@
 //! Embedding controller — orchestrates service and vector repository.
 
+use std::fmt::Write;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -17,7 +18,7 @@ pub struct WorkspaceMemory {
     pub content: String,
     /// Number of ledger entries included.
     pub count: usize,
-    /// Estimated token count (content.len() / 4).
+    /// Estimated token count (`content.len() / 4`).
     pub tokens: u64,
 }
 
@@ -179,7 +180,7 @@ impl EmbeddingController {
                 for lesson in lessons {
                     if let Some(text) = lesson.as_str() {
                         if !text.is_empty() {
-                            section.push_str(&format!("\n- {text}"));
+                            write!(section, "\n- {text}").unwrap();
                         }
                     }
                 }
@@ -197,7 +198,7 @@ impl EmbeddingController {
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("");
                     if !choice.is_empty() {
-                        section.push_str(&format!("\n- {choice}: {reason}"));
+                        write!(section, "\n- {choice}: {reason}").unwrap();
                     }
                 }
             }

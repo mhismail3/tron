@@ -31,7 +31,7 @@ use crate::shutdown::ShutdownCoordinator;
 use crate::websocket::broadcast::BroadcastManager;
 use crate::websocket::session::run_ws_session;
 
-/// Generates UUIDv7 request IDs.
+/// Generates `UUIDv7` request IDs.
 #[derive(Clone)]
 struct UuidV7RequestId;
 

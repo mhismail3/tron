@@ -67,9 +67,8 @@ where
                     }
 
                     // Convert to &str only for the final line
-                    let line = match std::str::from_utf8(&line_bytes) {
-                        Ok(s) => s,
-                        Err(_) => continue, // skip invalid UTF-8 lines
+                    let Ok(line) = std::str::from_utf8(&line_bytes) else {
+                        continue; // skip invalid UTF-8 lines
                     };
 
                     if let Some(data) = extract_sse_data(line) {

@@ -1,4 +1,4 @@
-//! Model file management — download from HuggingFace and path resolution.
+//! Model file management — download from `HuggingFace` and path resolution.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use tracing::{debug, info, warn};
 
 use crate::types::TranscriptionError;
 
-/// HuggingFace repository for the ONNX parakeet model.
+/// `HuggingFace` repository for the ONNX parakeet model.
 const HF_REPO: &str = "istupakov/parakeet-tdt-0.6b-v3-onnx";
 
 /// Required model files and their purposes.
@@ -40,10 +40,10 @@ pub fn is_model_cached(model_dir: impl AsRef<Path>) -> bool {
     files.values().all(|p| p.exists())
 }
 
-/// Download model files from HuggingFace if not already cached.
+/// Download model files from `HuggingFace` if not already cached.
 ///
 /// Uses `hf-hub` to download from the `istupakov/parakeet-tdt-0.6b-v3-onnx` repo.
-/// Files are stored in HuggingFace's cache, then symlinked/copied to `model_dir`.
+/// Files are stored in `HuggingFace`'s cache, then symlinked/copied to `model_dir`.
 pub async fn ensure_model(model_dir: impl AsRef<Path>) -> Result<(), TranscriptionError> {
     let model_dir = model_dir.as_ref().to_path_buf();
 

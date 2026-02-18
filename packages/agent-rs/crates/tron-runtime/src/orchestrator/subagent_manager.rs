@@ -1,4 +1,4 @@
-//! SubagentManager — real `SubagentSpawner` implementation.
+//! `SubagentManager` — real `SubagentSpawner` implementation.
 //!
 //! Spawns child agents in-process, tracks their state, and forwards
 //! events from child sessions to the parent session's broadcast.
@@ -34,10 +34,10 @@ use crate::types::{AgentConfig as AgentCfg, ReasoningLevel, RunContext};
 // SpawnType — taxonomy for tracked subagents
 // =============================================================================
 
-/// Distinguishes tool-spawned agents from system-spawned subsessions.
+/// Distinguishes tool-spawned agents from system-spawned `subsessions`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnType {
-    /// Spawned by the LLM via the SpawnSubagent tool.
+    /// Spawned by the LLM via the `SpawnSubagent` tool.
     ToolAgent,
     /// Spawned programmatically for internal tasks (ledger, compaction, etc.).
     Subsession,
@@ -59,9 +59,9 @@ pub struct SubsessionConfig {
     pub system_prompt: String,
     /// Working directory for the child agent.
     pub working_directory: String,
-    /// Timeout in milliseconds (default 30_000).
+    /// Timeout in milliseconds (default `30_000`).
     pub timeout_ms: u64,
-    /// If true, wait for completion; if false, return immediately with session_id.
+    /// If true, wait for completion; if false, return immediately with `session_id`.
     pub blocking: bool,
     /// Maximum LLM turns (default 1).
     pub max_turns: u32,
@@ -128,7 +128,7 @@ pub struct SubagentManager {
     tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
-    /// Tracked subagents: child_session_id → TrackedSubagent.
+    /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
 }
 
@@ -186,6 +186,7 @@ impl SubagentManager {
     /// Unlike `spawn()` (tool-agent path), the caller provides the system prompt
     /// directly, tools are optional, and the subsession is tracked as
     /// `SpawnType::Subsession`.
+    #[allow(clippy::too_many_lines)]
     pub async fn spawn_subsession(
         &self,
         config: SubsessionConfig,
@@ -280,7 +281,7 @@ impl SubagentManager {
             parent_session_id = %parent_session_id,
             spawn_type = "subsession",
         );
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let provider = match provider_factory.create_for_model(&model_owned).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -289,7 +290,7 @@ impl SubagentManager {
                         session_id: child_sid.clone(),
                         output: format!("Provider creation failed: {e}"),
                         token_usage: None,
-                        duration_ms: tracker_clone.started_at.elapsed().as_millis() as u64,
+                        duration_ms: elapsed_ms(&tracker_clone.started_at),
                         status: "failed".into(),
                     });
                     tracker_clone.done.notify_waiters();
@@ -319,7 +320,7 @@ impl SubagentManager {
                     is_subagent: true,
                     denied_tools: vec![],
                     subagent_depth: 0,
-                    subagent_max_depth: subagent_max_depth,
+                    subagent_max_depth,
                     rules_content: None,
                     initial_messages: vec![],
                     memory_content: None,
@@ -358,7 +359,7 @@ impl SubagentManager {
             )
             .await;
 
-            let duration_ms = tracker_clone.started_at.elapsed().as_millis() as u64;
+            let duration_ms = elapsed_ms(&tracker_clone.started_at);
 
             // Extract output from agent's last assistant message
             let output = {
@@ -430,7 +431,7 @@ impl SubagentManager {
                 duration_ms,
                 "subsession execution finished"
             );
-        }.instrument(subsession_span));
+        }.instrument(subsession_span)));
 
         // 6. If blocking, wait for completion
         if config.blocking {
@@ -473,6 +474,7 @@ impl SubagentManager {
 
 #[async_trait]
 impl SubagentSpawner for SubagentManager {
+    #[allow(clippy::too_many_lines)]
     async fn spawn(&self, config: SubagentConfig) -> Result<SubagentHandle, ToolError> {
         // Validate mode
         if config.mode == SubagentMode::Tmux {
@@ -603,7 +605,7 @@ impl SubagentSpawner for SubagentManager {
             depth = subagent_depth,
             spawn_type = "tool_agent",
         );
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let provider = match provider_factory.create_for_model(&model_owned).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -612,7 +614,7 @@ impl SubagentSpawner for SubagentManager {
                         session_id: child_sid.clone(),
                         output: format!("Provider creation failed: {e}"),
                         token_usage: None,
-                        duration_ms: tracker_clone.started_at.elapsed().as_millis() as u64,
+                        duration_ms: elapsed_ms(&tracker_clone.started_at),
                         status: "failed".into(),
                     });
                     tracker_clone.done.notify_waiters();
@@ -805,7 +807,7 @@ impl SubagentSpawner for SubagentManager {
             forward_cancel.cancel();
             let _ = forward_handle.await;
 
-            let duration_ms = tracker_clone.started_at.elapsed().as_millis() as u64;
+            let duration_ms = elapsed_ms(&tracker_clone.started_at);
 
             // Extract output from agent's last assistant message
             let output = {
@@ -833,39 +835,7 @@ impl SubagentSpawner for SubagentManager {
             let success = result.error.is_none();
             let result_output;
 
-            if !success {
-                let error = result.error.unwrap_or_else(|| "Unknown error".into());
-                // Emit SubagentFailed (routed to parent session)
-                let _ = broadcast.emit(TronEvent::SubagentFailed {
-                    base: BaseEvent::now(&tracker_clone.parent_session_id),
-                    subagent_session_id: child_sid.clone(),
-                    error: error.clone(),
-                    duration: duration_ms,
-                });
-
-                // Persist subagent.failed to parent session
-                if !tracker_clone.parent_session_id.is_empty() {
-                    let _ = event_store.append(&tron_events::AppendOptions {
-                        session_id: &tracker_clone.parent_session_id,
-                        event_type: EventType::SubagentFailed,
-                        payload: json!({
-                            "subagentSessionId": child_sid,
-                            "error": error,
-                            "duration": duration_ms,
-                        }),
-                        parent_id: None,
-                    });
-                }
-
-                result_output = error.clone();
-                *tracker_clone.result.lock() = Some(SubagentResult {
-                    session_id: child_sid.clone(),
-                    output: error,
-                    token_usage: token_usage.clone(),
-                    duration_ms,
-                    status: "failed".into(),
-                });
-            } else {
+            if success {
                 // Emit SubagentCompleted (routed to parent session)
                 let _ = broadcast.emit(TronEvent::SubagentCompleted {
                     base: BaseEvent::now(&tracker_clone.parent_session_id),
@@ -903,6 +873,38 @@ impl SubagentSpawner for SubagentManager {
                     duration_ms,
                     status: "completed".into(),
                 });
+            } else {
+                let error = result.error.unwrap_or_else(|| "Unknown error".into());
+                // Emit SubagentFailed (routed to parent session)
+                let _ = broadcast.emit(TronEvent::SubagentFailed {
+                    base: BaseEvent::now(&tracker_clone.parent_session_id),
+                    subagent_session_id: child_sid.clone(),
+                    error: error.clone(),
+                    duration: duration_ms,
+                });
+
+                // Persist subagent.failed to parent session
+                if !tracker_clone.parent_session_id.is_empty() {
+                    let _ = event_store.append(&tron_events::AppendOptions {
+                        session_id: &tracker_clone.parent_session_id,
+                        event_type: EventType::SubagentFailed,
+                        payload: json!({
+                            "subagentSessionId": child_sid,
+                            "error": error,
+                            "duration": duration_ms,
+                        }),
+                        parent_id: None,
+                    });
+                }
+
+                result_output = error.clone();
+                *tracker_clone.result.lock() = Some(SubagentResult {
+                    session_id: child_sid.clone(),
+                    output: error,
+                    token_usage: token_usage.clone(),
+                    duration_ms,
+                    status: "failed".into(),
+                });
             }
 
             // Persist notification.subagent_result to parent session's event store
@@ -914,8 +916,8 @@ impl SubagentSpawner for SubagentManager {
                     "task": tracker_clone.task,
                     "resultSummary": truncate(&result_output, 200),
                     "success": success,
-                    "totalTurns": result.turns_executed as i64,
-                    "duration": duration_ms as i64,
+                    "totalTurns": i64::from(result.turns_executed),
+                    "duration": duration_ms,
                     "tokenUsage": token_usage.clone().unwrap_or(json!({})),
                     "completedAt": chrono::Utc::now().to_rfc3339(),
                     "output": truncate(&result_output, 4000),
@@ -954,7 +956,7 @@ impl SubagentSpawner for SubagentManager {
                 duration_ms,
                 "subagent execution finished"
             );
-        }.instrument(subagent_span));
+        }.instrument(subagent_span)));
 
         // 5. If blocking, wait for completion
         if config.blocking {
@@ -1001,7 +1003,7 @@ impl SubagentSpawner for SubagentManager {
             "status" => {
                 if let Some(tracker) = self.subagents.get(session_id) {
                     let result = tracker.result.lock().clone();
-                    let duration_ms = tracker.started_at.elapsed().as_millis() as u64;
+                    let duration_ms = elapsed_ms(&tracker.started_at);
                     let status = if result.is_some() {
                         result.as_ref().map_or("unknown", |r| r.status.as_str())
                     } else {
@@ -1163,7 +1165,7 @@ impl SubagentSpawner for SubagentManager {
                     let tx = result_tx.clone();
                     let tracker = tracker.clone();
                     let sid = sid.clone();
-                    let _ = tokio::spawn(async move {
+                    drop(tokio::spawn(async move {
                         tracker.done.notified().await;
                         let result =
                             tracker
@@ -1178,7 +1180,7 @@ impl SubagentSpawner for SubagentManager {
                                     status: "unknown".into(),
                                 });
                         let _ = tx.send(result).await;
-                    });
+                    }));
                 }
                 drop(result_tx);
 
@@ -1196,6 +1198,12 @@ impl SubagentSpawner for SubagentManager {
 
 fn truncate(s: &str, max: usize) -> &str {
     tron_core::text::truncate_str(s, max)
+}
+
+/// Convert elapsed time to milliseconds as u64 (truncation is intentional).
+#[allow(clippy::cast_possible_truncation)]
+fn elapsed_ms(start: &Instant) -> u64 {
+    start.elapsed().as_millis() as u64
 }
 
 #[cfg(test)]

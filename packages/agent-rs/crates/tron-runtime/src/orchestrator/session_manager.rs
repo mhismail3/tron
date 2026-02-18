@@ -37,7 +37,7 @@ pub struct SessionFilter {
     pub workspace_path: Option<String>,
     /// Include archived sessions.
     pub include_archived: bool,
-    /// Exclude subagent sessions (spawning_session_id IS NULL).
+    /// Exclude subagent sessions (`spawning_session_id` IS NULL).
     pub exclude_subagents: bool,
     /// Maximum number of results.
     pub limit: Option<usize>,
@@ -237,7 +237,7 @@ impl SessionManager {
             .map_err(|e| RuntimeError::Persistence(e.to_string()))
     }
 
-    /// Create a session for a subagent (linked to parent via spawning_session_id).
+    /// Create a session for a subagent (linked to parent via `spawning_session_id`).
     #[instrument(skip(self), fields(model, working_dir = workspace_path, parent = spawning_session_id))]
     pub fn create_session_for_subagent(
         &self,
