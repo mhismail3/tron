@@ -91,41 +91,8 @@ pub struct OpenAIConfig {
 // Reasoning
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Reasoning effort levels.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningEffort {
-    /// Low reasoning effort.
-    Low,
-    /// Medium reasoning effort.
-    Medium,
-    /// High reasoning effort.
-    High,
-    /// Extra high reasoning effort.
-    Xhigh,
-    /// Maximum reasoning effort.
-    Max,
-}
-
-impl ReasoningEffort {
-    /// Returns the string representation for the API.
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Xhigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-}
-
-impl std::fmt::Display for ReasoningEffort {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+/// Re-export from `crate::provider` — the canonical definition lives at the shared boundary.
+pub use crate::provider::ReasoningEffort;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Model Registry
@@ -143,9 +110,9 @@ pub struct OpenAIModelInfo {
     /// Model tier.
     pub tier: &'static str,
     /// Context window size in tokens.
-    pub context_window: u32,
+    pub context_window: u64,
     /// Maximum output tokens.
-    pub max_output: u32,
+    pub max_output: u64,
     /// Whether the model supports tool use.
     pub supports_tools: bool,
     /// Whether the model supports image inputs.
@@ -420,7 +387,7 @@ pub struct ReasoningConfig {
 pub struct ResponsesOutputItem {
     /// Item type: `function_call`, `message`, `reasoning`, etc.
     #[serde(rename = "type")]
-    pub item_type: String,
+    pub item_type: OutputItemType,
     /// Item ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -482,9 +449,9 @@ pub struct ResponsesResponse {
 /// Events are parsed from the SSE stream by matching on the `type` field.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResponsesSseEvent {
-    /// Event type string (e.g., `response.output_text.delta`).
+    /// Event type (e.g., [`SseEventType::OutputTextDelta`]).
     #[serde(rename = "type")]
-    pub event_type: String,
+    pub event_type: SseEventType,
     /// Text delta (for text and reasoning summary deltas).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delta: Option<String>,
@@ -505,22 +472,53 @@ pub struct ResponsesSseEvent {
     pub response: Option<ResponsesResponse>,
 }
 
-/// Known SSE event type strings from the Responses API.
-pub mod event_types {
+/// SSE event types from the Responses API.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SseEventType {
     /// Streaming text content.
-    pub const OUTPUT_TEXT_DELTA: &str = "response.output_text.delta";
+    #[serde(rename = "response.output_text.delta")]
+    OutputTextDelta,
     /// New output item (tool call or reasoning started).
-    pub const OUTPUT_ITEM_ADDED: &str = "response.output_item.added";
+    #[serde(rename = "response.output_item.added")]
+    OutputItemAdded,
     /// Output item finished.
-    pub const OUTPUT_ITEM_DONE: &str = "response.output_item.done";
+    #[serde(rename = "response.output_item.done")]
+    OutputItemDone,
     /// New reasoning summary part added.
-    pub const REASONING_SUMMARY_PART_ADDED: &str = "response.reasoning_summary_part.added";
+    #[serde(rename = "response.reasoning_summary_part.added")]
+    ReasoningSummaryPartAdded,
+    /// Full reasoning text delta.
+    #[serde(rename = "response.reasoning_text.delta")]
+    ReasoningTextDelta,
     /// Streaming reasoning summary text.
-    pub const REASONING_SUMMARY_TEXT_DELTA: &str = "response.reasoning_summary_text.delta";
+    #[serde(rename = "response.reasoning_summary_text.delta")]
+    ReasoningSummaryTextDelta,
     /// Streaming function call arguments.
-    pub const FUNCTION_CALL_ARGS_DELTA: &str = "response.function_call_arguments.delta";
+    #[serde(rename = "response.function_call_arguments.delta")]
+    FunctionCallArgsDelta,
     /// Final complete response.
-    pub const COMPLETED: &str = "response.completed";
+    #[serde(rename = "response.completed")]
+    Completed,
+    /// Forward-compatible catch-all for unknown event types.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Output item types from the Responses API.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputItemType {
+    /// Function call (tool use by assistant).
+    FunctionCall,
+    /// Message content.
+    Message,
+    /// Reasoning/thinking.
+    Reasoning,
+    /// Forward-compatible catch-all for unknown item types.
+    #[default]
+    #[serde(other)]
+    Unknown,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -775,7 +773,7 @@ mod tests {
             "content_index": 0,
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(event.event_type, event_types::OUTPUT_TEXT_DELTA);
+        assert_eq!(event.event_type, SseEventType::OutputTextDelta);
         assert_eq!(event.delta.as_deref(), Some("Hello "));
         assert_eq!(event.content_index, Some(0));
     }
@@ -791,9 +789,9 @@ mod tests {
             },
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(event.event_type, event_types::OUTPUT_ITEM_ADDED);
+        assert_eq!(event.event_type, SseEventType::OutputItemAdded);
         let item = event.item.unwrap();
-        assert_eq!(item.item_type, "function_call");
+        assert_eq!(item.item_type, OutputItemType::FunctionCall);
         assert_eq!(item.call_id.as_deref(), Some("call_abc"));
         assert_eq!(item.name.as_deref(), Some("bash"));
     }
@@ -806,7 +804,7 @@ mod tests {
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
         let item = event.item.unwrap();
-        assert_eq!(item.item_type, "reasoning");
+        assert_eq!(item.item_type, OutputItemType::Reasoning);
     }
 
     #[test]
@@ -817,7 +815,7 @@ mod tests {
             "summary_index": 0,
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(event.event_type, event_types::REASONING_SUMMARY_TEXT_DELTA);
+        assert_eq!(event.event_type, SseEventType::ReasoningSummaryTextDelta);
         assert_eq!(event.delta.as_deref(), Some("Thinking about..."));
     }
 
@@ -829,7 +827,7 @@ mod tests {
             "delta": r#"{"cmd":"#,
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(event.event_type, event_types::FUNCTION_CALL_ARGS_DELTA);
+        assert_eq!(event.event_type, SseEventType::FunctionCallArgsDelta);
         assert_eq!(event.call_id.as_deref(), Some("call_abc"));
     }
 
@@ -844,12 +842,30 @@ mod tests {
             },
         });
         let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-        assert_eq!(event.event_type, event_types::COMPLETED);
+        assert_eq!(event.event_type, SseEventType::Completed);
         let resp = event.response.unwrap();
         assert_eq!(resp.id.as_deref(), Some("resp_123"));
         let usage = resp.usage.unwrap();
         assert_eq!(usage.input_tokens, 100);
         assert_eq!(usage.output_tokens, 50);
+    }
+
+    #[test]
+    fn sse_unknown_event_type_deserializes() {
+        let json = json!({
+            "type": "response.new_feature.delta",
+        });
+        let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(event.event_type, SseEventType::Unknown);
+    }
+
+    #[test]
+    fn output_item_type_unknown_deserializes() {
+        let json = json!({
+            "type": "new_item_type",
+        });
+        let item: ResponsesOutputItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.item_type, OutputItemType::Unknown);
     }
 
     #[test]
@@ -875,7 +891,7 @@ mod tests {
     #[test]
     fn output_item_function_call() {
         let item = ResponsesOutputItem {
-            item_type: "function_call".into(),
+            item_type: OutputItemType::FunctionCall,
             call_id: Some("call_abc".into()),
             name: Some("bash".into()),
             arguments: Some(r#"{"cmd":"ls"}"#.into()),

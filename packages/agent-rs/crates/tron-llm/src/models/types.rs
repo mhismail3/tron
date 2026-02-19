@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 // Re-export from tron-core as the canonical Provider type.
 pub use tron_core::messages::Provider;
 
-/// Backward-compatible alias — use [`Provider`] in new code.
+/// Backward-compatible alias — use [`Provider`] directly in new code.
+#[deprecated(note = "Use `Provider` directly")]
 pub type ProviderType = Provider;
 
 /// Model tier classification.
@@ -56,6 +57,7 @@ impl ModelTier {
 /// for use in the UI model catalog and provider factory.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ModelInfo {
     /// API model ID (e.g., `"claude-opus-4-6"`).
     pub id: String,
@@ -66,7 +68,7 @@ pub struct ModelInfo {
     /// Model family (e.g., `"Claude 4.6"`, `"GPT-5.3"`).
     pub family: String,
     /// Provider that serves this model.
-    pub provider: ProviderType,
+    pub provider: Provider,
     /// Performance tier.
     pub tier: ModelTier,
     /// Context window size in tokens.
@@ -205,6 +207,7 @@ pub fn format_model_pricing(cost_per_million: f64) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

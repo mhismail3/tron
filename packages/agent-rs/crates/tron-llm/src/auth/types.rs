@@ -256,6 +256,20 @@ pub struct OAuthConfig {
     pub token_expiry_buffer_seconds: i64,
 }
 
+/// OAuth token refresh response from any provider's token endpoint.
+///
+/// Uses `Option<String>` for `refresh_token` because some providers
+/// (e.g., Google) may omit it when reusing the existing refresh token.
+#[derive(Debug, serde::Deserialize)]
+pub struct OAuthTokenRefreshResponse {
+    /// New access token.
+    pub access_token: String,
+    /// New refresh token (absent when the provider reuses the existing one).
+    pub refresh_token: Option<String>,
+    /// Token lifetime in seconds.
+    pub expires_in: i64,
+}
+
 /// Current system time in milliseconds since Unix epoch.
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -474,6 +488,23 @@ mod tests {
         // Should be approximately now + (3600 - 300) * 1000 = now + 3_300_000
         assert!(result >= before + 3_300_000);
         assert!(result <= after + 3_300_000);
+    }
+
+    #[test]
+    fn oauth_token_refresh_response_with_refresh_token() {
+        let json = r#"{"access_token":"at","refresh_token":"rt","expires_in":3600}"#;
+        let resp: OAuthTokenRefreshResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.access_token, "at");
+        assert_eq!(resp.refresh_token.as_deref(), Some("rt"));
+        assert_eq!(resp.expires_in, 3600);
+    }
+
+    #[test]
+    fn oauth_token_refresh_response_without_refresh_token() {
+        let json = r#"{"access_token":"at","expires_in":3600}"#;
+        let resp: OAuthTokenRefreshResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.access_token, "at");
+        assert!(resp.refresh_token.is_none());
     }
 
     #[test]

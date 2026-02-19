@@ -81,7 +81,7 @@ pub async fn exchange_code_for_tokens_with_client(
     let data: TokenResponse = resp.json().await?;
     Ok(OAuthTokens {
         access_token: data.access_token,
-        refresh_token: data.refresh_token,
+        refresh_token: data.refresh_token.unwrap_or_default(),
         expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
     })
 }
@@ -122,7 +122,9 @@ pub async fn refresh_token_with_client(
     let data: TokenResponse = resp.json().await?;
     Ok(OAuthTokens {
         access_token: data.access_token,
-        refresh_token: data.refresh_token,
+        refresh_token: data
+            .refresh_token
+            .unwrap_or_else(|| refresh_token.to_string()),
         expires_at: calculate_expires_at(data.expires_in, config.token_expiry_buffer_seconds),
     })
 }
@@ -278,12 +280,9 @@ async fn maybe_refresh_tokens(
 }
 
 /// Token endpoint response.
-#[derive(serde::Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: String,
-    expires_in: i64,
-}
+///
+/// Uses the shared [`super::types::OAuthTokenRefreshResponse`] type.
+type TokenResponse = super::types::OAuthTokenRefreshResponse;
 
 /// URL-encode a string for use in query parameters.
 fn urlencoded(s: &str) -> String {

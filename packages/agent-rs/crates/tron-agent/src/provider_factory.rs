@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, warn};
 use tron_llm::models::registry::{detect_provider_from_model, strip_provider_prefix};
-use tron_llm::models::types::ProviderType;
+use tron_core::messages::Provider as ProviderType;
 use tron_llm::provider::{Provider, ProviderError, ProviderFactory};
 
 // ─── Captured settings ───────────────────────────────────────────────
@@ -366,7 +366,7 @@ impl DefaultProviderFactory {
 impl ProviderFactory for DefaultProviderFactory {
     async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         let bare_model = strip_provider_prefix(model);
-        let provider_type = detect_provider_from_model(model, true).ok_or_else(|| {
+        let provider_type = detect_provider_from_model(model).ok_or_else(|| {
             ProviderError::UnsupportedModel {
                 model: model.to_string(),
             }

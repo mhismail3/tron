@@ -157,12 +157,9 @@ async fn maybe_refresh_tokens(
 }
 
 /// `OpenAI` token endpoint response.
-#[derive(serde::Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: i64,
-}
+///
+/// Uses the shared [`super::types::OAuthTokenRefreshResponse`] type.
+type TokenResponse = super::types::OAuthTokenRefreshResponse;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests

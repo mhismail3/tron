@@ -25,6 +25,7 @@
 pub mod anthropic;
 pub mod auth;
 pub mod context_composition;
+pub mod error_parsing;
 pub mod google;
 pub mod health;
 pub mod id_remapping;
@@ -35,6 +36,7 @@ pub mod provider;
 pub mod retry;
 pub mod sse;
 pub mod stop_reason;
+pub mod stream_pipeline;
 pub mod tokens;
 pub mod tool_parsing;
 
@@ -51,13 +53,14 @@ pub use models::registry::{
     all_model_ids, detect_provider_from_model, is_model_supported, model_supports_images,
     strip_provider_prefix,
 };
+#[allow(deprecated)]
 pub use models::types::{
     ModelCapabilities, ModelCategory, ModelInfo, ModelTier, ProviderType, calculate_cost,
     format_context_window, format_model_pricing,
 };
 pub use provider::{
-    Provider, ProviderError, ProviderFactory, ProviderResult, ProviderStreamOptions,
-    StreamEventStream,
+    AnthropicEffortLevel, Provider, ProviderError, ProviderFactory, ProviderResult,
+    ProviderStreamOptions, ReasoningEffort, StreamEventStream,
 };
 pub use retry::{StreamFactory, StreamRetryConfig, with_provider_retry};
 pub use sse::{SseParserOptions, parse_sse_data, parse_sse_lines};

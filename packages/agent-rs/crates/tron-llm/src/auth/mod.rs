@@ -26,8 +26,9 @@ pub use errors::AuthError;
 pub use pkce::{PkcePair, generate_pkce};
 pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
 pub use types::{
-    AuthStorage, GoogleAuth, GoogleOAuthEndpoint, GoogleProviderAuth, OAuthConfig, OAuthTokens,
-    ProviderAuth, ServerAuth, ServiceAuth, calculate_expires_at, now_ms, should_refresh,
+    AuthStorage, GoogleAuth, GoogleOAuthEndpoint, GoogleProviderAuth, OAuthConfig,
+    OAuthTokenRefreshResponse, OAuthTokens, ProviderAuth, ServerAuth, ServiceAuth,
+    calculate_expires_at, now_ms, should_refresh,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

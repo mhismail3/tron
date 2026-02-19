@@ -16,21 +16,17 @@
 //! message prepended to the input. On the first turn (no assistant messages yet),
 //! a tool clarification message is also prepended.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use async_trait::async_trait;
 use base64::Engine as _;
-use futures::stream::{self, StreamExt};
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
 use crate::compose_context_parts;
-use crate::models::types::ProviderType;
+use crate::provider::ReasoningEffort;
+use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::sse::parse_sse_lines;
-use tron_core::events::StreamEvent;
 use tron_core::messages::{Context, Message};
 
 use super::message_converter::{
@@ -127,22 +123,10 @@ fn to_standard_base64(input: &str) -> String {
     }
 }
 
-/// Check if OAuth tokens need to be refreshed.
-///
-/// Returns `true` if the current time is within the expiry buffer
-/// of the token's `expires_at` timestamp (milliseconds since epoch).
-pub fn should_refresh_tokens(expires_at: i64) -> bool {
-    let now_ms = now_millis();
-    now_ms > expires_at.saturating_sub(TOKEN_EXPIRY_BUFFER_MS)
-}
-
 /// OAuth token refresh response.
-#[derive(serde::Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: String,
-    expires_in: i64,
-}
+///
+/// Uses the shared [`crate::auth::OAuthTokenRefreshResponse`] type.
+type TokenResponse = crate::auth::OAuthTokenRefreshResponse;
 
 /// Refresh OAuth tokens using the `refresh_token` grant.
 ///
@@ -185,21 +169,14 @@ async fn refresh_tokens(
 
     let new_tokens = crate::auth::OAuthTokens {
         access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        expires_at: now_millis() + data.expires_in * 1000,
+        refresh_token: data
+            .refresh_token
+            .unwrap_or_else(|| refresh_token.to_string()),
+        expires_at: crate::auth::now_ms() + data.expires_in * 1000,
     };
 
     info!("Successfully refreshed OpenAI OAuth tokens");
     Ok(new_tokens)
-}
-
-/// Current time in milliseconds since epoch.
-#[allow(clippy::cast_possible_truncation)] // u128->i64 truncation won't happen before year ~292 million
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -277,7 +254,7 @@ impl OpenAIProvider {
     #[instrument(skip_all)]
     async fn ensure_valid_tokens(&self) -> ProviderResult<()> {
         let mut tokens = self.tokens.lock().await;
-        if should_refresh_tokens(tokens.expires_at) {
+        if crate::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS) {
             let new_tokens =
                 refresh_tokens(&tokens.refresh_token, &self.provider_settings, &self.client)
                     .await?;
@@ -322,7 +299,8 @@ impl OpenAIProvider {
     fn resolve_reasoning_effort(&self, options: &ProviderStreamOptions) -> String {
         options
             .reasoning_effort
-            .as_deref()
+            .as_ref()
+            .map(ReasoningEffort::as_str)
             .or(self.config.reasoning_effort.as_deref())
             .or(self.provider_settings.default_reasoning_effort.as_deref())
             .unwrap_or_else(|| {
@@ -448,83 +426,34 @@ impl OpenAIProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(tron_core::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            let err_info = crate::error_parsing::parse_api_error(&body_text, status.as_u16());
             error!(
                 status = status.as_u16(),
-                code = code.as_deref().unwrap_or("unknown"),
+                code = err_info.code.as_deref().unwrap_or("unknown"),
                 body = %body_text,
-                retryable,
+                retryable = err_info.retryable,
                 "OpenAI API error"
             );
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
-                    message,
+                    message: err_info.message,
                 });
             }
             return Err(ProviderError::Api {
                 status: status.as_u16(),
-                message,
-                code,
-                retryable,
+                message: err_info.message,
+                code: err_info.code,
+                retryable: err_info.retryable,
             });
         }
 
-        let byte_stream = response.bytes_stream();
-        let sse_lines = parse_sse_lines(byte_stream, &SSE_OPTIONS);
-
-        let event_stream = sse_lines
-            .scan(create_stream_state(), |state, line| {
-                let event: ResponsesSseEvent = match serde_json::from_str(&line) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        warn!(line = %line, error = %e, "Failed to parse OpenAI SSE event");
-                        return std::future::ready(Some(vec![]));
-                    }
-                };
-                let events = process_stream_event(&event, state);
-                std::future::ready(Some(events))
-            })
-            .flat_map(stream::iter)
-            .map(Ok);
-
-        Ok(Box::pin(event_stream))
-    }
-}
-
-/// Parse an API error response body.
-///
-/// Handles multiple error formats:
-/// - Standard: `{"error": {"message": "...", "type": "..."}}`
-/// - Detail:   `{"detail": "..."}`
-/// - Flat:     `{"message": "..."}`
-fn parse_api_error(body: &str, status: u16) -> (String, Option<String>, bool) {
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-        let retryable = status == 429 || status >= 500;
-
-        // Standard OpenAI error envelope
-        if let Some(msg) = json["error"]["message"].as_str() {
-            let code = json["error"]["type"].as_str().map(String::from);
-            return (msg.to_string(), code, retryable);
-        }
-
-        // Alternative formats: {"detail": "..."} or {"message": "..."}
-        if let Some(msg) = json["detail"].as_str().or_else(|| json["message"].as_str()) {
-            let code = json["code"]
-                .as_str()
-                .or_else(|| json["type"].as_str())
-                .map(String::from);
-            return (msg.to_string(), code, retryable);
-        }
-
-        // JSON but unrecognized structure — include raw body
-        (format!("HTTP {status}: {body}"), None, retryable)
-    } else {
-        (
-            format!("HTTP {status}: {body}"),
-            None,
-            status == 429 || status >= 500,
-        )
+        Ok(crate::stream_pipeline::sse_to_event_stream::<ResponsesSseEvent, _, _>(
+            response,
+            &SSE_OPTIONS,
+            create_stream_state(),
+            process_stream_event,
+        ))
     }
 }
 
@@ -546,16 +475,10 @@ impl Provider for OpenAIProvider {
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
         self.ensure_valid_tokens().await?;
-
-        let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = match self.stream_internal(context, options).await {
-            Ok(s) => s,
-            Err(e) => {
-                error!(error = %e, "OpenAI stream failed");
-                return Err(e);
-            }
-        };
-        Ok(Box::pin(start_event.chain(inner_stream)))
+        crate::stream_pipeline::wrap_provider_stream(
+            "openai",
+            self.stream_internal(context, options).await,
+        )
     }
 }
 
@@ -566,13 +489,13 @@ impl Provider for OpenAIProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openai::types::OpenAIApiSettings;
+    use crate::openai::types::{OpenAIApiSettings, ReasoningEffort};
 
     fn test_tokens() -> crate::auth::OAuthTokens {
         crate::auth::OAuthTokens {
             access_token: "test-token".into(),
             refresh_token: "test-refresh".into(),
-            expires_at: now_millis() + 3_600_000, // 1 hour from now
+            expires_at: crate::auth::now_ms() + 3_600_000, // 1 hour from now
         }
     }
 
@@ -682,34 +605,47 @@ mod tests {
         assert_eq!(extract_account_id(&token), "");
     }
 
-    // ── should_refresh_tokens ─────────────────────────────────────────
+    // ── token refresh (via shared crate::auth::should_refresh) ────────
 
     #[test]
     fn should_refresh_when_expired() {
-        let expires_at = now_millis().saturating_sub(600_000);
-        assert!(should_refresh_tokens(expires_at));
+        let tokens = crate::auth::OAuthTokens {
+            access_token: "t".into(),
+            refresh_token: "r".into(),
+            expires_at: crate::auth::now_ms().saturating_sub(600_000),
+        };
+        assert!(crate::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
     }
 
     #[test]
     fn should_refresh_within_buffer() {
-        // Expires in 2 minutes (within 5-minute buffer)
-        let expires_at = now_millis() + 120_000;
-        assert!(should_refresh_tokens(expires_at));
+        let tokens = crate::auth::OAuthTokens {
+            access_token: "t".into(),
+            refresh_token: "r".into(),
+            expires_at: crate::auth::now_ms() + 120_000,
+        };
+        assert!(crate::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
     }
 
     #[test]
     fn should_not_refresh_when_valid() {
-        // Expires in 1 hour
-        let expires_at = now_millis() + 3_600_000;
-        assert!(!should_refresh_tokens(expires_at));
+        let tokens = crate::auth::OAuthTokens {
+            access_token: "t".into(),
+            refresh_token: "r".into(),
+            expires_at: crate::auth::now_ms() + 3_600_000,
+        };
+        assert!(!crate::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
     }
 
     #[test]
     fn should_refresh_at_exact_boundary() {
-        // Expires exactly at the buffer boundary
-        let expires_at = now_millis() + TOKEN_EXPIRY_BUFFER_MS;
-        // At the exact boundary, now_ms > expires_at - buffer => now_ms > now_ms => false
-        assert!(!should_refresh_tokens(expires_at));
+        let tokens = crate::auth::OAuthTokens {
+            access_token: "t".into(),
+            refresh_token: "r".into(),
+            expires_at: crate::auth::now_ms() + TOKEN_EXPIRY_BUFFER_MS,
+        };
+        // Shared version uses >=, so at exact boundary it refreshes (safer)
+        assert!(crate::auth::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS));
     }
 
     // ── build_headers ────────────────────────────────────────────────
@@ -765,7 +701,7 @@ mod tests {
     fn reasoning_effort_from_options() {
         let provider = OpenAIProvider::new(test_config());
         let options = ProviderStreamOptions {
-            reasoning_effort: Some("high".into()),
+            reasoning_effort: Some(ReasoningEffort::High),
             ..Default::default()
         };
         assert_eq!(provider.resolve_reasoning_effort(&options), "high");
@@ -803,7 +739,7 @@ mod tests {
         config.reasoning_effort = Some("low".into());
         let provider = OpenAIProvider::new(config);
         let options = ProviderStreamOptions {
-            reasoning_effort: Some("max".into()),
+            reasoning_effort: Some(ReasoningEffort::Max),
             ..Default::default()
         };
         assert_eq!(provider.resolve_reasoning_effort(&options), "max");
@@ -866,65 +802,7 @@ mod tests {
         assert!(!OpenAIProvider::is_first_turn(&messages));
     }
 
-    // ── parse_api_error ───────────────────────────────────────────────
-
-    #[test]
-    fn parse_api_error_json() {
-        let body = r#"{"error":{"type":"server_error","message":"Internal error"}}"#;
-        let (msg, code, retryable) = parse_api_error(body, 500);
-        assert_eq!(msg, "Internal error");
-        assert_eq!(code.as_deref(), Some("server_error"));
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_non_json() {
-        let (msg, code, retryable) = parse_api_error("Bad Gateway", 502);
-        assert!(msg.contains("502"));
-        assert!(code.is_none());
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_400_not_retryable() {
-        let body = r#"{"error":{"type":"invalid_request","message":"Bad request"}}"#;
-        let (msg, _, retryable) = parse_api_error(body, 400);
-        assert_eq!(msg, "Bad request");
-        assert!(!retryable);
-    }
-
-    #[test]
-    fn parse_api_error_429_retryable() {
-        let body = r#"{"error":{"type":"rate_limit","message":"Too many requests"}}"#;
-        let (_, _, retryable) = parse_api_error(body, 429);
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_missing_fields() {
-        let body = r#"{"error":{}}"#;
-        let (msg, code, _) = parse_api_error(body, 400);
-        assert!(msg.contains("400"));
-        assert!(msg.contains(r#"{"error":{}}"#));
-        assert!(code.is_none());
-    }
-
-    #[test]
-    fn parse_api_error_detail_format() {
-        let body = r#"{"detail":"Model not found"}"#;
-        let (msg, code, retryable) = parse_api_error(body, 404);
-        assert_eq!(msg, "Model not found");
-        assert!(code.is_none());
-        assert!(!retryable);
-    }
-
-    #[test]
-    fn parse_api_error_flat_message_format() {
-        let body = r#"{"message":"Invalid model","code":"model_not_found"}"#;
-        let (msg, code, _) = parse_api_error(body, 400);
-        assert_eq!(msg, "Invalid model");
-        assert_eq!(code.as_deref(), Some("model_not_found"));
-    }
+    // ── parse_api_error (via shared crate::error_parsing) ─────────────
 
     // ── to_standard_base64 ──────────────────────────────────────────
 
@@ -971,7 +849,7 @@ mod tests {
 
         assert_eq!(tokens.access_token, "new-access-token");
         assert_eq!(tokens.refresh_token, "new-refresh-token");
-        assert!(tokens.expires_at > now_millis());
+        assert!(tokens.expires_at > crate::auth::now_ms());
     }
 
     #[tokio::test]

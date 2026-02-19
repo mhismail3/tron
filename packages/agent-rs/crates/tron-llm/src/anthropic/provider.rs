@@ -5,21 +5,16 @@
 //! extended thinking (adaptive for Opus 4.6, budget-based for older models),
 //! and effort levels.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 
-use crate::models::types::ProviderType;
+use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::sse::parse_sse_lines;
 use crate::{compose_context_parts, compose_context_parts_grouped};
-use tron_core::events::StreamEvent;
 use tron_core::messages::Context;
 
 use super::cache_pruning::{
@@ -288,12 +283,12 @@ impl AnthropicProvider {
 
     /// Build output configuration (effort levels).
     fn build_output_config(&self, options: &ProviderStreamOptions) -> Option<Value> {
-        let effort = options.effort_level.as_deref()?;
+        let effort = options.effort_level.as_ref()?;
         let model_info = get_claude_model(&self.config.model)?;
         if !model_info.supports_effort {
             return None;
         }
-        Some(json!({ "effort": effort }))
+        Some(json!({ "effort": effort.as_str() }))
     }
 
     /// Calculate `max_tokens` for the request.
@@ -407,79 +402,40 @@ impl AnthropicProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(tron_core::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            let err_info = crate::error_parsing::parse_api_error(&body_text, status.as_u16());
             error!(
                 status = status.as_u16(),
-                code = code.as_deref().unwrap_or("unknown"),
-                retryable,
+                code = err_info.code.as_deref().unwrap_or("unknown"),
+                retryable = err_info.retryable,
                 "Anthropic API error"
             );
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
-                    message,
+                    message: err_info.message,
                 });
             }
             return Err(ProviderError::Api {
                 status: status.as_u16(),
-                message,
-                code,
-                retryable,
+                message: err_info.message,
+                code: err_info.code,
+                retryable: err_info.retryable,
             });
         }
 
-        // Parse SSE stream
-        let byte_stream = response.bytes_stream();
-        let sse_lines = parse_sse_lines(byte_stream, &SSE_OPTIONS);
-
-        let event_stream = sse_lines
-            .scan(create_stream_state(), |state, line| {
-                // Parse the SSE data as JSON
-                let event: AnthropicSseEvent = match serde_json::from_str(&line) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        warn!(line = %line, error = %e, "Failed to parse SSE event");
-                        return std::future::ready(Some(vec![]));
-                    }
-                };
-
-                let events = process_sse_event(&event, state);
-                std::future::ready(Some(events))
-            })
-            .flat_map(stream::iter)
-            .map(Ok);
-
-        Ok(Box::pin(event_stream))
+        Ok(crate::stream_pipeline::sse_to_event_stream::<AnthropicSseEvent, _, _>(
+            response,
+            &SSE_OPTIONS,
+            create_stream_state(),
+            process_sse_event,
+        ))
     }
 }
 
-/// Current time in milliseconds since epoch.
-#[allow(clippy::cast_possible_truncation)] // u128→u64 truncation won't happen before year 584 million
+/// Current time in milliseconds since epoch (as `u64` for elapsed-time logging).
+#[allow(clippy::cast_sign_loss)]
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
-/// Parse an API error response body.
-fn parse_api_error(body: &str, status: u16) -> (String, Option<String>, bool) {
-    if let Ok(json) = serde_json::from_str::<Value>(body) {
-        let error = &json["error"];
-        let message = error["message"]
-            .as_str()
-            .unwrap_or("Unknown error")
-            .to_string();
-        let code = error["type"].as_str().map(String::from);
-        let retryable = status == 429 || status >= 500;
-        (message, code, retryable)
-    } else {
-        (
-            format!("HTTP {status}: {body}"),
-            None,
-            status == 429 || status >= 500,
-        )
-    }
+    crate::auth::now_ms() as u64
 }
 
 #[async_trait]
@@ -499,15 +455,10 @@ impl Provider for AnthropicProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
-        let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = match self.stream_internal(context, options).await {
-            Ok(s) => s,
-            Err(e) => {
-                error!(error = %e, "Anthropic stream failed");
-                return Err(e);
-            }
-        };
-        Ok(Box::pin(start_event.chain(inner_stream)))
+        crate::stream_pipeline::wrap_provider_stream(
+            "anthropic",
+            self.stream_internal(context, options).await,
+        )
     }
 }
 
@@ -519,6 +470,7 @@ impl Provider for AnthropicProvider {
 mod tests {
     use super::*;
     use crate::anthropic::types::AnthropicProviderSettings;
+    use crate::provider::AnthropicEffortLevel;
 
     fn test_config(auth: AnthropicAuth) -> AnthropicConfig {
         AnthropicConfig {
@@ -548,25 +500,10 @@ mod tests {
         })
     }
 
-    fn empty_context() -> Context {
-        Context {
-            system_prompt: None,
-            messages: vec![],
-            tools: None,
-            working_directory: None,
-            rules_content: None,
-            memory_content: None,
-            skill_context: None,
-            subagent_results_context: None,
-            task_context: None,
-            dynamic_rules_context: None,
-        }
-    }
-
     fn context_with_system(prompt: &str) -> Context {
         Context {
             system_prompt: Some(prompt.into()),
-            ..empty_context()
+            ..Context::default()
         }
     }
 
@@ -723,7 +660,7 @@ mod tests {
     #[test]
     fn system_param_empty_context() {
         let provider = AnthropicProvider::new(api_key_config());
-        let ctx = empty_context();
+        let ctx = Context::default();
         assert!(provider.build_system_param(&ctx).is_none());
     }
 
@@ -746,7 +683,7 @@ mod tests {
             system_prompt: Some("System".into()),
             rules_content: Some("Rules".into()),
             skill_context: Some("Skills".into()),
-            ..empty_context()
+            ..Context::default()
         };
         let param = provider.build_system_param(&ctx).unwrap();
         let blocks: Vec<Value> = serde_json::from_value(param).unwrap();
@@ -770,7 +707,7 @@ mod tests {
         let provider = AnthropicProvider::new(oauth_config());
         let ctx = Context {
             system_prompt: Some("System".into()),
-            ..empty_context()
+            ..Context::default()
         };
         let param = provider.build_system_param(&ctx).unwrap();
         let blocks: Vec<Value> = serde_json::from_value(param).unwrap();
@@ -785,7 +722,7 @@ mod tests {
     #[test]
     fn build_tools_none() {
         let provider = AnthropicProvider::new(api_key_config());
-        let ctx = empty_context();
+        let ctx = Context::default();
         assert!(provider.build_tools(&ctx).is_none());
     }
 
@@ -804,7 +741,7 @@ mod tests {
                     extra: Default::default(),
                 },
             }]),
-            ..empty_context()
+            ..Context::default()
         };
         let tools = provider.build_tools(&ctx).unwrap();
         assert_eq!(tools.len(), 1);
@@ -840,7 +777,7 @@ mod tests {
                     },
                 },
             ]),
-            ..empty_context()
+            ..Context::default()
         };
         let tools = provider.build_tools(&ctx).unwrap();
         assert!(tools[0].cache_control.is_none()); // First tool: no cache
@@ -905,7 +842,7 @@ mod tests {
     fn output_config_opus_46_with_effort() {
         let provider = AnthropicProvider::new(api_key_config());
         let options = ProviderStreamOptions {
-            effort_level: Some("high".into()),
+            effort_level: Some(AnthropicEffortLevel::High),
             ..Default::default()
         };
         let config = provider.build_output_config(&options).unwrap();
@@ -925,7 +862,7 @@ mod tests {
         cfg.model = "claude-sonnet-4-5-20250929".into();
         let provider = AnthropicProvider::new(cfg);
         let options = ProviderStreamOptions {
-            effort_level: Some("high".into()),
+            effort_level: Some(AnthropicEffortLevel::High),
             ..Default::default()
         };
         assert!(provider.build_output_config(&options).is_none());
@@ -976,39 +913,7 @@ mod tests {
         assert!(req.output_config.is_none());
     }
 
-    // ── API error parsing ───────────────────────────────────────────────
-
-    #[test]
-    fn parse_api_error_json() {
-        let body = r#"{"error":{"type":"overloaded_error","message":"Overloaded"}}"#;
-        let (msg, code, retryable) = parse_api_error(body, 529);
-        assert_eq!(msg, "Overloaded");
-        assert_eq!(code.as_deref(), Some("overloaded_error"));
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_non_json() {
-        let (msg, code, retryable) = parse_api_error("Bad Gateway", 502);
-        assert!(msg.contains("502"));
-        assert!(code.is_none());
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_400_not_retryable() {
-        let body = r#"{"error":{"type":"invalid_request_error","message":"Bad request"}}"#;
-        let (msg, _, retryable) = parse_api_error(body, 400);
-        assert_eq!(msg, "Bad request");
-        assert!(!retryable);
-    }
-
-    #[test]
-    fn parse_api_error_429_retryable() {
-        let body = r#"{"error":{"type":"rate_limit_error","message":"Rate limited"}}"#;
-        let (_, _, retryable) = parse_api_error(body, 429);
-        assert!(retryable);
-    }
+    // ── API error parsing (via shared crate::error_parsing) ────────────
 
     // ── Cache breakpoint on last user message ───────────────────────────
 

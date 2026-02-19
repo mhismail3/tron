@@ -442,15 +442,16 @@ pub struct GeminiApiError {
 
 /// Information about a Gemini model.
 #[derive(Clone, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct GeminiModelInfo {
     /// Human-readable name.
     pub name: &'static str,
     /// Short display name.
     pub short_name: &'static str,
     /// Context window size in tokens.
-    pub context_window: u32,
+    pub context_window: u64,
     /// Maximum output tokens.
-    pub max_output: u32,
+    pub max_output: u64,
     /// Whether the model supports tool use.
     pub supports_tools: bool,
     /// Whether the model supports image inputs.
@@ -463,10 +464,10 @@ pub struct GeminiModelInfo {
     pub preview: bool,
     /// Default thinking level for Gemini 3 models.
     pub default_thinking_level: Option<GeminiThinkingLevel>,
-    /// Input cost per 1K tokens.
-    pub input_cost_per_1k: f64,
-    /// Output cost per 1K tokens.
-    pub output_cost_per_1k: f64,
+    /// Input cost per million tokens (USD).
+    pub input_cost_per_million: f64,
+    /// Output cost per million tokens (USD).
+    pub output_cost_per_million: f64,
 }
 
 /// Model registry mapping model IDs to their metadata.
@@ -486,8 +487,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "pro",
             preview: true,
             default_thinking_level: Some(GeminiThinkingLevel::High),
-            input_cost_per_1k: 0.001_25,
-            output_cost_per_1k: 0.005,
+            input_cost_per_million: 1.25,
+            output_cost_per_million: 5.0,
         },
     );
     m.insert(
@@ -503,8 +504,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "flash",
             preview: true,
             default_thinking_level: None,
-            input_cost_per_1k: 0.000_075,
-            output_cost_per_1k: 0.000_3,
+            input_cost_per_million: 0.075,
+            output_cost_per_million: 0.3,
         },
     );
     m.insert(
@@ -520,8 +521,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "pro",
             preview: false,
             default_thinking_level: Some(GeminiThinkingLevel::High),
-            input_cost_per_1k: 0.001_25,
-            output_cost_per_1k: 0.005,
+            input_cost_per_million: 1.25,
+            output_cost_per_million: 5.0,
         },
     );
     m.insert(
@@ -537,8 +538,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "flash",
             preview: false,
             default_thinking_level: Some(GeminiThinkingLevel::Low),
-            input_cost_per_1k: 0.000_075,
-            output_cost_per_1k: 0.000_3,
+            input_cost_per_million: 0.075,
+            output_cost_per_million: 0.3,
         },
     );
     m.insert(
@@ -554,8 +555,8 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
             tier: "flash-lite",
             preview: false,
             default_thinking_level: None,
-            input_cost_per_1k: 0.000_037_5,
-            output_cost_per_1k: 0.000_15,
+            input_cost_per_million: 0.037_5,
+            output_cost_per_million: 0.15,
         },
     );
     m

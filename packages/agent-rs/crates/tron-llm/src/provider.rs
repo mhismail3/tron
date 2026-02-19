@@ -14,7 +14,82 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tron_core::events::StreamEvent;
 
-use crate::models::types::ProviderType;
+use tron_core::messages::Provider as ProviderType;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Typed effort / reasoning enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Anthropic effort level for output configuration.
+///
+/// Controls how much effort the model puts into generating a response.
+/// Valid values for the Anthropic API: `low`, `medium`, `high`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnthropicEffortLevel {
+    /// Low effort.
+    Low,
+    /// Medium effort.
+    Medium,
+    /// High effort.
+    High,
+}
+
+impl AnthropicEffortLevel {
+    /// Returns the string representation for the API.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+impl std::fmt::Display for AnthropicEffortLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// `OpenAI` reasoning effort levels.
+///
+/// Controls how much reasoning the model performs before responding.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    /// Low reasoning effort.
+    Low,
+    /// Medium reasoning effort.
+    Medium,
+    /// High reasoning effort.
+    High,
+    /// Extra high reasoning effort.
+    Xhigh,
+    /// Maximum reasoning effort.
+    Max,
+}
+
+impl ReasoningEffort {
+    /// Returns the string representation for the API.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// Result type alias for provider operations.
 pub type ProviderResult<T> = Result<T, ProviderError>;
@@ -197,13 +272,13 @@ pub struct ProviderStreamOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<u32>,
 
-    /// Effort level string (Anthropic — `"low"`, `"medium"`, `"high"`).
+    /// Effort level (Anthropic — `low`, `medium`, `high`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort_level: Option<String>,
+    pub effort_level: Option<AnthropicEffortLevel>,
 
-    /// Reasoning effort (`OpenAI` — `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`).
+    /// Reasoning effort (`OpenAI` — `low`, `medium`, `high`, `xhigh`, `max`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
 
     /// Top-p sampling.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -336,7 +411,8 @@ mod tests {
             temperature: Some(0.7),
             enable_thinking: Some(true),
             thinking_budget: Some(10000),
-            reasoning_effort: Some("high".into()),
+            reasoning_effort: Some(ReasoningEffort::High),
+            effort_level: Some(AnthropicEffortLevel::Medium),
             ..Default::default()
         };
         let json = serde_json::to_string(&opts).unwrap();
@@ -345,7 +421,56 @@ mod tests {
         assert_eq!(back.temperature, Some(0.7));
         assert_eq!(back.enable_thinking, Some(true));
         assert_eq!(back.thinking_budget, Some(10000));
-        assert_eq!(back.reasoning_effort, Some("high".into()));
+        assert_eq!(back.reasoning_effort, Some(ReasoningEffort::High));
+        assert_eq!(back.effort_level, Some(AnthropicEffortLevel::Medium));
+    }
+
+    // ── Effort / reasoning enum tests ──
+
+    #[test]
+    fn anthropic_effort_level_serde_roundtrip() {
+        for (level, expected_str) in [
+            (AnthropicEffortLevel::Low, "low"),
+            (AnthropicEffortLevel::Medium, "medium"),
+            (AnthropicEffortLevel::High, "high"),
+        ] {
+            let json = serde_json::to_string(&level).unwrap();
+            assert_eq!(json, format!("\"{expected_str}\""));
+            let back: AnthropicEffortLevel = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, level);
+            assert_eq!(level.as_str(), expected_str);
+            assert_eq!(level.to_string(), expected_str);
+        }
+    }
+
+    #[test]
+    fn reasoning_effort_serde_roundtrip() {
+        for (effort, expected_str) in [
+            (ReasoningEffort::Low, "low"),
+            (ReasoningEffort::Medium, "medium"),
+            (ReasoningEffort::High, "high"),
+            (ReasoningEffort::Xhigh, "xhigh"),
+            (ReasoningEffort::Max, "max"),
+        ] {
+            let json = serde_json::to_string(&effort).unwrap();
+            assert_eq!(json, format!("\"{expected_str}\""));
+            let back: ReasoningEffort = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, effort);
+            assert_eq!(effort.as_str(), expected_str);
+            assert_eq!(effort.to_string(), expected_str);
+        }
+    }
+
+    #[test]
+    fn invalid_effort_level_fails_deser() {
+        let result = serde_json::from_str::<AnthropicEffortLevel>("\"xhigh\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_reasoning_effort_fails_deser() {
+        let result = serde_json::from_str::<ReasoningEffort>("\"ultra\"");
+        assert!(result.is_err());
     }
 
     // ── ProviderFactory tests ──

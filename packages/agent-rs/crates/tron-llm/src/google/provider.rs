@@ -17,18 +17,15 @@
 //! with a warning.
 
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::auth::{OAuthTokens, calculate_expires_at, should_refresh};
 use crate::compose_context_parts;
-use crate::models::types::ProviderType;
+use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::sse::parse_sse_lines;
-use tron_core::events::StreamEvent;
 use tron_core::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
@@ -36,9 +33,9 @@ use super::stream_handler::{create_stream_state, process_stream_chunk};
 use super::types::{
     ANTIGRAVITY_ENDPOINT, ANTIGRAVITY_VERSION, CLOUD_CODE_ASSIST_ENDPOINT,
     CLOUD_CODE_ASSIST_VERSION, DEFAULT_API_KEY_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS,
-    GenerationConfig, GoogleApiSettings, GoogleAuth, GoogleConfig, GoogleOAuthEndpoint,
-    SystemInstruction, SystemPart, ThinkingConfig, default_safety_settings, get_gemini_model,
-    is_gemini_3_model, map_to_antigravity_model,
+    GeminiStreamChunk, GenerationConfig, GoogleApiSettings, GoogleAuth, GoogleConfig,
+    GoogleOAuthEndpoint, SystemInstruction, SystemPart, ThinkingConfig,
+    default_safety_settings, get_gemini_model, is_gemini_3_model, map_to_antigravity_model,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,12 +61,9 @@ static SSE_OPTIONS: crate::SseParserOptions = crate::SseParserOptions {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// OAuth token refresh response.
-#[derive(serde::Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_in: i64,
-}
+///
+/// Uses the shared [`crate::auth::OAuthTokenRefreshResponse`] type.
+type TokenResponse = crate::auth::OAuthTokenRefreshResponse;
 
 /// Refresh Google OAuth tokens.
 #[instrument(skip_all)]
@@ -319,7 +313,8 @@ impl GoogleProvider {
             .max_tokens
             .or(self.config.max_tokens)
             .unwrap_or_else(|| {
-                get_gemini_model(model).map_or(DEFAULT_MAX_OUTPUT_TOKENS, |m| m.max_output)
+                #[allow(clippy::cast_possible_truncation)]
+                get_gemini_model(model).map_or(DEFAULT_MAX_OUTPUT_TOKENS, |m| m.max_output as u32)
             });
 
         let temperature = if is_gemini3 {
@@ -559,66 +554,33 @@ impl GoogleProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(tron_core::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            let err_info = crate::error_parsing::parse_api_error(&body_text, status.as_u16());
             error!(
                 status = status.as_u16(),
-                code = code.as_deref().unwrap_or("unknown"),
-                retryable,
+                code = err_info.code.as_deref().unwrap_or("unknown"),
+                retryable = err_info.retryable,
                 "Google API error"
             );
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
-                    message,
+                    message: err_info.message,
                 });
             }
             return Err(ProviderError::Api {
                 status: status.as_u16(),
-                message,
-                code,
-                retryable,
+                message: err_info.message,
+                code: err_info.code,
+                retryable: err_info.retryable,
             });
         }
 
-        let byte_stream = response.bytes_stream();
-        let sse_lines = parse_sse_lines(byte_stream, &SSE_OPTIONS);
-
-        let event_stream = sse_lines
-            .scan(create_stream_state(), |state, line| {
-                let chunk = match serde_json::from_str(&line) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!(line = %line, error = %e, "Failed to parse Gemini SSE chunk");
-                        return std::future::ready(Some(vec![]));
-                    }
-                };
-                let events = process_stream_chunk(&chunk, state);
-                std::future::ready(Some(events))
-            })
-            .flat_map(stream::iter)
-            .map(Ok);
-
-        Ok(Box::pin(event_stream))
-    }
-}
-
-/// Parse an API error response body.
-fn parse_api_error(body: &str, status: u16) -> (String, Option<String>, bool) {
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
-        let error = &json["error"];
-        let message = error["message"]
-            .as_str()
-            .unwrap_or("Unknown error")
-            .to_string();
-        let code = error["status"].as_str().map(String::from);
-        let retryable = status == 429 || status >= 500;
-        (message, code, retryable)
-    } else {
-        (
-            format!("HTTP {status}: {body}"),
-            None,
-            status == 429 || status >= 500,
-        )
+        Ok(crate::stream_pipeline::sse_to_event_stream::<GeminiStreamChunk, _, _>(
+            response,
+            &SSE_OPTIONS,
+            create_stream_state(),
+            process_stream_chunk,
+        ))
     }
 }
 
@@ -640,16 +602,10 @@ impl Provider for GoogleProvider {
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
         self.ensure_valid_tokens().await?;
-
-        let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = match self.stream_internal(context, options).await {
-            Ok(s) => s,
-            Err(e) => {
-                error!(error = %e, "Google stream failed");
-                return Err(e);
-            }
-        };
-        Ok(Box::pin(start_event.chain(inner_stream)))
+        crate::stream_pipeline::wrap_provider_stream(
+            "google",
+            self.stream_internal(context, options).await,
+        )
     }
 }
 
@@ -1062,31 +1018,7 @@ mod tests {
         assert!(body.get("model").is_none());
     }
 
-    // ── parse_api_error ───────────────────────────────────────────────
-
-    #[test]
-    fn parse_api_error_json() {
-        let body = r#"{"error":{"status":"NOT_FOUND","message":"Model not found"}}"#;
-        let (msg, code, retryable) = parse_api_error(body, 404);
-        assert_eq!(msg, "Model not found");
-        assert_eq!(code.as_deref(), Some("NOT_FOUND"));
-        assert!(!retryable);
-    }
-
-    #[test]
-    fn parse_api_error_non_json() {
-        let (msg, code, retryable) = parse_api_error("Bad Gateway", 502);
-        assert!(msg.contains("502"));
-        assert!(code.is_none());
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_429_retryable() {
-        let body = r#"{"error":{"message":"Rate limited"}}"#;
-        let (_, _, retryable) = parse_api_error(body, 429);
-        assert!(retryable);
-    }
+    // ── parse_api_error (via shared crate::error_parsing) ─────────────
 
     // ── Token refresh (mock server) ──────────────────────────────────
 

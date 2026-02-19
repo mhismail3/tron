@@ -17,7 +17,7 @@ use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
 use tron_core::messages::TokenUsage;
 
-use super::types::ResponsesSseEvent;
+use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
 
 /// State for tracking accumulated stream content.
 #[derive(Clone, Debug)]
@@ -78,8 +78,8 @@ pub fn process_stream_event(
 ) -> Vec<StreamEvent> {
     let mut events = Vec::new();
 
-    match event.event_type.as_str() {
-        "response.output_text.delta" => {
+    match event.event_type {
+        SseEventType::OutputTextDelta => {
             if let Some(delta) = &event.delta {
                 if !state.text_started {
                     state.text_started = true;
@@ -92,9 +92,9 @@ pub fn process_stream_event(
             }
         }
 
-        "response.output_item.added" => {
+        SseEventType::OutputItemAdded => {
             if let Some(item) = &event.item {
-                if item.item_type == "function_call" {
+                if item.item_type == OutputItemType::FunctionCall {
                     if let Some(call_id) = &item.call_id {
                         let name = item.name.clone().unwrap_or_default();
                         let initial_args = item.arguments.clone().unwrap_or_default();
@@ -111,25 +111,25 @@ pub fn process_stream_event(
                             name,
                         });
                     }
-                } else if item.item_type == "reasoning" && !state.thinking_started {
+                } else if item.item_type == OutputItemType::Reasoning && !state.thinking_started {
                     state.thinking_started = true;
                     events.push(StreamEvent::ThinkingStart);
                 }
             }
         }
 
-        "response.output_item.done" => {
+        SseEventType::OutputItemDone => {
             events.extend(handle_output_item_done(event, state));
         }
 
-        "response.reasoning_summary_part.added" => {
+        SseEventType::ReasoningSummaryPartAdded => {
             if !state.thinking_started {
                 state.thinking_started = true;
                 events.push(StreamEvent::ThinkingStart);
             }
         }
 
-        "response.reasoning_text.delta" => {
+        SseEventType::ReasoningTextDelta => {
             // Full reasoning content — preferred over summary when available.
             if let Some(delta) = &event.delta {
                 if !state.has_reasoning_text {
@@ -150,7 +150,7 @@ pub fn process_stream_event(
             }
         }
 
-        "response.reasoning_summary_text.delta" => {
+        SseEventType::ReasoningSummaryTextDelta => {
             // Skip summary deltas when we have full reasoning text.
             if state.has_reasoning_text {
                 return events;
@@ -170,7 +170,7 @@ pub fn process_stream_event(
             }
         }
 
-        "response.function_call_arguments.delta" => {
+        SseEventType::FunctionCallArgsDelta => {
             if let (Some(call_id), Some(delta)) = (&event.call_id, &event.delta) {
                 if let Some(tc) = state.tool_calls.get_mut(call_id.as_str()) {
                     tc.args.push_str(delta);
@@ -182,11 +182,11 @@ pub fn process_stream_event(
             }
         }
 
-        "response.completed" => {
+        SseEventType::Completed => {
             events.extend(process_completed_response(event, state));
         }
 
-        _ => {} // Ignore unknown event types
+        SseEventType::Unknown => {} // Ignore unknown event types
     }
 
     events
@@ -199,7 +199,7 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
         return events;
     };
     // Only process reasoning items with summary content not already streamed.
-    if item.item_type != "reasoning"
+    if item.item_type != OutputItemType::Reasoning
         || item.summary.is_none()
         || !state.accumulated_thinking.is_empty()
         || state.has_reasoning_text
@@ -293,11 +293,11 @@ fn merge_completed_output_items(
     events: &mut Vec<StreamEvent>,
 ) {
     for item in &response.output {
-        match item.item_type.as_str() {
-            "message" => merge_message_item(item, state),
-            "reasoning" => merge_reasoning_item(item, state, events),
-            "function_call" => merge_function_call_item(item, state),
-            _ => {}
+        match item.item_type {
+            OutputItemType::Message => merge_message_item(item, state),
+            OutputItemType::Reasoning => merge_reasoning_item(item, state, events),
+            OutputItemType::FunctionCall => merge_function_call_item(item, state),
+            OutputItemType::Unknown => {}
         }
     }
 }
@@ -431,12 +431,13 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
 mod tests {
     use super::*;
     use crate::openai::types::{
-        OutputContent, ResponsesOutputItem, ResponsesResponse, ResponsesUsage,
+        OutputContent, OutputItemType, ResponsesOutputItem, ResponsesResponse, ResponsesUsage,
+        SseEventType,
     };
 
     fn text_delta_event(delta: &str) -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.output_text.delta".into(),
+            event_type: SseEventType::OutputTextDelta,
             delta: Some(delta.into()),
             ..Default::default()
         }
@@ -444,9 +445,9 @@ mod tests {
 
     fn function_call_added_event(call_id: &str, name: &str) -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.output_item.added".into(),
+            event_type: SseEventType::OutputItemAdded,
             item: Some(ResponsesOutputItem {
-                item_type: "function_call".into(),
+                item_type: OutputItemType::FunctionCall,
                 call_id: Some(call_id.into()),
                 name: Some(name.into()),
                 ..Default::default()
@@ -457,7 +458,7 @@ mod tests {
 
     fn function_args_delta_event(call_id: &str, delta: &str) -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.function_call_arguments.delta".into(),
+            event_type: SseEventType::FunctionCallArgsDelta,
             call_id: Some(call_id.into()),
             delta: Some(delta.into()),
             ..Default::default()
@@ -466,9 +467,9 @@ mod tests {
 
     fn reasoning_added_event() -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.output_item.added".into(),
+            event_type: SseEventType::OutputItemAdded,
             item: Some(ResponsesOutputItem {
-                item_type: "reasoning".into(),
+                item_type: OutputItemType::Reasoning,
                 ..Default::default()
             }),
             ..Default::default()
@@ -477,7 +478,7 @@ mod tests {
 
     fn reasoning_summary_delta_event(delta: &str) -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.reasoning_summary_text.delta".into(),
+            event_type: SseEventType::ReasoningSummaryTextDelta,
             delta: Some(delta.into()),
             ..Default::default()
         }
@@ -488,7 +489,7 @@ mod tests {
         usage: Option<ResponsesUsage>,
     ) -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.completed".into(),
+            event_type: SseEventType::Completed,
             response: Some(ResponsesResponse {
                 id: Some("resp-123".into()),
                 output,
@@ -553,7 +554,7 @@ mod tests {
     fn ignores_text_delta_without_content() {
         let mut state = create_stream_state();
         let event = ResponsesSseEvent {
-            event_type: "response.output_text.delta".into(),
+            event_type: SseEventType::OutputTextDelta,
             ..Default::default()
         };
         let events = process_stream_event(&event, &mut state);
@@ -664,9 +665,9 @@ mod tests {
     fn handles_reasoning_from_output_item_done() {
         let mut state = create_stream_state();
         let event = ResponsesSseEvent {
-            event_type: "response.output_item.done".into(),
+            event_type: SseEventType::OutputItemDone,
             item: Some(ResponsesOutputItem {
-                item_type: "reasoning".into(),
+                item_type: OutputItemType::Reasoning,
                 summary: Some(vec![OutputContent {
                     content_type: "summary_text".into(),
                     text: Some("The approach is correct.".into()),
@@ -695,9 +696,9 @@ mod tests {
         state.accumulated_thinking = "Already accumulated".into();
 
         let event = ResponsesSseEvent {
-            event_type: "response.output_item.done".into(),
+            event_type: SseEventType::OutputItemDone,
             item: Some(ResponsesOutputItem {
-                item_type: "reasoning".into(),
+                item_type: OutputItemType::Reasoning,
                 summary: Some(vec![OutputContent {
                     content_type: "summary_text".into(),
                     text: Some("Different text".into()),
@@ -722,7 +723,7 @@ mod tests {
 
         let event = completed_event(
             vec![ResponsesOutputItem {
-                item_type: "message".into(),
+                item_type: OutputItemType::Message,
                 content: Some(vec![OutputContent {
                     content_type: "output_text".into(),
                     text: Some("Hello world".into()),
@@ -776,7 +777,7 @@ mod tests {
 
         let event = completed_event(
             vec![ResponsesOutputItem {
-                item_type: "function_call".into(),
+                item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_abc".into()),
                 name: Some("read_file".into()),
                 arguments: Some(r#"{"path":"/test.txt"}"#.into()),
@@ -812,7 +813,7 @@ mod tests {
 
         let event = completed_event(
             vec![ResponsesOutputItem {
-                item_type: "message".into(),
+                item_type: OutputItemType::Message,
                 content: Some(vec![OutputContent {
                     content_type: "output_text".into(),
                     text: Some("The answer".into()),
@@ -852,7 +853,7 @@ mod tests {
     fn completed_empty_response_is_handled() {
         let mut state = create_stream_state();
         let event = ResponsesSseEvent {
-            event_type: "response.completed".into(),
+            event_type: SseEventType::Completed,
             ..Default::default()
         };
         let events = process_stream_event(&event, &mut state);
@@ -864,7 +865,7 @@ mod tests {
         let mut state = create_stream_state();
         let event = completed_event(
             vec![ResponsesOutputItem {
-                item_type: "function_call".into(),
+                item_type: OutputItemType::FunctionCall,
                 call_id: Some("call_new".into()),
                 name: Some("write_file".into()),
                 arguments: Some(r#"{"path":"/out.txt","content":"data"}"#.into()),
@@ -899,7 +900,7 @@ mod tests {
     fn unknown_event_type_returns_empty() {
         let mut state = create_stream_state();
         let event = ResponsesSseEvent {
-            event_type: "response.unknown_event".into(),
+            event_type: SseEventType::Unknown,
             ..Default::default()
         };
         let events = process_stream_event(&event, &mut state);
@@ -912,7 +913,7 @@ mod tests {
     fn reasoning_summary_part_added_emits_thinking_start() {
         let mut state = create_stream_state();
         let event = ResponsesSseEvent {
-            event_type: "response.reasoning_summary_part.added".into(),
+            event_type: SseEventType::ReasoningSummaryPartAdded,
             ..Default::default()
         };
         let events = process_stream_event(&event, &mut state);
@@ -925,7 +926,7 @@ mod tests {
         let mut state = create_stream_state();
         state.thinking_started = true;
         let event = ResponsesSseEvent {
-            event_type: "response.reasoning_summary_part.added".into(),
+            event_type: SseEventType::ReasoningSummaryPartAdded,
             ..Default::default()
         };
         let events = process_stream_event(&event, &mut state);
@@ -964,7 +965,7 @@ mod tests {
 
     fn reasoning_text_delta_event(delta: &str) -> ResponsesSseEvent {
         ResponsesSseEvent {
-            event_type: "response.reasoning_text.delta".into(),
+            event_type: SseEventType::ReasoningTextDelta,
             delta: Some(delta.into()),
             ..Default::default()
         }

@@ -5,7 +5,6 @@
 //! No OAuth, no prompt caching, no image support, no adaptive thinking.
 
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, instrument, warn};
@@ -16,13 +15,11 @@ use crate::anthropic::stream_handler::{create_stream_state_for, process_sse_even
 use crate::anthropic::types::{
     AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent, AnthropicTool,
 };
-use crate::models::types::ProviderType;
+use tron_core::messages::Provider as ProviderType;
 use crate::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::sse::parse_sse_lines;
 use crate::compose_context_parts;
-use tron_core::events::StreamEvent;
 use tron_core::messages::Context;
 
 use super::types::{DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, MiniMaxAuth, MiniMaxConfig, get_minimax_model};
@@ -217,71 +214,33 @@ impl MiniMaxProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(tron_core::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let (message, code, retryable) = parse_api_error(&body_text, status.as_u16());
+            let err_info = crate::error_parsing::parse_api_error(&body_text, status.as_u16());
             error!(
                 status = status.as_u16(),
-                code = code.as_deref().unwrap_or("unknown"),
-                retryable,
+                code = err_info.code.as_deref().unwrap_or("unknown"),
+                retryable = err_info.retryable,
                 "MiniMax API error"
             );
             if status.as_u16() == 429 {
                 return Err(ProviderError::RateLimited {
                     retry_after_ms: retry_after.unwrap_or(0),
-                    message,
+                    message: err_info.message,
                 });
             }
             return Err(ProviderError::Api {
                 status: status.as_u16(),
-                message,
-                code,
-                retryable,
+                message: err_info.message,
+                code: err_info.code,
+                retryable: err_info.retryable,
             });
         }
 
-        // Parse SSE stream — reuse Anthropic stream handler with MiniMax provider type
-        let byte_stream = response.bytes_stream();
-        let sse_lines = parse_sse_lines(byte_stream, &SSE_OPTIONS);
-
-        let event_stream = sse_lines
-            .scan(
-                create_stream_state_for(tron_core::messages::ProviderType::MiniMax),
-                |state, line| {
-                    let event: AnthropicSseEvent = match serde_json::from_str(&line) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            warn!(line = %line, error = %e, "Failed to parse MiniMax SSE event");
-                            return std::future::ready(Some(vec![]));
-                        }
-                    };
-
-                    let events = process_sse_event(&event, state);
-                    std::future::ready(Some(events))
-                },
-            )
-            .flat_map(stream::iter)
-            .map(Ok);
-
-        Ok(Box::pin(event_stream))
-    }
-}
-
-/// Parse an API error response body.
-fn parse_api_error(body: &str, status: u16) -> (String, Option<String>, bool) {
-    if let Ok(json) = serde_json::from_str::<Value>(body) {
-        let error = &json["error"];
-        let message = error["message"]
-            .as_str()
-            .unwrap_or("Unknown error")
-            .to_string();
-        let code = error["type"].as_str().map(String::from);
-        let retryable = status == 429 || status >= 500;
-        (message, code, retryable)
-    } else {
-        (
-            format!("HTTP {status}: {body}"),
-            None,
-            status == 429 || status >= 500,
-        )
+        Ok(crate::stream_pipeline::sse_to_event_stream::<AnthropicSseEvent, _, _>(
+            response,
+            &SSE_OPTIONS,
+            create_stream_state_for(tron_core::messages::ProviderType::MiniMax),
+            process_sse_event,
+        ))
     }
 }
 
@@ -302,15 +261,10 @@ impl Provider for MiniMaxProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
-        let start_event = stream::once(async { Ok(StreamEvent::Start) });
-        let inner_stream = match self.stream_internal(context, options).await {
-            Ok(s) => s,
-            Err(e) => {
-                error!(error = %e, "MiniMax stream failed");
-                return Err(e);
-            }
-        };
-        Ok(Box::pin(start_event.chain(inner_stream)))
+        crate::stream_pipeline::wrap_provider_stream(
+            "minimax",
+            self.stream_internal(context, options).await,
+        )
     }
 }
 
@@ -336,25 +290,10 @@ mod tests {
         }
     }
 
-    fn empty_context() -> Context {
-        Context {
-            system_prompt: None,
-            messages: vec![],
-            tools: None,
-            working_directory: None,
-            rules_content: None,
-            memory_content: None,
-            skill_context: None,
-            subagent_results_context: None,
-            task_context: None,
-            dynamic_rules_context: None,
-        }
-    }
-
     fn context_with_system(prompt: &str) -> Context {
         Context {
             system_prompt: Some(prompt.into()),
-            ..empty_context()
+            ..Context::default()
         }
     }
 
@@ -431,7 +370,7 @@ mod tests {
 
     #[test]
     fn system_param_empty_context_returns_none() {
-        let ctx = empty_context();
+        let ctx = Context::default();
         assert!(MiniMaxProvider::build_system_param(&ctx).is_none());
     }
 
@@ -451,7 +390,7 @@ mod tests {
                     extra: Default::default(),
                 },
             }]),
-            ..empty_context()
+            ..Context::default()
         };
         let tools = MiniMaxProvider::build_tools(&ctx).unwrap();
         assert_eq!(tools.len(), 1);
@@ -462,7 +401,7 @@ mod tests {
     fn build_tools_empty_returns_none() {
         let ctx = Context {
             tools: Some(vec![]),
-            ..empty_context()
+            ..Context::default()
         };
         assert!(MiniMaxProvider::build_tools(&ctx).is_none());
     }
@@ -582,22 +521,5 @@ mod tests {
         assert_eq!(messages[0].content.len(), 1);
     }
 
-    // ── API error parsing ───────────────────────────────────────────────
-
-    #[test]
-    fn parse_api_error_json() {
-        let body = r#"{"error":{"type":"overloaded_error","message":"Overloaded"}}"#;
-        let (msg, code, retryable) = parse_api_error(body, 529);
-        assert_eq!(msg, "Overloaded");
-        assert_eq!(code.as_deref(), Some("overloaded_error"));
-        assert!(retryable);
-    }
-
-    #[test]
-    fn parse_api_error_non_json() {
-        let (msg, code, retryable) = parse_api_error("Bad Gateway", 502);
-        assert!(msg.contains("502"));
-        assert!(code.is_none());
-        assert!(retryable);
-    }
+    // ── parse_api_error (via shared crate::error_parsing) ─────────────
 }

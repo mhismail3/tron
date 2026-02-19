@@ -14,6 +14,7 @@ use tron_core::events::{
     TurnTokenUsage,
 };
 use tron_core::messages::{Message, ToolResultMessageContent};
+use crate::types::ReasoningLevel;
 use tron_llm::provider::{Provider, ProviderStreamOptions};
 use tron_llm::{ProviderHealthTracker, StreamFactory, StreamRetryConfig, with_provider_retry};
 use tron_tools::registry::ToolRegistry;
@@ -127,11 +128,11 @@ pub async fn execute_turn(
         effort_level: run_context
             .reasoning_level
             .as_ref()
-            .map(|r| r.as_effort_str().to_owned()),
+            .and_then(ReasoningLevel::as_anthropic_effort),
         reasoning_effort: run_context
             .reasoning_level
             .as_ref()
-            .map(|r| r.as_openai_reasoning_effort().to_owned()),
+            .map(ReasoningLevel::as_openai_reasoning),
         thinking_level: run_context
             .reasoning_level
             .as_ref()

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::context::types::CompactionConfig;
 use serde::{Deserialize, Serialize};
 use tron_core::messages::TokenUsage;
-use tron_llm::ProviderHealthTracker;
+use tron_llm::{AnthropicEffortLevel, ProviderHealthTracker, ReasoningEffort};
 
 use crate::errors::StopReason;
 
@@ -65,6 +65,30 @@ impl ReasoningLevel {
             Self::Low => "THINKING_LOW",
             Self::Medium => "THINKING_MEDIUM",
             Self::High | Self::XHigh | Self::Max => "THINKING_HIGH",
+        }
+    }
+
+    /// Convert to Anthropic [`AnthropicEffortLevel`].
+    ///
+    /// Returns `None` for `ReasoningLevel::None` (use model default).
+    /// Clamps XHigh/Max → High (Anthropic only supports low/medium/high).
+    pub fn as_anthropic_effort(&self) -> Option<AnthropicEffortLevel> {
+        match self {
+            Self::None => None,
+            Self::Low => Some(AnthropicEffortLevel::Low),
+            Self::Medium => Some(AnthropicEffortLevel::Medium),
+            Self::High | Self::XHigh | Self::Max => Some(AnthropicEffortLevel::High),
+        }
+    }
+
+    /// Convert to `OpenAI` [`ReasoningEffort`].
+    ///
+    /// `OpenAI` supports low/medium/high only — XHigh/Max clamp to High.
+    pub fn as_openai_reasoning(&self) -> ReasoningEffort {
+        match self {
+            Self::None | Self::Low => ReasoningEffort::Low,
+            Self::Medium => ReasoningEffort::Medium,
+            Self::High | Self::XHigh | Self::Max => ReasoningEffort::High,
         }
     }
 
@@ -600,6 +624,61 @@ mod tests {
         assert_eq!(
             ReasoningLevel::Max.as_gemini_thinking_level(),
             "THINKING_HIGH"
+        );
+    }
+
+    #[test]
+    fn reasoning_level_as_anthropic_effort() {
+        assert_eq!(ReasoningLevel::None.as_anthropic_effort(), None);
+        assert_eq!(
+            ReasoningLevel::Low.as_anthropic_effort(),
+            Some(AnthropicEffortLevel::Low)
+        );
+        assert_eq!(
+            ReasoningLevel::Medium.as_anthropic_effort(),
+            Some(AnthropicEffortLevel::Medium)
+        );
+        assert_eq!(
+            ReasoningLevel::High.as_anthropic_effort(),
+            Some(AnthropicEffortLevel::High)
+        );
+        // XHigh and Max clamp to High for Anthropic
+        assert_eq!(
+            ReasoningLevel::XHigh.as_anthropic_effort(),
+            Some(AnthropicEffortLevel::High)
+        );
+        assert_eq!(
+            ReasoningLevel::Max.as_anthropic_effort(),
+            Some(AnthropicEffortLevel::High)
+        );
+    }
+
+    #[test]
+    fn reasoning_level_as_openai_reasoning() {
+        assert_eq!(
+            ReasoningLevel::None.as_openai_reasoning(),
+            ReasoningEffort::Low
+        );
+        assert_eq!(
+            ReasoningLevel::Low.as_openai_reasoning(),
+            ReasoningEffort::Low
+        );
+        assert_eq!(
+            ReasoningLevel::Medium.as_openai_reasoning(),
+            ReasoningEffort::Medium
+        );
+        assert_eq!(
+            ReasoningLevel::High.as_openai_reasoning(),
+            ReasoningEffort::High
+        );
+        // XHigh and Max clamp to High for OpenAI
+        assert_eq!(
+            ReasoningLevel::XHigh.as_openai_reasoning(),
+            ReasoningEffort::High
+        );
+        assert_eq!(
+            ReasoningLevel::Max.as_openai_reasoning(),
+            ReasoningEffort::High
         );
     }
 
