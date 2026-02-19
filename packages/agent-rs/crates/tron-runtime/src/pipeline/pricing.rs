@@ -1,7 +1,6 @@
 //! Cost calculation — pricing tables and per-request cost computation.
 //!
-//! Matches the TypeScript implementation in `packages/agent/src/infrastructure/usage/index.ts`
-//! exactly. Pricing tiers are per-million tokens with cache multipliers.
+//! Pricing tiers are per-million tokens with cache multipliers.
 
 use tron_core::messages::TokenUsage;
 

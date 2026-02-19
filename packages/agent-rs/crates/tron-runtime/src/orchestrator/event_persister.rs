@@ -152,7 +152,7 @@ mod tests {
     async fn append_and_retrieve() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone(), session.session.id.clone());
@@ -174,7 +174,7 @@ mod tests {
     async fn sequential_events_form_chain() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone(), session.session.id.clone());
@@ -209,7 +209,7 @@ mod tests {
     async fn fire_and_forget() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone(), session.session.id.clone());
@@ -229,7 +229,7 @@ mod tests {
     async fn flush_returns_ok() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone(), session.session.id.clone());
@@ -243,7 +243,7 @@ mod tests {
     async fn flush_waits_for_pending() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone(), session.session.id.clone());
@@ -266,7 +266,7 @@ mod tests {
     async fn worker_exit_gives_descriptive_error() {
         let store = make_event_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"))
+            .create_session("test-model", "/tmp", Some("test"), None)
             .expect("Failed to create session");
 
         let persister = EventPersister::new(store.clone(), session.session.id.clone());

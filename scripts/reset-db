@@ -104,9 +104,9 @@ if [ -z "$target" ]; then
 fi
 
 case "$target" in
-  beta)  dbs=("$DB_DIR/beta.db") ;;
+  beta)  dbs=("$DB_DIR/beta-rs.db") ;;
   prod)  dbs=("$DB_DIR/prod.db") ;;
-  all)   dbs=("$DB_DIR/beta.db" "$DB_DIR/prod.db") ;;
+  all)   dbs=("$DB_DIR/beta-rs.db" "$DB_DIR/prod.db") ;;
   *)     usage ;;
 esac
 

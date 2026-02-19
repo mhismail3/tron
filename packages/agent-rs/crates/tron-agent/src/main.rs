@@ -1,4 +1,4 @@
-//! # tron-agent
+//! # tron
 //!
 //! Tron agent server binary — wires together all crates and starts the
 //! HTTP/WebSocket server.
@@ -30,7 +30,7 @@ use tron_tools::registry::ToolRegistry;
 
 /// Tron agent server.
 #[derive(Parser, Debug)]
-#[command(name = "tron-agent", about = "Tron agent server")]
+#[command(name = "tron", about = "Tron agent server")]
 struct Cli {
     /// Host to bind.
     #[arg(long, default_value = "0.0.0.0")]
@@ -546,43 +546,43 @@ mod tests {
 
     #[test]
     fn cli_default_host() {
-        let cli = Cli::parse_from(["tron-agent"]);
+        let cli = Cli::parse_from(["tron"]);
         assert_eq!(cli.host, "0.0.0.0");
     }
 
     #[test]
     fn cli_default_port() {
-        let cli = Cli::parse_from(["tron-agent"]);
+        let cli = Cli::parse_from(["tron"]);
         assert_eq!(cli.port, 9847);
     }
 
     #[test]
     fn cli_custom_port() {
-        let cli = Cli::parse_from(["tron-agent", "--port", "8080"]);
+        let cli = Cli::parse_from(["tron", "--port", "8080"]);
         assert_eq!(cli.port, 8080);
     }
 
     #[test]
     fn cli_custom_host() {
-        let cli = Cli::parse_from(["tron-agent", "--host", "0.0.0.0"]);
+        let cli = Cli::parse_from(["tron", "--host", "0.0.0.0"]);
         assert_eq!(cli.host, "0.0.0.0");
     }
 
     #[test]
     fn cli_db_path() {
-        let cli = Cli::parse_from(["tron-agent", "--db-path", "/tmp/test.db"]);
+        let cli = Cli::parse_from(["tron", "--db-path", "/tmp/test.db"]);
         assert_eq!(cli.db_path, Some(PathBuf::from("/tmp/test.db")));
     }
 
     #[test]
     fn cli_max_sessions() {
-        let cli = Cli::parse_from(["tron-agent", "--max-sessions", "20"]);
+        let cli = Cli::parse_from(["tron", "--max-sessions", "20"]);
         assert_eq!(cli.max_sessions, Some(20));
     }
 
     #[test]
     fn cli_max_sessions_defaults_to_none() {
-        let cli = Cli::parse_from(["tron-agent"]);
+        let cli = Cli::parse_from(["tron"]);
         assert_eq!(cli.max_sessions, None);
     }
 

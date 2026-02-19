@@ -1003,7 +1003,7 @@ mod tests {
         store: &Arc<tron_events::EventStore>,
     ) -> (TronAgent, String) {
         let session = store
-            .create_session("mock-model", "/tmp", Some("test"))
+            .create_session("mock-model", "/tmp", Some("test"), None)
             .unwrap();
         let sid = session.session.id.clone();
         let config = AgentConfig::default();

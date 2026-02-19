@@ -1,60 +1,29 @@
 # Tron
 
-**A persistent, event-sourced AI coding agent with multi-client architecture**
+**A persistent, event-sourced AI coding agent**
 
-Tron is an AI coding agent that runs as a persistent service, supporting multiple client interfaces (terminal, web, iOS). It features event-sourced session persistence, multi-model support, sub-agent spawning, and a comprehensive hook system.
-
-## Table of Contents
-
-- [Features](#features)
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Packages](#packages)
-- [Tools](#tools)
-- [Event System](#event-system)
-- [Customization](#customization)
-- [Development](#development)
-- [Deployment](#deployment)
-- [iOS App](#ios-app)
-- [API Reference](#api-reference)
-- [License](#license)
-
----
-
-## Features
-
-- **Multi-Client Architecture**: Terminal UI, web chat, and iOS app connect to a single persistent server
-- **Event-Sourced Persistence**: All state stored as immutable events with fork/rewind operations
-- **Multi-Model Support**: Claude (Anthropic), GPT-4o (OpenAI), Gemini (Google)
-- **Sub-Agent Spawning**: Spawn child agents for parallel task execution
-- **Hook System**: PreToolUse/PostToolUse hooks for automation and safety
-- **Skills System**: Reusable context packages for domain-specific knowledge
-- **Context Compaction**: Intelligent context management to stay within token limits
-
----
+Tron is an AI coding agent that runs as a persistent service on macOS. The Rust server handles LLM communication, tool execution, and event-sourced session persistence. The native iOS app provides a real-time chat interface with streaming, session management, and push notifications.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Client Interfaces                               │
-├─────────────────────┬─────────────────────┬─────────────────────────────────┤
-│   Terminal (TUI)    │     Web Chat        │          iOS App                │
-│   packages/tui      │   packages/chat-web │      packages/ios-app           │
-└─────────┬───────────┴─────────┬───────────┴─────────────┬───────────────────┘
-          │                     │                         │
-          └─────────────────────┼─────────────────────────┘
-                                │ WebSocket (JSON-RPC 2.0)
-                                ▼
+│                              iOS App                                        │
+│                          packages/ios-app                                    │
+│                  SwiftUI · MVVM · Event Plugins                             │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │ WebSocket (JSON-RPC 2.0)
+                                  │ Port 9847
+                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Agent Server                                        │
-│                       packages/agent                                         │
+│                          Rust Agent Server                                   │
+│                         packages/agent-rs                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │  Providers  │  │    Tools    │  │   Context   │  │    Orchestrator     │ │
 │  │  Anthropic  │  │  read/write │  │   loader    │  │  Session lifecycle  │ │
 │  │  OpenAI     │  │  edit/bash  │  │  compaction │  │  Turn management    │ │
-│  │  Google     │  │  grep/find  │  │  skills     │  │  Event routing      │ │
+│  │  Google     │  │  search/web │  │  skills     │  │  Event routing      │ │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘ │
 └────────────────────────────────────┬────────────────────────────────────────┘
                                      │
@@ -72,110 +41,59 @@ Tron is an AI coding agent that runs as a persistent service, supporting multipl
 ```
 tron/
 ├── packages/
-│   ├── agent/       # Core agent server (providers, tools, events, RPC)
-│   ├── tui/         # Terminal user interface
-│   ├── chat-web/    # React web chat interface
+│   ├── agent-rs/    # Rust agent server (crates workspace)
 │   └── ios-app/     # SwiftUI iOS application
 ├── scripts/         # CLI and deployment scripts
 └── .claude/         # Agent configuration
+```
+
+### Rust Crate Structure
+
+```
+packages/agent-rs/crates/
+├── tron-agent/          # Binary entry point (main.rs)
+├── tron-core/           # Shared types, logging, error hierarchy
+├── tron-events/         # Event store, SQLite backend, migrations
+├── tron-settings/       # Settings loader, defaults
+├── tron-llm/            # LLM providers (Anthropic, OpenAI, Google), auth, streaming
+├── tron-tools/          # Tool implementations (fs, bash, search, browser, web, subagent)
+├── tron-skills/         # Skill loader, registry
+├── tron-runtime/        # Orchestrator, session manager, agent turn loop
+├── tron-server/         # HTTP/WebSocket server, RPC handlers, event bridge
+├── tron-embeddings/     # ONNX embedding service, vector repository
+└── tron-transcription/  # Native speech-to-text (Whisper)
 ```
 
 ---
 
 ## Quick Start
 
-### One-Command Setup
+### Prerequisites
+
+- Rust toolchain (`rustup`, `cargo`)
+- Xcode 16+ (for iOS app)
+- XcodeGen (`brew install xcodegen`)
+
+### Build and Run
 
 ```bash
-./scripts/tron setup
+# Build the server
+cd packages/agent-rs
+cargo build --release
+
+# Run in foreground (development)
+./scripts/tron dev
+
+# Or install as a launchd service
+./scripts/tron install
 ```
 
-This will check prerequisites, install Bun, install dependencies, build all packages, and create default configuration.
-
-### Manual Setup
+### First-Time Setup
 
 ```bash
-# Use the pinned Node runtime for native module compatibility
-# (or use your preferred version manager with .nvmrc / .node-version)
-nvm use
-
-# Install Bun (required)
-curl -fsSL https://bun.sh/install | bash
-
-# Install dependencies and build
-bun install
-bun run build
-
-# Start the TUI
-bun run dev:tui
-
-# Or start the server for web/iOS clients
-bun run dev:server
+./scripts/tron setup    # Check prerequisites, build, create config
+./scripts/tron login    # Authenticate with Claude
 ```
-
-Native module note:
-- `better-sqlite3` is compiled for your current Node ABI. If you switch Node major versions, run `bun run check:native` (or just `bun run test`, which runs it automatically) to verify compatibility and auto-rebuild when needed.
-
-### Why Bun?
-
-- **3-6x faster** package installation than npm/pnpm/yarn
-- **Built-in SQLite** (bun:sqlite) for fast database operations
-- **Native TypeScript** support without transpilation
-- **Workspace support** with automatic dependency resolution
-
----
-
-## Packages
-
-### Agent (`packages/agent`)
-
-The core backend server. Handles LLM communication, tool execution, and event persistence.
-
-```
-src/
-├── agent/           # TronAgent, turn execution
-├── providers/       # Anthropic, OpenAI, Google LLM adapters
-├── tools/           # read, write, edit, bash, grep, subagent, etc.
-├── events/          # Event store, SQLite backend, reconstruction
-├── context/         # AGENTS.md loader, system prompts, compaction
-├── orchestrator/    # Session lifecycle, turn management
-├── gateway/         # WebSocket server, RPC handlers
-├── hooks/           # PreToolUse, PostToolUse hooks
-└── skills/          # Skill loader, registry
-```
-
-**Documentation:** See `packages/agent/docs/`
-
-### TUI (`packages/tui`)
-
-Terminal user interface for interactive sessions.
-
-```bash
-bun run dev:tui        # Development mode
-bun run login          # Authenticate with Claude Max
-```
-
-### Chat Web (`packages/chat-web`)
-
-React-based web interface.
-
-```bash
-bun run dev:chat       # Development server at localhost:5173
-```
-
-### iOS App (`packages/ios-app`)
-
-Native SwiftUI app with real-time streaming, session management, and push notifications.
-
-**Requirements:** Xcode 16+, iOS 18 SDK, XcodeGen
-
-```bash
-cd packages/ios-app
-xcodegen generate
-open TronMobile.xcodeproj
-```
-
-**Documentation:** See `packages/ios-app/docs/`
 
 ---
 
@@ -185,111 +103,49 @@ open TronMobile.xcodeproj
 
 | Tool | Description |
 |------|-------------|
-| `read` | Read file contents with line numbers |
-| `write` | Write content to files |
-| `edit` | Search and replace within files |
-| `ls` | List directory contents |
-| `find` | Find files by pattern |
-| `grep` | Search file contents with regex |
+| `Read` | Read file contents with line numbers |
+| `Write` | Write content to files |
+| `Edit` | Search and replace within files |
+| `Find` | Find files by pattern |
+| `Search` | Search file contents with regex |
 
 ### System Tools
 
 | Tool | Description |
 |------|-------------|
-| `bash` | Execute shell commands with timeout |
-| `ast_grep` | Structural code search with AST patterns |
+| `Bash` | Execute shell commands with timeout |
+| `Remember` | Store and retrieve memory across sessions |
 
 ### Browser Tools
 
 | Tool | Description |
 |------|-------------|
-| `open_browser` | Open URLs in browser |
-| `agent_web_browser` | Automated browser interaction |
+| `BrowseTheWeb` | CDP-based browser automation with screenshots |
+| `OpenURL` | Open URLs (iOS opens Safari via tool event) |
+
+### Web Tools
+
+| Tool | Description |
+|------|-------------|
+| `WebFetch` | Fetch and summarize web content |
+| `WebSearch` | Search the web (requires Brave API key) |
 
 ### Sub-Agent Tools
 
 | Tool | Description |
 |------|-------------|
-| `spawn_subagent` | Spawn child agent for parallel tasks |
-| `query_subagent` | Check sub-agent status and progress |
-| `wait_for_subagent` | Wait for sub-agent completion |
+| `SpawnSubagent` | Spawn child agent for parallel tasks |
+| `QueryAgent` | Check sub-agent status and progress |
+| `WaitForAgents` | Wait for sub-agent completion |
 
 ### UI Tools
 
 | Tool | Description |
 |------|-------------|
-| `ask_user_question` | Prompt user for input |
-| `notify_app` | Send push notification to mobile app |
-| `todo_write` | Create/update task list |
-| `render_app_ui` | Render custom UI in mobile app |
-
----
-
-## Event System
-
-Tron uses **event sourcing** for all state persistence. Events form a tree via `parentId` references, enabling fork/rewind operations.
-
-### Event Structure
-
-```typescript
-interface BaseEvent {
-  id: string;              // UUID v7 (time-sortable)
-  parentId: string | null; // Previous event (null for root)
-  sessionId: string;
-  sequence: number;        // Monotonic within session
-  type: string;            // Event discriminator
-  timestamp: string;       // ISO 8601
-  payload: Record<string, unknown>;
-}
-```
-
-### Event Types
-
-| Type | Description |
-|------|-------------|
-| `session.start` | Session created |
-| `session.end` | Session ended |
-| `session.fork` | Session forked from another |
-| `message.user` | User message |
-| `message.assistant` | Assistant response |
-| `tool.call` | Tool invoked |
-| `tool.result` | Tool completed |
-| `subagent.spawn` | Sub-agent created |
-| `subagent.complete` | Sub-agent finished |
-| `context.compaction` | Context compacted |
-
-### Database Schema
-
-```sql
-CREATE TABLE events (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  parent_id TEXT,
-  sequence INTEGER NOT NULL,
-  depth INTEGER NOT NULL DEFAULT 0,
-  type TEXT NOT NULL,
-  timestamp TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  workspace_id TEXT NOT NULL
-);
-
-CREATE TABLE sessions (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  head_event_id TEXT,
-  root_event_id TEXT,
-  status TEXT DEFAULT 'active',
-  model TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  working_directory TEXT NOT NULL
-);
-
-CREATE TABLE workspaces (
-  id TEXT PRIMARY KEY,
-  path TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL
-);
-```
+| `AskUserQuestion` | Prompt user for input |
+| `NotifyApp` | Send push notification to iOS |
+| `TaskManager` | Create/update task lists |
+| `RenderAppUI` | Render custom UI in iOS app |
 
 ---
 
@@ -299,238 +155,68 @@ CREATE TABLE workspaces (
 
 **Location:** `~/.tron/settings.json`
 
-```json
-{
-  "models": {
-    "default": "claude-sonnet-4-20250514",
-    "defaultMaxTokens": 4096
-  },
-  "tools": {
-    "bash": { "defaultTimeoutMs": 300000 }
-  },
-  "server": {
-    "wsPort": 8080,
-    "healthPort": 8081
-  }
-}
-```
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `models.default` | `claude-opus-4-5-20251101` | Default model |
-| `models.defaultMaxTokens` | `4096` | Max output tokens |
-| `tools.bash.defaultTimeoutMs` | `120000` | Command timeout |
-| `tools.read.defaultLimitLines` | `2000` | Lines per read |
-| `server.wsPort` | `8080` | WebSocket port |
-| `server.healthPort` | `8081` | Health endpoint |
-
-### Environment Variables
-
-| Variable | Overrides |
-|----------|-----------|
-| `TRON_WS_PORT` | `server.wsPort` |
-| `TRON_HEALTH_PORT` | `server.healthPort` |
-| `TRON_DEFAULT_MODEL` | `models.default` |
-| `TRON_LOG_LEVEL` | Logging verbosity |
+Server-authoritative — the Rust server reads settings directly on startup. iOS reads/writes via `settings.get`/`settings.update` RPC methods.
 
 ### Skills
 
-Skills are reusable context packages with optional YAML frontmatter.
+Reusable context packages with optional YAML frontmatter.
 
 **Locations:**
 - `~/.tron/skills/` — Global (all projects)
 - `.claude/skills/` or `.tron/skills/` — Project (higher precedence)
 
-**Creating a skill:**
-
-```bash
-mkdir -p ~/.tron/skills/my-rules
-cat > ~/.tron/skills/my-rules/SKILL.md << 'EOF'
----
-autoInject: true
-tags: [rules, typescript]
----
-Project coding standards.
-
-- Use strict TypeScript
-- No `any` types
-- Write tests for new code
-EOF
-```
-
-**Usage:** Reference with `@skill-name` in prompts:
-
-```
-@api-design Create a new endpoint for users
-```
-
-**Frontmatter options:**
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `autoInject` | boolean | Include in every prompt |
-| `version` | string | Semantic version |
-| `tools` | string[] | Associated tools |
-| `tags` | string[] | Categorization |
-
-### System Prompt
-
-Custom system prompts override the built-in default.
-
-**Priority order:**
-1. Programmatic `systemPrompt` parameter
-2. Project `.claude/SYSTEM.md` or `.tron/SYSTEM.md`
-3. Global `~/.tron/SYSTEM.md`
-4. Built-in default
-
-### Context Rules
-
-Path-scoped instructions loaded into every prompt.
-
-| Location | Scope |
-|----------|-------|
-| `.claude/AGENTS.md` | Project |
-| `subdir/AGENTS.md` | Subdirectory (loads when working in that path) |
+**Usage:** Reference with `@skill-name` in prompts.
 
 ### Hooks
 
-Hooks allow custom logic before/after tool execution.
-
-**PreToolUse** — Runs before a tool executes. Can block or modify.
-
-```typescript
-// .claude/hooks/pre-tool-use.ts
-export default async function(tool: ToolCall) {
-  if (tool.name === 'bash' && tool.arguments.command.includes('rm -rf')) {
-    return { blocked: true, reason: 'Dangerous command blocked' };
-  }
-  return { proceed: true };
-}
-```
-
-**PostToolUse** — Runs after a tool completes. Can log or transform.
-
-```typescript
-// .claude/hooks/post-tool-use.ts
-export default async function(tool: ToolCall, result: ToolResult) {
-  console.log(`Tool ${tool.name} completed in ${result.duration}ms`);
-}
-```
-
----
-
-## Development
-
-### Commands
-
-```bash
-# Verify Node/native module compatibility (auto-rebuilds better-sqlite3 on ABI mismatch)
-bun run check:native
-
-# Build all packages
-bun run build
-
-# Run all tests
-bun run test
-
-# Watch mode
-bun run test:watch
-
-# Type check
-bun run typecheck
-
-# Lint
-bun run lint
-
-# Clean build artifacts
-bun run clean
-```
-
-### Package-Specific Commands
-
-```bash
-# Agent
-bun run --cwd packages/agent build
-bun run --cwd packages/agent test
-
-# TUI
-bun run dev:tui
-
-# Web Chat
-bun run dev:chat
-
-# iOS (requires Xcode)
-cd packages/ios-app && xcodegen generate && open TronMobile.xcodeproj
-```
-
-### Database Debugging
-
-```bash
-# Query events
-sqlite3 ~/.tron/database/prod.db "SELECT type, substr(payload, 1, 100) FROM events ORDER BY rowid DESC LIMIT 10"
-
-# Query sessions
-sqlite3 ~/.tron/database/prod.db "SELECT id, status, model FROM sessions ORDER BY rowid DESC LIMIT 5"
-```
+Pre/post tool execution hooks for automation and safety.
 
 ---
 
 ## Deployment
 
-### Install as Service
-
-```bash
-./scripts/tron install
-```
-
-Creates a launchd service, installs `tron` CLI to `~/.local/bin/`, and starts the server.
-
 ### Service Management
 
 ```bash
-tron status          # Show all services (prod + beta)
-tron start [beta]    # Start service
-tron stop [beta]     # Stop service
-tron restart [beta]  # Restart service
-tron logs [beta]     # Query database logs
-tron errors [beta]   # Show recent errors
+tron status          # Show service status
+tron start           # Start launchd service
+tron stop            # Stop service
+tron restart         # Restart service
+tron logs            # Query database logs
+tron errors          # Show recent errors
 ```
 
-### Deployment Pipeline
-
-Deploys follow a beta-first promotion model: `code → beta (verify) → prod (promote)`.
+### Deploy Pipeline
 
 ```bash
-tron deploy beta     # Stage 1: build, test, deploy to beta, verify health
-tron deploy          # Stage 2: requires beta-verified commit, then build + swap
-tron deploy --force  # Emergency: skip beta verification
-tron rollback        # Restore previous prod deployment
+tron deploy          # Build, test, stop, swap binary, start, health check
+tron deploy --force  # Skip confirmations
+tron rollback        # Restore previous binary
 ```
 
-Production deploys are blocked unless beta has been verified on the same commit. The verification marker (`~/.tron/app/beta-deploy-verified.json`) is written automatically after a successful beta deploy + health check.
+The deploy process:
+1. Builds release binary (`cargo build --release`)
+2. Runs full test suite (`cargo test --workspace`)
+3. Backs up current binary (`~/.tron/tron` → `~/.tron/tron.bak`)
+4. Stops service, copies new binary, starts service
+5. Health checks (5 attempts, 3s apart)
+6. Auto-rollback on failure
 
-### Dual Environment
+### File Locations
 
-Run beta and production simultaneously:
-
-| Environment | WebSocket | Health | Database |
-|-------------|-----------|--------|----------|
-| Production | 8080 | 8081 | `~/.tron/database/prod.db` |
-| Beta | 8082 | 8083 | `~/.tron/database/beta.db` |
-
-```bash
-tron dev             # Beta dev workflow (sidecars, foreground mode)
-tron start beta      # Start beta server (minimal)
 ```
-
-### Logs
-
-```bash
-tron logs                # Recent prod logs
-tron logs beta           # Recent beta logs
-tron logs -l error       # Filter by level
-tron logs -q "search"    # Full-text search
-tron logs -t             # Tail prod file log
+~/.tron/
+├── tron                 # Server binary
+├── database/            # SQLite databases (prod.db)
+├── settings.json        # Global settings
+├── auth.json            # OAuth tokens
+├── skills/              # Global skills
+├── mods/apns/           # APNS credentials
+├── notes/               # Agent notes
+└── artifacts/
+    ├── server.log       # Production logs
+    ├── deployed-commit  # Git commit tracking
+    └── canvases/        # Generated artifacts
 ```
 
 ---
@@ -546,15 +232,6 @@ xcodegen generate
 open TronMobile.xcodeproj
 ```
 
-### Build Configurations
-
-| Config | Server | Use Case |
-|--------|--------|----------|
-| Debug-Beta | localhost:8082 | Development |
-| Release-Beta | localhost:8082 | TestFlight |
-| Debug-Prod | localhost:8080 | Production testing |
-| Release-Prod | localhost:8080 | App Store |
-
 ### Features
 
 - Real-time chat with streaming responses
@@ -562,10 +239,9 @@ open TronMobile.xcodeproj
 - Event-sourced state reconstruction
 - Push notifications for background alerts
 - Voice transcription input
+- Custom UI rendering via RenderAppUI tool
 
-### Push Notifications
-
-Requires Apple Developer account with APNS key. See `packages/ios-app/docs/apns.md`.
+**Documentation:** See `packages/ios-app/docs/`
 
 ---
 
@@ -574,86 +250,17 @@ Requires Apple Developer account with APNS key. See `packages/ios-app/docs/apns.
 ### WebSocket Connection
 
 ```
-ws://localhost:8080  (production)
-ws://localhost:8082  (development)
+ws://localhost:9847/ws
 ```
 
 All messages use JSON-RPC 2.0 format.
 
-### RPC Methods
-
-#### Session Management
-
-| Method | Params | Returns |
-|--------|--------|---------|
-| `session.create` | `{ workingDirectory, model }` | `{ sessionId }` |
-| `session.list` | `{ workspaceId?, limit? }` | `{ sessions }` |
-| `session.get` | `{ sessionId }` | `{ session }` |
-| `session.fork` | `{ sessionId, eventId? }` | `{ newSessionId }` |
-| `session.delete` | `{ sessionId }` | `{ success }` |
-
-#### Agent Control
-
-| Method | Params | Returns |
-|--------|--------|---------|
-| `agent.message` | `{ sessionId, content, attachments? }` | Stream of events |
-| `agent.abort` | `{ sessionId }` | `{ aborted }` |
-| `agent.respond` | `{ sessionId, response }` | Stream of events |
-
-#### Model
-
-| Method | Params | Returns |
-|--------|--------|---------|
-| `model.list` | `{}` | `{ models }` |
-| `model.switch` | `{ sessionId, model }` | `{ success }` |
-
-### Event Notifications
-
-Server sends notifications for real-time updates:
-
-```typescript
-// Text streaming
-{ method: "agent.text_delta", params: { sessionId, delta } }
-
-// Tool lifecycle
-{ method: "agent.tool_start", params: { sessionId, toolName, toolId } }
-{ method: "agent.tool_end", params: { sessionId, toolId, result } }
-
-// Turn complete
-{ method: "agent.turn_complete", params: { sessionId, tokenUsage } }
-
-// Sub-agent events
-{ method: "subagent.spawn", params: { parentSessionId, subagentSessionId, task } }
-{ method: "subagent.complete", params: { subagentSessionId, result } }
-```
-
 ### Health Endpoint
 
 ```
-GET http://localhost:8081/health  (production)
-GET http://localhost:8083/health  (development)
+GET http://localhost:9847/health
 
-Response: { status: "ok", version: "1.0.0" }
-```
-
----
-
-## File Locations
-
-```
-~/.tron/
-├── database/           # SQLite databases (prod.db, beta.db)
-├── logs/               # Server logs
-├── settings.json       # Global settings
-├── SYSTEM.md           # Global system prompt
-├── skills/             # Global skills
-└── rules/
-    └── AGENTS.md       # Global context rules
-
-.claude/                # Project config (or .tron/)
-├── CLAUDE.md           # Project context rules
-├── SYSTEM.md           # Project system prompt
-└── skills/             # Project skills
+Response: { "status": "ok" }
 ```
 
 ---
@@ -661,13 +268,3 @@ Response: { status: "ok", version: "1.0.0" }
 ## License
 
 MIT
-
----
-
-## Credits
-
-Built on insights from:
-- [pi-mono](https://github.com/badlogic/pi-mono) by Mario Zechner
-- [Continuous-Claude-v2](https://github.com/parcadei/Continuous-Claude-v2)
-- [Letta](https://docs.letta.com/)
-- [AgentFS](https://github.com/tursodatabase/agentfs)

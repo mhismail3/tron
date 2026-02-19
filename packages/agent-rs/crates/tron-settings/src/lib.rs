@@ -127,6 +127,10 @@ pub(crate) fn reset_settings() {
 mod tests {
     use super::*;
 
+    /// Tests that mutate the global SETTINGS static must hold this lock
+    /// to avoid racing with each other (Rust runs tests in parallel threads).
+    static SETTINGS_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn re_exports_work() {
         // Verify that key types are accessible through the crate root
@@ -163,6 +167,7 @@ mod tests {
 
     #[test]
     fn init_settings_sets_custom_value() {
+        let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
         let mut custom = TronSettings::default();
         custom.server.ws_port = 9999;
@@ -174,6 +179,7 @@ mod tests {
 
     #[test]
     fn init_settings_replaces_previous() {
+        let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
         let mut first = TronSettings::default();
         first.server.ws_port = 1111;
@@ -189,6 +195,7 @@ mod tests {
 
     #[test]
     fn reload_settings_from_path_updates_cached_value() {
+        let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
 
         // Start with defaults
@@ -221,6 +228,7 @@ mod tests {
 
     #[test]
     fn reload_from_nonexistent_path_falls_back_to_defaults() {
+        let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
 
         let mut custom = TronSettings::default();
@@ -242,6 +250,7 @@ mod tests {
 
     #[test]
     fn reload_settings_simulates_settings_update_rpc_flow() {
+        let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
 
         // Simulate server startup: auto-inject enabled by default
@@ -277,6 +286,7 @@ mod tests {
 
     #[test]
     fn get_settings_returns_arc_for_snapshot_isolation() {
+        let _lock = SETTINGS_MUTEX.lock().unwrap();
         reset_settings();
         init_settings(TronSettings::default());
 

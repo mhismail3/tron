@@ -1,40 +1,6 @@
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
-.venv/
-__pycache__/
-
-# Build outputs
-dist/
+# Rust build outputs
+**/target/
 *.tsbuildinfo
-.turbo/
-meta.json
-
-# TypeScript build artifacts (outside dist/)
-*.js
-*.js.map
-*.d.ts
-*.d.ts.map
-# Keep legitimate source .d.ts files
-!**/vite-env.d.ts
-
-# Test coverage
-.coverage/
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-pnpm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
 
 # IDE
 .idea/
@@ -42,6 +8,8 @@ pids/
 *.swp
 *.swo
 *~
+
+# Xcode
 *.xcuserstate
 project.xcworkspace/
 xcuserdata/
@@ -50,44 +18,26 @@ xcuserdata/
 .DS_Store
 Thumbs.db
 
-# Environment files
+# Environment
 .env
 .env.local
 .env.*.local
 
-# Tron agent data (user-specific, don't commit)
-.tron/sessions/
-.tron/memory/episodic.db
-.tron/memory/learnings/
-.tron/inbox/processed/
+# Tron user data
 .tron/auth.json
 
-# Session-scoped thoughts (don't commit)
-thoughts/ledgers/
-thoughts/shared/handoffs/
-thoughts/shared/plans/
+# Python (utility scripts)
+__pycache__/
+.venv/
 
-# Keep the structure
-!.tron/.gitkeep
-!.tron/skills/
-!thoughts/.gitkeep
-
-# Temporary files
+# Temporary
 tmp/
 temp/
 *.tmp
-ast-grep-temp-*/
-
-# Crash reports
 *.dump
 
-# Lock files (use npm/pnpm lock only)
-yarn.lock
-package-lock.json
-!pnpm-lock.yaml
+# Logs
+*.log
 
 # Debug
 .debug/
-
-# Research docs (kept in repo for reference)
-!*.md

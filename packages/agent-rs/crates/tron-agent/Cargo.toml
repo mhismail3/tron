@@ -10,7 +10,7 @@ license.workspace = true
 workspace = true
 
 [[bin]]
-name = "tron-agent"
+name = "tron"
 path = "src/main.rs"
 
 [dependencies]

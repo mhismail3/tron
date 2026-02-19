@@ -404,7 +404,7 @@ mod tests {
         let store = setup_store();
         // Create a session to query
         let result = store
-            .create_session("claude-opus-4-6", "/tmp", Some("Test Session"))
+            .create_session("claude-opus-4-6", "/tmp", Some("Test Session"), None)
             .unwrap();
         let sid = result.root_event.session_id;
 
