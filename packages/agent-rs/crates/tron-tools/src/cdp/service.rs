@@ -51,7 +51,7 @@ impl BrowserService {
         }
 
         let session = Arc::new(
-            BrowserSession::launch(&self.chrome_path)
+            BrowserSession::launch(&self.chrome_path, self.frame_tx.clone())
                 .await
                 .map_err(|e| {
                     tracing::error!(session_id, error = %e, "browser session creation failed");
@@ -72,11 +72,7 @@ impl BrowserService {
     pub async fn start_stream(&self, session_id: &str) -> Result<(), BrowserError> {
         let session = self.get_or_create(session_id).await?;
         session
-            .start_screencast(
-                session_id.to_string(),
-                ScreencastOptions::default(),
-                self.frame_tx.clone(),
-            )
+            .start_screencast(session_id.to_string(), ScreencastOptions::default())
             .await?;
         tracing::info!(session_id, "screencast streaming started");
         Ok(())
@@ -187,6 +183,7 @@ mod tests {
 #[cfg(feature = "browser-integration")]
 mod integration_tests {
     use super::*;
+    use std::time::Duration;
 
     fn make_real_service() -> BrowserService {
         let chrome = super::chrome::find_chrome().expect("Chrome required for integration tests");
@@ -279,6 +276,96 @@ mod integration_tests {
         assert!(svc.get_status("s1").is_streaming);
         svc.stop_stream("s1").await.unwrap();
         assert!(!svc.get_status("s1").is_streaming);
+        svc.close_session("s1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_start_stream_delivers_frames() {
+        let svc = make_real_service();
+        let mut rx = svc.subscribe();
+        svc.start_stream("s1").await.unwrap();
+
+        let session = svc.get_or_create("s1").await.unwrap();
+        session
+            .navigate("data:text/html,<h1 style='font-size:72px'>FRAME TEST</h1>")
+            .await
+            .unwrap();
+
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout waiting for frame")
+            .expect("channel error");
+
+        match event {
+            BrowserEvent::Frame { session_id, frame } => {
+                assert_eq!(session_id, "s1");
+                assert!(!frame.data.is_empty());
+                assert!(frame.frame_id >= 1);
+                assert!(frame.timestamp > 0);
+            }
+            other => panic!("expected Frame, got: {other:?}"),
+        }
+
+        svc.close_session("s1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_stop_stream_stops_frames() {
+        let svc = make_real_service();
+        let mut rx = svc.subscribe();
+        svc.start_stream("s1").await.unwrap();
+
+        let session = svc.get_or_create("s1").await.unwrap();
+        session
+            .navigate("data:text/html,<h1>STOP TEST</h1>")
+            .await
+            .unwrap();
+
+        // Drain one frame
+        let _ = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await;
+
+        svc.stop_stream("s1").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Clear buffered frames
+        while rx.try_recv().is_ok() {}
+
+        // No more frames should arrive
+        let result = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await;
+        assert!(result.is_err(), "should not receive frames after stop");
+
+        svc.close_session("s1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_frame_ids_increment() {
+        let svc = make_real_service();
+        let mut rx = svc.subscribe();
+        svc.start_stream("s1").await.unwrap();
+
+        let session = svc.get_or_create("s1").await.unwrap();
+        session
+            .navigate("data:text/html,<h1>COUNTER TEST</h1>")
+            .await
+            .unwrap();
+
+        let mut ids = vec![];
+        for _ in 0..3 {
+            if let Ok(Ok(BrowserEvent::Frame { frame, .. })) =
+                tokio::time::timeout(Duration::from_secs(5), rx.recv()).await
+            {
+                ids.push(frame.frame_id);
+            }
+        }
+
+        assert!(ids.len() >= 2, "need at least 2 frames, got {}", ids.len());
+        for window in ids.windows(2) {
+            assert!(
+                window[1] > window[0],
+                "frame_ids should increment: {ids:?}"
+            );
+        }
+
         svc.close_session("s1").await.unwrap();
     }
 }

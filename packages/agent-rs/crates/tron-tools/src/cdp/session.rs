@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::error::BrowserError;
-use super::types::{BrowserEvent, ScreencastOptions};
+use super::types::{BrowserEvent, BrowserFrame, FrameMetadata, ScreencastOptions};
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -31,11 +31,16 @@ type PendingTx = oneshot::Sender<Result<Value, String>>;
 /// A single CDP browser session.
 pub struct BrowserSession {
     cmd_tx: mpsc::Sender<CdpCommand>,
-    is_streaming: AtomicBool,
-    screencast_handle: Mutex<Option<JoinHandle<()>>>,
+    is_streaming: Arc<AtomicBool>,
     current_url: parking_lot::RwLock<Option<String>>,
     chrome_process: Mutex<Option<Child>>,
     _handler: JoinHandle<()>,
+    /// Keeps the broadcast channel alive while the session exists.
+    _frame_tx: broadcast::Sender<BrowserEvent>,
+    /// Tron session ID (set when screencast starts, read by handler loop).
+    screencast_session_id: Arc<parking_lot::RwLock<Option<String>>>,
+    /// Monotonic frame counter (shared with handler loop).
+    frame_counter: Arc<AtomicU64>,
 }
 
 /// Internal CDP command message.
@@ -50,7 +55,14 @@ impl BrowserSession {
     const MAX_PORT_ATTEMPTS: usize = 3;
 
     /// Launch a headless Chrome, connect via CDP WebSocket.
-    pub async fn launch(chrome_path: &std::path::Path) -> Result<Self, BrowserError> {
+    pub async fn launch(
+        chrome_path: &std::path::Path,
+        frame_tx: broadcast::Sender<BrowserEvent>,
+    ) -> Result<Self, BrowserError> {
+        let is_streaming = Arc::new(AtomicBool::new(false));
+        let screencast_session_id = Arc::new(parking_lot::RwLock::new(None));
+        let frame_counter = Arc::new(AtomicU64::new(0));
+
         let mut last_err = None;
 
         for attempt in 0..Self::MAX_PORT_ATTEMPTS {
@@ -96,15 +108,24 @@ impl BrowserSession {
                             })?;
 
                     let (cmd_tx, cmd_rx) = mpsc::channel::<CdpCommand>(64);
-                    let handler = tokio::spawn(cdp_handler_loop(ws, cmd_rx));
+                    let handler = tokio::spawn(cdp_handler_loop(
+                        ws,
+                        cmd_rx,
+                        frame_tx.clone(),
+                        Arc::clone(&is_streaming),
+                        Arc::clone(&screencast_session_id),
+                        Arc::clone(&frame_counter),
+                    ));
 
                     return Ok(Self {
                         cmd_tx,
-                        is_streaming: AtomicBool::new(false),
-                        screencast_handle: Mutex::new(None),
+                        is_streaming,
                         current_url: parking_lot::RwLock::new(None),
                         chrome_process: Mutex::new(Some(child)),
                         _handler: handler,
+                        _frame_tx: frame_tx,
+                        screencast_session_id,
+                        frame_counter,
                     });
                 }
                 Err(e) if attempt < Self::MAX_PORT_ATTEMPTS - 1 => {
@@ -492,15 +513,22 @@ impl BrowserSession {
 
     /// Start streaming screencast frames.
     ///
-    /// Screencast works by enabling `Page.screencastFrame` events from CDP,
-    /// then forwarding them onto the broadcast channel.
+    /// Enables the Page CDP domain (required for Chrome to dispatch events)
+    /// then starts `Page.screencastFrame` events. The handler loop forwards
+    /// frames onto the broadcast channel stored on this session.
     pub async fn start_screencast(
-        self: &Arc<Self>,
-        _session_id: String,
+        &self,
+        session_id: String,
         opts: ScreencastOptions,
-        _tx: broadcast::Sender<BrowserEvent>,
     ) -> Result<(), BrowserError> {
         self.stop_screencast().await?;
+
+        *self.screencast_session_id.write() = Some(session_id);
+        self.frame_counter.store(0, Ordering::Relaxed);
+
+        // Enable the Page domain — Chrome won't dispatch Page.screencastFrame
+        // events without this. Playwright does it internally; we must be explicit.
+        let _ = self.send_cdp("Page.enable", json!({})).await?;
 
         let _ = self
             .send_cdp(
@@ -516,34 +544,13 @@ impl BrowserSession {
             .await?;
 
         self.is_streaming.store(true, Ordering::Relaxed);
-
-        // The CDP handler loop already receives screencast events.
-        // We need a separate mechanism to forward them. For now, we use
-        // a polling approach via the event subscription the handler supports.
-        // This is handled inside cdp_handler_loop via the event_tx.
-
-        // Store session info for the handler to use
-        let this = Arc::clone(self);
-        let handle = tokio::spawn(async move {
-            // Keep alive while streaming; actual frame delivery happens in cdp_handler_loop
-            loop {
-                if !this.is_streaming.load(Ordering::Relaxed) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        });
-
-        *self.screencast_handle.lock().await = Some(handle);
         Ok(())
     }
 
     /// Stop screencast streaming.
     pub async fn stop_screencast(&self) -> Result<(), BrowserError> {
         self.is_streaming.store(false, Ordering::Relaxed);
-        if let Some(handle) = self.screencast_handle.lock().await.take() {
-            handle.abort();
-        }
+        *self.screencast_session_id.write() = None;
         let _ = self.send_cdp("Page.stopScreencast", json!({})).await;
         Ok(())
     }
@@ -645,8 +652,15 @@ async fn wait_for_ws_url(port: u16, child: &mut Child) -> Result<String, Browser
 /// CDP WebSocket handler loop.
 ///
 /// Receives commands from `BrowserSession`, sends them over WS, and routes
-/// responses back. Also handles CDP events (like screencast frames).
-async fn cdp_handler_loop(ws: WsStream, mut cmd_rx: mpsc::Receiver<CdpCommand>) {
+/// responses back. Handles CDP events (screencast frames).
+async fn cdp_handler_loop(
+    ws: WsStream,
+    mut cmd_rx: mpsc::Receiver<CdpCommand>,
+    frame_tx: broadcast::Sender<BrowserEvent>,
+    is_streaming: Arc<AtomicBool>,
+    screencast_session_id: Arc<parking_lot::RwLock<Option<String>>>,
+    frame_counter: Arc<AtomicU64>,
+) {
     let (mut ws_tx, mut ws_rx) = ws.split();
     let mut pending: HashMap<u64, PendingTx> = HashMap::new();
     let next_id = AtomicU64::new(1);
@@ -675,7 +689,7 @@ async fn cdp_handler_loop(ws: WsStream, mut cmd_rx: mpsc::Receiver<CdpCommand>) 
                     continue;
                 };
                 if let Some(id) = val.get("id").and_then(Value::as_u64) {
-                    // This is a response to a command
+                    // CDP response to a command we sent
                     if let Some(tx) = pending.remove(&id) {
                         if let Some(err) = val.get("error") {
                             let msg = err["message"].as_str().unwrap_or("CDP error");
@@ -684,13 +698,100 @@ async fn cdp_handler_loop(ws: WsStream, mut cmd_rx: mpsc::Receiver<CdpCommand>) 
                             let _ = tx.send(Ok(val["result"].clone()));
                         }
                     }
+                } else if let Some(method) = val.get("method").and_then(Value::as_str) {
+                    // CDP event
+                    if method == "Page.screencastFrame"
+                        && is_streaming.load(Ordering::Relaxed)
+                    {
+                        handle_screencast_frame(
+                            &val,
+                            &mut ws_tx,
+                            &next_id,
+                            &frame_tx,
+                            &screencast_session_id,
+                            &frame_counter,
+                        )
+                        .await;
+                    }
                 }
-                // CDP events (method field, no id) are ignored for now.
-                // Screencast frame events will be handled when we add
-                // event subscriptions.
             }
         }
     }
+}
+
+/// Process a `Page.screencastFrame` CDP event: ACK it and broadcast the frame.
+#[allow(clippy::cast_possible_truncation)]
+async fn handle_screencast_frame(
+    val: &Value,
+    ws_tx: &mut futures::stream::SplitSink<WsStream, Message>,
+    next_id: &AtomicU64,
+    frame_tx: &broadcast::Sender<BrowserEvent>,
+    screencast_session_id: &parking_lot::RwLock<Option<String>>,
+    frame_counter: &AtomicU64,
+) {
+    let Some(params) = val.get("params") else {
+        return;
+    };
+    let Some(data) = params
+        .get("data")
+        .and_then(Value::as_str)
+        .filter(|d| !d.is_empty())
+    else {
+        return;
+    };
+
+    let Some(session_id) = screencast_session_id.read().clone() else {
+        tracing::warn!("screencast frame received but no session_id set");
+        return;
+    };
+
+    // ACK the frame so Chrome keeps sending
+    if let Some(cdp_session_id) = params.get("sessionId").and_then(Value::as_u64) {
+        let ack = build_screencast_ack(cdp_session_id, next_id.fetch_add(1, Ordering::Relaxed));
+        let _ = ws_tx
+            .send(Message::Text(ack.to_string().into()))
+            .await;
+    }
+
+    let metadata = params.get("metadata").map(parse_frame_metadata);
+    let frame_id = frame_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let frame = BrowserFrame {
+        session_id: session_id.clone(),
+        data: data.to_string(),
+        frame_id,
+        timestamp,
+        metadata,
+    };
+
+    // send() fails only when there are no receivers — not an error
+    let _ = frame_tx.send(BrowserEvent::Frame { session_id, frame });
+}
+
+/// Parse CDP screencast frame metadata.
+#[allow(clippy::cast_possible_truncation)]
+fn parse_frame_metadata(val: &Value) -> FrameMetadata {
+    FrameMetadata {
+        offset_top: val["offsetTop"].as_f64().unwrap_or(0.0),
+        page_scale_factor: val["pageScaleFactor"].as_f64().unwrap_or(1.0),
+        device_width: val["deviceWidth"].as_u64().unwrap_or(1280) as u32,
+        device_height: val["deviceHeight"].as_u64().unwrap_or(800) as u32,
+        scroll_offset_x: val["scrollOffsetX"].as_f64().unwrap_or(0.0),
+        scroll_offset_y: val["scrollOffsetY"].as_f64().unwrap_or(0.0),
+    }
+}
+
+/// Build a `Page.screencastFrameAck` CDP message.
+fn build_screencast_ack(cdp_session_id: u64, msg_id: u64) -> Value {
+    json!({
+        "id": msg_id,
+        "method": "Page.screencastFrameAck",
+        "params": { "sessionId": cdp_session_id }
+    })
 }
 
 #[cfg(test)]
@@ -714,6 +815,150 @@ mod tests {
         let opts = ScreencastOptions::default();
         assert_eq!(opts.format.as_str(), "jpeg");
     }
+
+    // ─── parse_frame_metadata tests ──────────────────────────────────
+
+    #[test]
+    fn parse_metadata_full() {
+        let val = json!({
+            "offsetTop": 10.0,
+            "pageScaleFactor": 2.0,
+            "deviceWidth": 1920,
+            "deviceHeight": 1080,
+            "scrollOffsetX": 5.0,
+            "scrollOffsetY": 100.0,
+        });
+        let meta = parse_frame_metadata(&val);
+        assert!((meta.offset_top - 10.0).abs() < f64::EPSILON);
+        assert!((meta.page_scale_factor - 2.0).abs() < f64::EPSILON);
+        assert_eq!(meta.device_width, 1920);
+        assert_eq!(meta.device_height, 1080);
+        assert!((meta.scroll_offset_x - 5.0).abs() < f64::EPSILON);
+        assert!((meta.scroll_offset_y - 100.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_metadata_partial_uses_defaults() {
+        let val = json!({ "deviceWidth": 640 });
+        let meta = parse_frame_metadata(&val);
+        assert!((meta.offset_top - 0.0).abs() < f64::EPSILON);
+        assert!((meta.page_scale_factor - 1.0).abs() < f64::EPSILON);
+        assert_eq!(meta.device_width, 640);
+        assert_eq!(meta.device_height, 800); // default
+    }
+
+    #[test]
+    fn parse_metadata_empty_object_all_defaults() {
+        let val = json!({});
+        let meta = parse_frame_metadata(&val);
+        assert_eq!(meta.device_width, 1280);
+        assert_eq!(meta.device_height, 800);
+        assert!((meta.page_scale_factor - 1.0).abs() < f64::EPSILON);
+    }
+
+    // ─── build_screencast_ack tests ──────────────────────────────────
+
+    #[test]
+    fn ack_message_format() {
+        let ack = build_screencast_ack(42, 7);
+        assert_eq!(ack["id"], 7);
+        assert_eq!(ack["method"], "Page.screencastFrameAck");
+        assert_eq!(ack["params"]["sessionId"], 42);
+    }
+
+    #[test]
+    fn ack_message_different_ids() {
+        let ack = build_screencast_ack(999, 123);
+        assert_eq!(ack["id"], 123);
+        assert_eq!(ack["params"]["sessionId"], 999);
+    }
+
+    // ─── frame counter tests ─────────────────────────────────────────
+
+    #[test]
+    fn frame_counter_increments_monotonically() {
+        let counter = AtomicU64::new(0);
+        let id1 = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let id2 = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let id3 = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+        assert_eq!(id3, 3);
+    }
+
+    #[test]
+    fn frame_counter_resets_to_zero() {
+        let counter = AtomicU64::new(5);
+        counter.store(0, Ordering::Relaxed);
+        let id = counter.fetch_add(1, Ordering::Relaxed) + 1;
+        assert_eq!(id, 1);
+    }
+
+    // ─── frame construction tests ────────────────────────────────────
+
+    #[test]
+    fn browser_frame_from_cdp_data() {
+        let frame = BrowserFrame {
+            session_id: "s1".into(),
+            data: "/9j/4AAQ".into(),
+            frame_id: 1,
+            timestamp: 1707999045123,
+            metadata: Some(parse_frame_metadata(&json!({
+                "offsetTop": 0,
+                "pageScaleFactor": 1,
+                "deviceWidth": 1280,
+                "deviceHeight": 800,
+                "scrollOffsetX": 0,
+                "scrollOffsetY": 0,
+            }))),
+        };
+        assert_eq!(frame.session_id, "s1");
+        assert_eq!(frame.data, "/9j/4AAQ");
+        assert_eq!(frame.frame_id, 1);
+        let meta = frame.metadata.unwrap();
+        assert_eq!(meta.device_width, 1280);
+    }
+
+    #[test]
+    fn browser_frame_without_metadata() {
+        let frame = BrowserFrame {
+            session_id: "s1".into(),
+            data: "AA==".into(),
+            frame_id: 1,
+            timestamp: 0,
+            metadata: None,
+        };
+        assert!(frame.metadata.is_none());
+    }
+
+    // ─── streaming state tests ───────────────────────────────────────
+
+    #[test]
+    fn is_streaming_flag_controls_frame_emission() {
+        let flag = Arc::new(AtomicBool::new(false));
+        assert!(!flag.load(Ordering::Relaxed));
+        flag.store(true, Ordering::Relaxed);
+        assert!(flag.load(Ordering::Relaxed));
+        flag.store(false, Ordering::Relaxed);
+        assert!(!flag.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn screencast_session_id_starts_none() {
+        let id: Arc<parking_lot::RwLock<Option<String>>> =
+            Arc::new(parking_lot::RwLock::new(None));
+        assert!(id.read().is_none());
+    }
+
+    #[test]
+    fn screencast_session_id_set_and_clear() {
+        let id: Arc<parking_lot::RwLock<Option<String>>> =
+            Arc::new(parking_lot::RwLock::new(None));
+        *id.write() = Some("s1".into());
+        assert_eq!(*id.read(), Some("s1".to_string()));
+        *id.write() = None;
+        assert!(id.read().is_none());
+    }
 }
 
 #[cfg(test)]
@@ -723,7 +968,8 @@ mod integration_tests {
 
     async fn launch_test_session() -> Arc<BrowserSession> {
         let chrome = super::chrome::find_chrome().expect("Chrome required for integration tests");
-        Arc::new(BrowserSession::launch(&chrome).await.unwrap())
+        let (tx, _) = broadcast::channel(64);
+        Arc::new(BrowserSession::launch(&chrome, tx).await.unwrap())
     }
 
     #[tokio::test]

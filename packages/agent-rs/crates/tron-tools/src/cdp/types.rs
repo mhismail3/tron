@@ -85,7 +85,7 @@ impl Default for ScreencastOptions {
             format: ScreencastFormat::Jpeg,
             max_width: 1280,
             max_height: 800,
-            every_nth_frame: 1,
+            every_nth_frame: 6,
         }
     }
 }
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(opts.format, ScreencastFormat::Jpeg);
         assert_eq!(opts.max_width, 1280);
         assert_eq!(opts.max_height, 800);
-        assert_eq!(opts.every_nth_frame, 1);
+        assert_eq!(opts.every_nth_frame, 6);
     }
 
     #[test]

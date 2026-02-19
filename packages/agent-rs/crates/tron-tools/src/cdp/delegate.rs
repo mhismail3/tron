@@ -37,6 +37,13 @@ impl BrowserDelegate for CdpBrowserDelegate {
                     message: e.to_string(),
                 })?;
 
+        // Auto-start screencast for iOS frame streaming (matches TS server behavior)
+        if !session.is_streaming() {
+            if let Err(e) = self.service.start_stream(session_id).await {
+                tracing::warn!(session_id, error = %e, "auto-start screencast failed (non-fatal)");
+            }
+        }
+
         match action.action.as_str() {
             "navigate" => {
                 let url = action
@@ -579,6 +586,51 @@ mod integration_tests {
         };
         let result = d.execute_action("s1", &action).await.unwrap();
         assert!(result.content.contains("reloaded"));
+        d.close_session("s1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delegate_auto_starts_screencast() {
+        let chrome = super::chrome::find_chrome().expect("Chrome required");
+        let svc = Arc::new(super::service::BrowserService::new(chrome));
+        let d = CdpBrowserDelegate::new(Arc::clone(&svc));
+
+        let action = BrowserAction {
+            action: "navigate".into(),
+            params: serde_json::json!({"url": "data:text/html,<h1>Auto</h1>"}),
+        };
+        d.execute_action("s1", &action).await.unwrap();
+
+        let status = svc.get_status("s1");
+        assert!(
+            status.is_streaming,
+            "delegate should auto-start screencast on first action"
+        );
+        d.close_session("s1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delegate_does_not_restart_screencast() {
+        let chrome = super::chrome::find_chrome().expect("Chrome required");
+        let svc = Arc::new(super::service::BrowserService::new(chrome));
+        let d = CdpBrowserDelegate::new(Arc::clone(&svc));
+
+        // First action: triggers auto-start
+        let action = BrowserAction {
+            action: "navigate".into(),
+            params: serde_json::json!({"url": "data:text/html,<h1>First</h1>"}),
+        };
+        d.execute_action("s1", &action).await.unwrap();
+        assert!(svc.get_status("s1").is_streaming);
+
+        // Second action: should NOT restart (already streaming)
+        let action2 = BrowserAction {
+            action: "navigate".into(),
+            params: serde_json::json!({"url": "data:text/html,<h1>Second</h1>"}),
+        };
+        d.execute_action("s1", &action2).await.unwrap();
+        assert!(svc.get_status("s1").is_streaming);
+
         d.close_session("s1").await.unwrap();
     }
 }
