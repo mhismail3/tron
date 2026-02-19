@@ -1358,7 +1358,7 @@ cmd_ci() {
 cmd_bench() {
     require_project_dir
 
-    local BENCH_DIR="$PROJECT_DIR/benchmarks"
+    local BENCH_DIR="$SCRIPT_DIR/artifacts/benchmarks"
     local subcmd="${1:-run}"
     shift 2>/dev/null || true
 

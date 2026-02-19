@@ -30,6 +30,9 @@ Thumbs.db
 __pycache__/
 .venv/
 
+# Script artifacts (benchmarks, etc.)
+scripts/artifacts/
+
 # Temporary
 tmp/
 temp/
