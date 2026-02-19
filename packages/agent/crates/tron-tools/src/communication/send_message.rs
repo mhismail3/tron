@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{MessageBus, OutgoingMessage, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_bool, get_optional_u64, validate_required_string};
 
 const DEFAULT_REPLY_TIMEOUT_MS: u64 = 30_000;
@@ -40,39 +39,16 @@ impl TronTool for SendMessageTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "send_message".into(),
-            description:
-                "Send a message to another agent session. Can optionally wait for a reply.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("targetSessionId".into(), json!({"type": "string", "description": "Session ID to send the message to"}));
-                    let _ = m.insert(
-                        "messageType".into(),
-                        json!({"type": "string", "description": "Type of message for routing"}),
-                    );
-                    let _ = m.insert(
-                        "payload".into(),
-                        json!({"type": "object", "description": "Message content/data"}),
-                    );
-                    let _ = m.insert(
-                        "waitForReply".into(),
-                        json!({"type": "boolean", "description": "Whether to wait for a reply"}),
-                    );
-                    let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in ms when waiting for reply (default: 30000)"}));
-                    m
-                }),
-                required: Some(vec![
-                    "targetSessionId".into(),
-                    "messageType".into(),
-                    "payload".into(),
-                ]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "send_message",
+            "Send a message to another agent session. Can optionally wait for a reply.",
+        )
+        .required_property("targetSessionId", json!({"type": "string", "description": "Session ID to send the message to"}))
+        .required_property("messageType", json!({"type": "string", "description": "Type of message for routing"}))
+        .required_property("payload", json!({"type": "object", "description": "Message content/data"}))
+        .property("waitForReply", json!({"type": "boolean", "description": "Whether to wait for a reply"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in ms when waiting for reply (default: 30000)"}))
+        .build()
     }
 
     async fn execute(
@@ -139,6 +115,7 @@ impl TronTool for SendMessageTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{MessageFilter, MessageSendResult, ReceivedMessage};
 
     struct MockBus {
@@ -192,31 +169,6 @@ mod tests {
             _filter: &MessageFilter,
         ) -> Result<Vec<ReceivedMessage>, ToolError> {
             Ok(vec![])
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{NotifyDelegate, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::validate_required_string;
 
 /// The `OpenURL` tool opens a URL in Safari via the iOS app.
@@ -42,9 +41,9 @@ impl TronTool for OpenURLTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "OpenURL".into(),
-            description: "Open a URL in the native iOS Safari browser for the user to view.\n\n\
+        ToolSchemaBuilder::new(
+            "OpenURL",
+            "Open a URL in the native iOS Safari browser for the user to view.\n\n\
 Use this tool when you want to:\n\
 - Show the user a webpage, documentation, or article\n\
 - Direct the user to a website for reference\n\
@@ -54,20 +53,10 @@ and dismiss it when done. This is a fire-and-forget action — you don't need to
 for the user to close the browser.\n\n\
 Examples:\n\
 - Open documentation: { \"url\": \"https://docs.swift.org/swift-book/\" }\n\
-- Show a reference: { \"url\": \"https://developer.apple.com/documentation/swiftui\" }"
-                .into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("url".into(), json!({"type": "string", "description": "The URL to open (must be http:// or https://)"}));
-                    m
-                }),
-                required: Some(vec!["url".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+- Show a reference: { \"url\": \"https://developer.apple.com/documentation/swiftui\" }",
+        )
+        .required_property("url", json!({"type": "string", "description": "The URL to open (must be http:// or https://)"}))
+        .build()
     }
 
     async fn execute(
@@ -122,6 +111,7 @@ Examples:\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{Notification, NotifyResult};
 
     struct MockNotify {
@@ -158,31 +148,6 @@ mod tests {
             } else {
                 Ok(())
             }
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

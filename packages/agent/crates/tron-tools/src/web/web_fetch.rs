@@ -8,12 +8,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{ContentSummarizer, HttpClient, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::validate_required_string;
 use crate::web::cache::{CachedResult, WebCache, WebCacheConfig};
 use crate::web::html_parser::parse_html;
@@ -78,28 +77,19 @@ impl TronTool for WebFetchTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "WebFetch".into(),
-            description: "Fetch a web page and answer a question about its content.\n\n\
+        ToolSchemaBuilder::new(
+            "WebFetch",
+            "Fetch a web page and answer a question about its content.\n\n\
 The tool fetches the URL, extracts the main content, and summarizes it to answer your question. \
 This is much more efficient than including raw web content in context.\n\n\
 Parameters:\n\
 - **url**: The URL to fetch (required). HTTP is auto-upgraded to HTTPS.\n\
 - **prompt**: Your question about the content (required). Be specific for better answers.\n\n\
-Returns the page content with title. Results are cached for 15 minutes — same URL + same prompt = instant cached response.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("url".into(), json!({"type": "string", "description": "The URL to fetch"}));
-                    let _ = m.insert("prompt".into(), json!({"type": "string", "description": "Question to answer about the page content"}));
-                    m
-                }),
-                required: Some(vec!["url".into(), "prompt".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+Returns the page content with title. Results are cached for 15 minutes — same URL + same prompt = instant cached response.",
+        )
+        .required_property("url", json!({"type": "string", "description": "The URL to fetch"}))
+        .required_property("prompt", json!({"type": "string", "description": "Question to answer about the page content"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -143,9 +133,10 @@ Returns the page content with title. Results are cached for 15 minutes — same 
         }
 
         // Fetch
-        let response = self.http.get(&url).await.map_err(|e| ToolError::Internal {
-            message: format!("HTTP fetch failed: {e}"),
-        })?;
+        let response = match self.http.get(&url).await {
+            Ok(r) => r,
+            Err(e) => return Ok(error_result(format!("HTTP request failed: {e}"))),
+        };
 
         if response.status != 200 {
             return Ok(error_result(format!("HTTP {} for {url}", response.status)));
@@ -182,8 +173,8 @@ Returns the page content with title. Results are cached for 15 minutes — same 
             let task = build_summarizer_task(&prompt, &title, &truncated_content);
             match summarizer.summarize(&task, &ctx.session_id).await {
                 Ok(result) => (result.answer, result.session_id),
-                Err(_) => {
-                    // Graceful fallback to raw content on summarizer failure
+                Err(e) => {
+                    tracing::warn!(error = %e, "summarizer failed, returning raw content");
                     (format!("# {title}\n\n{truncated_content}"), String::new())
                 }
             }
@@ -300,30 +291,7 @@ mod tests {
         }
     }
 
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        }
-    }
+    use crate::testutil::{extract_text, make_ctx};
 
     // ─── Original tests (unchanged behavior) ─────────────────────────────
 
@@ -403,7 +371,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_timeout_returns_error() {
+    async fn network_failure_returns_tool_error() {
         let http = Arc::new(MockHttp {
             handler: Box::new(|_| Err("connection timed out".into())),
         });
@@ -414,7 +382,10 @@ mod tests {
                 &make_ctx(),
             )
             .await;
-        assert!(r.is_err());
+        // Must be Ok (tool-level error), NOT Err (system error)
+        let result = r.unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(extract_text(&result).contains("HTTP request failed"));
     }
 
     #[tokio::test]

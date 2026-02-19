@@ -7,11 +7,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::traits::{TaskManagerDelegate, ToolContext, TronTool};
 use crate::utils::validation::validate_required_string;
 
@@ -58,9 +57,9 @@ impl TronTool for TaskManagerTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "TaskManager".into(),
-            description: "Persistent task, project, and area manager (PARA model). Tasks survive across sessions.\n\n\
+        ToolSchemaBuilder::new(
+            "TaskManager",
+            "Persistent task, project, and area manager (PARA model). Tasks survive across sessions.\n\n\
 ## PARA Model\n\
 - **Projects**: Time-bound scoped efforts with tasks\n\
 - **Areas**: Ongoing responsibilities the agent maintains awareness of (e.g., \"Security\", \"Code Quality\")\n\
@@ -89,35 +88,26 @@ backlog → pending → in_progress → completed/cancelled\n\n\
 ## Key Behaviors\n\
 - status→in_progress auto-sets startedAt; status→completed auto-sets completedAt\n\
 - notes append with timestamps (never replace)\n\
-- Dependencies: addBlocks/addBlockedBy create blocking relationships; circular deps rejected".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("action".into(), json!({
-                        "type": "string",
-                        "enum": VALID_ACTIONS,
-                        "description": "The management action to perform"
-                    }));
-                    let _ = m.insert("taskId".into(), json!({"type": "string"}));
-                    let _ = m.insert("title".into(), json!({"type": "string"}));
-                    let _ = m.insert("description".into(), json!({"type": "string"}));
-                    let _ = m.insert("status".into(), json!({"type": "string"}));
-                    let _ = m.insert("priority".into(), json!({"type": "string"}));
-                    let _ = m.insert("projectId".into(), json!({"type": "string"}));
-                    let _ = m.insert("areaId".into(), json!({"type": "string"}));
-                    let _ = m.insert("projectTitle".into(), json!({"type": "string"}));
-                    let _ = m.insert("areaTitle".into(), json!({"type": "string"}));
-                    let _ = m.insert("query".into(), json!({"type": "string"}));
-                    let _ = m.insert("limit".into(), json!({"type": "number"}));
-                    let _ = m.insert("offset".into(), json!({"type": "number"}));
-                    m
-                }),
-                required: Some(vec!["action".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+- Dependencies: addBlocks/addBlockedBy create blocking relationships; circular deps rejected",
+        )
+        .required_property("action", json!({
+            "type": "string",
+            "enum": VALID_ACTIONS,
+            "description": "The management action to perform"
+        }))
+        .property("taskId", json!({"type": "string"}))
+        .property("title", json!({"type": "string"}))
+        .property("description", json!({"type": "string"}))
+        .property("status", json!({"type": "string"}))
+        .property("priority", json!({"type": "string"}))
+        .property("projectId", json!({"type": "string"}))
+        .property("areaId", json!({"type": "string"}))
+        .property("projectTitle", json!({"type": "string"}))
+        .property("areaTitle", json!({"type": "string"}))
+        .property("query", json!({"type": "string"}))
+        .property("limit", json!({"type": "number"}))
+        .property("offset", json!({"type": "number"}))
+        .build()
     }
 
     async fn execute(
@@ -158,6 +148,7 @@ backlog → pending → in_progress → completed/cancelled\n\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
 
     struct MockDelegate;
 
@@ -176,31 +167,6 @@ mod tests {
             Err(ToolError::Internal {
                 message: "delegate error".into(),
             })
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

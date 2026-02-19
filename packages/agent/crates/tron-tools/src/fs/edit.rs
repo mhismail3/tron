@@ -7,16 +7,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{FileSystemOps, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::diff::generate_unified_diff;
 use crate::utils::fs_errors::format_fs_error;
 use crate::utils::path::resolve_path;
 use crate::utils::validation::validate_required_string;
+
+const MAX_FILE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
 
 /// The `Edit` tool performs exact string replacement in files.
 pub struct EditTool {
@@ -47,41 +48,15 @@ impl TronTool for EditTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Edit".into(),
-            description:
-                "Edit a file by replacing old_string with new_string. Requires exact match.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert(
-                        "file_path".into(),
-                        json!({"type": "string", "description": "The path to the file to edit"}),
-                    );
-                    let _ = m.insert(
-                        "old_string".into(),
-                        json!({"type": "string", "description": "The exact string to find and replace"}),
-                    );
-                    let _ = m.insert(
-                        "new_string".into(),
-                        json!({"type": "string", "description": "The replacement string"}),
-                    );
-                    let _ = m.insert(
-                        "replace_all".into(),
-                        json!({"type": "boolean", "description": "Replace all occurrences (default: false)"}),
-                    );
-                    m
-                }),
-                required: Some(vec![
-                    "file_path".into(),
-                    "old_string".into(),
-                    "new_string".into(),
-                ]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "Edit",
+            "Edit a file by replacing old_string with new_string. Requires exact match.",
+        )
+        .required_property("file_path", json!({"type": "string", "description": "The path to the file to edit"}))
+        .required_property("old_string", json!({"type": "string", "description": "The exact string to find and replace"}))
+        .required_property("new_string", json!({"type": "string", "description": "The replacement string"}))
+        .property("replace_all", json!({"type": "boolean", "description": "Replace all occurrences (default: false)"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -125,11 +100,33 @@ impl TronTool for EditTool {
 
         let resolved = resolve_path(&file_path, &ctx.working_directory);
 
+        // Pre-read metadata size check (fail-open: if metadata() errors, proceed)
+        if let Ok(meta) = self.fs.metadata(&resolved).await {
+            #[allow(clippy::cast_possible_truncation)]
+            let file_size = meta.len() as usize;
+            if file_size > MAX_FILE_SIZE {
+                return Ok(error_result(format!(
+                    "File too large to edit: {} bytes (max {} MB)",
+                    file_size,
+                    MAX_FILE_SIZE / 1024 / 1024
+                )));
+            }
+        }
+
         // Read the file
         let bytes = match self.fs.read_file(&resolved).await {
             Ok(b) => b,
             Err(e) => return Ok(format_fs_error(&e, &resolved.to_string_lossy(), "reading")),
         };
+
+        // Post-read size check (hard limit)
+        if bytes.len() > MAX_FILE_SIZE {
+            return Ok(error_result(format!(
+                "File too large to edit: {} bytes (max {} MB)",
+                bytes.len(),
+                MAX_FILE_SIZE / 1024 / 1024
+            )));
+        }
 
         let content = String::from_utf8_lossy(&bytes).into_owned();
 
@@ -187,91 +184,9 @@ impl TronTool for EditTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::io;
-    use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
+    use std::path::Path;
 
-    struct MockFs {
-        files: Mutex<HashMap<PathBuf, Vec<u8>>>,
-    }
-
-    impl MockFs {
-        fn new() -> Self {
-            Self {
-                files: Mutex::new(HashMap::new()),
-            }
-        }
-        fn with_file(self, path: impl Into<PathBuf>, content: impl AsRef<[u8]>) -> Self {
-            let _ = self
-                .files
-                .lock()
-                .unwrap()
-                .insert(path.into(), content.as_ref().to_vec());
-            self
-        }
-        fn read_content(&self, path: &Path) -> Option<String> {
-            self.files
-                .lock()
-                .unwrap()
-                .get(path)
-                .map(|b| String::from_utf8_lossy(b).into_owned())
-        }
-    }
-
-    #[async_trait]
-    impl FileSystemOps for MockFs {
-        async fn read_file(&self, path: &Path) -> Result<Vec<u8>, io::Error> {
-            self.files
-                .lock()
-                .unwrap()
-                .get(path)
-                .cloned()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
-        }
-        async fn write_file(&self, path: &Path, content: &[u8]) -> Result<(), io::Error> {
-            let _ = self
-                .files
-                .lock()
-                .unwrap()
-                .insert(path.to_path_buf(), content.to_vec());
-            Ok(())
-        }
-        async fn metadata(&self, _: &Path) -> Result<std::fs::Metadata, io::Error> {
-            Err(io::Error::new(io::ErrorKind::Other, "mock"))
-        }
-        async fn create_dir_all(&self, _: &Path) -> Result<(), io::Error> {
-            Ok(())
-        }
-        fn exists(&self, path: &Path) -> bool {
-            self.files.lock().unwrap().contains_key(path)
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        }
-    }
+    use crate::testutil::{extract_text, make_ctx, MockFs};
 
     #[tokio::test]
     async fn exact_match_replace() {
@@ -550,6 +465,38 @@ mod tests {
         assert!(result.is_error.is_none());
         let content = fs.read_content(Path::new("/tmp/f.txt")).unwrap();
         assert!(content.ends_with("last"));
+    }
+
+    #[tokio::test]
+    async fn edit_rejects_file_over_50mb() {
+        let content = vec![b'x'; MAX_FILE_SIZE + 1];
+        let fs = Arc::new(MockFs::new().with_file("/tmp/huge.txt", &content));
+        let tool = EditTool::new(fs);
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/huge.txt", "old_string": "x", "new_string": "y"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(extract_text(&result).contains("too large"));
+    }
+
+    #[tokio::test]
+    async fn edit_allows_file_at_exactly_50mb() {
+        let mut content = vec![b'a'; MAX_FILE_SIZE - 1];
+        content.push(b'x');
+        let fs = Arc::new(MockFs::new().with_file("/tmp/at_limit.txt", &content));
+        let tool = EditTool::new(fs);
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/at_limit.txt", "old_string": "x", "new_string": "y"}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_error.is_none());
     }
 
     #[tokio::test]

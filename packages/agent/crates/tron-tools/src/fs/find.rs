@@ -7,12 +7,11 @@ use std::fmt::Write;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::path::resolve_path;
 use crate::utils::validation::{
     get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
@@ -156,28 +155,19 @@ impl TronTool for FindTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Find".into(),
-            description: "Search for files matching a glob pattern. Returns file paths relative to search directory.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("pattern".into(), json!({"type": "string", "description": "Glob pattern to match"}));
-                    let _ = m.insert("path".into(), json!({"type": "string", "description": "Directory to search in"}));
-                    let _ = m.insert("type".into(), json!({"type": "string", "enum": ["file", "directory", "all"], "description": "Type filter"}));
-                    let _ = m.insert("maxDepth".into(), json!({"type": "number", "description": "Maximum recursion depth"}));
-                    let _ = m.insert("maxResults".into(), json!({"type": "number", "description": "Maximum number of results"}));
-                    let _ = m.insert("exclude".into(), json!({"type": "array", "description": "Patterns to exclude from results", "items": {"type": "string"}}));
-                    let _ = m.insert("showSize".into(), json!({"type": "boolean", "description": "Include file sizes"}));
-                    let _ = m.insert("sortByTime".into(), json!({"type": "boolean", "description": "Sort by modification time (newest first)"}));
-                    m
-                }),
-                required: Some(vec!["pattern".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "Find",
+            "Search for files matching a glob pattern. Returns file paths relative to search directory.",
+        )
+        .required_property("pattern", json!({"type": "string", "description": "Glob pattern to match"}))
+        .property("path", json!({"type": "string", "description": "Directory to search in"}))
+        .property("type", json!({"type": "string", "enum": ["file", "directory", "all"], "description": "Type filter"}))
+        .property("maxDepth", json!({"type": "number", "description": "Maximum recursion depth"}))
+        .property("maxResults", json!({"type": "number", "description": "Maximum number of results"}))
+        .property("exclude", json!({"type": "array", "description": "Patterns to exclude from results", "items": {"type": "string"}}))
+        .property("showSize", json!({"type": "boolean", "description": "Include file sizes"}))
+        .property("sortByTime", json!({"type": "boolean", "description": "Sort by modification time (newest first)"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -273,6 +263,8 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    use crate::testutil::extract_text;
+
     fn make_ctx(dir: &str) -> ToolContext {
         ToolContext {
             tool_call_id: "call-1".into(),
@@ -281,20 +273,6 @@ mod tests {
             cancellation: tokio_util::sync::CancellationToken::new(),
             subagent_depth: 0,
             subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

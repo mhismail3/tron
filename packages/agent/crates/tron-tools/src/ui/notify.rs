@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{Notification, NotifyDelegate, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
 const MAX_TITLE_LENGTH: usize = 50;
@@ -41,9 +40,9 @@ impl TronTool for NotifyAppTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "NotifyApp".into(),
-            description: "Send a push notification to the Tron iOS app.\n\n\
+        ToolSchemaBuilder::new(
+            "NotifyApp",
+            "Send a push notification to the Tron iOS app.\n\n\
 ## When to Use\n\
 - Long-running task has completed and the user should know\n\
 - Important results are ready that need user attention\n\
@@ -57,34 +56,15 @@ impl TronTool for NotifyAppTool {
 - Keep titles concise (max 50 chars)\n\
 - Keep body text brief (max 200 chars)\n\
 - Use high priority sparingly (only for urgent notifications)\n\
-- Include relevant context in the body to help user understand why they're being notified"
-                .into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("title".into(), json!({"type": "string", "description": "Notification title (max 50 chars)"}));
-                    let _ = m.insert("body".into(), json!({"type": "string", "description": "Notification body (max 200 chars)"}));
-                    let _ = m.insert("priority".into(), json!({"type": "string", "enum": ["high", "normal"], "description": "Notification priority"}));
-                    let _ = m.insert(
-                        "badge".into(),
-                        json!({"type": "number", "description": "Badge count on app icon"}),
-                    );
-                    let _ = m.insert(
-                        "sheetContent".into(),
-                        json!({"type": "string", "description": "Markdown content shown on tap"}),
-                    );
-                    let _ = m.insert(
-                        "data".into(),
-                        json!({"type": "object", "description": "Custom data payload"}),
-                    );
-                    m
-                }),
-                required: Some(vec!["title".into(), "body".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+- Include relevant context in the body to help user understand why they're being notified",
+        )
+        .required_property("title", json!({"type": "string", "description": "Notification title (max 50 chars)"}))
+        .required_property("body", json!({"type": "string", "description": "Notification body (max 200 chars)"}))
+        .property("priority", json!({"type": "string", "enum": ["high", "normal"], "description": "Notification priority"}))
+        .property("badge", json!({"type": "number", "description": "Badge count on app icon"}))
+        .property("sheetContent", json!({"type": "string", "description": "Markdown content shown on tap"}))
+        .property("data", json!({"type": "object", "description": "Custom data payload"}))
+        .build()
     }
 
     async fn execute(
@@ -155,6 +135,7 @@ impl TronTool for NotifyAppTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::NotifyResult;
 
     struct MockNotify {
@@ -182,31 +163,6 @@ mod tests {
         }
         async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
             Ok(())
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

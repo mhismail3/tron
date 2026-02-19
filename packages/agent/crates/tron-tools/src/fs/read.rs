@@ -9,12 +9,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{FileSystemOps, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::fs_errors::format_fs_error;
 use crate::utils::path::resolve_path;
 use crate::utils::truncation::{TruncateOptions, estimate_tokens, truncate_output};
@@ -65,33 +64,14 @@ impl TronTool for ReadTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Read".into(),
-            description: "Read the contents of a file. Returns the file content with line numbers."
-                .into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert(
-                        "file_path".into(),
-                        json!({"type": "string", "description": "The path to the file to read (absolute or relative)"}),
-                    );
-                    let _ = m.insert(
-                        "offset".into(),
-                        json!({"type": "number", "description": "Line number to start reading from (0-indexed)"}),
-                    );
-                    let _ = m.insert(
-                        "limit".into(),
-                        json!({"type": "number", "description": "Maximum number of lines to read"}),
-                    );
-                    m
-                }),
-                required: Some(vec!["file_path".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "Read",
+            "Read the contents of a file. Returns the file content with line numbers.",
+        )
+        .required_property("file_path", json!({"type": "string", "description": "The path to the file to read (absolute or relative)"}))
+        .property("offset", json!({"type": "number", "description": "Line number to start reading from (0-indexed)"}))
+        .property("limit", json!({"type": "number", "description": "Maximum number of lines to read"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -157,7 +137,7 @@ impl TronTool for ReadTool {
 
         if selected.is_empty() {
             return Ok(TronToolResult {
-                content: ToolResultBody::Text(String::new()),
+                content: ToolResultBody::Blocks(vec![]),
                 details: Some(json!({
                     "filePath": resolved.to_string_lossy(),
                     "totalLines": total_lines,
@@ -212,74 +192,8 @@ impl TronTool for ReadTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
-    use std::path::{Path, PathBuf};
 
-    struct MockFs {
-        files: std::collections::HashMap<PathBuf, Vec<u8>>,
-    }
-
-    impl MockFs {
-        fn new() -> Self {
-            Self {
-                files: std::collections::HashMap::new(),
-            }
-        }
-        fn add_file(&mut self, path: impl Into<PathBuf>, content: impl Into<Vec<u8>>) {
-            let _ = self.files.insert(path.into(), content.into());
-        }
-    }
-
-    #[async_trait]
-    impl FileSystemOps for MockFs {
-        async fn read_file(&self, path: &Path) -> Result<Vec<u8>, io::Error> {
-            self.files
-                .get(path)
-                .cloned()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file not found"))
-        }
-        async fn write_file(&self, _path: &Path, _content: &[u8]) -> Result<(), io::Error> {
-            Ok(())
-        }
-        async fn metadata(&self, path: &Path) -> Result<std::fs::Metadata, io::Error> {
-            if self.files.contains_key(path) {
-                Err(io::Error::new(io::ErrorKind::Other, "mock"))
-            } else {
-                Err(io::Error::new(io::ErrorKind::NotFound, "not found"))
-            }
-        }
-        async fn create_dir_all(&self, _path: &Path) -> Result<(), io::Error> {
-            Ok(())
-        }
-        fn exists(&self, path: &Path) -> bool {
-            self.files.contains_key(path)
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        }
-    }
+    use crate::testutil::{extract_text, make_ctx, MockFs};
 
     #[tokio::test]
     async fn valid_file_with_line_numbers() {

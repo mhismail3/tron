@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{HttpClient, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
 const BRAVE_BASE_URL: &str = "https://api.search.brave.com";
@@ -78,9 +77,9 @@ impl TronTool for WebSearchTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "WebSearch".into(),
-            description: "Search the web using Brave Search API.\n\n\
+        ToolSchemaBuilder::new(
+            "WebSearch",
+            "Search the web using Brave Search API.\n\n\
                 Endpoints:\n\
                 - **web**: General web search (default)\n\
                 - **news**: Current news articles\n\
@@ -91,25 +90,16 @@ impl TronTool for WebSearchTool {
                 - Use 'news' endpoint for current events\n\
                 - Use 'freshness' to filter by recency: 'pd' (day), 'pw' (week), 'pm' (month), 'py' (year)\n\
                 - Use domain filters (allowedDomains/blockedDomains) for trusted sources\n\
-                - Use WebFetch to read full content of interesting results".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("query".into(), json!({"type": "string", "description": "Search query (max 400 chars)"}));
-                    let _ = m.insert("endpoint".into(), json!({"type": "string", "enum": ["web", "news", "images", "videos"], "description": "Search endpoint"}));
-                    let _ = m.insert("count".into(), json!({"type": "number", "description": "Number of results"}));
-                    let _ = m.insert("freshness".into(), json!({"type": "string", "description": "Freshness filter: pd, pw, pm, py, or date range"}));
-                    let _ = m.insert("country".into(), json!({"type": "string", "description": "2-character country code"}));
-                    let _ = m.insert("safesearch".into(), json!({"type": "string", "enum": ["off", "moderate", "strict"]}));
-                    let _ = m.insert("offset".into(), json!({"type": "number", "description": "Result offset (0-9)"}));
-                    m
-                }),
-                required: Some(vec!["query".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+                - Use WebFetch to read full content of interesting results",
+        )
+        .required_property("query", json!({"type": "string", "description": "Search query (max 400 chars)"}))
+        .property("endpoint", json!({"type": "string", "enum": ["web", "news", "images", "videos"], "description": "Search endpoint"}))
+        .property("count", json!({"type": "number", "description": "Number of results"}))
+        .property("freshness", json!({"type": "string", "description": "Freshness filter: pd, pw, pm, py, or date range"}))
+        .property("country", json!({"type": "string", "description": "2-character country code"}))
+        .property("safesearch", json!({"type": "string", "enum": ["off", "moderate", "strict"]}))
+        .property("offset", json!({"type": "number", "description": "Result offset (0-9)"}))
+        .build()
     }
 
     async fn execute(
@@ -324,6 +314,7 @@ fn format_video_results(body: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::HttpResponse;
 
     struct MockHttp {
@@ -346,31 +337,6 @@ mod tests {
                 content_type: Some("application/json".into()),
             })
             }),
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

@@ -120,21 +120,7 @@ mod tests {
         assert!(result.is_err());
         // Check the error message mentions "expected string"
         let err = result.unwrap_err();
-        match &err.content {
-            tron_core::tools::ToolResultBody::Blocks(blocks) => {
-                let text = blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<String>();
-                assert!(text.contains("expected string"));
-            }
-            tron_core::tools::ToolResultBody::Text(t) => {
-                assert!(t.contains("expected string"));
-            }
-        }
+        assert!(crate::testutil::extract_text(&err).contains("expected string"));
     }
 
     #[test]

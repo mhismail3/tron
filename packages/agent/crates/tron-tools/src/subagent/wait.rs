@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{SubagentSpawner, ToolContext, TronTool, WaitMode};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::get_optional_string;
 
 const DEFAULT_TIMEOUT_MS: u64 = 300_000; // 5 minutes
@@ -40,30 +39,21 @@ impl TronTool for WaitForAgentsTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "WaitForAgents".into(),
-            description: "Wait for spawned sub-agent(s) to complete and get their results.\n\n\
+        ToolSchemaBuilder::new(
+            "WaitForAgents",
+            "Wait for spawned sub-agent(s) to complete and get their results.\n\n\
                 Use this when you need the output of a sub-agent before proceeding. The tool will block until:\n\
                 - The sub-agent(s) complete (success or failure)\n\
                 - The timeout is reached (default: 5 minutes)\n\n\
                 Mode:\n\
                 - 'all' (default): Wait for ALL sub-agents to complete\n\
                 - 'any': Return as soon as ANY sub-agent completes\n\n\
-                Returns the full result including output, token usage, and duration.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("sessionIds".into(), json!({"type": "array", "items": {"type": "string"}, "description": "Session IDs to wait for"}));
-                    let _ = m.insert("mode".into(), json!({"type": "string", "enum": ["all", "any"], "description": "Wait mode: all or any (default: all)"}));
-                    let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in milliseconds (default: 300000)"}));
-                    m
-                }),
-                required: Some(vec!["sessionIds".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+                Returns the full result including output, token usage, and duration.",
+        )
+        .required_property("sessionIds", json!({"type": "array", "items": {"type": "string"}, "description": "Session IDs to wait for"}))
+        .property("mode", json!({"type": "string", "enum": ["all", "any"], "description": "Wait mode: all or any (default: all)"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds (default: 300000)"}))
+        .build()
     }
 
     async fn execute(
@@ -156,6 +146,7 @@ impl TronTool for WaitForAgentsTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{SubagentConfig, SubagentHandle, SubagentResult};
 
     struct MockSpawner {
@@ -212,31 +203,6 @@ mod tests {
                     status: "completed".into(),
                 })
                 .collect())
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

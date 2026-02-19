@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{BrowserAction, BrowserDelegate, ExecutionMode, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::validate_required_string;
 
 const VALID_ACTIONS: &[&str] = &[
@@ -63,9 +62,9 @@ impl TronTool for BrowseTheWebTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "BrowseTheWeb".into(),
-            description: "Control a web browser with automation capabilities.\n\n\
+        ToolSchemaBuilder::new(
+            "BrowseTheWeb",
+            "Control a web browser with automation capabilities.\n\n\
 IMPORTANT: Execute browser actions ONE AT A TIME sequentially — wait for each action to complete \
 before starting the next. Do NOT call multiple browser tools in parallel as this causes race conditions.\n\n\
 Recommended workflow:\n\
@@ -91,33 +90,24 @@ Actions:\n\
 - pdf: Generate PDF. Optional: path\n\
 - close: Close browser session\n\n\
 Element references from snapshot (e1, e2) are automatically resolved. \
-Browser sessions are persistent — once created, you can perform multiple actions.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("action".into(), json!({
-                        "type": "string",
-                        "enum": VALID_ACTIONS,
-                        "description": "Browser action to perform"
-                    }));
-                    let _ = m.insert("url".into(), json!({"type": "string", "description": "URL for navigate action"}));
-                    let _ = m.insert("selector".into(), json!({"type": "string", "description": "CSS selector or element reference"}));
-                    let _ = m.insert("value".into(), json!({"type": "string", "description": "Value for fill or select actions"}));
-                    let _ = m.insert("text".into(), json!({"type": "string", "description": "Text for type action"}));
-                    let _ = m.insert("direction".into(), json!({"type": "string", "description": "Scroll direction: up, down, left, right"}));
-                    let _ = m.insert("amount".into(), json!({"type": "number", "description": "Scroll amount in pixels"}));
-                    let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in milliseconds for wait action"}));
-                    let _ = m.insert("key".into(), json!({"type": "string", "description": "Key name for pressKey (e.g., Enter, Tab)"}));
-                    let _ = m.insert("attribute".into(), json!({"type": "string", "description": "Attribute name for getAttribute"}));
-                    let _ = m.insert("path".into(), json!({"type": "string", "description": "File path for pdf action"}));
-                    m
-                }),
-                required: Some(vec!["action".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+Browser sessions are persistent — once created, you can perform multiple actions.",
+        )
+        .required_property("action", json!({
+            "type": "string",
+            "enum": VALID_ACTIONS,
+            "description": "Browser action to perform"
+        }))
+        .property("url", json!({"type": "string", "description": "URL for navigate action"}))
+        .property("selector", json!({"type": "string", "description": "CSS selector or element reference"}))
+        .property("value", json!({"type": "string", "description": "Value for fill or select actions"}))
+        .property("text", json!({"type": "string", "description": "Text for type action"}))
+        .property("direction", json!({"type": "string", "description": "Scroll direction: up, down, left, right"}))
+        .property("amount", json!({"type": "number", "description": "Scroll amount in pixels"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds for wait action"}))
+        .property("key", json!({"type": "string", "description": "Key name for pressKey (e.g., Enter, Tab)"}))
+        .property("attribute", json!({"type": "string", "description": "Attribute name for getAttribute"}))
+        .property("path", json!({"type": "string", "description": "File path for pdf action"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -175,6 +165,7 @@ Browser sessions are persistent — once created, you can perform multiple actio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{BrowserResult, ExecutionMode};
     use std::sync::Mutex;
 
@@ -226,31 +217,6 @@ mod tests {
                 });
             }
             Ok(())
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

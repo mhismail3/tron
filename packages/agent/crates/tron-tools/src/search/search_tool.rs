@@ -9,14 +9,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::search::ast_search;
 use crate::search::text_search;
 use crate::traits::{ProcessRunner, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::path::resolve_path;
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
@@ -49,10 +48,9 @@ impl TronTool for SearchTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Search".into(),
-            description:
-                "Search code using text or AST patterns. Automatically detects search mode.\n\n\
+        ToolSchemaBuilder::new(
+            "Search",
+            "Search code using text or AST patterns. Automatically detects search mode.\n\n\
 Text search (default):\n\
 - Fast regex-based content search\n\
 - Works for any text pattern\n\n\
@@ -69,25 +67,15 @@ Parameters:\n\
 Examples:\n\
 - Text: { \"pattern\": \"TODO.*bug\" }\n\
 - AST: { \"pattern\": \"function $NAME() {}\" }\n\
-- Force: { \"pattern\": \"test\", \"type\": \"ast\" }"
-                    .into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("pattern".into(), json!({"type": "string", "description": "Search pattern (regex for text, AST pattern with $VAR for structural)"}));
-                    let _ = m.insert("path".into(), json!({"type": "string", "description": "File or directory to search (defaults to current directory)"}));
-                    let _ = m.insert("type".into(), json!({"type": "string", "enum": ["text", "ast"], "description": "Force search mode: text or ast"}));
-                    let _ = m.insert("filePattern".into(), json!({"type": "string", "description": "Glob pattern to filter files (e.g. *.ts, *.rs)"}));
-                    let _ = m.insert("context".into(), json!({"type": "number", "description": "Context lines before/after match (text mode only)"}));
-                    let _ = m.insert("maxResults".into(), json!({"type": "number", "description": "Maximum number of results to return"}));
-                    m
-                }),
-                required: Some(vec!["pattern".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+- Force: { \"pattern\": \"test\", \"type\": \"ast\" }",
+        )
+        .required_property("pattern", json!({"type": "string", "description": "Search pattern (regex for text, AST pattern with $VAR for structural)"}))
+        .property("path", json!({"type": "string", "description": "File or directory to search (defaults to current directory)"}))
+        .property("type", json!({"type": "string", "enum": ["text", "ast"], "description": "Force search mode: text or ast"}))
+        .property("filePattern", json!({"type": "string", "description": "Glob pattern to filter files (e.g. *.ts, *.rs)"}))
+        .property("context", json!({"type": "number", "description": "Context lines before/after match (text mode only)"}))
+        .property("maxResults", json!({"type": "number", "description": "Maximum number of results to return"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -171,6 +159,7 @@ Examples:\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::extract_text;
     use crate::traits::ProcessOutput;
 
     struct MockRunner {
@@ -209,20 +198,6 @@ mod tests {
             cancellation: tokio_util::sync::CancellationToken::new(),
             subagent_depth: 0,
             subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

@@ -9,12 +9,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{ProcessOptions, ProcessRunner, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::truncation::estimate_tokens;
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
@@ -58,7 +57,10 @@ fn compile_danger_patterns() -> Vec<Regex> {
         r"chmod\s+(-[^\s]+\s+)*777\s+/$",
         r">\s*/dev/[sh]d",
     ];
-    patterns.iter().filter_map(|p| Regex::new(p).ok()).collect()
+    patterns
+        .iter()
+        .map(|p| Regex::new(p).expect("danger pattern must compile"))
+        .collect()
 }
 
 #[async_trait]
@@ -72,23 +74,14 @@ impl TronTool for BashTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Bash".into(),
-            description: "Execute a shell command. Commands that are potentially destructive require confirmation.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("command".into(), json!({"type": "string", "description": "The shell command to execute"}));
-                    let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in milliseconds (max 600000)"}));
-                    let _ = m.insert("description".into(), json!({"type": "string", "description": "Brief description of what the command does"}));
-                    m
-                }),
-                required: Some(vec!["command".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "Bash",
+            "Execute a shell command. Commands that are potentially destructive require confirmation.",
+        )
+        .required_property("command", json!({"type": "string", "description": "The shell command to execute"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds (max 600000)"}))
+        .property("description", json!({"type": "string", "description": "Brief description of what the command does"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -249,30 +242,7 @@ mod tests {
         }
     }
 
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        }
-    }
+    use crate::testutil::{extract_text, make_ctx};
 
     #[tokio::test]
     async fn simple_command() {
@@ -502,5 +472,16 @@ mod tests {
                 .unwrap();
             assert!(r.is_error.is_none(), "Command incorrectly blocked: {cmd}");
         }
+    }
+
+    #[test]
+    fn all_danger_patterns_compile() {
+        let patterns = compile_danger_patterns();
+        assert_eq!(
+            patterns.len(),
+            8,
+            "expected 8 danger patterns, got {}",
+            patterns.len()
+        );
     }
 }

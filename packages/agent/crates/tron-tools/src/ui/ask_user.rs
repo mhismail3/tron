@@ -6,14 +6,13 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use std::fmt::Write;
 
 use crate::errors::ToolError;
 use crate::traits::{ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::get_optional_string;
 
 const MAX_QUESTIONS: usize = 5;
@@ -54,9 +53,9 @@ impl TronTool for AskUserQuestionTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "AskUserQuestion".into(),
-            description: "Ask the user interactive questions with multiple choice options.\n\n\
+        ToolSchemaBuilder::new(
+            "AskUserQuestion",
+            "Ask the user interactive questions with multiple choice options.\n\n\
 Use this tool when you need to:\n\
 - Get user preferences or choices\n\
 - Clarify requirements before proceeding\n\
@@ -69,46 +68,36 @@ Rules:\n\
 - Each question must have at least 2 options\n\
 - Question IDs must be unique within the call\n\n\
 IMPORTANT: When using this tool, do NOT output any text response after calling it. \
-The question tool should be the FINAL action in your response."
-                .into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("questions".into(), json!({
+The question tool should be the FINAL action in your response.",
+        )
+        .required_property("questions", json!({
+            "type": "array",
+            "description": "Array of questions (1-5) with options",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "question": {"type": "string"},
+                    "options": {
                         "type": "array",
-                        "description": "Array of questions (1-5) with options",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "id": {"type": "string"},
-                                "question": {"type": "string"},
-                                "options": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "label": {"type": "string", "description": "Display text for this option"},
-                                            "value": {"type": "string", "description": "Optional value (defaults to label)"},
-                                            "description": {"type": "string", "description": "Optional explanation of this option"}
-                                        },
-                                        "required": ["label"]
-                                    }
-                                },
-                                "mode": {"type": "string", "enum": ["single", "multi"]},
-                                "allowOther": {"type": "boolean", "description": "Whether to allow a free-text 'Other' option"},
-                                "otherPlaceholder": {"type": "string", "description": "Placeholder text for the Other input"}
-                            }
+                                "label": {"type": "string", "description": "Display text for this option"},
+                                "value": {"type": "string", "description": "Optional value (defaults to label)"},
+                                "description": {"type": "string", "description": "Optional explanation of this option"}
+                            },
+                            "required": ["label"]
                         }
-                    }));
-                    let _ = m.insert("context".into(), json!({"type": "string", "description": "Additional context for the questions"}));
-                    m
-                }),
-                required: Some(vec!["questions".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+                    },
+                    "mode": {"type": "string", "enum": ["single", "multi"]},
+                    "allowOther": {"type": "boolean", "description": "Whether to allow a free-text 'Other' option"},
+                    "otherPlaceholder": {"type": "string", "description": "Placeholder text for the Other input"}
+                }
+            }
+        }))
+        .property("context", json!({"type": "string", "description": "Additional context for the questions"}))
+        .build()
     }
 
     async fn execute(
@@ -207,31 +196,7 @@ The question tool should be the FINAL action in your response."
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        }
-    }
+    use crate::testutil::{extract_text, make_ctx};
 
     #[tokio::test]
     async fn valid_questions_returns_stop_turn() {

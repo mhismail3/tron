@@ -7,13 +7,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
+use tron_core::tools::{Tool, ToolCategory, TronToolResult, text_result};
 
 use crate::errors::ToolError;
 use crate::traits::{FileSystemOps, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::fs_errors::format_fs_error;
 use crate::utils::path::resolve_path;
 use crate::utils::validation::{validate_path_not_root, validate_required_string};
+
+const MAX_CONTENT_SIZE: usize = 50 * 1024 * 1024; // 50 MB
 
 /// The `Write` tool creates or overwrites files.
 pub struct WriteTool {
@@ -38,29 +41,13 @@ impl TronTool for WriteTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Write".into(),
-            description:
-                "Write content to a file. Creates parent directories if they do not exist.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert(
-                        "file_path".into(),
-                        json!({"type": "string", "description": "The path to the file to write"}),
-                    );
-                    let _ = m.insert(
-                        "content".into(),
-                        json!({"type": "string", "description": "The content to write to the file"}),
-                    );
-                    m
-                }),
-                required: Some(vec!["file_path".into(), "content".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "Write",
+            "Write content to a file. Creates parent directories if they do not exist.",
+        )
+        .required_property("file_path", json!({"type": "string", "description": "The path to the file to write"}))
+        .required_property("content", json!({"type": "string", "description": "The content to write to the file"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -88,6 +75,17 @@ impl TronTool for WriteTool {
                 ));
             }
         };
+
+        if content.len() > MAX_CONTENT_SIZE {
+            return Ok(text_result(
+                format!(
+                    "Content too large: {} bytes (max {} MB)",
+                    content.len(),
+                    MAX_CONTENT_SIZE / 1024 / 1024
+                ),
+                true,
+            ));
+        }
 
         let resolved = resolve_path(&file_path, &ctx.working_directory);
         let existed = self.fs.exists(&resolved);
@@ -143,85 +141,9 @@ impl TronTool for WriteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::io;
-    use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
+    use std::path::Path;
 
-    struct MockFs {
-        files: Mutex<HashMap<PathBuf, Vec<u8>>>,
-    }
-
-    impl MockFs {
-        fn new() -> Self {
-            Self {
-                files: Mutex::new(HashMap::new()),
-            }
-        }
-
-        fn with_file(self, path: impl Into<PathBuf>, content: impl Into<Vec<u8>>) -> Self {
-            let _ = self
-                .files
-                .lock()
-                .unwrap()
-                .insert(path.into(), content.into());
-            self
-        }
-    }
-
-    #[async_trait]
-    impl FileSystemOps for MockFs {
-        async fn read_file(&self, path: &Path) -> Result<Vec<u8>, io::Error> {
-            self.files
-                .lock()
-                .unwrap()
-                .get(path)
-                .cloned()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "not found"))
-        }
-        async fn write_file(&self, path: &Path, content: &[u8]) -> Result<(), io::Error> {
-            let _ = self
-                .files
-                .lock()
-                .unwrap()
-                .insert(path.to_path_buf(), content.to_vec());
-            Ok(())
-        }
-        async fn metadata(&self, _path: &Path) -> Result<std::fs::Metadata, io::Error> {
-            Err(io::Error::new(io::ErrorKind::Other, "mock"))
-        }
-        async fn create_dir_all(&self, _path: &Path) -> Result<(), io::Error> {
-            Ok(())
-        }
-        fn exists(&self, path: &Path) -> bool {
-            self.files.lock().unwrap().contains_key(path)
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            tron_core::tools::ToolResultBody::Text(t) => t.clone(),
-            tron_core::tools::ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
-        }
-    }
+    use crate::testutil::{extract_text, make_ctx, MockFs};
 
     #[tokio::test]
     async fn create_new_file() {
@@ -352,6 +274,37 @@ mod tests {
             .unwrap();
         let details = result.details.unwrap();
         assert_eq!(details["filePath"], "/tmp/test.txt");
+    }
+
+    #[tokio::test]
+    async fn write_rejects_content_over_50mb() {
+        let fs = Arc::new(MockFs::new());
+        let content = "x".repeat(MAX_CONTENT_SIZE + 1);
+        let tool = WriteTool::new(fs);
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/huge.txt", "content": content}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        assert!(extract_text(&result).contains("too large"));
+    }
+
+    #[tokio::test]
+    async fn write_allows_content_at_exactly_50mb() {
+        let fs = Arc::new(MockFs::new());
+        let content = "a".repeat(MAX_CONTENT_SIZE);
+        let tool = WriteTool::new(fs);
+        let result = tool
+            .execute(
+                json!({"file_path": "/tmp/at_limit.txt", "content": content}),
+                &make_ctx(),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_error.is_none());
     }
 
     #[tokio::test]

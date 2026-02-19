@@ -8,9 +8,9 @@ use crate::traits::{ToolContext, TronTool};
 use crate::utils::validation::get_optional_string;
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
+
+use crate::utils::schema::ToolSchemaBuilder;
 
 /// The `RenderAppUI` tool renders custom UI components in the iOS app.
 pub struct RenderAppUITool;
@@ -47,9 +47,9 @@ impl TronTool for RenderAppUITool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "RenderAppUI".into(),
-            description: "Render a native iOS UI interface for the user to interact with.\n\n\
+        ToolSchemaBuilder::new(
+            "RenderAppUI",
+            "Render a native iOS UI interface for the user to interact with.\n\n\
 Use this tool to create custom interfaces when you need to:\n\
 - Build interactive forms or settings screens\n\
 - Display structured data with charts, lists, or tables\n\
@@ -67,32 +67,13 @@ The UI renders as a native SwiftUI sheet on iOS with liquid glass styling.\n\n\
 - Keep UIs simple and focused on the task\n\
 - Use Sections to group related controls\n\n\
 IMPORTANT: After calling this tool, do NOT output additional text. The UI will be \
-presented to the user, and their response will come back as a new message."
-                .into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert(
-                        "ui".into(),
-                        json!({"type": "object", "description": "Root UI component tree"}),
-                    );
-                    let _ = m.insert("canvasId".into(), json!({"type": "string", "description": "Canvas ID (auto-generated if omitted)"}));
-                    let _ = m.insert(
-                        "title".into(),
-                        json!({"type": "string", "description": "Sheet toolbar title"}),
-                    );
-                    let _ = m.insert(
-                        "state".into(),
-                        json!({"type": "object", "description": "Initial binding values"}),
-                    );
-                    m
-                }),
-                required: Some(vec!["ui".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+presented to the user, and their response will come back as a new message.",
+        )
+        .required_property("ui", json!({"type": "object", "description": "Root UI component tree"}))
+        .property("canvasId", json!({"type": "string", "description": "Canvas ID (auto-generated if omitted)"}))
+        .property("title", json!({"type": "string", "description": "Sheet toolbar title"}))
+        .property("state", json!({"type": "object", "description": "Initial binding values"}))
+        .build()
     }
 
     async fn execute(
@@ -176,17 +157,7 @@ fn count_components(ui: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
+    use crate::testutil::make_ctx;
 
     #[tokio::test]
     async fn valid_ui_returns_stop_turn() {

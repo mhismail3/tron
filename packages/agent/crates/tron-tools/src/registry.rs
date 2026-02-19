@@ -85,11 +85,12 @@ impl Default for ToolRegistry {
 mod tests {
     use async_trait::async_trait;
     use serde_json::Value;
-    use tron_core::tools::{ToolCategory, ToolParameterSchema, TronToolResult};
+    use tron_core::tools::{ToolCategory, TronToolResult};
 
     use super::*;
     use crate::errors::ToolError;
     use crate::traits::ToolContext;
+    use crate::utils::schema::ToolSchemaBuilder;
 
     /// Minimal stub tool for registry tests.
     struct StubTool {
@@ -115,17 +116,8 @@ mod tests {
         }
 
         fn definition(&self) -> Tool {
-            Tool {
-                name: self.tool_name.clone(),
-                description: format!("Stub {}", self.tool_name),
-                parameters: ToolParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::new(),
-                },
-            }
+            ToolSchemaBuilder::new(self.tool_name.clone(), format!("Stub {}", self.tool_name))
+                .build()
         }
 
         async fn execute(

@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{EventStoreQuery, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_string, get_optional_u64, validate_required_string};
 
 const VALID_ACTIONS: &[&str] = &[
@@ -104,9 +103,9 @@ impl TronTool for RememberTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "Remember".into(),
-            description: "Your memory and self-analysis tool. Query your internal database to recall past work, \
+        ToolSchemaBuilder::new(
+            "Remember",
+            "Your memory and self-analysis tool. Query your internal database to recall past work, \
 review session history, and retrieve stored content.\n\n\
 Available actions:\n\
 - recall (default): Semantic memory search — \"find memories about X\". Uses vector similarity to find \
@@ -123,31 +122,22 @@ the most relevant past work even when exact keywords don't match. ALWAYS provide
 - read_blob: Read stored content from blob storage\n\n\
 Search strategy: Use \"recall\" for finding relevant past work (semantic). Use \"search\" for exact \
 keyword matching. Start narrow (query + small limit), then broaden if needed.\n\
-Use read_blob to retrieve full content when tool results reference a blob_id.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("action".into(), json!({
-                        "type": "string",
-                        "enum": VALID_ACTIONS,
-                        "description": "The query action to perform"
-                    }));
-                    let _ = m.insert("query".into(), json!({"type": "string", "description": "Search query"}));
-                    let _ = m.insert("session_id".into(), json!({"type": "string", "description": "Session ID to query"}));
-                    let _ = m.insert("blob_id".into(), json!({"type": "string", "description": "Blob ID to read"}));
-                    let _ = m.insert("type".into(), json!({"type": "string", "description": "Event type filter"}));
-                    let _ = m.insert("turn".into(), json!({"type": "number", "description": "Turn number filter"}));
-                    let _ = m.insert("level".into(), json!({"type": "string", "description": "Log level filter"}));
-                    let _ = m.insert("limit".into(), json!({"type": "number", "description": "Max results (default 20, max 500)"}));
-                    let _ = m.insert("offset".into(), json!({"type": "number", "description": "Pagination offset"}));
-                    m
-                }),
-                required: Some(vec!["action".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+Use read_blob to retrieve full content when tool results reference a blob_id.",
+        )
+        .required_property("action", json!({
+            "type": "string",
+            "enum": VALID_ACTIONS,
+            "description": "The query action to perform"
+        }))
+        .property("query", json!({"type": "string", "description": "Search query"}))
+        .property("session_id", json!({"type": "string", "description": "Session ID to query"}))
+        .property("blob_id", json!({"type": "string", "description": "Blob ID to read"}))
+        .property("type", json!({"type": "string", "description": "Event type filter"}))
+        .property("turn", json!({"type": "number", "description": "Turn number filter"}))
+        .property("level", json!({"type": "string", "description": "Log level filter"}))
+        .property("limit", json!({"type": "number", "description": "Max results (default 20, max 500)"}))
+        .property("offset", json!({"type": "number", "description": "Pagination offset"}))
+        .build()
     }
 
     async fn execute(
@@ -266,6 +256,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.".i
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{MemoryEntry, SessionInfo};
 
     struct MockStore;
@@ -357,31 +348,6 @@ mod tests {
         }
         async fn read_blob(&self, _id: &str) -> Result<String, ToolError> {
             Ok("blob content here".into())
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

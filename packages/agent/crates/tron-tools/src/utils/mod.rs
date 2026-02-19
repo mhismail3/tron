@@ -3,5 +3,6 @@
 pub mod diff;
 pub mod fs_errors;
 pub mod path;
+pub mod schema;
 pub mod truncation;
 pub mod validation;

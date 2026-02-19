@@ -6,12 +6,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{SubagentSpawner, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_u64, validate_required_string};
 
 const VALID_QUERY_TYPES: &[&str] = &["status", "events", "logs", "output"];
@@ -40,29 +39,20 @@ impl TronTool for QueryAgentTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "QueryAgent".into(),
-            description: "Query the status, events, logs, or output of a spawned sub-agent.\n\n\
+        ToolSchemaBuilder::new(
+            "QueryAgent",
+            "Query the status, events, logs, or output of a spawned sub-agent.\n\n\
                 Query types:\n\
                 - **status**: Get current status (running/completed/failed), turn count, token usage, and task\n\
                 - **events**: Get recent events from the sub-agent session\n\
                 - **logs**: Get log entries from the sub-agent session\n\
                 - **output**: Get the final assistant response (only available when completed)\n\n\
-                Use this to monitor sub-agents you've spawned with SpawnSubagent.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("sessionId".into(), json!({"type": "string", "description": "Session ID of the subagent"}));
-                    let _ = m.insert("queryType".into(), json!({"type": "string", "enum": VALID_QUERY_TYPES, "description": "Type of query"}));
-                    let _ = m.insert("limit".into(), json!({"type": "number", "description": "Limit number of results (default: 20)"}));
-                    m
-                }),
-                required: Some(vec!["sessionId".into(), "queryType".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+                Use this to monitor sub-agents you've spawned with SpawnSubagent.",
+        )
+        .required_property("sessionId", json!({"type": "string", "description": "Session ID of the subagent"}))
+        .required_property("queryType", json!({"type": "string", "enum": VALID_QUERY_TYPES, "description": "Type of query"}))
+        .property("limit", json!({"type": "number", "description": "Limit number of results (default: 20)"}))
+        .build()
     }
 
     async fn execute(
@@ -118,6 +108,7 @@ impl TronTool for QueryAgentTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{SubagentConfig, SubagentHandle, SubagentResult, WaitMode};
 
     struct MockSpawner {
@@ -169,31 +160,6 @@ mod tests {
             _timeout_ms: u64,
         ) -> Result<Vec<SubagentResult>, ToolError> {
             Ok(vec![])
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

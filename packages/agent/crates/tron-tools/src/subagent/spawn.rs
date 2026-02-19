@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{
-    Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult, error_result,
-};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
 use crate::errors::ToolError;
 use crate::traits::{SubagentConfig, SubagentMode, SubagentSpawner, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{
     get_optional_bool, get_optional_string, get_optional_u64, validate_required_string,
 };
@@ -44,9 +43,9 @@ impl TronTool for SpawnSubagentTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "SpawnSubagent".into(),
-            description: "Spawn an agent to handle a specific task. Supports two execution modes:\n\n\
+        ToolSchemaBuilder::new(
+            "SpawnSubagent",
+            "Spawn an agent to handle a specific task. Supports two execution modes:\n\n\
 **1. In-Process Mode (default):**\n\
 - Runs in the same process, sharing the event store\n\
 - **Blocking by default**: Waits for completion and returns full results\n\
@@ -67,29 +66,20 @@ Parameters:\n\
 Returns (when mode=inProcess and blocking=true):\n\
 - Full output from the agent\n\
 - Token usage and duration statistics\n\
-- Success/failure status".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("task".into(), json!({"type": "string", "description": "Task/prompt for the subagent"}));
-                    let _ = m.insert("mode".into(), json!({"type": "string", "enum": ["inProcess", "tmux"], "description": "Execution mode"}));
-                    let _ = m.insert("model".into(), json!({"type": "string", "description": "Override model for the subagent"}));
-                    let _ = m.insert("systemPrompt".into(), json!({"type": "string", "description": "Custom system prompt"}));
-                    let _ = m.insert("toolDenials".into(), json!({"type": "object", "description": "Tool denial configuration"}));
-                    let _ = m.insert("skills".into(), json!({"type": "array", "items": {"type": "string"}, "description": "Skills to enable"}));
-                    let _ = m.insert("workingDirectory".into(), json!({"type": "string", "description": "Working directory"}));
-                    let _ = m.insert("maxTurns".into(), json!({"type": "number", "description": "Maximum turns before stopping"}));
-                    let _ = m.insert("blocking".into(), json!({"type": "boolean", "description": "Whether to wait for completion"}));
-                    let _ = m.insert("timeout".into(), json!({"type": "number", "description": "Timeout in milliseconds when blocking"}));
-                    let _ = m.insert("maxDepth".into(), json!({"type": "number", "description": "Maximum nesting depth for child subagents (0 = no children)"}));
-                    m
-                }),
-                required: Some(vec!["task".into()]),
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+- Success/failure status",
+        )
+        .required_property("task", json!({"type": "string", "description": "Task/prompt for the subagent"}))
+        .property("mode", json!({"type": "string", "enum": ["inProcess", "tmux"], "description": "Execution mode"}))
+        .property("model", json!({"type": "string", "description": "Override model for the subagent"}))
+        .property("systemPrompt", json!({"type": "string", "description": "Custom system prompt"}))
+        .property("toolDenials", json!({"type": "object", "description": "Tool denial configuration"}))
+        .property("skills", json!({"type": "array", "items": {"type": "string"}, "description": "Skills to enable"}))
+        .property("workingDirectory", json!({"type": "string", "description": "Working directory"}))
+        .property("maxTurns", json!({"type": "number", "description": "Maximum turns before stopping"}))
+        .property("blocking", json!({"type": "boolean", "description": "Whether to wait for completion"}))
+        .property("timeout", json!({"type": "number", "description": "Timeout in milliseconds when blocking"}))
+        .property("maxDepth", json!({"type": "number", "description": "Maximum nesting depth for child subagents (0 = no children)"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -198,6 +188,7 @@ Returns (when mode=inProcess and blocking=true):\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{SubagentHandle, SubagentResult, WaitMode};
 
     struct MockSpawner {
@@ -253,31 +244,6 @@ mod tests {
             _timeout_ms: u64,
         ) -> Result<Vec<SubagentResult>, ToolError> {
             Ok(vec![])
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 

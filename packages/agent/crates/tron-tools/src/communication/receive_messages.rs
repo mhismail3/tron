@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, ToolResultBody, TronToolResult};
+use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult};
 
 use crate::errors::ToolError;
 use crate::traits::{MessageBus, MessageFilter, ToolContext, TronTool};
+use crate::utils::schema::ToolSchemaBuilder;
 use crate::utils::validation::{get_optional_bool, get_optional_string, get_optional_u64};
 
 const DEFAULT_LIMIT: u32 = 20;
@@ -38,24 +39,15 @@ impl TronTool for ReceiveMessagesTool {
     }
 
     fn definition(&self) -> Tool {
-        Tool {
-            name: "receive_messages".into(),
-            description: "Check for messages sent to this session from other agents. Can filter by type or sender.".into(),
-            parameters: ToolParameterSchema {
-                schema_type: "object".into(),
-                properties: Some({
-                    let mut m = serde_json::Map::new();
-                    let _ = m.insert("type".into(), json!({"type": "string", "description": "Filter by message type"}));
-                    let _ = m.insert("fromSessionId".into(), json!({"type": "string", "description": "Filter by sender session ID"}));
-                    let _ = m.insert("limit".into(), json!({"type": "number", "description": "Maximum messages to return (default: 20)"}));
-                    let _ = m.insert("markAsRead".into(), json!({"type": "boolean", "description": "Whether to mark returned messages as read (default: true)"}));
-                    m
-                }),
-                required: None,
-                description: None,
-                extra: serde_json::Map::new(),
-            },
-        }
+        ToolSchemaBuilder::new(
+            "receive_messages",
+            "Check for messages sent to this session from other agents. Can filter by type or sender.",
+        )
+        .property("type", json!({"type": "string", "description": "Filter by message type"}))
+        .property("fromSessionId", json!({"type": "string", "description": "Filter by sender session ID"}))
+        .property("limit", json!({"type": "number", "description": "Maximum messages to return (default: 20)"}))
+        .property("markAsRead", json!({"type": "boolean", "description": "Whether to mark returned messages as read (default: true)"}))
+        .build()
     }
 
     async fn execute(&self, params: Value, ctx: &ToolContext) -> Result<TronToolResult, ToolError> {
@@ -139,6 +131,7 @@ impl TronTool for ReceiveMessagesTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{extract_text, make_ctx};
     use crate::traits::{MessageSendResult, OutgoingMessage, ReceivedMessage};
 
     struct MockBus {
@@ -192,31 +185,6 @@ mod tests {
                 });
             }
             Ok(self.messages.clone())
-        }
-    }
-
-    fn make_ctx() -> ToolContext {
-        ToolContext {
-            tool_call_id: "call-1".into(),
-            session_id: "sess-1".into(),
-            working_directory: "/tmp".into(),
-            cancellation: tokio_util::sync::CancellationToken::new(),
-            subagent_depth: 0,
-            subagent_max_depth: 0,
-        }
-    }
-
-    fn extract_text(result: &TronToolResult) -> String {
-        match &result.content {
-            ToolResultBody::Text(t) => t.clone(),
-            ToolResultBody::Blocks(blocks) => blocks
-                .iter()
-                .filter_map(|b| match b {
-                    tron_core::content::ToolResultContent::Text { text } => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(""),
         }
     }
 
