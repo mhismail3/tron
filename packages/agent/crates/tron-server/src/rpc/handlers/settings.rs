@@ -119,11 +119,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_settings_has_models() {
+    async fn get_settings_has_no_models_key() {
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
-        assert!(result.get("models").is_some());
-        assert!(result["models"]["default"].is_string());
+        // ModelSettings removed — default_model lives in server, subagent_model in agent
+        assert!(result.get("models").is_none());
+        assert!(result["server"]["defaultModel"].is_string());
+        assert!(result["agent"]["subagentModel"].is_string());
     }
 
     #[tokio::test]
@@ -138,16 +140,15 @@ mod tests {
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
         assert!(result.get("version").is_some());
-        assert!(result.get("models").is_some());
         assert!(result.get("server").is_some());
         assert!(result.get("context").is_some());
     }
 
     #[tokio::test]
-    async fn get_settings_returns_default_model_in_models_section() {
+    async fn get_settings_returns_default_model_in_server_section() {
         let (ctx, _dir) = make_ctx_with_temp_settings();
         let result = GetSettingsHandler.handle(None, &ctx).await.unwrap();
-        assert!(result["models"]["default"].is_string());
+        assert_eq!(result["server"]["defaultModel"], "claude-sonnet-4-6");
     }
 
     #[tokio::test]

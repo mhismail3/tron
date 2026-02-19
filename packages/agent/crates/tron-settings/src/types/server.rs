@@ -54,7 +54,7 @@ impl Default for ServerSettings {
             max_concurrent_sessions: 10,
             sessions_dir: "sessions".to_string(),
             memory_db_path: "memory.db".to_string(),
-            default_model: "claude-sonnet-4-20250514".to_string(),
+            default_model: "claude-sonnet-4-6".to_string(),
             default_provider: "anthropic".to_string(),
             default_workspace: None,
             anthropic_account: None,
@@ -113,18 +113,18 @@ impl Default for TranscriptionSettings {
 pub struct AgentRuntimeSettings {
     /// Maximum number of agentic turns per prompt.
     pub max_turns: u32,
-    /// Timeout for inactive sessions in milliseconds.
-    pub inactive_session_timeout_ms: u64,
     /// Maximum subagent nesting depth.
     pub subagent_max_depth: u32,
+    /// Default model for skill sub-agents.
+    pub subagent_model: String,
 }
 
 impl Default for AgentRuntimeSettings {
     fn default() -> Self {
         Self {
             max_turns: 100,
-            inactive_session_timeout_ms: 1_800_000,
             subagent_max_depth: 3,
+            subagent_model: "claude-haiku-4-5-20251001".to_string(),
         }
     }
 }
@@ -337,8 +337,12 @@ mod tests {
     fn agent_defaults() {
         let a = AgentRuntimeSettings::default();
         assert_eq!(a.max_turns, 100);
-        assert_eq!(a.inactive_session_timeout_ms, 1_800_000);
         assert_eq!(a.subagent_max_depth, 3);
+        assert_eq!(a.subagent_model, "claude-haiku-4-5-20251001");
+
+        // inactive_session_timeout_ms removed — canonical field is server.session_timeout_ms
+        let json = serde_json::to_value(&a).unwrap();
+        assert!(json.get("inactiveSessionTimeoutMs").is_none());
     }
 
     #[test]

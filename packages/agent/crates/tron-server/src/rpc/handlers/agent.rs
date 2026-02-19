@@ -162,6 +162,7 @@ struct RuntimeMemoryDeps {
     workspace_id: String,
     embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
+    ledger_enabled: bool,
 }
 
 #[async_trait]
@@ -273,7 +274,7 @@ impl tron_events::memory::manager::MemoryManagerDeps for RuntimeMemoryDeps {
     }
 
     fn is_ledger_enabled(&self) -> bool {
-        tron_settings::get_settings().context.memory.ledger.enabled
+        self.ledger_enabled
     }
 
     fn emit_memory_updating(&self, _session_id: &str) {
@@ -462,6 +463,9 @@ impl MethodHandler for PromptHandler {
                 use tron_runtime::orchestrator::agent_runner::run_agent;
                 use tron_runtime::types::{AgentConfig, RunContext};
 
+                // Grab settings once — consistent snapshot for the entire run
+                let settings = tron_settings::get_settings();
+
                 // 1. Resume session to get reconstructed state + persister
                 let (state, persister) = match session_manager.resume_session(&session_id_clone) {
                     Ok(active) => (active.state.clone(), active.context.persister.clone()),
@@ -486,11 +490,10 @@ impl MethodHandler for PromptHandler {
                 // 2. Load project rules via ContextLoader
                 let project_rules = {
                     let wd = std::path::Path::new(&working_dir);
-                    let rules_settings = tron_settings::get_settings();
                     let mut loader = tron_runtime::context::loader::ContextLoader::new(
                         tron_runtime::context::loader::ContextLoaderConfig {
                             project_root: wd.to_path_buf(),
-                            discover_standalone_files: rules_settings
+                            discover_standalone_files: settings
                                 .context
                                 .rules
                                 .discover_standalone_files,
@@ -519,10 +522,9 @@ impl MethodHandler for PromptHandler {
                 // 4b. Discover scoped rules for dynamic path-based activation
                 let rules_index = {
                     let wd_path = std::path::Path::new(&working_dir);
-                    let rules_settings = tron_settings::get_settings();
                     let config = tron_runtime::context::rules_discovery::RulesDiscoveryConfig {
                         project_root: wd_path.to_path_buf(),
-                        discover_standalone_files: rules_settings
+                        discover_standalone_files: settings
                             .context
                             .rules
                             .discover_standalone_files,
@@ -588,7 +590,6 @@ impl MethodHandler for PromptHandler {
                 // (rules.loaded / memory.loaded events are emitted optimistically
                 // at session.create time so iOS shows pills immediately)
                 let memory = {
-                    let settings = tron_settings::get_settings();
                     let auto_inject = &settings.context.memory.auto_inject;
 
                     if auto_inject.enabled {
@@ -647,7 +648,6 @@ impl MethodHandler for PromptHandler {
                     }
                 };
 
-                let settings = tron_settings::get_settings();
                 let cs = &settings.context.compactor;
 
                 let config = AgentConfig {
@@ -936,13 +936,13 @@ impl MethodHandler for PromptHandler {
                         workspace_id: resolved_workspace_id,
                         embedding_controller: embedding_controller.clone(),
                         shutdown_coordinator: shutdown_coordinator.clone(),
+                        ledger_enabled: settings.context.memory.ledger.enabled,
                     };
 
                     let (recent_event_types, recent_tool_calls) =
                         gather_recent_events(&event_store, &session_id_clone);
 
-                    let settings_for_trigger = tron_settings::get_settings();
-                    let cs_for_trigger = &settings_for_trigger.context.compactor;
+                    let cs_for_trigger = &settings.context.compactor;
                     let trigger_config =
                         tron_events::memory::types::CompactionTriggerConfig::from(cs_for_trigger);
                     let mut trigger =

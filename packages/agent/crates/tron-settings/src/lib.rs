@@ -35,7 +35,7 @@ pub mod loader;
 pub mod types;
 
 pub use errors::{Result, SettingsError};
-pub use loader::{deep_merge, load_settings, load_settings_from_path, settings_path};
+pub use loader::{deep_merge, load_settings, load_settings_from_path, settings_path, tron_home_dir};
 pub use types::*;
 
 use std::path::Path;
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(settings.server.ws_port, 8080);
         assert_eq!(settings.server.health_port, 8081);
         assert_eq!(settings.server.default_provider, "anthropic");
-        assert_eq!(settings.server.default_model, "claude-sonnet-4-20250514");
+        assert_eq!(settings.server.default_model, "claude-sonnet-4-6");
         assert_eq!(settings.retry.max_retries, 1);
         assert_eq!(settings.agent.max_turns, 100);
         assert_eq!(settings.tools.bash.default_timeout_ms, 120_000);

@@ -47,8 +47,6 @@ pub struct TronSettings {
     pub name: String,
     /// API provider settings (Anthropic, `OpenAI`, Google).
     pub api: ApiSettings,
-    /// Default model selection.
-    pub models: ModelSettings,
     /// Retry configuration for API calls.
     pub retry: RetrySettings,
     /// Tool-specific settings.
@@ -80,7 +78,6 @@ impl Default for TronSettings {
             version: "0.1.0".to_string(),
             name: "tron".to_string(),
             api: ApiSettings::default(),
-            models: ModelSettings::default(),
             retry: RetrySettings::default(),
             tools: ToolSettings::default(),
             context: ContextSettings::default(),
@@ -96,22 +93,43 @@ impl Default for TronSettings {
     }
 }
 
-/// Default model selection.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ModelSettings {
-    /// Default model for main conversations.
-    #[serde(rename = "default")]
-    pub default_model: String,
-    /// Default model for skill sub-agents.
-    pub subagent: String,
-}
+impl TronSettings {
+    /// Clamp ratio fields to [0.0, 1.0] and correct invalid invariants.
+    ///
+    /// Called automatically during loading. Out-of-range values are clamped
+    /// with a warning rather than rejected, so users get corrected behavior
+    /// instead of a confusing error.
+    pub fn validate(&mut self) {
+        fn clamp_ratio(val: &mut f64, name: &str) {
+            if *val < 0.0 || *val > 1.0 {
+                let clamped = val.clamp(0.0, 1.0);
+                tracing::warn!("{name} out of range ({val}), clamped to {clamped}");
+                *val = clamped;
+            }
+        }
 
-impl Default for ModelSettings {
-    fn default() -> Self {
-        Self {
-            default_model: "claude-opus-4-6".to_string(),
-            subagent: "claude-haiku-4-5-20251001".to_string(),
+        fn clamp_option_ratio(val: &mut Option<f64>, name: &str) {
+            if let Some(v) = val.as_mut() {
+                clamp_ratio(v, name);
+            }
+        }
+
+        let cs = &mut self.context.compactor;
+        clamp_ratio(&mut cs.compaction_threshold, "compaction_threshold");
+        clamp_ratio(&mut cs.preserve_ratio, "preserve_ratio");
+        clamp_option_ratio(&mut cs.trigger_token_threshold, "trigger_token_threshold");
+        clamp_option_ratio(&mut cs.alert_zone_threshold, "alert_zone_threshold");
+
+        clamp_ratio(&mut self.retry.jitter_factor, "jitter_factor");
+
+        let bash = &mut self.tools.bash;
+        if bash.max_timeout_ms < bash.default_timeout_ms {
+            tracing::warn!(
+                "bash max_timeout_ms ({}) < default_timeout_ms ({}), correcting",
+                bash.max_timeout_ms,
+                bash.default_timeout_ms
+            );
+            bash.max_timeout_ms = bash.default_timeout_ms;
         }
     }
 }
@@ -178,7 +196,9 @@ mod tests {
         // Root fields are camelCase
         assert!(json.get("version").is_some());
         assert!(json.get("api").is_some());
-        assert!(json.get("models").is_some());
+
+        // Dead "models" key removed
+        assert!(json.get("models").is_none());
 
         // Nested fields are camelCase
         let server = json.get("server").unwrap();
@@ -187,6 +207,19 @@ mod tests {
 
         // Optional sections omitted when None
         assert!(json.get("guardrails").is_none());
+    }
+
+    #[test]
+    fn legacy_models_key_silently_ignored() {
+        let json = serde_json::json!({
+            "models": {
+                "default": "claude-opus-4-6",
+                "subagent": "claude-haiku-4-5-20251001"
+            }
+        });
+        let settings: TronSettings = serde_json::from_value(json).unwrap();
+        // Should deserialize without error, models key ignored
+        assert_eq!(settings.version, "0.1.0");
     }
 
     #[test]
@@ -215,25 +248,6 @@ mod tests {
         assert_eq!(settings.server.health_port, 8081);
         assert_eq!(settings.retry.base_delay_ms, 1000);
         assert_eq!(settings.version, "0.1.0");
-    }
-
-    #[test]
-    fn model_settings_default_field_name() {
-        let m = ModelSettings::default();
-        let json = serde_json::to_value(&m).unwrap();
-        // The field should serialize as "default" (not "defaultModel")
-        assert_eq!(json["default"], "claude-opus-4-6");
-        assert_eq!(json["subagent"], "claude-haiku-4-5-20251001");
-    }
-
-    #[test]
-    fn model_settings_deserialize_default_field() {
-        let json = serde_json::json!({
-            "default": "claude-sonnet-4-5-20250929",
-            "subagent": "claude-haiku-4-5-20251001"
-        });
-        let m: ModelSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(m.default_model, "claude-sonnet-4-5-20250929");
     }
 
     #[test]
@@ -270,6 +284,69 @@ mod tests {
         let g = settings.guardrails.unwrap();
         assert!(g.audit.is_some());
         assert_eq!(g.audit.unwrap().max_entries, 200);
+    }
+
+    // ── validate ───────────────────────────────────────────────────
+
+    #[test]
+    fn validate_clamps_compaction_threshold() {
+        let mut s = TronSettings::default();
+        s.context.compactor.compaction_threshold = 5.0;
+        s.validate();
+        assert!((s.context.compactor.compaction_threshold - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn validate_clamps_preserve_ratio() {
+        let mut s = TronSettings::default();
+        s.context.compactor.preserve_ratio = -0.5;
+        s.validate();
+        assert!((s.context.compactor.preserve_ratio - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn validate_clamps_jitter_factor() {
+        let mut s = TronSettings::default();
+        s.retry.jitter_factor = 2.0;
+        s.validate();
+        assert!((s.retry.jitter_factor - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn validate_clamps_trigger_token_threshold() {
+        let mut s = TronSettings::default();
+        s.context.compactor.trigger_token_threshold = Some(1.5);
+        s.validate();
+        assert_eq!(s.context.compactor.trigger_token_threshold, Some(1.0));
+    }
+
+    #[test]
+    fn validate_clamps_alert_zone_threshold() {
+        let mut s = TronSettings::default();
+        s.context.compactor.alert_zone_threshold = Some(-0.1);
+        s.validate();
+        assert_eq!(s.context.compactor.alert_zone_threshold, Some(0.0));
+    }
+
+    #[test]
+    fn validate_corrects_bash_timeout_inversion() {
+        let mut s = TronSettings::default();
+        s.tools.bash.default_timeout_ms = 300_000;
+        s.tools.bash.max_timeout_ms = 100_000;
+        s.validate();
+        assert_eq!(s.tools.bash.max_timeout_ms, 300_000);
+    }
+
+    #[test]
+    fn validate_preserves_valid_values() {
+        let mut s = TronSettings::default();
+        let before_threshold = s.context.compactor.compaction_threshold;
+        let before_jitter = s.retry.jitter_factor;
+        let before_max = s.tools.bash.max_timeout_ms;
+        s.validate();
+        assert!((s.context.compactor.compaction_threshold - before_threshold).abs() < f64::EPSILON);
+        assert!((s.retry.jitter_factor - before_jitter).abs() < f64::EPSILON);
+        assert_eq!(s.tools.bash.max_timeout_ms, before_max);
     }
 
     #[test]

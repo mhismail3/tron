@@ -2708,14 +2708,14 @@ async fn e2e_settings_get_ios_compat() {
 
     let resp = rpc_call(&mut ws, 1, "settings.get", None).await;
     let result = &resp["result"];
-    // iOS flat fields
-    assert!(result["defaultModel"].is_string());
-    assert!(result["maxConcurrentSessions"].is_number());
-    assert!(result["compaction"].is_object());
-    assert!(result["memory"].is_object());
-    // Original nested fields still present
+    // Nested fields
     assert!(result["server"].is_object());
-    assert!(result["models"].is_object());
+    assert!(result["server"]["defaultModel"].is_string());
+    assert!(result["server"]["maxConcurrentSessions"].is_number());
+    assert!(result["context"]["compactor"].is_object());
+    assert!(result["context"]["memory"].is_object());
+    // ModelSettings removed — no top-level "models" key
+    assert!(result.get("models").is_none());
 
     server.shutdown().shutdown();
 }

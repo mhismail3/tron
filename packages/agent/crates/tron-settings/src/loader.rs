@@ -18,16 +18,20 @@ use tracing::debug;
 use crate::errors::Result;
 use crate::types::TronSettings;
 
+/// Resolve the `~/.tron` directory.
+pub fn tron_home_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".tron")
+}
+
 /// Resolve the path to the settings file (`~/.tron/settings.json`).
 pub fn settings_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".tron").join("settings.json")
+    tron_home_dir().join("settings.json")
 }
 
 /// Resolve the path to the auth file (`~/.tron/auth.json`).
 pub fn auth_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".tron").join("auth.json")
+    tron_home_dir().join("auth.json")
 }
 
 /// Load settings from the default path with env var overrides.
@@ -40,20 +44,20 @@ pub fn load_settings() -> Result<TronSettings> {
 /// If the file does not exist, returns defaults. If the file contains
 /// invalid JSON, returns an error.
 pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
-    let defaults = serde_json::to_value(TronSettings::default())?;
-
-    let merged = if path.exists() {
+    let mut settings = if path.exists() {
         debug!(?path, "loading settings from file");
         let content = std::fs::read_to_string(path)?;
         let user: Value = serde_json::from_str(&content)?;
-        deep_merge(defaults, user)
+        let defaults = serde_json::to_value(TronSettings::default())?;
+        let merged = deep_merge(defaults, user);
+        serde_json::from_value(merged)?
     } else {
         debug!(?path, "settings file not found, using defaults");
-        defaults
+        TronSettings::default()
     };
 
-    let mut settings: TronSettings = serde_json::from_value(merged)?;
     apply_env_overrides(&mut settings);
+    settings.validate();
     Ok(settings)
 }
 
@@ -154,10 +158,20 @@ pub fn apply_env_overrides(settings: &mut TronSettings) {
 ///
 /// Accepts (case-insensitive): `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`.
 pub fn parse_bool(val: &str) -> Option<bool> {
-    match val.to_lowercase().as_str() {
-        "true" | "1" | "yes" | "on" => Some(true),
-        "false" | "0" | "no" | "off" => Some(false),
-        _ => None,
+    if val.eq_ignore_ascii_case("true")
+        || val == "1"
+        || val.eq_ignore_ascii_case("yes")
+        || val.eq_ignore_ascii_case("on")
+    {
+        Some(true)
+    } else if val.eq_ignore_ascii_case("false")
+        || val == "0"
+        || val.eq_ignore_ascii_case("no")
+        || val.eq_ignore_ascii_case("off")
+    {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -229,6 +243,12 @@ fn read_env_usize(name: &str, min: usize, max: usize) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::errors::SettingsError;
+
+    #[test]
+    fn tron_home_dir_ends_with_dot_tron() {
+        let dir = tron_home_dir();
+        assert!(dir.to_string_lossy().ends_with(".tron"));
+    }
 
     #[test]
     fn auth_path_under_tron_dir() {
@@ -349,6 +369,17 @@ mod tests {
         let defaults = TronSettings::default();
         assert_eq!(settings.version, defaults.version);
         assert_eq!(settings.server.ws_port, defaults.server.ws_port);
+        // Full field comparison — fast path returns identical values
+        assert_eq!(settings.name, defaults.name);
+        assert_eq!(settings.server.default_model, defaults.server.default_model);
+        assert_eq!(settings.retry.max_retries, defaults.retry.max_retries);
+        assert!((settings.retry.jitter_factor - defaults.retry.jitter_factor).abs() < f64::EPSILON);
+        assert_eq!(settings.agent.max_turns, defaults.agent.max_turns);
+        assert_eq!(settings.agent.subagent_model, defaults.agent.subagent_model);
+        assert_eq!(settings.tools.bash.default_timeout_ms, defaults.tools.bash.default_timeout_ms);
+        assert_eq!(settings.context.compactor.max_tokens, defaults.context.compactor.max_tokens);
+        assert!(settings.context.memory.embedding.enabled);
+        assert!(settings.guardrails.is_none());
     }
 
     #[test]
@@ -435,6 +466,16 @@ mod tests {
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.tools.bash.dangerous_patterns.len(), 1);
         assert_eq!(settings.tools.bash.dangerous_patterns[0], "^rm -rf /");
+    }
+
+    #[test]
+    fn load_validates_clamping() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"retry": {"jitterFactor": 5.0}}"#).unwrap();
+
+        let settings = load_settings_from_path(&path).unwrap();
+        assert!((settings.retry.jitter_factor - 1.0).abs() < f64::EPSILON);
     }
 
     // ── parse_bool ──────────────────────────────────────────────────
