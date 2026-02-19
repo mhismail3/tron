@@ -39,7 +39,7 @@ TRON_HOME="${TRON_DATA_DIR:-$HOME/.tron}"
 BIN_DIR="$HOME/.local/bin"
 
 # Rust workspace
-RUST_WORKSPACE="$PROJECT_DIR/packages/agent-rs"
+RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
 
 # Installed binary
@@ -1383,9 +1383,9 @@ cmd_help() {
     echo "  errors          Show recent errors"
     echo ""
     echo "Direct cargo commands:"
-    echo "  cd packages/agent-rs && cargo build --release"
-    echo "  cd packages/agent-rs && cargo test --workspace"
-    echo "  cd packages/agent-rs && cargo clippy --workspace -- -D warnings"
+    echo "  cd packages/agent && cargo build --release"
+    echo "  cd packages/agent && cargo test --workspace"
+    echo "  cd packages/agent && cargo clippy --workspace -- -D warnings"
     echo ""
 }
 

@@ -5,13 +5,13 @@
 1. **Code, tests, and docs ship together.** Every change must include updated tests and updated documentation in the same commit. Outdated docs and missing tests are bugs.
 2. **Root cause fixes only.** Trace the real cause — no bandaid fixes.
 3. **Use `@tron-db` skill** to investigate issues. Query `~/.tron/database/` directly — don't guess.
-4. **Follow established patterns.** Read `packages/agent-rs/docs/` before implementing new features.
+4. **Follow established patterns.** Read `packages/agent/docs/` before implementing new features.
 
 ## Commands
 
 ```bash
 # REQUIRED before completing any task
-cd packages/agent-rs && cargo build --release && cargo test --workspace
+cd packages/agent && cargo build --release && cargo test --workspace
 
 # iOS
 cd packages/ios-app && xcodegen generate
@@ -22,7 +22,7 @@ xcodebuild test -scheme TronMobile -destination 'platform=iOS Simulator,name=iPh
 
 Read the relevant docs before working on a subsystem. Path-scoped rules in `.claude/rules/` load automatically.
 
-- `packages/agent-rs/docs/architecture.md` — Rust server architecture
+- `packages/agent/docs/architecture.md` — Rust server architecture
 - `packages/ios-app/docs/architecture.md` — SwiftUI, MVVM, coordinator, event plugins
 - `packages/ios-app/docs/development.md` — Xcode setup, builds, testing
 - `packages/ios-app/docs/events.md` — event plugin system

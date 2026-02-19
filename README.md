@@ -17,7 +17,7 @@ Tron is an AI coding agent that runs as a persistent service on macOS. The Rust 
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          Rust Agent Server                                   │
-│                         packages/agent-rs                                    │
+│                         packages/agent                                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │  Providers  │  │    Tools    │  │   Context   │  │    Orchestrator     │ │
@@ -41,7 +41,7 @@ Tron is an AI coding agent that runs as a persistent service on macOS. The Rust 
 ```
 tron/
 ├── packages/
-│   ├── agent-rs/    # Rust agent server (crates workspace)
+│   ├── agent/       # Rust agent server (crates workspace)
 │   └── ios-app/     # SwiftUI iOS application
 ├── scripts/         # CLI and deployment scripts
 └── .claude/         # Agent configuration
@@ -50,7 +50,7 @@ tron/
 ### Rust Crate Structure
 
 ```
-packages/agent-rs/crates/
+packages/agent/crates/
 ├── tron-agent/          # Binary entry point (main.rs)
 ├── tron-core/           # Shared types, logging, error hierarchy
 ├── tron-events/         # Event store, SQLite backend, migrations
@@ -78,7 +78,7 @@ packages/agent-rs/crates/
 
 ```bash
 # Build the server
-cd packages/agent-rs
+cd packages/agent
 cargo build --release
 
 # Run in foreground (development)

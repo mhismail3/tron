@@ -2,12 +2,12 @@
 
 ## Scope
 
-`packages/agent-rs` is the Rust gateway/runtime for Tron agent workflows. The server keeps one canonical internal model and uses a single compatibility boundary for iOS-specific shaping.
+`packages/agent` is the Rust gateway/runtime for Tron agent workflows. The server keeps one canonical internal model and uses a single compatibility boundary for iOS-specific shaping.
 
 ## Workspace Crates
 
 ```
-packages/agent-rs/
+packages/agent/
 ├── crates/tron-core           # shared domain types, message/content model, errors
 ├── crates/tron-events         # sqlite event store, migrations, reconstruction
 ├── crates/tron-settings       # settings schema + load/merge helpers

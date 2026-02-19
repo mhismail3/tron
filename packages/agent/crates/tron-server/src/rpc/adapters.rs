@@ -3,7 +3,7 @@
 //! This entire module exists to transform Rust server responses into the format
 //! the iOS app currently expects. Every public function is tagged for future removal.
 //!
-//! To find all adapter usage:  `grep -rn "ADAPTER(ios-compat)" packages/agent-rs/`
+//! To find all adapter usage:  `grep -rn "ADAPTER(ios-compat)" packages/agent/`
 //! To remove: delete this module, remove `pub mod adapters` from lib.rs,
 //!            and revert each tagged call site (instructions inline at each site).
 

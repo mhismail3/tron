@@ -38,7 +38,7 @@ impl MethodHandler for GetInfoHandler {
             "activeSessions": active_sessions,
             "platform": std::env::consts::OS,
             "arch": std::env::consts::ARCH,
-            "runtime": "agent-rs",
+            "runtime": "agent",
         }))
     }
 }
@@ -79,7 +79,7 @@ mod tests {
         let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
         assert!(result["version"].is_string());
         assert!(result["platform"].is_string());
-        assert_eq!(result["runtime"], "agent-rs");
+        assert_eq!(result["runtime"], "agent");
     }
 
     #[tokio::test]
@@ -107,7 +107,7 @@ mod tests {
         let result = GetInfoHandler.handle(None, &ctx).await.unwrap();
         assert!(result["platform"].is_string());
         assert!(result["arch"].is_string());
-        assert_eq!(result["runtime"], "agent-rs");
+        assert_eq!(result["runtime"], "agent");
     }
 
     #[tokio::test]

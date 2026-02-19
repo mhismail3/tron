@@ -2649,7 +2649,7 @@ async fn e2e_system_get_info_ios_compat() {
     assert!(result["activeSessions"].is_number());
     assert!(result["platform"].is_string());
     assert!(result["arch"].is_string());
-    assert_eq!(result["runtime"], "agent-rs");
+    assert_eq!(result["runtime"], "agent");
 
     server.shutdown().shutdown();
 }

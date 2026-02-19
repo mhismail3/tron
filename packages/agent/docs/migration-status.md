@@ -1,6 +1,6 @@
 # Migration Status (TypeScript -> Rust)
 
-This file tracks the active hardening/refactor pass for `packages/agent-rs`.
+This file tracks the active hardening/refactor pass for `packages/agent`.
 
 Legend:
 - `done`: implemented and covered by tests

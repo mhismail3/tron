@@ -22,7 +22,7 @@ use tron_events::{AppendOptions, ConnectionConfig, EventStore, EventType};
 #[derive(Debug, Parser)]
 #[command(
     name = "tron-bench",
-    about = "Benchmark runner for agent-rs server hot paths"
+    about = "Benchmark runner for agent server hot paths"
 )]
 struct Args {
     /// Scenario to run: `prompt_text_only`, `prompt_with_tools`, `concurrent_sessions`, `all`.
