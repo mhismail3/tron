@@ -9,7 +9,12 @@ use tracing::{debug, info};
 use crate::audio;
 use crate::decoder;
 use crate::model;
-use crate::types::{TranscriptionError, TranscriptionResult};
+use crate::types::{ResultExt, TranscriptionError, TranscriptionResult};
+
+/// Intra-op thread count for preprocessor and encoder ONNX sessions.
+const PARALLEL_THREADS: usize = 4;
+/// Decoder is sequential — single thread is sufficient.
+const DECODER_THREADS: usize = 1;
 
 /// Rust-native transcription engine using ONNX Runtime with the parakeet-tdt model.
 ///
@@ -33,7 +38,7 @@ impl TranscriptionEngine {
         let dir = model_dir.clone();
         tokio::task::spawn_blocking(move || Self::load_sessions(&dir))
             .await
-            .map_err(|e| TranscriptionError::Inference(format!("task join: {e}")))?
+            .inference("task join")?
             .map(Arc::new)
     }
 
@@ -42,47 +47,34 @@ impl TranscriptionEngine {
             "loading transcription model from {}...",
             model_dir.display()
         );
-        let files = model::model_files(model_dir);
-
-        let preprocessor_path = files.get("nemo128.onnx").ok_or_else(|| {
-            TranscriptionError::ModelNotAvailable("nemo128.onnx not found".into())
-        })?;
-        let encoder_path = files.get("encoder-model.onnx").ok_or_else(|| {
-            TranscriptionError::ModelNotAvailable("encoder-model.onnx not found".into())
-        })?;
-        let decoder_path = files.get("decoder_joint-model.onnx").ok_or_else(|| {
-            TranscriptionError::ModelNotAvailable("decoder_joint-model.onnx not found".into())
-        })?;
-        let vocab_path = files
-            .get("vocab.txt")
-            .ok_or_else(|| TranscriptionError::ModelNotAvailable("vocab.txt not found".into()))?;
+        let paths = model::ModelPaths::from_dir(model_dir);
 
         // Load ONNX sessions
         let preprocessor = Session::builder()
-            .map_err(|e| TranscriptionError::Inference(format!("session builder: {e}")))?
-            .with_intra_threads(4)
-            .map_err(|e| TranscriptionError::Inference(format!("set threads: {e}")))?
-            .commit_from_file(preprocessor_path)
-            .map_err(|e| TranscriptionError::Inference(format!("load preprocessor: {e}")))?;
+            .inference("session builder")?
+            .with_intra_threads(PARALLEL_THREADS)
+            .inference("set threads")?
+            .commit_from_file(&paths.preprocessor)
+            .inference("load preprocessor")?;
         debug!("loaded preprocessor");
 
         let encoder = Session::builder()
-            .map_err(|e| TranscriptionError::Inference(format!("session builder: {e}")))?
-            .with_intra_threads(4)
-            .map_err(|e| TranscriptionError::Inference(format!("set threads: {e}")))?
-            .commit_from_file(encoder_path)
-            .map_err(|e| TranscriptionError::Inference(format!("load encoder: {e}")))?;
+            .inference("session builder")?
+            .with_intra_threads(PARALLEL_THREADS)
+            .inference("set threads")?
+            .commit_from_file(&paths.encoder)
+            .inference("load encoder")?;
         debug!("loaded encoder");
 
         let decoder_joint = Session::builder()
-            .map_err(|e| TranscriptionError::Inference(format!("session builder: {e}")))?
-            .with_intra_threads(1) // Decoder is sequential, single-threaded is fine
-            .map_err(|e| TranscriptionError::Inference(format!("set threads: {e}")))?
-            .commit_from_file(decoder_path)
-            .map_err(|e| TranscriptionError::Inference(format!("load decoder: {e}")))?;
+            .inference("session builder")?
+            .with_intra_threads(DECODER_THREADS)
+            .inference("set threads")?
+            .commit_from_file(&paths.decoder_joint)
+            .inference("load decoder")?;
         debug!("loaded decoder_joint");
 
-        let vocab = model::load_vocab(vocab_path)?;
+        let vocab = model::load_vocab(&paths.vocab)?;
         let blank_idx = vocab.len(); // Blank token is at index == vocab_size
 
         info!(
@@ -112,9 +104,9 @@ impl TranscriptionEngine {
         let data = audio_data.to_vec();
         let mime = mime_type.to_string();
         let (samples, _source_rate) =
-            tokio::task::spawn_blocking(move || audio::decode_audio(&data, &mime))
+            tokio::task::spawn_blocking(move || audio::decode_audio(data, &mime))
                 .await
-                .map_err(|e| TranscriptionError::Inference(format!("audio decode task: {e}")))??;
+                .inference("audio decode task")??;
 
         #[allow(clippy::cast_precision_loss)]
         let duration_seconds = samples.len() as f64 / f64::from(audio::TARGET_SAMPLE_RATE);
@@ -128,7 +120,7 @@ impl TranscriptionEngine {
         let engine = Arc::clone(self);
         let text = tokio::task::spawn_blocking(move || engine.run_inference(&samples))
             .await
-            .map_err(|e| TranscriptionError::Inference(format!("inference task: {e}")))??;
+            .inference("inference task")??;
 
         Ok(TranscriptionResult {
             text,
@@ -144,7 +136,7 @@ impl TranscriptionEngine {
             let mut preprocessor = self
                 .preprocessor
                 .lock()
-                .map_err(|e| TranscriptionError::Inference(format!("preprocessor lock: {e}")))?;
+                .inference("preprocessor lock")?;
             decoder::run_preprocessor(&mut preprocessor, samples)?
         };
         debug!("mel features: {:?}, len={}", features.shape(), features_len);
@@ -154,7 +146,7 @@ impl TranscriptionEngine {
             let mut encoder = self
                 .encoder
                 .lock()
-                .map_err(|e| TranscriptionError::Inference(format!("encoder lock: {e}")))?;
+                .inference("encoder lock")?;
             decoder::run_encoder(&mut encoder, &features, features_len)?
         };
         debug!("encoder output: {:?}", encoder_out.shape());
@@ -164,7 +156,7 @@ impl TranscriptionEngine {
             let mut decoder_joint = self
                 .decoder_joint
                 .lock()
-                .map_err(|e| TranscriptionError::Inference(format!("decoder lock: {e}")))?;
+                .inference("decoder lock")?;
             decoder::greedy_decode(
                 &encoder_out,
                 &mut decoder_joint,
@@ -174,11 +166,6 @@ impl TranscriptionEngine {
         };
 
         Ok(text)
-    }
-
-    /// Check if the engine is ready for inference.
-    pub fn is_ready(&self) -> bool {
-        true // If constructed, it's ready
     }
 }
 
@@ -201,7 +188,6 @@ mod tests {
     async fn transcribe_wav_produces_text() {
         let model_dir = model::default_model_dir();
         model::ensure_model(&model_dir).await.unwrap();
-        let engine = TranscriptionEngine::new(model_dir).await.unwrap();
-        assert!(engine.is_ready());
+        let _engine = TranscriptionEngine::new(model_dir).await.unwrap();
     }
 }

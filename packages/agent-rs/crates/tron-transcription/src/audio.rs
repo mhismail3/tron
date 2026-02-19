@@ -9,7 +9,7 @@ use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-use crate::types::TranscriptionError;
+use crate::types::{ResultExt, TranscriptionError};
 
 /// Target sample rate for the transcription model.
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
@@ -19,10 +19,13 @@ const MAX_AUDIO_SAMPLES: usize = 30 * 60 * 16_000;
 
 /// Decode audio bytes into 16kHz mono f32 samples.
 ///
-/// Supports WAV, M4A/AAC, and other formats via symphonia.
+/// Supports WAV, M4A/AAC, MP3, OGG, FLAC, and other formats via symphonia.
 /// Automatically resamples to 16kHz and mixes to mono if needed.
-pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), TranscriptionError> {
-    let cursor = Cursor::new(data.to_vec());
+///
+/// Takes ownership of `data` to avoid an extra copy (the previous `&[u8]`
+/// signature required `.to_vec()` for the `Cursor`).
+pub fn decode_audio(data: Vec<u8>, mime_type: &str) -> Result<(Vec<f32>, u32), TranscriptionError> {
+    let cursor = Cursor::new(data);
     let mss = MediaSourceStream::new(Box::new(cursor), MediaSourceStreamOptions::default());
 
     let mut hint = Hint::new();
@@ -32,6 +35,15 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
         }
         "audio/m4a" | "audio/mp4" | "audio/x-m4a" | "audio/aac" => {
             let _ = hint.with_extension("m4a");
+        }
+        "audio/mpeg" | "audio/mp3" => {
+            let _ = hint.with_extension("mp3");
+        }
+        "audio/ogg" | "audio/vorbis" => {
+            let _ = hint.with_extension("ogg");
+        }
+        "audio/flac" | "audio/x-flac" => {
+            let _ = hint.with_extension("flac");
         }
         _ => {}
     }
@@ -43,7 +55,7 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .map_err(|e| TranscriptionError::AudioDecode(format!("probe failed: {e}")))?;
+        .audio_decode("probe failed")?;
 
     let mut format = probed.format;
 
@@ -63,7 +75,7 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&codec_params, &DecoderOptions::default())
-        .map_err(|e| TranscriptionError::AudioDecode(format!("codec init failed: {e}")))?;
+        .audio_decode("codec init failed")?;
 
     let mut all_samples: Vec<f32> = Vec::new();
 
@@ -84,7 +96,7 @@ pub fn decode_audio(data: &[u8], mime_type: &str) -> Result<(Vec<f32>, u32), Tra
 
         let audio_buf = decoder
             .decode(&packet)
-            .map_err(|e| TranscriptionError::AudioDecode(format!("decode: {e}")))?;
+            .audio_decode("decode")?;
 
         let spec = *audio_buf.spec();
         let n_frames = audio_buf.capacity();
@@ -143,7 +155,7 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>, T
     let chunk_size = 1024;
 
     let mut resampler = SincFixedIn::<f32>::new(ratio, 2.0, params, chunk_size, 1)
-        .map_err(|e| TranscriptionError::Resample(format!("init: {e}")))?;
+        .resample("init")?;
 
     #[allow(
         clippy::cast_precision_loss,
@@ -164,7 +176,7 @@ fn resample(samples: &[f32], from_rate: u32, to_rate: u32) -> Result<Vec<f32>, T
 
         let output_buf = resampler
             .process(&input, None)
-            .map_err(|e| TranscriptionError::Resample(format!("process: {e}")))?;
+            .resample("process")?;
 
         if let Some(channel) = output_buf.first() {
             output.extend_from_slice(channel);
@@ -180,14 +192,28 @@ mod tests {
 
     #[test]
     fn decode_invalid_audio_returns_error() {
-        let result = decode_audio(b"not audio data", "audio/wav");
+        let result = decode_audio(b"not audio data".to_vec(), "audio/wav");
         assert!(result.is_err());
     }
 
     #[test]
     fn decode_empty_returns_error() {
-        let result = decode_audio(b"", "audio/wav");
+        let result = decode_audio(b"".to_vec(), "audio/wav");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_audio_respects_mime_hint() {
+        for mime in &[
+            "audio/mp3",
+            "audio/ogg",
+            "audio/flac",
+            "audio/webm",
+            "audio/x-caf",
+        ] {
+            let result = decode_audio(b"invalid".to_vec(), mime);
+            assert!(result.is_err(), "expected error for {mime}");
+        }
     }
 
     #[test]
@@ -213,7 +239,7 @@ mod tests {
     fn decode_wav_synthetic() {
         // Generate a minimal valid WAV file (16kHz mono 16-bit, 0.1s of silence)
         let wav = generate_test_wav(16000, 1, 1600);
-        let (samples, _rate) = decode_audio(&wav, "audio/wav").unwrap();
+        let (samples, _rate) = decode_audio(wav, "audio/wav").unwrap();
         assert!(!samples.is_empty());
         assert!(samples.iter().all(|&s| s >= -1.0 && s <= 1.0));
     }
@@ -222,7 +248,7 @@ mod tests {
     fn decode_wav_44khz_resamples_to_16khz() {
         // Generate 44.1kHz stereo WAV, 0.5s
         let wav = generate_test_wav(44100, 2, 22050);
-        let (samples, _) = decode_audio(&wav, "audio/wav").unwrap();
+        let (samples, _) = decode_audio(wav, "audio/wav").unwrap();
         assert!(!samples.is_empty());
         // Should have been resampled to ~16kHz
         // 0.5s at 16kHz ≈ 8000 samples (mono output)

@@ -2955,7 +2955,7 @@ mod tests {
     fn get_pending_no_notifications_returns_empty() {
         let store = make_event_store();
         let sid = store
-            .create_session("mock", "/tmp", None)
+            .create_session("mock", "/tmp", None, None)
             .unwrap()
             .session
             .id;
@@ -2968,7 +2968,7 @@ mod tests {
     fn get_pending_with_notification_returns_it() {
         let store = make_event_store();
         let sid = store
-            .create_session("mock", "/tmp", None)
+            .create_session("mock", "/tmp", None, None)
             .unwrap()
             .session
             .id;
@@ -3002,7 +3002,7 @@ mod tests {
     fn get_pending_skips_consumed() {
         let store = make_event_store();
         let sid = store
-            .create_session("mock", "/tmp", None)
+            .create_session("mock", "/tmp", None, None)
             .unwrap()
             .session
             .id;
@@ -3048,7 +3048,7 @@ mod tests {
     fn get_pending_partial_consumed() {
         let store = make_event_store();
         let sid = store
-            .create_session("mock", "/tmp", None)
+            .create_session("mock", "/tmp", None, None)
             .unwrap()
             .session
             .id;
@@ -3113,7 +3113,7 @@ mod tests {
     fn get_pending_multiple_consumption_events() {
         let store = make_event_store();
         let sid = store
-            .create_session("mock", "/tmp", None)
+            .create_session("mock", "/tmp", None, None)
             .unwrap()
             .session
             .id;

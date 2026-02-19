@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
 use tracing::{info, instrument, warn};
+use tron_transcription::TranscriptionResult;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
@@ -13,6 +14,40 @@ use crate::rpc::registry::MethodHandler;
 
 /// Maximum audio size in bytes (50 MB).
 const MAX_AUDIO_SIZE: usize = 50 * 1024 * 1024;
+
+/// Typed response for the transcribe.audio RPC method.
+///
+/// Serializes to camelCase JSON matching the iOS `TranscribeAudioResult` contract.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranscribeResponse {
+    text: String,
+    raw_text: String,
+    language: String,
+    duration_seconds: f64,
+    processing_time_ms: u64,
+    model: String,
+    device: String,
+    compute_type: String,
+    cleanup_mode: String,
+}
+
+impl TranscribeResponse {
+    /// Stub response when both native engine and sidecar are unavailable.
+    fn stub(estimated_duration: f64) -> Self {
+        Self {
+            text: "(transcription not available)".into(),
+            raw_text: String::new(),
+            language: "en".into(),
+            duration_seconds: estimated_duration,
+            processing_time_ms: 0,
+            model: String::new(),
+            device: String::new(),
+            compute_type: String::new(),
+            cleanup_mode: "none".into(),
+        }
+    }
+}
 
 /// Map a MIME type to a sensible default filename with the correct extension.
 ///
@@ -119,32 +154,31 @@ pub async fn transcribe_audio_via_sidecar(
 
 /// Shared transcription helper: tries native engine first, falls back to sidecar.
 ///
-/// Returns `(text, language, duration_seconds)` on success, or a stub fallback
-/// if both native and sidecar fail.
+/// Returns a [`TranscriptionResult`] with text, language, and duration.
 pub async fn transcribe_audio(
     ctx: &RpcContext,
     audio_bytes: &[u8],
     mime_type: &str,
     file_name: Option<&str>,
-) -> (String, String, f64) {
-    let result = transcribe_audio_full(ctx, audio_bytes, mime_type, file_name).await;
-    (
-        result["text"].as_str().unwrap_or("").to_string(),
-        result["language"].as_str().unwrap_or("en").to_string(),
-        result["durationSeconds"].as_f64().unwrap_or(0.0),
-    )
+) -> TranscriptionResult {
+    let resp = transcribe_audio_full(ctx, audio_bytes, mime_type, file_name).await;
+    TranscriptionResult {
+        text: resp.text,
+        language: resp.language,
+        duration_seconds: resp.duration_seconds,
+    }
 }
 
 /// Full transcription helper returning the complete response expected by iOS.
 ///
-/// Returns a JSON object with all fields: text, rawText, language, durationSeconds,
-/// processingTimeMs, model, device, computeType, cleanupMode.
+/// Returns a [`TranscribeResponse`] with all fields: text, rawText, language,
+/// durationSeconds, processingTimeMs, model, device, computeType, cleanupMode.
 async fn transcribe_audio_full(
     ctx: &RpcContext,
     audio_bytes: &[u8],
     mime_type: &str,
     file_name: Option<&str>,
-) -> Value {
+) -> TranscribeResponse {
     // Rough duration estimate for fallback: ~16KB/s for compressed audio
     #[allow(clippy::cast_precision_loss)]
     let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
@@ -161,17 +195,17 @@ async fn transcribe_audio_full(
                     "native transcription succeeded ({:.1}s audio)",
                     result.duration_seconds
                 );
-                return serde_json::json!({
-                    "text": result.text,
-                    "rawText": result.text,
-                    "language": result.language,
-                    "durationSeconds": result.duration_seconds,
-                    "processingTimeMs": elapsed_ms,
-                    "model": "parakeet-tdt-0.6b-v3",
-                    "device": "cpu",
-                    "computeType": "onnx",
-                    "cleanupMode": "none",
-                });
+                return TranscribeResponse {
+                    text: result.text.clone(),
+                    raw_text: result.text,
+                    language: result.language,
+                    duration_seconds: result.duration_seconds,
+                    processing_time_ms: elapsed_ms,
+                    model: "parakeet-tdt-0.6b-v3".into(),
+                    device: "cpu".into(),
+                    compute_type: "onnx".into(),
+                    cleanup_mode: "none".into(),
+                };
             }
             Err(e) => {
                 warn!(error = %e, "native transcription failed, trying sidecar");
@@ -186,37 +220,61 @@ async fn transcribe_audio_full(
             #[allow(clippy::cast_possible_truncation)]
             let elapsed_ms = start.elapsed().as_millis() as u64;
             // Sidecar returns snake_case — map to camelCase for iOS
-            let text = result.get("text").and_then(Value::as_str).unwrap_or("");
-            serde_json::json!({
-                "text": text,
-                "rawText": result.get("raw_text").or_else(|| result.get("rawText"))
-                    .and_then(Value::as_str).unwrap_or(text),
-                "language": result.get("language").and_then(Value::as_str).unwrap_or("en"),
-                "durationSeconds": result.get("duration_s").or_else(|| result.get("durationSeconds"))
-                    .and_then(Value::as_f64).unwrap_or(estimated_duration),
-                "processingTimeMs": result.get("processing_time_ms").or_else(|| result.get("processingTimeMs"))
-                    .and_then(Value::as_u64).unwrap_or(elapsed_ms),
-                "model": result.get("model").and_then(Value::as_str).unwrap_or(""),
-                "device": result.get("device").and_then(Value::as_str).unwrap_or(""),
-                "computeType": result.get("compute_type").or_else(|| result.get("computeType"))
-                    .and_then(Value::as_str).unwrap_or(""),
-                "cleanupMode": result.get("cleanup_mode").or_else(|| result.get("cleanupMode"))
-                    .and_then(Value::as_str).unwrap_or("basic"),
-            })
+            let text = result
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            TranscribeResponse {
+                raw_text: result
+                    .get("raw_text")
+                    .or_else(|| result.get("rawText"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(&text)
+                    .to_string(),
+                text,
+                language: result
+                    .get("language")
+                    .and_then(Value::as_str)
+                    .unwrap_or("en")
+                    .to_string(),
+                duration_seconds: result
+                    .get("duration_s")
+                    .or_else(|| result.get("durationSeconds"))
+                    .and_then(Value::as_f64)
+                    .unwrap_or(estimated_duration),
+                processing_time_ms: result
+                    .get("processing_time_ms")
+                    .or_else(|| result.get("processingTimeMs"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(elapsed_ms),
+                model: result
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                device: result
+                    .get("device")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                compute_type: result
+                    .get("compute_type")
+                    .or_else(|| result.get("computeType"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                cleanup_mode: result
+                    .get("cleanup_mode")
+                    .or_else(|| result.get("cleanupMode"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("basic")
+                    .to_string(),
+            }
         }
         Err(e) => {
             warn!(error = %e, "sidecar transcription failed, using stub");
-            serde_json::json!({
-                "text": "(transcription not available)",
-                "rawText": "",
-                "language": "en",
-                "durationSeconds": estimated_duration,
-                "processingTimeMs": 0,
-                "model": "",
-                "device": "",
-                "computeType": "",
-                "cleanupMode": "none",
-            })
+            TranscribeResponse::stub(estimated_duration)
         }
     }
 }
@@ -262,7 +320,10 @@ impl MethodHandler for TranscribeAudioHandler {
             .and_then(Value::as_str)
             .unwrap_or("audio/wav");
 
-        Ok(transcribe_audio_full(ctx, &audio_bytes, mime_type, None).await)
+        let resp = transcribe_audio_full(ctx, &audio_bytes, mime_type, None).await;
+        serde_json::to_value(&resp).map_err(|e| RpcError::Internal {
+            message: format!("serialize response: {e}"),
+        })
     }
 }
 
@@ -333,6 +394,55 @@ mod tests {
     use super::*;
     use crate::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
+
+    // ── TranscribeResponse tests ──
+
+    #[test]
+    fn transcribe_response_serializes_camel_case() {
+        let resp = TranscribeResponse {
+            text: "hello".into(),
+            raw_text: "hello".into(),
+            language: "en".into(),
+            duration_seconds: 2.5,
+            processing_time_ms: 100,
+            model: "parakeet".into(),
+            device: "cpu".into(),
+            compute_type: "onnx".into(),
+            cleanup_mode: "none".into(),
+        };
+        let val = serde_json::to_value(&resp).unwrap();
+        assert_eq!(val["text"], "hello");
+        assert_eq!(val["rawText"], "hello");
+        assert_eq!(val["durationSeconds"], 2.5);
+        assert_eq!(val["processingTimeMs"], 100);
+        assert_eq!(val["computeType"], "onnx");
+        assert_eq!(val["cleanupMode"], "none");
+        // Verify NO snake_case keys leak through
+        assert!(val.get("raw_text").is_none());
+        assert!(val.get("duration_seconds").is_none());
+        assert!(val.get("processing_time_ms").is_none());
+        assert!(val.get("compute_type").is_none());
+        assert!(val.get("cleanup_mode").is_none());
+    }
+
+    #[test]
+    fn transcribe_response_stub_has_all_fields() {
+        let resp = TranscribeResponse::stub(1.0);
+        let val = serde_json::to_value(&resp).unwrap();
+        for key in &[
+            "text",
+            "rawText",
+            "language",
+            "durationSeconds",
+            "processingTimeMs",
+            "model",
+            "device",
+            "computeType",
+            "cleanupMode",
+        ] {
+            assert!(val.get(key).is_some(), "missing field: {key}");
+        }
+    }
 
     // ── TranscribeAudioHandler tests ──
 
@@ -463,33 +573,38 @@ mod tests {
     #[tokio::test]
     async fn transcribe_audio_helper_no_engine_no_sidecar() {
         let ctx = make_test_context();
-        let (text, lang, dur) = transcribe_audio(&ctx, b"fake-audio", "audio/wav", None).await;
-        assert_eq!(text, "(transcription not available)");
-        assert_eq!(lang, "en");
-        assert!(dur > 0.0);
+        let result = transcribe_audio(&ctx, b"fake-audio", "audio/wav", None).await;
+        assert_eq!(result.text, "(transcription not available)");
+        assert_eq!(result.language, "en");
+        assert!(result.duration_seconds > 0.0);
     }
 
     #[tokio::test]
     async fn transcribe_audio_full_returns_all_fields() {
         let ctx = make_test_context();
         let result = transcribe_audio_full(&ctx, b"fake-audio", "audio/wav", None).await;
-        assert_eq!(result["text"], "(transcription not available)");
-        assert_eq!(result["rawText"], "");
-        assert_eq!(result["language"], "en");
-        assert!(result["durationSeconds"].is_number());
-        assert!(result["processingTimeMs"].is_number());
-        assert!(result["model"].is_string());
-        assert!(result["device"].is_string());
-        assert!(result["computeType"].is_string());
-        assert!(result["cleanupMode"].is_string());
+        let val = serde_json::to_value(&result).unwrap();
+        assert_eq!(val["text"], "(transcription not available)");
+        assert_eq!(val["rawText"], "");
+        assert_eq!(val["language"], "en");
+        assert!(val["durationSeconds"].is_number());
+        assert!(val["processingTimeMs"].is_number());
+        assert!(val["model"].is_string());
+        assert!(val["device"].is_string());
+        assert!(val["computeType"].is_string());
+        assert!(val["cleanupMode"].is_string());
     }
 
     #[tokio::test]
     async fn transcribe_audio_helper_duration_estimate() {
         let ctx = make_test_context();
         let audio = vec![0u8; 16_000]; // 16KB = ~1s at 16KB/s estimate
-        let (_, _, dur) = transcribe_audio(&ctx, &audio, "audio/wav", None).await;
-        assert!((dur - 1.0).abs() < 0.01, "expected ~1.0s, got {dur}");
+        let result = transcribe_audio(&ctx, &audio, "audio/wav", None).await;
+        assert!(
+            (result.duration_seconds - 1.0).abs() < 0.01,
+            "expected ~1.0s, got {}",
+            result.duration_seconds
+        );
     }
 
     // ── normalize_base64 tests ──

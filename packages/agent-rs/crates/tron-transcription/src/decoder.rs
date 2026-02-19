@@ -2,27 +2,33 @@
 //!
 //! ONNX tensor shapes use `i64` dimensions while Rust indexing needs `usize`.
 //! These casts are safe because tensor dimensions are always small positive values.
-#![allow(
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_truncation
-)]
 
 use ndarray::{Array2, Array3};
 use ort::session::Session;
 use ort::value::Tensor;
 use tracing::debug;
 
-use crate::types::TranscriptionError;
+use crate::types::{ResultExt, TranscriptionError};
 
 /// TDT duration buckets: how many encoder frames to advance per step.
 pub const DURATIONS: [usize; 5] = [0, 1, 2, 3, 4];
+
+/// Hidden state dimension for the LSTM decoder.
+const LSTM_STATE_DIM: usize = 640;
+
+/// Safety multiplier — decode loop terminates after `time_steps * MAX_STEPS_MULTIPLIER` iterations.
+const MAX_STEPS_MULTIPLIER: usize = 5;
 
 /// Greedy TDT decoding: walk encoder output frame-by-frame using the `decoder_joint` network.
 ///
 /// The `decoder_joint` model takes encoder frames + previous token + LSTM states,
 /// and outputs token logits + duration logits. The token with highest logit is
 /// emitted (if not blank), and we advance by the predicted duration.
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 pub fn greedy_decode(
     encoder_out: &Array2<f32>,
     decoder_joint: &mut Session,
@@ -36,12 +42,11 @@ pub fn greedy_decode(
     let mut tokens: Vec<usize> = Vec::new();
     let mut prev_token = blank_idx;
 
-    // Initialize LSTM states to zeros (2 state tensors, shape [1, 1, 640])
-    let state_dim = 640;
-    let mut state1_data = vec![0.0f32; state_dim];
-    let mut state2_data = vec![0.0f32; state_dim];
+    // Pre-allocate reusable LSTM state buffers (avoids per-iteration allocation)
+    let mut state1_data = vec![0.0f32; LSTM_STATE_DIM];
+    let mut state2_data = vec![0.0f32; LSTM_STATE_DIM];
 
-    let max_steps = time_steps * 5; // safety limit
+    let max_steps = time_steps * MAX_STEPS_MULTIPLIER;
     let mut total_steps = 0;
 
     while step < time_steps {
@@ -54,19 +59,21 @@ pub fn greedy_decode(
         // Encoder frame: [1, 1, hidden_dim]
         let frame: Vec<f32> = encoder_out.row(step).to_vec();
         let encoder_input = Tensor::from_array(([1i64, 1, hidden_dim as i64], frame))
-            .map_err(|e| TranscriptionError::Inference(format!("encoder frame tensor: {e}")))?;
+            .inference("encoder frame tensor")?;
 
         // Target token: [1, 1]
         let target = Tensor::from_array(([1i64, 1], vec![prev_token as i64]))
-            .map_err(|e| TranscriptionError::Inference(format!("target tensor: {e}")))?;
-        let target_length = Tensor::from_array(([1i64], vec![1i64]))
-            .map_err(|e| TranscriptionError::Inference(format!("target_length tensor: {e}")))?;
+            .inference("target tensor")?;
+        let target_length =
+            Tensor::from_array(([1i64], vec![1i64])).inference("target_length tensor")?;
 
         // LSTM states: [1, 1, 640]
-        let s1 = Tensor::from_array(([1i64, 1, state_dim as i64], state1_data.clone()))
-            .map_err(|e| TranscriptionError::Inference(format!("state1 tensor: {e}")))?;
-        let s2 = Tensor::from_array(([1i64, 1, state_dim as i64], state2_data.clone()))
-            .map_err(|e| TranscriptionError::Inference(format!("state2 tensor: {e}")))?;
+        let s1 =
+            Tensor::from_array(([1i64, 1, LSTM_STATE_DIM as i64], state1_data.clone()))
+                .inference("state1 tensor")?;
+        let s2 =
+            Tensor::from_array(([1i64, 1, LSTM_STATE_DIM as i64], state2_data.clone()))
+                .inference("state2 tensor")?;
 
         let outputs = decoder_joint
             .run(ort::inputs![
@@ -76,23 +83,23 @@ pub fn greedy_decode(
                 "input_states_1" => s1,
                 "input_states_2" => s2,
             ])
-            .map_err(|e| TranscriptionError::Inference(format!("decoder_joint run: {e}")))?;
+            .inference("decoder_joint run")?;
 
         // Extract outputs — ort 2.0 returns (&Shape, &[T])
         let (_, logits) = outputs["outputs"]
             .try_extract_tensor::<f32>()
-            .map_err(|e| TranscriptionError::Inference(format!("extract logits: {e}")))?;
+            .inference("extract logits")?;
 
-        // Update LSTM states
-        let (_, s1_data) = outputs["output_states_1"]
+        // Update LSTM states in-place (avoids allocation via .to_vec())
+        let (_, s1_out) = outputs["output_states_1"]
             .try_extract_tensor::<f32>()
-            .map_err(|e| TranscriptionError::Inference(format!("extract state1: {e}")))?;
-        state1_data = s1_data.to_vec();
+            .inference("extract state1")?;
+        state1_data.copy_from_slice(s1_out);
 
-        let (_, s2_data) = outputs["output_states_2"]
+        let (_, s2_out) = outputs["output_states_2"]
             .try_extract_tensor::<f32>()
-            .map_err(|e| TranscriptionError::Inference(format!("extract state2: {e}")))?;
-        state2_data = s2_data.to_vec();
+            .inference("extract state2")?;
+        state2_data.copy_from_slice(s2_out);
 
         // Split logits into token logits and duration logits
         let vocab_size = vocab.len();
@@ -158,6 +165,11 @@ fn argmax(slice: &[f32]) -> usize {
 ///
 /// Input: mel features `[1, 128, T]` from preprocessor
 /// Output: encoder output `[T', hidden_dim]` (squeezed from `[1, T', hidden_dim]`)
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 pub fn run_encoder(
     encoder: &mut Session,
     features: &Array3<f32>,
@@ -166,26 +178,25 @@ pub fn run_encoder(
     let shape = features.shape();
     let flat: Vec<f32> = features.iter().copied().collect();
     let audio_signal =
-        Tensor::from_array(([shape[0] as i64, shape[1] as i64, shape[2] as i64], flat)).map_err(
-            |e| TranscriptionError::Inference(format!("encoder audio_signal tensor: {e}")),
-        )?;
+        Tensor::from_array(([shape[0] as i64, shape[1] as i64, shape[2] as i64], flat))
+            .inference("encoder audio_signal tensor")?;
     let length = Tensor::from_array(([1i64], vec![features_len]))
-        .map_err(|e| TranscriptionError::Inference(format!("encoder length tensor: {e}")))?;
+        .inference("encoder length tensor")?;
 
     let outputs = encoder
         .run(ort::inputs![
             "audio_signal" => audio_signal,
             "length" => length,
         ])
-        .map_err(|e| TranscriptionError::Inference(format!("encoder run: {e}")))?;
+        .inference("encoder run")?;
 
     let (enc_shape, enc_data) = outputs["outputs"]
         .try_extract_tensor::<f32>()
-        .map_err(|e| TranscriptionError::Inference(format!("extract encoder output: {e}")))?;
+        .inference("extract encoder output")?;
 
     let (_, enc_len_data) = outputs["encoded_lengths"]
         .try_extract_tensor::<i64>()
-        .map_err(|e| TranscriptionError::Inference(format!("extract encoded_lengths: {e}")))?;
+        .inference("extract encoded_lengths")?;
     let enc_len = enc_len_data[0];
 
     // Squeeze batch dim: [1, T', H] → [T', H]
@@ -193,7 +204,7 @@ pub fn run_encoder(
     let hidden = enc_shape[2] as usize;
 
     let out = Array2::from_shape_vec((t_prime, hidden), enc_data.to_vec())
-        .map_err(|e| TranscriptionError::Inference(format!("reshape encoder: {e}")))?;
+        .inference("reshape encoder")?;
 
     Ok((out, enc_len))
 }
@@ -202,31 +213,36 @@ pub fn run_encoder(
 ///
 /// Input: waveform [1, N] (16kHz mono f32)
 /// Output: mel features [1, 128, T]
+#[allow(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 pub fn run_preprocessor(
     preprocessor: &mut Session,
     samples: &[f32],
 ) -> Result<(Array3<f32>, i64), TranscriptionError> {
     let n = samples.len();
     let waveform = Tensor::from_array(([1i64, n as i64], samples.to_vec()))
-        .map_err(|e| TranscriptionError::Inference(format!("waveform tensor: {e}")))?;
+        .inference("waveform tensor")?;
 
     let waveform_lens = Tensor::from_array(([1i64], vec![n as i64]))
-        .map_err(|e| TranscriptionError::Inference(format!("waveform_lens tensor: {e}")))?;
+        .inference("waveform_lens tensor")?;
 
     let outputs = preprocessor
         .run(ort::inputs![
             "waveforms" => waveform,
             "waveforms_lens" => waveform_lens,
         ])
-        .map_err(|e| TranscriptionError::Inference(format!("preprocessor run: {e}")))?;
+        .inference("preprocessor run")?;
 
     let (feat_shape, feat_data) = outputs["features"]
         .try_extract_tensor::<f32>()
-        .map_err(|e| TranscriptionError::Inference(format!("extract features: {e}")))?;
+        .inference("extract features")?;
 
     let (_, feat_len_data) = outputs["features_lens"]
         .try_extract_tensor::<i64>()
-        .map_err(|e| TranscriptionError::Inference(format!("extract features_lens: {e}")))?;
+        .inference("extract features_lens")?;
     let feat_len = feat_len_data[0];
 
     // Clone into Array3 [1, 128, T]
@@ -238,7 +254,7 @@ pub fn run_preprocessor(
         ),
         feat_data.to_vec(),
     )
-    .map_err(|e| TranscriptionError::Inference(format!("reshape features: {e}")))?;
+    .inference("reshape features")?;
 
     Ok((out, feat_len))
 }
@@ -250,6 +266,16 @@ mod tests {
     #[test]
     fn tdt_durations_constant() {
         assert_eq!(DURATIONS, [0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn lstm_state_dim_constant() {
+        assert_eq!(LSTM_STATE_DIM, 640);
+    }
+
+    #[test]
+    fn max_steps_multiplier_constant() {
+        assert_eq!(MAX_STEPS_MULTIPLIER, 5);
     }
 
     #[test]
@@ -267,6 +293,12 @@ mod tests {
     #[test]
     fn argmax_negative() {
         assert_eq!(argmax(&[-3.0, -1.0, -2.0]), 1);
+    }
+
+    #[test]
+    fn argmax_all_equal() {
+        // max_by returns the last maximum element when equal
+        assert_eq!(argmax(&[1.0, 1.0, 1.0]), 2);
     }
 
     #[test]

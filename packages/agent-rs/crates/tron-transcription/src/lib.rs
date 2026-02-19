@@ -12,11 +12,11 @@
 //! → vocab.txt lookup → text string
 //! ```
 
-pub mod audio;
-pub mod decoder;
+pub(crate) mod audio;
+pub(crate) mod decoder;
 pub mod engine;
 pub mod model;
 pub mod types;
 
 pub use engine::TranscriptionEngine;
-pub use types::{TranscriptionError, TranscriptionResult};
+pub use types::{ResultExt, TranscriptionError, TranscriptionResult};

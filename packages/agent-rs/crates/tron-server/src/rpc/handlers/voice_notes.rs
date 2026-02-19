@@ -56,16 +56,15 @@ impl MethodHandler for SaveHandler {
             })?;
 
         // Transcribe via native engine → sidecar → stub fallback
-        let (transcript_text, language, duration_seconds) =
-            transcribe_audio(ctx, &audio_bytes, mime_type, file_name).await;
+        let result = transcribe_audio(ctx, &audio_bytes, mime_type, file_name).await;
 
         // Write markdown with frontmatter
         let content = format!(
             "---\ntype: voice-note\ncreated: {}\nduration: {:.1}\nlanguage: {}\n---\n\n{}\n",
             now.to_rfc3339(),
-            duration_seconds,
-            language,
-            transcript_text,
+            result.duration_seconds,
+            result.language,
+            result.text,
         );
         std::fs::write(&filepath, &content).map_err(|e| RpcError::Internal {
             message: format!("Failed to write voice note: {e}"),
@@ -76,9 +75,9 @@ impl MethodHandler for SaveHandler {
             "filename": filename,
             "filepath": filepath,
             "transcription": {
-                "text": transcript_text,
-                "language": language,
-                "durationSeconds": duration_seconds,
+                "text": result.text,
+                "language": result.language,
+                "durationSeconds": result.duration_seconds,
             },
         }))
     }

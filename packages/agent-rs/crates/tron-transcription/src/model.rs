@@ -1,23 +1,62 @@
 //! Model file management — download from `HuggingFace` and path resolution.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use tracing::{debug, info, warn};
 
-use crate::types::TranscriptionError;
+use crate::types::{ResultExt, TranscriptionError};
 
 /// `HuggingFace` repository for the ONNX parakeet model.
 const HF_REPO: &str = "istupakov/parakeet-tdt-0.6b-v3-onnx";
 
-/// Required model files and their purposes.
-const MODEL_FILES: &[&str] = &[
-    "nemo128.onnx",
-    "encoder-model.onnx",
-    "encoder-model.onnx.data",
-    "decoder_joint-model.onnx",
-    "vocab.txt",
-];
+/// Typed paths for the 5 required model files.
+///
+/// Replaces the previous `HashMap<String, PathBuf>` approach — all fields are
+/// known at compile time so there's no need for dynamic lookup.
+pub struct ModelPaths {
+    /// Mel-spectrogram preprocessor (`nemo128.onnx`).
+    pub preprocessor: PathBuf,
+    /// Encoder model (`encoder-model.onnx`).
+    pub encoder: PathBuf,
+    /// Encoder external data (`encoder-model.onnx.data`).
+    pub encoder_data: PathBuf,
+    /// Decoder + joint network (`decoder_joint-model.onnx`).
+    pub decoder_joint: PathBuf,
+    /// Token vocabulary (`vocab.txt`).
+    pub vocab: PathBuf,
+}
+
+impl ModelPaths {
+    /// All required model filenames.
+    pub const NAMES: &[&str] = &[
+        "nemo128.onnx",
+        "encoder-model.onnx",
+        "encoder-model.onnx.data",
+        "decoder_joint-model.onnx",
+        "vocab.txt",
+    ];
+
+    /// Construct paths for all model files under `dir`.
+    pub fn from_dir(dir: impl AsRef<Path>) -> Self {
+        let dir = dir.as_ref();
+        Self {
+            preprocessor: dir.join("nemo128.onnx"),
+            encoder: dir.join("encoder-model.onnx"),
+            encoder_data: dir.join("encoder-model.onnx.data"),
+            decoder_joint: dir.join("decoder_joint-model.onnx"),
+            vocab: dir.join("vocab.txt"),
+        }
+    }
+
+    /// Check if all 5 required files exist.
+    pub fn all_exist(&self) -> bool {
+        self.preprocessor.exists()
+            && self.encoder.exists()
+            && self.encoder_data.exists()
+            && self.decoder_joint.exists()
+            && self.vocab.exists()
+    }
+}
 
 /// Default model cache directory under ~/.tron/mods/transcribe/onnx/.
 pub fn default_model_dir() -> PathBuf {
@@ -25,19 +64,9 @@ pub fn default_model_dir() -> PathBuf {
     PathBuf::from(format!("{home}/.tron/mods/transcribe/onnx"))
 }
 
-/// Returns a map of filename → full path for all required model files.
-pub fn model_files(model_dir: impl AsRef<Path>) -> HashMap<String, PathBuf> {
-    let dir = model_dir.as_ref();
-    MODEL_FILES
-        .iter()
-        .map(|&name| (name.to_string(), dir.join(name)))
-        .collect()
-}
-
 /// Check if all required model files exist locally.
 pub fn is_model_cached(model_dir: impl AsRef<Path>) -> bool {
-    let files = model_files(&model_dir);
-    files.values().all(|p| p.exists())
+    ModelPaths::from_dir(model_dir).all_exist()
 }
 
 /// Download model files from `HuggingFace` if not already cached.
@@ -59,15 +88,14 @@ pub async fn ensure_model(model_dir: impl AsRef<Path>) -> Result<(), Transcripti
     let dir = model_dir.clone();
     tokio::task::spawn_blocking(move || download_model_files(&dir))
         .await
-        .map_err(|e| TranscriptionError::ModelNotAvailable(format!("task join error: {e}")))?
+        .model("task join")?
 }
 
 fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
-    let api = hf_hub::api::sync::Api::new()
-        .map_err(|e| TranscriptionError::ModelNotAvailable(format!("HF API init: {e}")))?;
+    let api = hf_hub::api::sync::Api::new().model("HF API init")?;
     let repo = api.model(HF_REPO.to_string());
 
-    for &filename in MODEL_FILES {
+    for &filename in ModelPaths::NAMES {
         let target = model_dir.join(filename);
         if target.exists() {
             debug!("skipping {filename} (already exists)");
@@ -79,11 +107,8 @@ fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
             Ok(cached_path) => {
                 // hf-hub caches to its own dir; copy to our model dir
                 if cached_path != target {
-                    let _ = std::fs::copy(&cached_path, &target).map_err(|e| {
-                        TranscriptionError::ModelNotAvailable(format!(
-                            "failed to copy {filename}: {e}"
-                        ))
-                    })?;
+                    let _ = std::fs::copy(&cached_path, &target)
+                        .model(&format!("copy {filename}"))?;
                 }
                 debug!("downloaded {filename}");
             }
@@ -102,9 +127,7 @@ fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
 
 /// Load vocabulary from vocab.txt (one token per line).
 pub fn load_vocab(vocab_path: &Path) -> Result<Vec<String>, TranscriptionError> {
-    let content = std::fs::read_to_string(vocab_path).map_err(|e| {
-        TranscriptionError::ModelNotAvailable(format!("failed to read vocab.txt: {e}"))
-    })?;
+    let content = std::fs::read_to_string(vocab_path).model("read vocab.txt")?;
     Ok(content.lines().map(String::from).collect())
 }
 
@@ -113,17 +136,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_dir_structure() {
-        let expected = [
-            "nemo128.onnx",
-            "encoder-model.onnx",
-            "decoder_joint-model.onnx",
-            "vocab.txt",
-        ];
-        let files = model_files(PathBuf::from("/tmp/test"));
-        for name in &expected {
-            assert!(files.contains_key(*name), "Missing model file: {name}");
+    fn model_paths_from_dir_constructs_all_paths() {
+        let paths = ModelPaths::from_dir("/tmp/test");
+        assert_eq!(paths.preprocessor, PathBuf::from("/tmp/test/nemo128.onnx"));
+        assert_eq!(
+            paths.encoder,
+            PathBuf::from("/tmp/test/encoder-model.onnx")
+        );
+        assert_eq!(
+            paths.encoder_data,
+            PathBuf::from("/tmp/test/encoder-model.onnx.data")
+        );
+        assert_eq!(
+            paths.decoder_joint,
+            PathBuf::from("/tmp/test/decoder_joint-model.onnx")
+        );
+        assert_eq!(paths.vocab, PathBuf::from("/tmp/test/vocab.txt"));
+    }
+
+    #[test]
+    fn model_paths_all_exist_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = ModelPaths::from_dir(tmp.path());
+        assert!(!paths.all_exist());
+    }
+
+    #[test]
+    fn model_paths_all_exist_partial() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("nemo128.onnx"), b"").unwrap();
+        std::fs::write(tmp.path().join("encoder-model.onnx"), b"").unwrap();
+        let paths = ModelPaths::from_dir(tmp.path());
+        assert!(!paths.all_exist());
+    }
+
+    #[test]
+    fn model_paths_all_exist_complete() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ModelPaths::NAMES {
+            std::fs::write(tmp.path().join(name), b"").unwrap();
         }
+        let paths = ModelPaths::from_dir(tmp.path());
+        assert!(paths.all_exist());
+    }
+
+    #[test]
+    fn model_paths_names_matches_all_required_files() {
+        assert_eq!(ModelPaths::NAMES.len(), 5);
+        assert!(ModelPaths::NAMES.contains(&"nemo128.onnx"));
+        assert!(ModelPaths::NAMES.contains(&"encoder-model.onnx"));
+        assert!(ModelPaths::NAMES.contains(&"encoder-model.onnx.data"));
+        assert!(ModelPaths::NAMES.contains(&"decoder_joint-model.onnx"));
+        assert!(ModelPaths::NAMES.contains(&"vocab.txt"));
     }
 
     #[test]
@@ -137,11 +201,5 @@ mod tests {
     fn is_model_cached_returns_false_for_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(!is_model_cached(tmp.path()));
-    }
-
-    #[test]
-    fn model_files_returns_all_required() {
-        let files = model_files("/tmp/test");
-        assert_eq!(files.len(), MODEL_FILES.len());
     }
 }
