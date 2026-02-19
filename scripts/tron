@@ -3,20 +3,31 @@
 #
 # Usage: tron <command> [options]
 #
-# Commands:
-#   dev        Start server for development (-d for background)
-#   ci         Run CI checks (fmt, clippy, test, doc)
-#   deploy     Build, test, and deploy
-#   install    Initial production setup (launchd + CLI)
-#   rollback   Restore previous binary
-#   setup      First-time project setup
-#   status     Show service status and health
+# Development:
+#   dev             Start server (-b build, -t test, -d background)
+#   ci              Run CI checks (fmt, check, clippy, test, doc)
+#   bench           Performance benchmarks (run, compare)
+#   setup           First-time project setup
+#
+# Service:
 #   start/stop/restart  Manage launchd service
-#   login      OAuth login for Claude (--label for multi-account)
-#   logs       Query database logs
-#   errors     Show recent errors
-#   uninstall  Remove service (preserves data)
-#   help       Show this help message
+#   status              Show service status
+#
+# Deployment:
+#   deploy          Build, test, deploy (--force to skip confirmations)
+#   install         Initial setup (launchd + CLI)
+#   rollback        Restore previous binary (--yes to skip confirmation)
+#   uninstall       Remove service (preserves data)
+#
+# Auth:
+#   login           Authenticate with Claude (--label for multi-account)
+#
+# Data:
+#   backfill-ledger Import LEDGER.jsonl entries as memory events
+#
+# Logs:
+#   logs            Query database logs (use -h for options)
+#   errors          Show recent errors
 
 set -e
 
@@ -53,8 +64,18 @@ DEV_PORT=9846
 
 # File paths
 PROD_LOG_FILE="$TRON_HOME/artifacts/server.log"
+DEV_LOG_FILE="$TRON_HOME/artifacts/dev.log"
+DEV_PID_FILE="$TRON_HOME/artifacts/dev.pid"
 DEPLOYED_COMMIT_FILE="$TRON_HOME/artifacts/deployed-commit"
 DEPLOY_LOCK_FILE="$TRON_HOME/deploy.lock"
+
+# OAuth
+AUTH_FILE="$TRON_HOME/auth.json"
+OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
+OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
+OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
+OAUTH_SCOPES="org:create_api_key user:profile user:inference"
 
 #=============================================================================
 # SECTION 2: UTILITY FUNCTIONS
@@ -424,9 +445,6 @@ query_logs() {
 # SECTION 6: COMMANDS
 #=============================================================================
 
-DEV_LOG_FILE="$TRON_HOME/artifacts/dev.log"
-DEV_PID_FILE="$TRON_HOME/artifacts/dev.pid"
-
 cmd_dev() {
     require_project_dir
 
@@ -635,7 +653,6 @@ cmd_deploy() {
 
     require_project_dir
     require_installed
-    cd "$RUST_WORKSPACE"
 
     print_header "Deploying to Production"
     echo "  Workspace: $PROJECT_DIR"
@@ -1096,17 +1113,6 @@ cmd_uninstall() {
     echo ""
 }
 
-# =============================================================================
-# Login Command (OAuth PKCE)
-# =============================================================================
-
-AUTH_FILE="$TRON_HOME/auth.json"
-OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-OAUTH_AUTH_ENDPOINT="https://claude.ai/oauth/authorize"
-OAUTH_TOKEN_ENDPOINT="https://console.anthropic.com/v1/oauth/token"
-OAUTH_REDIRECT_URI="https://console.anthropic.com/oauth/code/callback"
-OAUTH_SCOPES="org:create_api_key user:profile user:inference"
-
 base64url_encode() {
     openssl base64 -A | tr '+/' '-_' | tr -d '='
 }
@@ -1349,6 +1355,140 @@ cmd_ci() {
     print_success "All CI checks passed"
 }
 
+cmd_bench() {
+    require_project_dir
+
+    local BENCH_DIR="$PROJECT_DIR/benchmarks"
+    local subcmd="${1:-run}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        run)
+            local iterations=100
+            local concurrency=16
+            local scenario="all"
+            local save=false
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -i|--iterations) iterations="$2"; shift 2 ;;
+                    -c|--concurrency) concurrency="$2"; shift 2 ;;
+                    -s|--scenario)    scenario="$2"; shift 2 ;;
+                    --save)           save=true; shift ;;
+                    -h|--help)
+                        echo ""
+                        echo -e "${CYAN}tron bench run${NC} - Run benchmarks"
+                        echo ""
+                        echo "Usage: tron bench run [options]"
+                        echo ""
+                        echo "Options:"
+                        echo "  -i, --iterations N   Turns per scenario (default: 100)"
+                        echo "  -c, --concurrency N  Parallel sessions (default: 16)"
+                        echo "  -s, --scenario NAME  Scenario: prompt_text_only, prompt_with_tools,"
+                        echo "                       concurrent_sessions, all (default: all)"
+                        echo "  --save               Save result as a baseline"
+                        echo ""
+                        return 0
+                        ;;
+                    *) print_error "Unknown option: $1"; return 1 ;;
+                esac
+            done
+
+            local output_args=()
+            if [ "$save" = true ]; then
+                mkdir -p "$BENCH_DIR"
+                local stamp
+                stamp="$(date +"%Y%m%d-%H%M%S")"
+                local out_file="$BENCH_DIR/baseline-${stamp}.json"
+                output_args=(--output "$out_file")
+            fi
+
+            print_header "Running benchmarks"
+            (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+                --scenario "$scenario" \
+                --iterations "$iterations" \
+                --concurrency "$concurrency" \
+                "${output_args[@]}")
+
+            if [ "$save" = true ]; then
+                print_success "Baseline saved to: $out_file"
+            fi
+            ;;
+
+        compare)
+            local baseline=""
+            local iterations=100
+            local concurrency=16
+            local enforce=true
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -b|--baseline)    baseline="$2"; shift 2 ;;
+                    -i|--iterations)  iterations="$2"; shift 2 ;;
+                    -c|--concurrency) concurrency="$2"; shift 2 ;;
+                    --no-enforce)     enforce=false; shift ;;
+                    -h|--help)
+                        echo ""
+                        echo -e "${CYAN}tron bench compare${NC} - Compare against baseline"
+                        echo ""
+                        echo "Usage: tron bench compare -b <baseline.json> [options]"
+                        echo ""
+                        echo "Options:"
+                        echo "  -b, --baseline FILE  Baseline JSON to compare against (required)"
+                        echo "  -i, --iterations N   Turns per scenario (default: 100)"
+                        echo "  -c, --concurrency N  Parallel sessions (default: 16)"
+                        echo "  --no-enforce         Don't fail on gate violations"
+                        echo ""
+                        return 0
+                        ;;
+                    *) print_error "Unknown option: $1"; return 1 ;;
+                esac
+            done
+
+            if [[ -z "$baseline" ]]; then
+                print_error "Missing required --baseline argument"
+                echo "Usage: tron bench compare -b <baseline.json>"
+                return 1
+            fi
+
+            mkdir -p "$BENCH_DIR"
+            local stamp
+            stamp="$(date +"%Y%m%d-%H%M%S")"
+            local out_file="$BENCH_DIR/compare-${stamp}.json"
+
+            local enforce_args=()
+            if [ "$enforce" = true ]; then
+                enforce_args=(--enforce-gates)
+            fi
+
+            print_header "Comparing against baseline"
+            (cd "$RUST_WORKSPACE" && cargo run -p tron-bench --release -- \
+                --scenario all \
+                --iterations "$iterations" \
+                --concurrency "$concurrency" \
+                --baseline "$baseline" \
+                "${enforce_args[@]}" \
+                --output "$out_file")
+
+            print_success "Comparison saved to: $out_file"
+            ;;
+
+        -h|--help|help)
+            echo ""
+            echo -e "${CYAN}tron bench${NC} - Performance benchmarks"
+            echo ""
+            echo "Usage: tron bench <subcommand> [options]"
+            echo ""
+            echo "Subcommands:"
+            echo "  run       Run benchmarks (use --save to store baseline)"
+            echo "  compare   Compare current performance against a baseline"
+            echo ""
+            echo "Run 'tron bench <subcommand> -h' for subcommand help."
+            echo ""
+            ;;
+
+        *) print_error "Unknown bench subcommand: $subcmd"; return 1 ;;
+    esac
+}
+
 cmd_help() {
     echo ""
     echo -e "${CYAN}Tron - Persistent AI Coding Agent${NC}"
@@ -1358,6 +1498,7 @@ cmd_help() {
     echo "Development:"
     echo "  dev             Start server (-b build, -t test, -d background)"
     echo "  ci              Run CI checks (fmt, check, clippy, test, doc)"
+    echo "  bench           Performance benchmarks (run, compare)"
     echo "  setup           First-time project setup"
     echo ""
     echo "Service:"
@@ -1393,11 +1534,16 @@ cmd_help() {
 # SECTION 7: MAIN DISPATCH
 #=============================================================================
 
+case "${1:-help}" in
+    help|--help|-h) cmd_help; exit 0 ;;
+esac
+
 ensure_tron_home
 
-case "${1:-help}" in
+case "$1" in
     dev)       shift; cmd_dev "$@" ;;
     ci)        shift; cmd_ci "$@" ;;
+    bench)     shift; cmd_bench "$@" ;;
     deploy)    shift; cmd_deploy "$@" ;;
     install)   cmd_install ;;
     rollback)  shift; cmd_rollback "$@" ;;
@@ -1411,6 +1557,5 @@ case "${1:-help}" in
     login)     shift; cmd_login "$@" ;;
     backfill-ledger) shift; "$INSTALLED_BINARY" backfill-ledger "$@" ;;
     uninstall) cmd_uninstall ;;
-    help|--help|-h) cmd_help ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac
