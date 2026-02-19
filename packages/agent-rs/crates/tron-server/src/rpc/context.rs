@@ -62,6 +62,8 @@ pub struct RpcContext {
     pub health_tracker: Arc<ProviderHealthTracker>,
     /// Shutdown coordinator for registering background task handles.
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
+    /// Server origin (e.g. `"localhost:9847"`).
+    pub origin: String,
 }
 
 #[cfg(test)]

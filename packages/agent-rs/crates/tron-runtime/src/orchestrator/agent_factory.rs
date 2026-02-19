@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use tron_core::tools::{Tool, ToolCategory, ToolParameterSchema, TronToolResult, text_result};
-    use tron_llm::models::types::ProviderType;
+    use tron_llm::models::types::Provider as ProviderType;
     use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
     use tron_tools::traits::{ToolContext, TronTool};
 

@@ -49,6 +49,7 @@ INSTALLED_BINARY="$TRON_HOME/tron"
 PLIST_NAME="com.tron.server"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
 PROD_PORT=9847
+DEV_PORT=9846
 
 # File paths
 PROD_LOG_FILE="$TRON_HOME/artifacts/server.log"
@@ -314,7 +315,7 @@ query_logs() {
     fi
 
     # Database mode
-    local db_path="$TRON_HOME/database/prod.db"
+    local db_path="$TRON_HOME/database/tron.db"
 
     if [ ! -f "$db_path" ]; then
         print_error "Database not found: $db_path"
@@ -443,7 +444,9 @@ cmd_dev() {
             --log|--logs) dev_tail_log; return ;;
             -h|--help)
                 echo ""
-                echo -e "${CYAN}tron dev${NC} - Start server for development"
+                echo -e "${CYAN}tron dev${NC} - Start dev server on port $DEV_PORT"
+                echo ""
+                echo "Runs alongside production (port $PROD_PORT). Switch in iOS Settings."
                 echo ""
                 echo "Usage: tron dev [options]"
                 echo ""
@@ -455,8 +458,8 @@ cmd_dev() {
                 echo "  --log           Tail the dev log"
                 echo ""
                 echo "Examples:"
-                echo "  tron dev          # Foreground, last build"
-                echo "  tron dev -b       # Build then foreground"
+                echo "  tron dev          # Foreground (auto-builds local changes)"
+                echo "  tron dev -b       # Explicit build then foreground"
                 echo "  tron dev -bd      # Build then background"
                 echo "  tron dev -bt      # Build, test, then foreground"
                 echo "  tron dev --stop   # Stop background server"
@@ -482,12 +485,12 @@ cmd_dev() {
         fi
     fi
 
-    # Check if something is already listening on the port
+    # Check if something is already listening on the dev port
     local existing_pid
-    existing_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
+    existing_pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
     if [ -n "$existing_pid" ]; then
-        print_error "Port $PROD_PORT already in use (PID: $existing_pid)"
-        echo "  Stop it with: tron dev --stop  or  tron stop"
+        print_error "Port $DEV_PORT already in use (PID: $existing_pid)"
+        echo "  Stop it with: tron dev --stop"
         return 1
     fi
 
@@ -499,26 +502,17 @@ cmd_dev() {
 }
 
 dev_start_foreground() {
-    if [ -f "$RELEASE_BINARY" ]; then
-        echo ""
-        echo -e "${CYAN}Starting Tron Server (foreground)${NC}"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Server: http://localhost:$PROD_PORT"
-        echo "  Health: http://localhost:$PROD_PORT/health"
-        echo ""
-        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        RUST_LOG="${RUST_LOG:-debug}" exec "$RELEASE_BINARY" --port "$PROD_PORT"
-    else
-        echo ""
-        echo -e "${CYAN}Starting Tron Server via cargo run (foreground)${NC}"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  Server: http://localhost:$PROD_PORT"
-        echo ""
-        echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        RUST_LOG="${RUST_LOG:-debug}" exec cargo run --release --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron -- --port "$PROD_PORT"
-    fi
+    echo ""
+    echo -e "${CYAN}Starting Tron Dev Server (foreground)${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Server: http://localhost:$DEV_PORT"
+    echo "  Health: http://localhost:$DEV_PORT/health"
+    echo ""
+    echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    # Always use cargo run so local changes are picked up (builds if needed).
+    # The release binary is reserved for prod (deployed via tron deploy).
+    RUST_LOG="${RUST_LOG:-debug}" exec cargo run --release --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron -- --port "$DEV_PORT"
 }
 
 dev_start_daemon() {
@@ -530,7 +524,7 @@ dev_start_daemon() {
     mkdir -p "$(dirname "$DEV_LOG_FILE")"
     : > "$DEV_LOG_FILE"
 
-    RUST_LOG="${RUST_LOG:-debug}" nohup "$RELEASE_BINARY" --port "$PROD_PORT" \
+    RUST_LOG="${RUST_LOG:-debug}" nohup "$RELEASE_BINARY" --port "$DEV_PORT" \
         >> "$DEV_LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$DEV_PID_FILE"
@@ -540,8 +534,8 @@ dev_start_daemon() {
     if kill -0 "$pid" 2>/dev/null; then
         echo ""
         print_success "Dev server running in background (PID: $pid)"
-        echo "  Server: http://localhost:$PROD_PORT"
-        echo "  Health: http://localhost:$PROD_PORT/health"
+        echo "  Server: http://localhost:$DEV_PORT"
+        echo "  Health: http://localhost:$DEV_PORT/health"
         echo "  Log:    $DEV_LOG_FILE"
         echo ""
         echo "  Stop with: tron dev --stop"
@@ -577,9 +571,9 @@ dev_stop() {
     fi
 
     # Fall back to port lookup
-    pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
+    pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
     if [ -n "$pid" ]; then
-        print_status "Stopping process on port $PROD_PORT (PID: $pid)..."
+        print_status "Stopping process on port $DEV_PORT (PID: $pid)..."
         kill "$pid"
         sleep 1
         if kill -0 "$pid" 2>/dev/null; then
@@ -990,7 +984,7 @@ cmd_status() {
 
     if service_is_running; then
         local pid=$(get_service_pid)
-        print_success "Service: ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
+        print_success "Prod:    ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
         echo "  Server: http://localhost:$PROD_PORT"
         echo "  Health: http://localhost:$PROD_PORT/health"
 
@@ -1018,10 +1012,24 @@ cmd_status() {
         [ -f "$INSTALLED_BINARY" ] && echo "  Binary: $INSTALLED_BINARY"
     fi
 
+    # Dev/Beta server status
+    echo ""
+    local dev_pid
+    dev_pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$dev_pid" ]; then
+        print_success "Dev:     ${GREEN}RUNNING${NC} (PID: $dev_pid)"
+        echo "  Server: http://localhost:$DEV_PORT"
+        local dev_uptime=$(ps -o etime= -p "$dev_pid" 2>/dev/null | tr -d ' ')
+        [ -n "$dev_uptime" ] && echo "  Uptime: $dev_uptime"
+    else
+        print_warning "Dev:     ${YELLOW}STOPPED${NC}"
+    fi
+
     echo ""
     echo -e "${DIM}Logs:${NC}"
     echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
-    [ -f "$PROD_LOG_FILE" ] && echo -e "  ${DIM}File:  $PROD_LOG_FILE${NC}"
+    [ -f "$PROD_LOG_FILE" ] && echo -e "  ${DIM}Prod:  $PROD_LOG_FILE${NC}"
+    [ -f "$DEV_LOG_FILE" ] && echo -e "  ${DIM}Dev:   $DEV_LOG_FILE${NC}"
     echo ""
 }
 
@@ -1045,7 +1053,7 @@ cmd_restart() {
 }
 
 cmd_errors() {
-    local db_path="$TRON_HOME/database/prod.db"
+    local db_path="$TRON_HOME/database/tron.db"
 
     if [ -f "$db_path" ]; then
         echo -e "${RED}Recent errors from database:${NC}"
@@ -1367,6 +1375,9 @@ cmd_help() {
     echo "Auth:"
     echo "  login           Authenticate with Claude (--label <name> for multi-account)"
     echo ""
+    echo "Data:"
+    echo "  backfill-ledger Import LEDGER.jsonl entries as memory events"
+    echo ""
     echo "Logs:"
     echo "  logs            Query database logs (use -h for options)"
     echo "  errors          Show recent errors"
@@ -1398,6 +1409,7 @@ case "${1:-help}" in
     logs)      shift; query_logs "$@" ;;
     errors)    cmd_errors ;;
     login)     shift; cmd_login "$@" ;;
+    backfill-ledger) shift; "$INSTALLED_BINARY" backfill-ledger "$@" ;;
     uninstall) cmd_uninstall ;;
     help|--help|-h) cmd_help ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;

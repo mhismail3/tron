@@ -12,7 +12,7 @@ Legend:
 ### done
 
 - DB startup guard enforces production DB path:
-  `~/.tron/database/beta-rs.db` only.
+  `~/.tron/database/tron.db` only.
 - Integration tests for DB guard and migration touch behavior:
   `crates/tron-agent/tests/db_path_guard.rs`.
 - Unknown model/provider fallback removal (fail-fast typed errors):

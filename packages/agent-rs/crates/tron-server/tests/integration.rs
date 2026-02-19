@@ -16,7 +16,7 @@ use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
 use tron_core::messages::TokenUsage;
 use tron_events::{ConnectionConfig, EventStore};
-use tron_llm::models::types::ProviderType;
+use tron_llm::models::types::Provider as ProviderType;
 use tron_llm::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
@@ -65,6 +65,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         embedding_controller: None,
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
+        origin: "localhost:9847".to_string(),
     };
 
     let mut registry = MethodRegistry::new();
@@ -236,6 +237,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         embedding_controller: None,
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
+        origin: "localhost:9847".to_string(),
     };
 
     let mut registry = MethodRegistry::new();

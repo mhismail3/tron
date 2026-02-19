@@ -46,7 +46,7 @@
 
 - Production startup must resolve DB path through policy module:
   `crates/tron-agent/src/db_path_policy.rs`.
-- Any non-`beta-rs.db` or path outside `~/.tron/database` is rejected before opening SQLite.
+- Any non-`tron.db` or path outside `~/.tron/database` is rejected before opening SQLite.
 
 ## Testing Pattern
 

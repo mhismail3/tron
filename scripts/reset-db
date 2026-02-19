@@ -2,11 +2,11 @@
 #
 # reset-db — Clear session/event/log data while preserving memory vectors.
 #
-# Usage: scripts/reset-db [beta|prod|all]
+# Usage: scripts/reset-db
 #
-# Stops the tron server, clears all session/event/log/task data from the
-# specified database(s), vacuums, and restarts the server. Memory vectors
-# and schema_version are preserved.
+# Stops the tron server, clears all session/event/log/task data from
+# tron.db, vacuums, and restarts the server. Memory vectors and
+# schema_version are preserved.
 
 set -euo pipefail
 
@@ -27,11 +27,11 @@ DATA_TABLES=(
 FTS_TABLES=(events_fts logs_fts tasks_fts areas_fts)
 
 usage() {
-  echo "Usage: $(basename "$0") [beta|prod|all]"
+  echo "Usage: $(basename "$0")"
   echo ""
-  echo "Clears session/event/log data while preserving memory vectors."
+  echo "Clears session/event/log data from tron.db while preserving memory vectors."
   echo "Stops the server, clears data, vacuums, and restarts."
-  exit 1
+  exit 0
 }
 
 is_server_running() {
@@ -98,20 +98,14 @@ reset_database() {
 }
 
 # Parse arguments
-target="${1:-}"
-if [ -z "$target" ]; then
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
 fi
 
-case "$target" in
-  beta)  dbs=("$DB_DIR/beta-rs.db") ;;
-  prod)  dbs=("$DB_DIR/prod.db") ;;
-  all)   dbs=("$DB_DIR/beta-rs.db" "$DB_DIR/prod.db") ;;
-  *)     usage ;;
-esac
+db_path="$DB_DIR/tron.db"
 
 # Confirm
-echo "This will DELETE all sessions, events, logs, tasks from: $target"
+echo "This will DELETE all sessions, events, logs, tasks from tron.db"
 echo "Memory vectors will be preserved."
 read -rp "Continue? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -125,10 +119,8 @@ if is_server_running; then
   stop_server
 fi
 
-echo "Resetting databases..."
-for db in "${dbs[@]}"; do
-  reset_database "$db"
-done
+echo "Resetting database..."
+reset_database "$db_path"
 
 if $was_running; then
   start_server

@@ -4,7 +4,6 @@ struct ServerSettingsSection: View {
     @Binding var serverHost: String
     @Binding var serverPort: String
     let selectedEnvironment: String
-    let effectivePort: String
     let onHostSubmit: () -> Void
     let onPortChange: (String) -> Void
     let onEnvironmentChange: (String) -> Void
@@ -18,25 +17,30 @@ struct ServerSettingsSection: View {
                 .autocorrectionDisabled()
                 .onSubmit { onHostSubmit() }
 
-            Picker("", selection: Binding(
-                get: { selectedEnvironment },
-                set: { onEnvironmentChange($0) }
-            )) {
-                Text("TS Beta").tag("tsBeta")
-                Text("TS Prod").tag("tsProd")
-                Text("Agent RS").tag("agentRs")
-                Text("Tron RS").tag("tronRs")
-            }
-            .pickerStyle(.segmented)
-
-            TextField("Custom Port", text: $serverPort)
-                .font(TronTypography.subheadline)
-                .keyboardType(.numberPad)
-                .onChange(of: serverPort) { _, newValue in
-                    if !newValue.isEmpty {
-                        onPortChange(newValue)
-                    }
+            HStack {
+                Picker("", selection: Binding(
+                    get: { selectedEnvironment },
+                    set: { onEnvironmentChange($0) }
+                )) {
+                    Text("Beta").tag("beta")
+                    Text("Prod").tag("prod")
                 }
+                .pickerStyle(.segmented)
+                .fixedSize()
+
+                Spacer()
+
+                TextField("Port", text: $serverPort)
+                    .font(TronTypography.subheadline)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 60)
+                    .onChange(of: serverPort) { _, newValue in
+                        if !newValue.isEmpty {
+                            onPortChange(newValue)
+                        }
+                    }
+            }
         } header: {
             Text("Server")
                 .font(TronTypography.bodySM)

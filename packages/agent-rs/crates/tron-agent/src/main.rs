@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use parking_lot::RwLock;
 use tron_agent::db_path_policy::resolve_production_db_path;
 use tron_events::{ConnectionConfig, EventStore};
@@ -32,6 +32,9 @@ use tron_tools::registry::ToolRegistry;
 #[derive(Parser, Debug)]
 #[command(name = "tron", about = "Tron agent server")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Host to bind.
     #[arg(long, default_value = "0.0.0.0")]
     host: String,
@@ -47,6 +50,24 @@ struct Cli {
     /// Maximum concurrent sessions (overrides settings if specified).
     #[arg(long)]
     max_sessions: Option<usize>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Import LEDGER.jsonl entries as memory.ledger events and generate embeddings.
+    BackfillLedger {
+        /// Path to LEDGER.jsonl file (e.g. ~/.claude/LEDGER.jsonl).
+        #[arg(long)]
+        ledger_path: PathBuf,
+
+        /// Only import entries whose front.path starts with this prefix.
+        #[arg(long)]
+        project_filter: Option<String>,
+
+        /// Parse and report without writing to DB.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
@@ -201,6 +222,17 @@ fn create_tool_registry(config: &ToolRegistryConfig) -> ToolRegistry {
 async fn main() -> Result<()> {
     let args = Cli::parse();
 
+    // Dispatch subcommands
+    if let Some(command) = args.command {
+        return match command {
+            Command::BackfillLedger {
+                ledger_path,
+                project_filter,
+                dry_run,
+            } => run_backfill_ledger(args.db_path, &ledger_path, project_filter.as_deref(), dry_run).await,
+        };
+    }
+
     // Database (events + tasks share one SQLite file) — set up before logging
     // so that tracing events are persisted from the start.
     let db_path = resolve_production_db_path(args.db_path)?;
@@ -228,9 +260,11 @@ async fn main() -> Result<()> {
     log_conn
         .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
         .context("Failed to set logging connection pragmas")?;
+    let origin = format!("localhost:{}", args.port);
     let log_handle = tron_core::logging::init_subscriber_with_sqlite(
         settings.logging.db_log_level.as_filter_str(),
         log_conn,
+        Some(origin.clone()),
     );
     let flush_task = tron_core::logging::spawn_flush_task(log_handle.clone());
     let task_pool = pool.clone();
@@ -240,7 +274,9 @@ async fn main() -> Result<()> {
     let max_sessions = args
         .max_sessions
         .unwrap_or(settings.server.max_concurrent_sessions);
-    let session_manager = Arc::new(SessionManager::new(event_store.clone()));
+    let session_manager = Arc::new(
+        SessionManager::new(event_store.clone()).with_origin(origin.clone()),
+    );
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone(), max_sessions));
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
 
@@ -476,6 +512,7 @@ async fn main() -> Result<()> {
         subagent_manager: shared_subagent_manager,
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None, // set by TronServer after creation
+        origin: origin.clone(),
     };
 
     // Method registry
@@ -531,6 +568,219 @@ async fn main() -> Result<()> {
     log_handle.flush();
 
     tracing::info!("Shutdown complete");
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Backfill LEDGER.jsonl
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// LEDGER.jsonl entry structure.
+#[derive(serde::Deserialize)]
+struct LedgerEntry {
+    _meta: LedgerMeta,
+    front: LedgerFront,
+    body: LedgerBody,
+    /// Not used currently, but captured to match the LEDGER.jsonl schema.
+    #[allow(dead_code)]
+    history: Option<LedgerHistory>,
+}
+
+#[derive(serde::Deserialize)]
+struct LedgerHistory {
+    #[allow(dead_code)]
+    embedded: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+struct LedgerMeta {
+    id: String,
+    ts: String,
+    #[allow(dead_code)]
+    v: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct LedgerFront {
+    #[allow(dead_code)]
+    project: Option<String>,
+    path: Option<String>,
+    title: Option<String>,
+    #[serde(rename = "type")]
+    entry_type: Option<String>,
+    status: Option<String>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(serde::Deserialize)]
+struct LedgerBody {
+    input: Option<String>,
+    actions: Option<Vec<String>>,
+    #[allow(dead_code)]
+    files: Option<serde_json::Value>,
+    decisions: Option<Vec<serde_json::Value>>,
+    lessons: Option<Vec<String>>,
+}
+
+/// Check if a ledger entry with the given meta ID already exists in the DB.
+fn has_ledger_entry(store: &EventStore, meta_id: &str) -> bool {
+    let conn = match store.pool().get() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // Direct payload search — match both source and id to avoid false positives.
+    // Two independent LIKE conditions since serde_json key ordering is not guaranteed.
+    let id_pattern = format!("%\"id\":\"{meta_id}\"%");
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM events WHERE type = 'memory.ledger' \
+             AND payload LIKE '%\"source\":\"ledger.jsonl\"%' \
+             AND payload LIKE ?1 \
+             LIMIT 1",
+            [&id_pattern],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    count > 0
+}
+
+/// Run the backfill-ledger subcommand.
+async fn run_backfill_ledger(
+    db_path_override: Option<PathBuf>,
+    ledger_path: &std::path::Path,
+    project_filter: Option<&str>,
+    dry_run: bool,
+) -> Result<()> {
+    use std::io::BufRead;
+
+    // Open database — when explicitly provided via --db-path, use it directly
+    // (bypasses production path policy so backfill can target any DB file).
+    let db_path = match db_path_override {
+        Some(p) => p,
+        None => resolve_production_db_path(None)?,
+    };
+    ensure_parent_dir(&db_path)?;
+    let db_str = db_path.to_string_lossy();
+    let pool = tron_events::new_file(&db_str, &ConnectionConfig::default())
+        .context("Failed to open database")?;
+    {
+        let conn = pool.get().context("Failed to get DB connection")?;
+        let _ = tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
+    }
+    let store = Arc::new(EventStore::new(pool));
+
+    // Read LEDGER.jsonl
+    let file = std::fs::File::open(ledger_path)
+        .with_context(|| format!("Failed to open {}", ledger_path.display()))?;
+    let reader = std::io::BufReader::new(file);
+
+    let mut total = 0u64;
+    let mut imported = 0u64;
+    let mut skipped_filter = 0u64;
+    let mut skipped_exists = 0u64;
+    let mut parse_errors = 0u64;
+
+    // Track backfill sessions per workspace path
+    let mut workspace_sessions: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    for line in reader.lines() {
+        let line = line.context("Failed to read LEDGER line")?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        total += 1;
+
+        let entry: LedgerEntry = match serde_json::from_str(&line) {
+            Ok(e) => e,
+            Err(e) => {
+                parse_errors += 1;
+                eprintln!("[backfill] parse error on line {total}: {e}");
+                continue;
+            }
+        };
+
+        // Apply project filter
+        if let Some(filter) = project_filter {
+            let path = entry.front.path.as_deref().unwrap_or("");
+            if !path.starts_with(filter) {
+                skipped_filter += 1;
+                continue;
+            }
+        }
+
+        // Idempotency check: skip if event with matching _meta.id already exists
+        if !dry_run && has_ledger_entry(&store, &entry._meta.id) {
+            skipped_exists += 1;
+            continue;
+        }
+
+        if dry_run {
+            imported += 1;
+            continue;
+        }
+
+        // Get or create backfill session for this workspace path
+        let workspace_path = entry
+            .front
+            .path
+            .as_deref()
+            .unwrap_or("/tmp/backfill")
+            .to_string();
+        let session_id = if let Some(sid) = workspace_sessions.get(&workspace_path) {
+            sid.clone()
+        } else {
+            let title = format!(
+                "Backfill: {}",
+                entry.front.path.as_deref().unwrap_or("unknown")
+            );
+            let result = store
+                .create_session("backfill", &workspace_path, Some(&title), None, None)
+                .context("Failed to create backfill session")?;
+            let sid = result.session.id.clone();
+            let _ = workspace_sessions.insert(workspace_path, sid.clone());
+            sid
+        };
+
+        // Build memory.ledger payload
+        let payload = serde_json::json!({
+            "title": entry.front.title,
+            "input": entry.body.input,
+            "actions": entry.body.actions,
+            "lessons": entry.body.lessons,
+            "decisions": entry.body.decisions,
+            "tags": entry.front.tags,
+            "entryType": entry.front.entry_type,
+            "status": entry.front.status,
+            "timestamp": entry._meta.ts,
+            "_meta": {
+                "source": "ledger.jsonl",
+                "id": entry._meta.id
+            }
+        });
+
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &session_id,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload,
+                parent_id: None,
+            })
+            .with_context(|| format!("Failed to append ledger entry {}", entry._meta.id))?;
+
+        imported += 1;
+    }
+
+    println!(
+        "Backfill complete: {imported} imported, {skipped_filter} filtered, {skipped_exists} already existed, {parse_errors} parse errors (of {total} total)"
+    );
+
+    if dry_run {
+        println!("(dry run — no changes written)");
+    } else if imported > 0 {
+        println!("Embeddings will be generated on next server start.");
+    }
+
     Ok(())
 }
 
@@ -867,7 +1117,7 @@ mod tests {
     #[tokio::test]
     async fn server_boots_and_responds() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("beta-rs.db");
+        let db_path = dir.path().join("tron.db");
         let settings_path = dir.path().join("settings.json");
 
         // Single DB for events + tasks
@@ -900,6 +1150,7 @@ mod tests {
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
         };
 
         let mut registry = MethodRegistry::new();
@@ -948,7 +1199,7 @@ mod tests {
     #[test]
     fn server_runs_migrations() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("tron.db");
         let db_str = db_path.to_string_lossy();
         let pool = tron_events::new_file(&db_str, &ConnectionConfig::default()).unwrap();
         let conn = pool.get().unwrap();
@@ -1082,6 +1333,7 @@ mod tests {
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
         };
 
         let mut registry = MethodRegistry::new();
@@ -1103,5 +1355,202 @@ mod tests {
             .await
             .expect("shutdown timed out")
             .expect("join error");
+    }
+
+    // ── Backfill CLI tests ───────────────────────────────────────────
+
+    #[test]
+    fn cli_backfill_ledger_subcommand_parses() {
+        let cli = Cli::parse_from([
+            "tron",
+            "backfill-ledger",
+            "--ledger-path",
+            "/tmp/LEDGER.jsonl",
+        ]);
+        assert!(cli.command.is_some());
+        match cli.command.unwrap() {
+            Command::BackfillLedger {
+                ledger_path,
+                project_filter,
+                dry_run,
+            } => {
+                assert_eq!(ledger_path, PathBuf::from("/tmp/LEDGER.jsonl"));
+                assert!(project_filter.is_none());
+                assert!(!dry_run);
+            }
+        }
+    }
+
+    #[test]
+    fn cli_backfill_with_filters() {
+        let cli = Cli::parse_from([
+            "tron",
+            "backfill-ledger",
+            "--ledger-path",
+            "/tmp/LEDGER.jsonl",
+            "--project-filter",
+            "/Users/moose/Workspace/tron",
+            "--dry-run",
+        ]);
+        match cli.command.unwrap() {
+            Command::BackfillLedger {
+                project_filter,
+                dry_run,
+                ..
+            } => {
+                assert_eq!(
+                    project_filter.as_deref(),
+                    Some("/Users/moose/Workspace/tron")
+                );
+                assert!(dry_run);
+            }
+        }
+    }
+
+    #[test]
+    fn cli_no_subcommand_is_serve() {
+        let cli = Cli::parse_from(["tron"]);
+        assert!(cli.command.is_none());
+        assert_eq!(cli.port, 9847);
+    }
+
+    #[test]
+    fn parse_ledger_entry() {
+        let json = r#"{"_meta":{"id":"abc-123","ts":"2026-01-01T00:00:00Z","v":1},"front":{"project":"tron","path":"/tmp/tron","title":"Test entry","type":"feature","status":"completed","tags":["test"]},"body":{"input":"do something","actions":["did it"],"files":[],"decisions":[],"lessons":["learned thing"]},"history":{"embedded":false}}"#;
+        let entry: LedgerEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry._meta.id, "abc-123");
+        assert_eq!(entry.front.title.as_deref(), Some("Test entry"));
+        assert_eq!(entry.body.lessons.as_ref().unwrap()[0], "learned thing");
+    }
+
+    #[tokio::test]
+    async fn backfill_dry_run_no_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tron.db");
+        let ledger_path = dir.path().join("LEDGER.jsonl");
+        std::fs::write(
+            &ledger_path,
+            r#"{"_meta":{"id":"id-1","ts":"2026-01-01T00:00:00Z","v":1},"front":{"project":"test","path":"/tmp","title":"Entry 1","type":"feature","status":"completed","tags":[]},"body":{"input":"req","actions":["did"],"files":[],"decisions":[],"lessons":["lesson"]},"history":{"embedded":false}}"#,
+        )
+        .unwrap();
+
+        run_backfill_ledger(Some(db_path.clone()), &ledger_path, None, true)
+            .await
+            .unwrap();
+
+        // DB should have been created by migrations but no events (dry run)
+        let pool =
+            tron_events::new_file(&db_path.to_string_lossy(), &ConnectionConfig::default())
+                .unwrap();
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE type = 'memory.ledger'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn backfill_imports_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tron.db");
+        let ledger_path = dir.path().join("LEDGER.jsonl");
+        std::fs::write(
+            &ledger_path,
+            concat!(
+                r#"{"_meta":{"id":"id-1","ts":"2026-01-01T00:00:00Z","v":1},"front":{"project":"test","path":"/tmp/proj","title":"Entry 1","type":"feature","status":"completed","tags":["a"]},"body":{"input":"req1","actions":["a1"],"files":[],"decisions":[],"lessons":["l1"]},"history":{"embedded":false}}"#,
+                "\n",
+                r#"{"_meta":{"id":"id-2","ts":"2026-01-02T00:00:00Z","v":1},"front":{"project":"test","path":"/tmp/proj","title":"Entry 2","type":"bugfix","status":"completed","tags":["b"]},"body":{"input":"req2","actions":["a2"],"files":[],"decisions":[],"lessons":["l2"]},"history":{"embedded":false}}"#,
+            ),
+        )
+        .unwrap();
+
+        run_backfill_ledger(Some(db_path.clone()), &ledger_path, None, false)
+            .await
+            .unwrap();
+
+        let pool =
+            tron_events::new_file(&db_path.to_string_lossy(), &ConnectionConfig::default())
+                .unwrap();
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE type = 'memory.ledger'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn backfill_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tron.db");
+        let ledger_path = dir.path().join("LEDGER.jsonl");
+        let entry = r#"{"_meta":{"id":"id-unique","ts":"2026-01-01T00:00:00Z","v":1},"front":{"project":"test","path":"/tmp","title":"Test","type":"feature","status":"completed","tags":[]},"body":{"input":"req","actions":["a"],"files":[],"decisions":[],"lessons":["l"]},"history":{"embedded":false}}"#;
+        std::fs::write(&ledger_path, entry).unwrap();
+
+        // Run twice
+        run_backfill_ledger(Some(db_path.clone()), &ledger_path, None, false)
+            .await
+            .unwrap();
+        run_backfill_ledger(Some(db_path.clone()), &ledger_path, None, false)
+            .await
+            .unwrap();
+
+        let pool =
+            tron_events::new_file(&db_path.to_string_lossy(), &ConnectionConfig::default())
+                .unwrap();
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE type = 'memory.ledger'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "second run should skip existing entry");
+    }
+
+    #[tokio::test]
+    async fn backfill_project_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("tron.db");
+        let ledger_path = dir.path().join("LEDGER.jsonl");
+        std::fs::write(
+            &ledger_path,
+            concat!(
+                r#"{"_meta":{"id":"id-a","ts":"2026-01-01T00:00:00Z","v":1},"front":{"project":"tron","path":"/Users/moose/tron","title":"Match","type":"feature","status":"completed","tags":[]},"body":{"input":"r","actions":["a"],"files":[],"decisions":[],"lessons":["l"]},"history":{"embedded":false}}"#,
+                "\n",
+                r#"{"_meta":{"id":"id-b","ts":"2026-01-02T00:00:00Z","v":1},"front":{"project":"other","path":"/Users/moose/other","title":"No match","type":"feature","status":"completed","tags":[]},"body":{"input":"r","actions":["a"],"files":[],"decisions":[],"lessons":["l"]},"history":{"embedded":false}}"#,
+            ),
+        )
+        .unwrap();
+
+        run_backfill_ledger(
+            Some(db_path.clone()),
+            &ledger_path,
+            Some("/Users/moose/tron"),
+            false,
+        )
+        .await
+        .unwrap();
+
+        let pool =
+            tron_events::new_file(&db_path.to_string_lossy(), &ConnectionConfig::default())
+                .unwrap();
+        let conn = pool.get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE type = 'memory.ledger'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "only matching entry should be imported");
     }
 }

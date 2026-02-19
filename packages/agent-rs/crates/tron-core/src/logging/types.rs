@@ -112,6 +112,9 @@ pub struct LogEntry {
     /// Error stack trace.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_stack: Option<String>,
+    /// Server origin (e.g. `"localhost:9847"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// Sort direction for log queries.
@@ -156,6 +159,8 @@ pub struct LogQueryOptions {
     pub offset: Option<usize>,
     /// Sort order.
     pub order: Option<SortOrder>,
+    /// Filter by server origin.
+    pub origin: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,6 +239,7 @@ mod tests {
             data: None,
             error_message: None,
             error_stack: None,
+            origin: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let back: LogEntry = serde_json::from_str(&json).unwrap();
@@ -261,6 +267,7 @@ mod tests {
             data: None,
             error_message: None,
             error_stack: None,
+            origin: None,
         };
         let json = serde_json::to_value(&entry).unwrap();
         assert!(json.get("sessionId").is_none());

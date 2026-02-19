@@ -250,7 +250,7 @@ pub(crate) mod test_helpers {
     use async_trait::async_trait;
     use parking_lot::RwLock;
     use tron_events::EventStore;
-    use tron_llm::models::types::ProviderType;
+    use tron_llm::models::types::Provider as ProviderType;
     use tron_llm::provider::{
         Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
     };
@@ -381,6 +381,7 @@ pub(crate) mod test_helpers {
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
         }
     }
 
@@ -412,6 +413,7 @@ pub(crate) mod test_helpers {
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
         }
     }
 }

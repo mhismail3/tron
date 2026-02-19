@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   tags                       TEXT NOT NULL DEFAULT '[]',
   spawning_session_id        TEXT,
   spawn_type                 TEXT,
-  spawn_task                 TEXT
+  spawn_task                 TEXT,
+  origin                     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace   ON sessions(workspace_id);
@@ -66,6 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_parent      ON sessions(parent_session_i
 CREATE INDEX IF NOT EXISTS idx_sessions_ended       ON sessions(ended_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_created     ON sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_spawning    ON sessions(spawning_session_id, ended_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_origin      ON sessions(origin);
 
 -- Events (immutable append-only log — heart of event sourcing)
 CREATE TABLE IF NOT EXISTS events (
@@ -88,7 +90,14 @@ CREATE TABLE IF NOT EXISTS events (
   output_tokens        INTEGER,
   cache_read_tokens    INTEGER,
   cache_creation_tokens INTEGER,
-  checksum             TEXT
+  checksum             TEXT,
+  -- Per-turn metadata (queryable indexed columns for fields in payload)
+  model                TEXT,
+  latency_ms           INTEGER,
+  stop_reason          TEXT,
+  has_thinking         INTEGER,
+  provider_type        TEXT,
+  cost                 REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_session_seq       ON events(session_id, sequence);
@@ -100,6 +109,9 @@ CREATE INDEX IF NOT EXISTS idx_events_tool_call_id      ON events(tool_call_id) 
 CREATE INDEX IF NOT EXISTS idx_events_message_preview   ON events(session_id, type, sequence DESC)
   WHERE type IN ('message.user', 'message.assistant');
 CREATE INDEX IF NOT EXISTS idx_events_session_covering  ON events(session_id, sequence, type, timestamp, parent_id);
+CREATE INDEX IF NOT EXISTS idx_events_model             ON events(session_id, model) WHERE model IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_events_latency           ON events(session_id, latency_ms) WHERE latency_ms IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_sequence_unique ON events(session_id, sequence);
 
 -- Blobs (content-addressable deduplicated storage)
 CREATE TABLE IF NOT EXISTS blobs (
@@ -152,7 +164,8 @@ CREATE TABLE IF NOT EXISTS logs (
   error_stack     TEXT,
   trace_id        TEXT,
   parent_trace_id TEXT,
-  depth           INTEGER NOT NULL DEFAULT 0
+  depth           INTEGER NOT NULL DEFAULT 0,
+  origin          TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_logs_timestamp      ON logs(timestamp DESC);
@@ -163,6 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_event          ON logs(event_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_workspace_time ON logs(workspace_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_trace_id       ON logs(trace_id);
 CREATE INDEX IF NOT EXISTS idx_logs_parent_trace   ON logs(parent_trace_id);
+CREATE INDEX IF NOT EXISTS idx_logs_origin         ON logs(origin);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Device Tokens (push notifications)

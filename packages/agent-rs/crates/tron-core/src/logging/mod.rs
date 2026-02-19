@@ -61,7 +61,12 @@ pub fn init_subscriber(level: &str) {
 ///
 /// * `level` - Minimum log level to display/persist.
 /// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
-pub fn init_subscriber_with_sqlite(level: &str, conn: rusqlite::Connection) -> TransportHandle {
+/// * `origin` - Server origin (e.g. `"localhost:9847"`) stamped on every log entry.
+pub fn init_subscriber_with_sqlite(
+    level: &str,
+    conn: rusqlite::Connection,
+    origin: Option<String>,
+) -> TransportHandle {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -73,7 +78,9 @@ pub fn init_subscriber_with_sqlite(level: &str, conn: rusqlite::Connection) -> T
         .with_writer(std::io::stderr)
         .compact();
 
-    let transport = SqliteTransport::new(conn, TransportConfig::default());
+    let mut config = TransportConfig::default();
+    config.origin = origin;
+    let transport = SqliteTransport::new(conn, config);
     let handle = transport.handle();
 
     let _ = tracing_subscriber::registry()

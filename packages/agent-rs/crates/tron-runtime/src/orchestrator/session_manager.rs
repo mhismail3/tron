@@ -48,6 +48,7 @@ pub struct SessionManager {
     event_store: Arc<EventStore>,
     active_sessions: DashMap<String, Arc<ActiveSession>>,
     plan_mode: DashMap<String, bool>,
+    origin: Option<String>,
 }
 
 impl SessionManager {
@@ -57,7 +58,14 @@ impl SessionManager {
             event_store,
             active_sessions: DashMap::new(),
             plan_mode: DashMap::new(),
+            origin: None,
         }
+    }
+
+    /// Set the server origin (e.g. "localhost:9847") for all sessions created by this manager.
+    pub fn with_origin(mut self, origin: String) -> Self {
+        self.origin = Some(origin);
+        self
     }
 
     /// Create a new session.
@@ -70,7 +78,7 @@ impl SessionManager {
     ) -> Result<String, RuntimeError> {
         let result = self
             .event_store
-            .create_session(model, workspace_path, title, None)
+            .create_session(model, workspace_path, title, None, self.origin.as_deref())
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         let session_id = result.session.id.clone();
@@ -231,6 +239,7 @@ impl SessionManager {
             #[allow(clippy::cast_possible_wrap)]
             limit: filter.limit.map(|l| l as i64),
             offset: None,
+            origin: None,
         };
         self.event_store
             .list_sessions(&opts)
@@ -423,5 +432,28 @@ mod tests {
         let mgr = make_manager();
         let result = mgr.resume_session("nonexistent");
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_session_with_origin() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone()).with_origin("localhost:9847".to_string());
+
+        let sid = mgr.create_session("test-model", "/tmp", Some("origin test")).unwrap();
+        let session = store.get_session(&sid).unwrap().unwrap();
+        assert_eq!(session.origin.as_deref(), Some("localhost:9847"));
+    }
+
+    #[tokio::test]
+    async fn create_session_without_origin() {
+        let mgr = make_manager();
+        let sid = mgr.create_session("test-model", "/tmp", Some("no origin")).unwrap();
+        let session = mgr.get_session(&sid).unwrap().unwrap();
+        assert!(session.origin.is_none());
     }
 }

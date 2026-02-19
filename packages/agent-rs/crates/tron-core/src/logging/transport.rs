@@ -38,6 +38,8 @@ pub struct TransportConfig {
     pub batch_size: usize,
     /// Flush interval in milliseconds. Default: 1000.
     pub flush_interval_ms: u64,
+    /// Server origin (e.g. `"localhost:9847"`). Stamped on every log entry.
+    pub origin: Option<String>,
 }
 
 impl Default for TransportConfig {
@@ -46,6 +48,7 @@ impl Default for TransportConfig {
             min_level: LogLevel::Info.as_num(),
             batch_size: 100,
             flush_interval_ms: 1000,
+            origin: None,
         }
     }
 }
@@ -68,6 +71,7 @@ struct PendingEntry {
     data: Option<String>,
     error_message: Option<String>,
     error_stack: Option<String>,
+    origin: Option<String>,
 }
 
 /// Inner state shared between the layer and the flush task.
@@ -329,6 +333,7 @@ where
             data: data_json,
             error_message: visitor.error_message,
             error_stack: visitor.error_stack,
+            origin: self.config.origin.clone(),
         };
 
         let should_flush = level_num >= LogLevel::Warn.as_num();
@@ -377,8 +382,8 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
         let mut stmt = tx.prepare_cached(
             "INSERT INTO logs (timestamp, level, level_num, component, message, \
              session_id, workspace_id, event_id, turn, trace_id, \
-             parent_trace_id, depth, data, error_message, error_stack) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             parent_trace_id, depth, data, error_message, error_stack, origin) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         )?;
 
         for entry in entries {
@@ -398,6 +403,7 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
                 entry.data,
                 entry.error_message,
                 entry.error_stack,
+                entry.origin,
             ])?;
         }
     }
@@ -433,7 +439,8 @@ mod tests {
                 depth INTEGER,
                 data TEXT,
                 error_message TEXT,
-                error_stack TEXT
+                error_stack TEXT,
+                origin TEXT
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS logs_fts USING fts5(
                 log_id UNINDEXED,
@@ -471,6 +478,7 @@ mod tests {
             data: None,
             error_message: None,
             error_stack: None,
+            origin: None,
         }
     }
 
@@ -545,6 +553,7 @@ mod tests {
             data: Some(r#"{"attempt":2}"#.to_string()),
             error_message: Some("Connection refused".to_string()),
             error_stack: Some("Error: Connection refused\n  at ...".to_string()),
+            origin: Some("localhost:9847".to_string()),
         };
         write_batch(&conn, &[entry]).unwrap();
 
@@ -564,6 +573,11 @@ mod tests {
             })
             .unwrap();
         assert_eq!(err_msg.as_deref(), Some("Connection refused"));
+
+        let origin: Option<String> = conn
+            .query_row("SELECT origin FROM logs WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(origin.as_deref(), Some("localhost:9847"));
     }
 
     #[test]

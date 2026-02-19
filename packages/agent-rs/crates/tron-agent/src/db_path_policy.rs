@@ -1,14 +1,14 @@
 //! Production database path policy.
 //!
 //! Production startup is intentionally strict: the server may only open the
-//! canonical `beta-rs.db` path under `~/.tron/database`.
+//! canonical `tron.db` path under `~/.tron/database`.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
 /// The only database filename allowed in production startup.
-pub const PRODUCTION_DB_FILENAME: &str = "beta-rs.db";
+pub const PRODUCTION_DB_FILENAME: &str = "tron.db";
 
 /// Default production database directory for a given home directory.
 #[must_use]
@@ -31,7 +31,7 @@ pub fn default_production_db_path() -> PathBuf {
 
 /// Resolve and validate the production database path using `$HOME`.
 ///
-/// Returns the canonical allowed path (`~/.tron/database/beta-rs.db`) when valid.
+/// Returns the canonical allowed path (`~/.tron/database/tron.db`) when valid.
 pub fn resolve_production_db_path(cli_db_path: Option<PathBuf>) -> Result<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     resolve_production_db_path_for_home(cli_db_path, &PathBuf::from(home))
@@ -66,7 +66,7 @@ pub fn resolve_production_db_path_for_home(
 /// Validate that a requested DB path matches the production policy.
 ///
 /// Rules:
-/// - filename must be exactly `beta-rs.db`
+/// - filename must be exactly `tron.db`
 /// - parent directory must resolve exactly to `~/.tron/database`
 /// - symlink DB files are rejected
 pub fn validate_production_db_path_for_home(db_path: &Path, home: &Path) -> Result<()> {

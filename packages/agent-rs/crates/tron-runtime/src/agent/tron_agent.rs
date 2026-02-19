@@ -322,7 +322,7 @@ mod tests {
     use tron_core::content::AssistantContent;
     use tron_core::events::{AssistantMessage, StreamEvent};
     use tron_core::messages::ToolResultMessageContent;
-    use tron_llm::models::types::ProviderType;
+    use tron_llm::models::types::Provider as ProviderType;
     use tron_llm::provider::{ProviderError, ProviderStreamOptions, StreamEventStream};
 
     // ── Mock Provider ──
@@ -1003,7 +1003,7 @@ mod tests {
         store: &Arc<tron_events::EventStore>,
     ) -> (TronAgent, String) {
         let session = store
-            .create_session("mock-model", "/tmp", Some("test"), None)
+            .create_session("mock-model", "/tmp", Some("test"), None, None)
             .unwrap();
         let sid = session.session.id.clone();
         let config = AgentConfig::default();

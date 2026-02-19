@@ -59,6 +59,8 @@ pub struct SessionRow {
     pub spawn_type: Option<String>,
     /// Spawn task description.
     pub spawn_task: Option<String>,
+    /// Server origin (e.g. "localhost:9847").
+    pub origin: Option<String>,
 }
 
 /// Raw event row from the `events` table.

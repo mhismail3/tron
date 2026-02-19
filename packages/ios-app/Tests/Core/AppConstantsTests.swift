@@ -14,20 +14,12 @@ final class AppConstantsTests: XCTestCase {
                        "Should end with /Workspace, got: \(AppConstants.defaultWorkspace)")
     }
 
-    func testTsBetaPort_is8082() {
-        XCTAssertEqual(AppConstants.tsBetaPort, "8082")
+    func testBetaPort_is9846() {
+        XCTAssertEqual(AppConstants.betaPort, "9846")
     }
 
-    func testTsProdPort_is8080() {
-        XCTAssertEqual(AppConstants.tsProdPort, "8080")
-    }
-
-    func testAgentRsPort_is9847() {
-        XCTAssertEqual(AppConstants.agentRsPort, "9847")
-    }
-
-    func testTronRsPort_is9091() {
-        XCTAssertEqual(AppConstants.tronRsPort, "9091")
+    func testProdPort_is9847() {
+        XCTAssertEqual(AppConstants.prodPort, "9847")
     }
 
     func testDefaultHost_isLocalhost() {
@@ -41,8 +33,8 @@ final class AppConstantsTests: XCTestCase {
         XCTAssertEqual(url.scheme, "ws")
     }
 
-    func testFallbackServerURL_usesTsBetaPort() {
+    func testFallbackServerURL_usesProdPort() {
         let url = AppConstants.fallbackServerURL
-        XCTAssertEqual(url.port, 8082)
+        XCTAssertEqual(url.port, 9847)
     }
 }

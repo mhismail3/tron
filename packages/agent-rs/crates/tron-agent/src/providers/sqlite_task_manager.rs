@@ -277,11 +277,11 @@ mod tests {
     #[tokio::test]
     async fn list_tasks_with_status_filter() {
         let delegate = SqliteTaskManagerDelegate::new(setup_pool());
-        delegate
+        let _ = delegate
             .execute_action("create", json!({"title": "Task A", "status": "in_progress"}))
             .await
             .unwrap();
-        delegate
+        let _ = delegate
             .execute_action("create", json!({"title": "Task B"}))
             .await
             .unwrap();
@@ -300,11 +300,11 @@ mod tests {
             .await
             .unwrap();
         let pid = proj["id"].as_str().unwrap().to_string();
-        delegate
+        let _ = delegate
             .execute_action("create", json!({"title": "In Project", "projectId": pid}))
             .await
             .unwrap();
-        delegate
+        let _ = delegate
             .execute_action("create", json!({"title": "No Project"}))
             .await
             .unwrap();
@@ -318,11 +318,11 @@ mod tests {
     #[tokio::test]
     async fn search_tasks() {
         let delegate = SqliteTaskManagerDelegate::new(setup_pool());
-        delegate
+        let _ = delegate
             .execute_action("create", json!({"title": "Fix authentication"}))
             .await
             .unwrap();
-        delegate
+        let _ = delegate
             .execute_action("create", json!({"title": "Add logging"}))
             .await
             .unwrap();

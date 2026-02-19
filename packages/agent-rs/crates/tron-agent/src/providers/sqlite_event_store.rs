@@ -149,6 +149,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             exclude_subagents: Some(true),
             limit: Some(i64::from(limit)),
             offset: Some(i64::from(offset)),
+            origin: None,
         };
         let rows = self.store.list_sessions(&opts).map_err(tool_err)?;
         Ok(rows
@@ -404,7 +405,7 @@ mod tests {
         let store = setup_store();
         // Create a session to query
         let result = store
-            .create_session("claude-opus-4-6", "/tmp", Some("Test Session"), None)
+            .create_session("claude-opus-4-6", "/tmp", Some("Test Session"), None, None)
             .unwrap();
         let sid = result.root_event.session_id;
 

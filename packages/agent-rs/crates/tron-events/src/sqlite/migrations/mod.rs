@@ -20,23 +20,11 @@ struct Migration {
 }
 
 /// All migrations in version order.
-const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        description: "Complete schema — core tables, FTS, indexes, triggers",
-        sql: include_str!("v001_schema.sql"),
-    },
-    Migration {
-        version: 2,
-        description: "Per-turn metadata columns on events table",
-        sql: include_str!("v002_turn_metadata.sql"),
-    },
-    Migration {
-        version: 3,
-        description: "Unique per-session event sequence index",
-        sql: include_str!("v003_session_sequence_unique.sql"),
-    },
-];
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    description: "Complete schema — core tables, FTS, indexes, triggers, origin tracking",
+    sql: include_str!("v001_schema.sql"),
+}];
 
 /// Run all pending migrations on the given connection.
 ///
@@ -173,7 +161,7 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 3);
+        assert_eq!(applied, 1);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -231,7 +219,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first, 3);
+        assert_eq!(first, 1);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second, 0);
@@ -248,12 +236,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 3);
+        assert_eq!(current_version(&conn).unwrap(), 1);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 3);
+        assert_eq!(latest_version(), 1);
     }
 
     #[test]
@@ -271,6 +259,7 @@ mod tests {
 
         assert_eq!(version, 1);
         assert!(desc.contains("Complete schema"));
+        assert!(desc.contains("origin tracking"));
     }
 
     #[test]
@@ -299,11 +288,11 @@ mod tests {
             "idx_areas_workspace",
             "idx_blobs_hash",
             "idx_branches_session",
-            // v002 indexes
             "idx_events_model",
             "idx_events_latency",
-            // v003 index
             "idx_events_session_sequence_unique",
+            "idx_sessions_origin",
+            "idx_logs_origin",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
@@ -376,7 +365,6 @@ mod tests {
             "cache_read_tokens",
             "cache_creation_tokens",
             "checksum",
-            // v002 columns
             "model",
             "latency_ms",
             "stop_reason",
@@ -428,6 +416,7 @@ mod tests {
             "spawning_session_id",
             "spawn_type",
             "spawn_task",
+            "origin",
         ];
         for col in &expected {
             assert!(
@@ -435,6 +424,38 @@ mod tests {
                 "sessions table missing column: {col}"
             );
         }
+    }
+
+    #[test]
+    fn origin_columns_exist_in_sessions_and_logs() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // sessions.origin
+        let sessions_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            sessions_cols.contains(&"origin".to_string()),
+            "sessions table missing origin column"
+        );
+
+        // logs.origin
+        let logs_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(logs)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            logs_cols.contains(&"origin".to_string()),
+            "logs table missing origin column"
+        );
     }
 
     #[test]
@@ -531,24 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn v002_schema_version_recorded() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let (version, desc): (u32, String) = conn
-            .query_row(
-                "SELECT version, description FROM schema_version WHERE version = 2",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-
-        assert_eq!(version, 2);
-        assert!(desc.contains("Per-turn metadata"));
-    }
-
-    #[test]
-    fn v002_new_columns_are_nullable() {
+    fn turn_metadata_columns_are_nullable() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
@@ -594,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn v002_new_columns_can_be_populated() {
+    fn turn_metadata_columns_can_be_populated() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 

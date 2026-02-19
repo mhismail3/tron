@@ -639,7 +639,7 @@ mod tests {
 
         // Create session and get workspace ID
         let result = store
-            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None)
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None, None)
             .unwrap();
         let sid = result.root_event.session_id;
         let ws_id = store
@@ -676,7 +676,7 @@ mod tests {
         let store = make_event_store();
 
         let result = store
-            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None)
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None, None)
             .unwrap();
         let sid = result.root_event.session_id;
         let ws_id = store
@@ -747,7 +747,7 @@ mod tests {
         let store = make_event_store();
 
         let result = store
-            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None)
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None, None)
             .unwrap();
         let sid = result.root_event.session_id;
         let ws_id = store

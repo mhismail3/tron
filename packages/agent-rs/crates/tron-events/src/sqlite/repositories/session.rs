@@ -31,6 +31,8 @@ pub struct CreateSessionOptions<'a> {
     pub spawn_type: Option<&'a str>,
     /// Spawn task description.
     pub spawn_task: Option<&'a str>,
+    /// Server origin (e.g. "localhost:9847").
+    pub origin: Option<&'a str>,
 }
 
 /// Options for listing sessions.
@@ -46,6 +48,8 @@ pub struct ListSessionsOptions<'a> {
     pub limit: Option<i64>,
     /// Skip results.
     pub offset: Option<i64>,
+    /// Filter by server origin.
+    pub origin: Option<&'a str>,
 }
 
 /// Counters to increment atomically.
@@ -121,8 +125,8 @@ impl SessionRepo {
         let _ = conn.execute(
             "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory,
              parent_session_id, fork_from_event_id, created_at, last_activity_at, tags,
-             spawning_session_id, spawn_type, spawn_task)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             spawning_session_id, spawn_type, spawn_task, origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id,
                 opts.workspace_id,
@@ -137,6 +141,7 @@ impl SessionRepo {
                 opts.spawning_session_id,
                 opts.spawn_type,
                 opts.spawn_task,
+                opts.origin,
             ],
         )?;
 
@@ -166,6 +171,7 @@ impl SessionRepo {
             spawning_session_id: opts.spawning_session_id.map(String::from),
             spawn_type: opts.spawn_type.map(String::from),
             spawn_task: opts.spawn_task.map(String::from),
+            origin: opts.origin.map(String::from),
         })
     }
 
@@ -200,6 +206,10 @@ impl SessionRepo {
         }
         if opts.exclude_subagents == Some(true) {
             sql.push_str(" AND spawning_session_id IS NULL");
+        }
+        if let Some(origin) = opts.origin {
+            let _ = write!(sql, " AND origin = ?{}", param_values.len() + 1);
+            param_values.push(Box::new(origin.to_string()));
         }
         sql.push_str(" ORDER BY last_activity_at DESC");
         if let Some(limit) = opts.limit {
@@ -481,6 +491,7 @@ impl SessionRepo {
             spawning_session_id: row.get("spawning_session_id")?,
             spawn_type: row.get("spawn_type")?,
             spawn_task: row.get("spawn_task")?,
+            origin: row.get("origin")?,
         })
     }
 }
@@ -527,6 +538,7 @@ mod tests {
                 spawning_session_id: None,
                 spawn_type: None,
                 spawn_task: None,
+                origin: None,
             },
         )
         .unwrap()
@@ -598,6 +610,7 @@ mod tests {
                 spawning_session_id: None,
                 spawn_type: None,
                 spawn_task: None,
+                origin: None,
             },
         )
         .unwrap();
@@ -816,6 +829,7 @@ mod tests {
                 spawning_session_id: Some(&parent.id),
                 spawn_type: Some("query"),
                 spawn_task: Some("do something"),
+                origin: None,
             },
         )
         .unwrap();
@@ -843,6 +857,7 @@ mod tests {
                 spawning_session_id: Some(&parent.id),
                 spawn_type: Some("query"),
                 spawn_task: None,
+                origin: None,
             },
         )
         .unwrap();
@@ -1098,5 +1113,147 @@ mod tests {
     fn extract_text_missing_content() {
         let text = extract_text_from_payload(r#"{"other": "field"}"#);
         assert_eq!(text, "");
+    }
+
+    // ── Origin tracking ─────────────────────────────────────────────
+
+    #[test]
+    fn create_session_with_origin() {
+        let (conn, ws_id) = setup();
+        let sess = SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "claude-opus-4-6",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: Some("localhost:9847"),
+            },
+        )
+        .unwrap();
+        assert_eq!(sess.origin.as_deref(), Some("localhost:9847"));
+
+        let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert_eq!(found.origin.as_deref(), Some("localhost:9847"));
+    }
+
+    #[test]
+    fn create_session_without_origin() {
+        let (conn, ws_id) = setup();
+        let sess = create_default_session(&conn, &ws_id);
+        assert!(sess.origin.is_none());
+
+        let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
+        assert!(found.origin.is_none());
+    }
+
+    #[test]
+    fn list_sessions_filter_by_origin() {
+        let (conn, ws_id) = setup();
+
+        SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "claude-opus-4-6",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: Some("localhost:9847"),
+            },
+        )
+        .unwrap();
+        SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "claude-opus-4-6",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: Some("localhost:9846"),
+            },
+        )
+        .unwrap();
+
+        let prod = SessionRepo::list(
+            &conn,
+            &ListSessionsOptions {
+                origin: Some("localhost:9847"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(prod.len(), 1);
+        assert_eq!(prod[0].origin.as_deref(), Some("localhost:9847"));
+
+        let dev = SessionRepo::list(
+            &conn,
+            &ListSessionsOptions {
+                origin: Some("localhost:9846"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(dev.len(), 1);
+    }
+
+    #[test]
+    fn list_sessions_no_origin_filter() {
+        let (conn, ws_id) = setup();
+
+        SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "claude-opus-4-6",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: Some("localhost:9847"),
+            },
+        )
+        .unwrap();
+        SessionRepo::create(
+            &conn,
+            &CreateSessionOptions {
+                workspace_id: &ws_id,
+                model: "claude-opus-4-6",
+                working_directory: "/tmp/test",
+                title: None,
+                tags: None,
+                parent_session_id: None,
+                fork_from_event_id: None,
+                spawning_session_id: None,
+                spawn_type: None,
+                spawn_task: None,
+                origin: Some("localhost:9846"),
+            },
+        )
+        .unwrap();
+
+        let all = SessionRepo::list(&conn, &ListSessionsOptions::default()).unwrap();
+        assert_eq!(all.len(), 2);
     }
 }

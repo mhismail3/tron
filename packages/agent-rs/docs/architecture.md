@@ -32,7 +32,7 @@ packages/agent-rs/
 5. Event reconstruction is deterministic from persisted events.
 6. Session writes are session-serialized in-process; global lock is limited to non-session/global mutation paths.
 7. SQLite uniqueness enforces per-session order via `UNIQUE(session_id, sequence)`.
-8. Production DB target is strictly `~/.tron/database/beta-rs.db`.
+8. Production DB target is strictly `~/.tron/database/tron.db`.
 
 ## Compatibility Boundary
 
@@ -55,7 +55,7 @@ packages/agent-rs/
 ## Storage & Startup Safety
 
 - Production startup path guard in `crates/tron-agent/src/db_path_policy.rs`:
-  - only `beta-rs.db`
+  - only `tron.db`
   - only under `~/.tron/database`
   - rejects symlinked DB path targets
 - Binary startup (`crates/tron-agent/src/main.rs`) resolves and validates DB path before opening SQLite.
