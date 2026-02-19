@@ -1,5 +1,8 @@
 //! ADAPTER(ios-compat): Temporary compatibility adapters for iOS client.
 //!
+//! INVARIANT: compatibility adaptation is boundary-only. All iOS wire-format
+//! shaping happens in this module — handlers and runtime use canonical shapes.
+//!
 //! This entire module exists to transform Rust server responses into the format
 //! the iOS app currently expects. Every public function is tagged for future removal.
 //!

@@ -22,6 +22,11 @@
 //! let settings = get_settings();
 //! println!("WebSocket port: {}", settings.server.ws_port);
 //! ```
+//!
+//! ## Crate Position
+//!
+//! Depends on: (none — standalone schema + loader).
+//! Depended on by: tron-events, tron-runtime, tron-server.
 
 #![deny(unsafe_code)]
 

@@ -36,7 +36,8 @@ pub async fn run_agent(
     let session_id = agent.session_id().to_owned();
     debug!(session_id = agent.session_id(), "agent runner starting");
 
-    // 1. Drain background hooks from previous run
+    // INVARIANT: drain background hooks before accepting a new prompt — prevents
+    // stale hook state from previous run interfering with the new run.
     if let Some(hook_engine) = hooks {
         hook_engine.wait_for_background().await;
         debug!("background hooks drained");
@@ -88,7 +89,11 @@ pub async fn run_agent(
 
     info!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
 
-    // 6. Emit agent.ready — MUST be AFTER agent.complete
+    // INVARIANT: agent.ready MUST be emitted AFTER agent.complete — iOS
+    // handleComplete() sets isPostProcessing=true, handleAgentReady() clears it.
+    // Wrong ordering = stuck send button. Three independent send-button concerns:
+    // isPostProcessing (cleared by agent.ready), isCompacting (cleared by
+    // agent.compaction), ledger (fully async, no blocking).
     let _ = broadcast.emit(TronEvent::AgentReady {
         base: BaseEvent::now(&session_id),
     });

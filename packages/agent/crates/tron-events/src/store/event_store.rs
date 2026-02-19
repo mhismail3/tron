@@ -73,6 +73,10 @@ pub struct ForkOptions<'a> {
 ///
 /// All write methods are transactional — they run inside `SAVEPOINT`/`RELEASE`
 /// blocks so callers never see partial state.
+///
+/// INVARIANT: session writes are serialized per-session via in-process mutex
+/// locks (`with_session_write_lock`). Global mutations use a separate global
+/// lock. SQLite `UNIQUE(session_id, sequence)` enforces ordering at the DB level.
 pub struct EventStore {
     pool: ConnectionPool,
     global_write_lock: Mutex<()>,

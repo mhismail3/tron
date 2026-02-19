@@ -101,6 +101,9 @@ impl SessionManager {
     }
 
     /// Resume an existing session (reconstruct from events).
+    ///
+    /// INVARIANT: callers must drain background hooks before calling this.
+    /// The prompt handler drains via `agent_runner` pre-run step.
     #[instrument(skip(self), fields(session_id))]
     pub fn resume_session(&self, session_id: &str) -> Result<Arc<ActiveSession>, RuntimeError> {
         // Check if already active

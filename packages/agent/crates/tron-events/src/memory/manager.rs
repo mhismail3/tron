@@ -1,9 +1,9 @@
 //! Memory manager.
 //!
-//! Orchestrates the compaction → ledger pipeline. The critical invariant is
-//! **sequential ordering**: compaction always runs before ledger writing,
-//! ensuring `compact.boundary` events always precede `memory.ledger` events
-//! in the event log.
+//! INVARIANT: compaction → ledger sequential ordering. Compaction always runs
+//! before ledger writing, ensuring `compact.boundary` events always precede
+//! `memory.ledger` events in the event log. This deterministic DB ordering
+//! is required for correct event reconstruction.
 //!
 //! All operations are **fail-silent** — errors are logged but never propagated.
 //! Memory errors must never crash a session.

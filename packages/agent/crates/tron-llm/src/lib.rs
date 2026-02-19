@@ -19,6 +19,11 @@
 //! Each provider crate (`tron-llm-anthropic`, `tron-llm-openai`, `tron-llm-google`)
 //! depends on this crate and implements the [`Provider`] trait. The shared utilities
 //! here eliminate duplication while allowing provider-specific behavior.
+//!
+//! ## Crate Position
+//!
+//! Depends on: tron-core.
+//! Depended on by: tron-runtime, tron-server.
 
 #![deny(unsafe_code)]
 

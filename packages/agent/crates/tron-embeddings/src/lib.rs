@@ -6,6 +6,11 @@
 //! - Tokenize -> inference -> last-token pooling
 //! - Matryoshka truncation (1024d -> 512d) + L2 normalization
 //! - `SQLite` BLOB storage with brute-force KNN search
+//!
+//! ## Crate Position
+//!
+//! Standalone (no tron crate dependencies).
+//! Depended on by: tron-server.
 
 #![deny(unsafe_code)]
 

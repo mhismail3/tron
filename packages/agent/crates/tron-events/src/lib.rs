@@ -12,6 +12,11 @@
 //! - **Event chain builder**: Automates `parent_id` threading across sequential events
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding messages from event history
 //! - **Migrations**: Version-tracked SQL schema evolution
+//!
+//! ## Crate Position
+//!
+//! Depends on: tron-core, tron-settings.
+//! Depended on by: tron-runtime, tron-server.
 
 #![deny(unsafe_code)]
 

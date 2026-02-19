@@ -13,6 +13,10 @@
 //! - **Retry**: [`retry::RetryConfig`] and backoff calculation
 //! - **`AskUserQuestion`**: [`ask_user_question::AskUserQuestion`] interactive tool types
 //! - **Memory**: [`memory::SessionMemory`] and [`memory::HandoffRecord`]
+//!
+//! ## Crate Position
+//!
+//! Foundation crate. Depended on by all other tron crates.
 
 #![deny(unsafe_code)]
 

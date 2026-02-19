@@ -1,4 +1,25 @@
 //! RPC handler modules and registration.
+//!
+//! Handlers are grouped into three registration sets:
+//!
+//! ## `register_core` — Session and agent lifecycle
+//!
+//! `system` (ping, info, shutdown), `session` (CRUD, fork, archive),
+//! `agent` (prompt, abort, state), `model` (list, switch), `context`
+//! (snapshot, compaction), `events` (history, subscribe), `settings`,
+//! `tool` (result), `message`, `memory` (ledger, search), `logs`
+//!
+//! ## `register_capabilities` — Domain features
+//!
+//! `skills` (list, get, refresh), `filesystem` (list, read, mkdir),
+//! `search` (content, events), `task`/`projects`/`areas` (CRUD),
+//! `tree` (visualization, branches)
+//!
+//! ## `register_platform` — Platform-specific
+//!
+//! `browser` (stream), `canvas`, `worktree` (git), `transcription`,
+//! `device` (push tokens), `plan`, `communication`, `voice_notes`,
+//! `git`, `sandbox`
 
 pub mod agent;
 pub mod browser;

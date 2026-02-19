@@ -6,6 +6,10 @@
 //! - `WebSocket` gateway: connection management, heartbeat, message dispatch
 //! - Event fan-out to connected clients via `BroadcastManager`
 //! - Graceful shutdown via `CancellationToken` coordination
+//!
+//! ## Crate Position
+//!
+//! HTTP/WS surface. Depends on all other tron crates.
 
 #![deny(unsafe_code)]
 

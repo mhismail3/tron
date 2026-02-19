@@ -366,6 +366,8 @@ impl DefaultProviderFactory {
 impl ProviderFactory for DefaultProviderFactory {
     async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         let bare_model = strip_provider_prefix(model);
+        // INVARIANT: unknown model/provider → fail-fast with typed error.
+        // No silent fallback or default provider substitution.
         let provider_type = detect_provider_from_model(model).ok_or_else(|| {
             ProviderError::UnsupportedModel {
                 model: model.to_string(),

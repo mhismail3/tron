@@ -2,6 +2,40 @@
 //!
 //! Tron agent server binary — wires together all crates and starts the
 //! HTTP/WebSocket server.
+//!
+//! ## Workspace Architecture
+//!
+//! ```text
+//! tron-core          Foundation types, errors, branded IDs, message model
+//! tron-settings      Settings schema, layered loading, global singleton
+//! tron-events        SQLite event store, migrations, session reconstruction
+//! tron-llm           Provider trait, model registry, SSE streaming, auth
+//! tron-tools         Tool trait, registry, filesystem/bash/web/browser/subagent tools
+//! tron-skills        SKILL.md parser, registry, context injection
+//! tron-embeddings    ONNX embeddings (Qwen3-0.6B), vector search
+//! tron-transcription Native transcription (parakeet-tdt-0.6b via ONNX)
+//! tron-runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
+//! tron-server        Axum HTTP/WS, RPC handlers, event bridge, APNS
+//! tron-agent         This binary — wires all crates, CLI, DB startup
+//! ```
+//!
+//! ## Data Path
+//!
+//! 1. Client sends JSON-RPC over WebSocket
+//! 2. `tron-server` dispatches to RPC handlers
+//! 3. Handlers call runtime/orchestrator/event store
+//! 4. iOS compatibility adapted at boundary (`rpc/adapters.rs`)
+//! 5. Events broadcast back through WebSocket channels
+//!
+//! ## Core Invariants
+//!
+//! 1. Canonical internal model per concept; iOS adaptation is boundary-only
+//! 2. Unknown model/provider → fail-fast typed error (no fallback)
+//! 3. Event reconstruction is deterministic from persisted events
+//! 4. Session writes are serialized per-session via in-process locks
+//! 5. `agent.ready` is emitted AFTER `agent.complete` (iOS send button)
+//! 6. Compaction always runs before ledger writing (deterministic DB ordering)
+//! 7. Production DB target is strictly `~/.tron/database/tron.db`
 
 #![deny(unsafe_code)]
 

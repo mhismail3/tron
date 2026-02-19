@@ -8,6 +8,12 @@
 //! - **Stream processor**: Consumes `Stream<StreamEvent>`, accumulates content blocks
 //! - **Agent runner**: High-level: skill injection, user content building, interrupt handling
 //! - **Orchestrator**: Multi-session management with event broadcasting
+//!
+//! ## Crate Position
+//!
+//! Aggregation layer. Depends on: tron-core, tron-events, tron-llm, tron-tools,
+//! tron-skills, tron-settings.
+//! Depended on by: tron-server.
 
 #![deny(unsafe_code)]
 

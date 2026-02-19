@@ -11,6 +11,11 @@
 //! → TDT greedy decode (decoder_joint-model.onnx in loop) → token IDs
 //! → vocab.txt lookup → text string
 //! ```
+//!
+//! ## Crate Position
+//!
+//! Standalone (no tron crate dependencies).
+//! Depended on by: tron-server.
 
 pub(crate) mod audio;
 pub(crate) mod decoder;

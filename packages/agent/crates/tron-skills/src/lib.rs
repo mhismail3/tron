@@ -28,6 +28,11 @@
 //! println!("Cleaned: {}", result.cleaned_prompt);
 //! println!("Context: {}", result.skill_context);
 //! ```
+//!
+//! ## Crate Position
+//!
+//! Standalone (no tron crate dependencies).
+//! Depended on by: tron-runtime, tron-server.
 
 #![deny(unsafe_code)]
 

@@ -14,6 +14,11 @@
 //! - **UI**: `AskUserQuestion`, `NotifyApp`, `TaskManager`, `RenderAppUI`
 //! - **Subagent**: `SpawnSubagent`, `QueryAgent`, `WaitForAgents`
 //! - **Communication**: `send_message`, `receive_messages`
+//!
+//! ## Crate Position
+//!
+//! Depends on: tron-core.
+//! Depended on by: tron-runtime, tron-server.
 
 #![deny(unsafe_code)]
 // The TronTool trait returns `&str` from `fn name()` — clippy's `unnecessary_literal_bound`
