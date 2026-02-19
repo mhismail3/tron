@@ -18,6 +18,18 @@ struct ServerSettingsSection: View {
                 .onSubmit { onHostSubmit() }
 
             HStack {
+                TextField("Port", text: $serverPort)
+                    .font(TronTypography.subheadline)
+                    .keyboardType(.numberPad)
+                    .frame(width: 60)
+                    .onChange(of: serverPort) { _, newValue in
+                        if !newValue.isEmpty {
+                            onPortChange(newValue)
+                        }
+                    }
+
+                Spacer()
+
                 Picker("", selection: Binding(
                     get: { selectedEnvironment },
                     set: { onEnvironmentChange($0) }
@@ -26,20 +38,7 @@ struct ServerSettingsSection: View {
                     Text("Prod").tag("prod")
                 }
                 .pickerStyle(.segmented)
-                .fixedSize()
-
-                Spacer()
-
-                TextField("Port", text: $serverPort)
-                    .font(TronTypography.subheadline)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 60)
-                    .onChange(of: serverPort) { _, newValue in
-                        if !newValue.isEmpty {
-                            onPortChange(newValue)
-                        }
-                    }
+                .frame(width: 160)
             }
         } header: {
             Text("Server")
