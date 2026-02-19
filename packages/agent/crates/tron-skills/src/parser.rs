@@ -219,7 +219,7 @@ fn extract_description(content: &str) -> String {
         // Found a content line
         let desc = trimmed.to_string();
         if desc.len() > 200 {
-            return desc[..200].to_string();
+            return desc[..desc.floor_char_boundary(200)].to_string();
         }
         return desc;
     }
@@ -232,12 +232,12 @@ fn is_horizontal_rule(line: &str) -> bool {
     if line.len() < 3 {
         return false;
     }
-    let chars: Vec<char> = line.chars().collect();
-    let first = chars[0];
+    let mut chars = line.chars();
+    let first = chars.next().unwrap();
     if first != '-' && first != '*' && first != '_' {
         return false;
     }
-    chars.iter().all(|&c| c == first)
+    chars.all(|c| c == first)
 }
 
 #[cfg(test)]
@@ -381,6 +381,18 @@ This is the body."#;
         let content = format!("# Header\n\n{long_line}");
         let result = parse_skill_md(&content);
         assert_eq!(result.description.len(), 200);
+    }
+
+    #[test]
+    fn test_description_truncation_multibyte_utf8() {
+        // Each emoji is 4 bytes. 51 emojis = 204 bytes, so byte 200 is mid-char.
+        let emojis = "\u{1F600}".repeat(51);
+        let content = format!("# Header\n\n{emojis}");
+        let result = parse_skill_md(&content);
+        assert!(result.description.len() <= 200);
+        assert!(result.description.is_char_boundary(result.description.len()));
+        // Should truncate to 50 emojis = 200 bytes
+        assert_eq!(result.description.chars().count(), 50);
     }
 
     #[test]

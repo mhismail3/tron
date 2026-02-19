@@ -10,6 +10,7 @@ use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
 
+/// Shape skill for the iOS wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
 fn skill_to_wire(skill: &tron_skills::types::SkillMetadata) -> Value {
     serde_json::json!({
         "name": skill.name,
@@ -85,7 +86,7 @@ impl MethodHandler for RefreshSkillsHandler {
         let working_dir = working_dir.to_string();
         let count = task::spawn_blocking(move || {
             let mut registry = skill_registry.write();
-            registry.initialize(&working_dir);
+            registry.refresh(&working_dir);
             registry.list(None).len()
         })
         .await
@@ -296,6 +297,24 @@ mod tests {
         let ctx = make_test_context();
         let result = ListSkillsHandler.handle(None, &ctx).await.unwrap();
         assert!(result["skills"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn refresh_clears_stale_skills() {
+        let ctx = make_test_context();
+        ctx.skill_registry.write().insert(make_skill("stale-skill"));
+        assert!(ctx.skill_registry.read().has("stale-skill"));
+
+        // Refresh with empty tmpdir — stale-skill should be gone
+        let result = RefreshSkillsHandler
+            .handle(
+                Some(json!({"workingDirectory": "/tmp/empty-nonexistent"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["success"], true);
+        assert!(!ctx.skill_registry.read().has("stale-skill"));
     }
 
     #[tokio::test]

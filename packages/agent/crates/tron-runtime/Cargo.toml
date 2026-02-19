@@ -17,7 +17,6 @@ tron-core.workspace = true
 tron-events.workspace = true
 tron-llm.workspace = true
 tron-tools.workspace = true
-tron-skills = { path = "../tron-skills" }
 tron-settings.workspace = true
 async-trait.workspace = true
 serde.workspace = true

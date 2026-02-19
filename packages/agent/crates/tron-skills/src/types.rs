@@ -190,8 +190,8 @@ pub struct SkillInjectionResult {
     pub original_prompt: String,
     /// Prompt with `@references` removed.
     pub cleaned_prompt: String,
-    /// Successfully injected skills.
-    pub injected_skills: Vec<SkillMetadata>,
+    /// Successfully injected skills (lightweight — no full content).
+    pub injected_skills: Vec<SkillInfo>,
     /// Skills referenced but not found.
     pub not_found_skills: Vec<String>,
     /// Generated `<skills>` XML context block.

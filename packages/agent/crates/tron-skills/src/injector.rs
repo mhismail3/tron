@@ -3,10 +3,17 @@
 //! Extracts `@skill-name` references from user prompts, builds XML context
 //! blocks for skill injection, and processes prompts for the LLM.
 
+use std::sync::LazyLock;
+
 use regex::Regex;
 
 use crate::registry::SkillRegistry;
-use crate::types::{SkillInjectionResult, SkillMetadata, SkillReference};
+use crate::types::{SkillInjectionResult, SkillInfo, SkillMetadata, SkillReference};
+
+static SKILL_REF_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"@([a-zA-Z][a-zA-Z0-9_-]*)").unwrap());
+
+static MULTI_SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" {2,}").unwrap());
 
 /// Extract `@skill-name` references from a user prompt.
 ///
@@ -14,10 +21,7 @@ use crate::types::{SkillInjectionResult, SkillMetadata, SkillReference};
 /// Email addresses like `user@example.com` are not matched (word char before `@`
 /// disqualifies it).
 pub fn extract_skill_references(prompt: &str) -> Vec<SkillReference> {
-    let Ok(pattern) = Regex::new(r"@([a-zA-Z][a-zA-Z0-9_-]*)") else {
-        return Vec::new();
-    };
-
+    let pattern = &*SKILL_REF_PATTERN;
     let mut references = Vec::new();
     let mut in_code_block = false;
     let mut global_offset = 0;
@@ -76,30 +80,31 @@ pub fn extract_skill_references(prompt: &str) -> Vec<SkillReference> {
 
 /// Remove `@skill-name` references from a prompt.
 ///
-/// References are removed by position (from end to start to preserve indices).
+/// Collects the kept ranges between references in a single forward pass.
 /// Resulting multiple spaces are collapsed.
 pub fn remove_skill_references(prompt: &str, references: &[SkillReference]) -> String {
     if references.is_empty() {
         return prompt.to_string();
     }
 
-    let mut result = prompt.to_string();
-
-    // Sort by position descending to remove from end first
+    // Sort by position ascending to collect kept ranges in one pass
     let mut sorted_refs: Vec<&SkillReference> = references.iter().collect();
-    sorted_refs.sort_by(|a, b| b.start.cmp(&a.start));
+    sorted_refs.sort_by_key(|r| r.start);
 
-    for reference in sorted_refs {
-        if reference.start < result.len() && reference.end <= result.len() {
-            result = format!("{}{}", &result[..reference.start], &result[reference.end..]);
+    let mut result = String::with_capacity(prompt.len());
+    let mut cursor = 0;
+
+    for reference in &sorted_refs {
+        if reference.start > cursor && reference.end <= prompt.len() {
+            result.push_str(&prompt[cursor..reference.start]);
         }
+        cursor = reference.end;
+    }
+    if cursor < prompt.len() {
+        result.push_str(&prompt[cursor..]);
     }
 
-    // Collapse multiple spaces
-    let Ok(multi_space) = Regex::new(r" {2,}") else {
-        return result.trim().to_string();
-    };
-    multi_space.replace_all(&result, " ").trim().to_string()
+    MULTI_SPACE.replace_all(&result, " ").trim().to_string()
 }
 
 /// Build a `<skills>` XML context block from skill metadata.
@@ -166,13 +171,12 @@ pub fn process_prompt_for_skills(prompt: &str, registry: &SkillRegistry) -> Skil
     let (found, not_found) = registry.get_many(&unique_names);
 
     let cleaned = remove_skill_references(prompt, &references);
-    let skill_refs: Vec<&SkillMetadata> = found.clone();
-    let context = build_skill_context(&skill_refs);
+    let context = build_skill_context(&found);
 
     SkillInjectionResult {
         original_prompt: prompt.to_string(),
         cleaned_prompt: cleaned,
-        injected_skills: found.into_iter().cloned().collect(),
+        injected_skills: found.iter().map(|s| SkillInfo::from(*s)).collect(),
         not_found_skills: not_found,
         skill_context: context,
     }
@@ -215,11 +219,18 @@ fn build_tool_preferences(skill: &SkillMetadata) -> String {
 
 /// Escape XML special characters.
 fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -356,6 +367,15 @@ mod tests {
     fn test_remove_no_references() {
         let cleaned = remove_skill_references("No changes", &[]);
         assert_eq!(cleaned, "No changes");
+    }
+
+    #[test]
+    fn test_remove_adjacent_references() {
+        let prompt = "Run @browser @git now";
+        let refs = extract_skill_references(prompt);
+        assert_eq!(refs.len(), 2);
+        let cleaned = remove_skill_references(prompt, &refs);
+        assert_eq!(cleaned, "Run now");
     }
 
     // --- build_skill_context ---

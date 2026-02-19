@@ -4940,7 +4940,6 @@ dependencies = [
  "tron-events",
  "tron-llm",
  "tron-settings",
- "tron-skills",
  "tron-tools",
  "uuid",
  "walkdir",
@@ -5004,15 +5003,12 @@ dependencies = [
 name = "tron-skills"
 version = "0.1.0"
 dependencies = [
- "insta",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
- "tron-core",
- "walkdir",
 ]
 
 [[package]]

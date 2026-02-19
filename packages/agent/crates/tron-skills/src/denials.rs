@@ -6,6 +6,8 @@
 //!
 //! If both are specified, `deniedTools` takes precedence with a warning.
 
+use std::collections::HashSet;
+
 use tracing::warn;
 
 use crate::types::{SkillFrontmatter, SkillSubagentMode, ToolDenialConfig};
@@ -40,10 +42,16 @@ pub fn skill_frontmatter_to_denials(
     }
 
     if has_allowed {
-        let allowed = frontmatter.allowed_tools.as_ref().unwrap();
+        let allowed: HashSet<&str> = frontmatter
+            .allowed_tools
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(String::as_str)
+            .collect();
         let denied_tools: Vec<String> = all_available_tools
             .iter()
-            .filter(|tool| !allowed.contains(tool))
+            .filter(|tool| !allowed.contains(tool.as_str()))
             .cloned()
             .collect();
         let denied_patterns = frontmatter.denied_patterns.clone().unwrap_or_default();
