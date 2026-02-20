@@ -6,7 +6,7 @@
 //! |--------|---------|
 //! | `connection` | Per-connection state (session binding, send channel, liveness flags) |
 //! | `handler` | JSON-RPC message parsing, method dispatch, response framing |
-//! | `event_bridge` | Orchestrator events → WebSocket broadcast (+ iOS adaptation) |
+//! | `event_bridge` | Orchestrator events → WebSocket broadcast |
 //! | `broadcast` | Fan-out manager: subscribe/unsubscribe, per-session filtering |
 //! | `session` | Full session lifecycle — heartbeat lives in the outbound forwarder |
 //!
