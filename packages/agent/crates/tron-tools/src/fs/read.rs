@@ -164,7 +164,6 @@ impl TronTool for ReadTool {
                     ..Default::default()
                 },
             )
-            .content
         } else {
             output
         };

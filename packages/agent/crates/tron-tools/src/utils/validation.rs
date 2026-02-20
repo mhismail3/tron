@@ -38,22 +38,9 @@ pub fn validate_path_not_root(path: &str, param: &str) -> Result<(), TronToolRes
     Ok(())
 }
 
-/// Validate a string is non-empty.
-pub fn validate_non_empty_string(value: &str, param: &str) -> Result<(), TronToolResult> {
-    if value.is_empty() {
-        return Err(error_result(format!("Parameter {param} must not be empty")));
-    }
-    Ok(())
-}
-
 /// Extract an optional string parameter.
 pub fn get_optional_string(args: &Value, param: &str) -> Option<String> {
     args.get(param).and_then(Value::as_str).map(String::from)
-}
-
-/// Extract an optional number parameter.
-pub fn get_optional_number(args: &Value, param: &str) -> Option<f64> {
-    args.get(param).and_then(Value::as_f64)
 }
 
 /// Extract an optional boolean parameter.
@@ -64,18 +51,6 @@ pub fn get_optional_bool(args: &Value, param: &str) -> Option<bool> {
 /// Extract an optional integer parameter.
 pub fn get_optional_u64(args: &Value, param: &str) -> Option<u64> {
     args.get(param).and_then(Value::as_u64)
-}
-
-/// Extract an optional array of strings.
-pub fn get_optional_string_array(args: &Value, param: &str) -> Option<Vec<String>> {
-    args.get(param).and_then(|v| {
-        v.as_array().map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(String::from)
-                .collect()
-        })
-    })
 }
 
 #[cfg(test)]
@@ -155,9 +130,4 @@ mod tests {
         assert_eq!(get_optional_string(&args, "key"), None);
     }
 
-    #[test]
-    fn get_optional_number_present() {
-        let args = json!({"n": 3.14});
-        assert_eq!(get_optional_number(&args, "n"), Some(3.14));
-    }
 }

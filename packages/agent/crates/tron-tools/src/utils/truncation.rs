@@ -27,38 +27,16 @@ pub struct TruncateOptions {
     pub truncation_message: Option<String>,
 }
 
-/// Result of truncation.
-#[derive(Clone, Debug)]
-pub struct TruncateResult {
-    /// The (possibly truncated) content.
-    pub content: String,
-    /// Whether truncation occurred.
-    pub truncated: bool,
-    /// Estimated tokens of the original content.
-    pub original_tokens: usize,
-    /// Estimated tokens of the final content.
-    pub final_tokens: usize,
-}
-
 /// Truncate output to fit within a token budget.
 ///
 /// If the output fits within `max_tokens`, returns it unchanged.
 /// Otherwise, preserves the first `preserve_start_lines` and last
 /// `preserve_end_lines`, inserting a truncation indicator in the middle.
-pub fn truncate_output(
-    output: &str,
-    max_tokens: usize,
-    options: &TruncateOptions,
-) -> TruncateResult {
+pub fn truncate_output(output: &str, max_tokens: usize, options: &TruncateOptions) -> String {
     let original_tokens = estimate_tokens(output.len());
 
     if original_tokens <= max_tokens {
-        return TruncateResult {
-            content: output.to_owned(),
-            truncated: false,
-            original_tokens,
-            final_tokens: original_tokens,
-        };
+        return output.to_owned();
     }
 
     let max_chars = tokens_to_chars(max_tokens);
@@ -89,38 +67,22 @@ pub fn truncate_output(
             String::new()
         };
 
-        let combined = if end_part.is_empty() {
+        return if end_part.is_empty() {
             format!("{start_part}{message}")
         } else {
             format!("{start_part}{message}{end_part}")
-        };
-
-        let final_tokens = estimate_tokens(combined.len());
-        return TruncateResult {
-            content: combined,
-            truncated: true,
-            original_tokens,
-            final_tokens,
         };
     }
 
     // Simple character-based truncation (UTF-8–safe)
     let available = max_chars.saturating_sub(message_chars);
-    let truncated_content = if available > 0 && available < output.len() {
+    if available > 0 && available < output.len() {
         let safe_slice = tron_core::text::truncate_str(output, available);
         // Try to break at a line boundary
         let break_at = safe_slice.rfind('\n').map_or(safe_slice.len(), |pos| pos);
         format!("{}{message}", &output[..break_at])
     } else {
-        message.clone()
-    };
-
-    let final_tokens = estimate_tokens(truncated_content.len());
-    TruncateResult {
-        content: truncated_content,
-        truncated: true,
-        original_tokens,
-        final_tokens,
+        message
     }
 }
 
@@ -147,24 +109,21 @@ mod tests {
     fn within_budget_no_truncation() {
         let output = "hello world";
         let result = truncate_output(output, 100, &TruncateOptions::default());
-        assert!(!result.truncated);
-        assert_eq!(result.content, "hello world");
+        assert_eq!(result, "hello world");
     }
 
     #[test]
     fn over_budget_truncated_with_message() {
         let output = "a".repeat(1000);
         let result = truncate_output(&output, 10, &TruncateOptions::default());
-        assert!(result.truncated);
-        assert!(result.content.contains("truncated"));
+        assert!(result.contains("truncated"));
+        assert!(result.len() < output.len());
     }
 
     #[test]
     fn empty_string_no_truncation() {
         let result = truncate_output("", 100, &TruncateOptions::default());
-        assert!(!result.truncated);
-        assert_eq!(result.content, "");
-        assert_eq!(result.original_tokens, 0);
+        assert_eq!(result, "");
     }
 
     #[test]
@@ -172,8 +131,7 @@ mod tests {
         // 20 chars = 5 tokens
         let output = "a".repeat(20);
         let result = truncate_output(&output, 5, &TruncateOptions::default());
-        assert!(!result.truncated);
-        assert_eq!(result.content, output);
+        assert_eq!(result, output);
     }
 
     #[test]
@@ -185,9 +143,9 @@ mod tests {
             ..Default::default()
         };
         let result = truncate_output(&output, 10, &opts);
-        assert!(result.truncated);
-        assert!(result.content.starts_with("line 1\n"));
-        assert!(result.content.contains("line 5"));
+        assert!(result.starts_with("line 1\n"));
+        assert!(result.contains("line 5"));
+        assert!(result.contains("truncated"));
     }
 
     #[test]
@@ -199,8 +157,8 @@ mod tests {
             ..Default::default()
         };
         let result = truncate_output(&output, 10, &opts);
-        assert!(result.truncated);
-        assert!(result.content.contains("line 100"));
+        assert!(result.contains("line 100"));
+        assert!(result.contains("truncated"));
     }
 
     #[test]
@@ -213,10 +171,9 @@ mod tests {
             ..Default::default()
         };
         let result = truncate_output(&output, 10, &opts);
-        assert!(result.truncated);
-        assert!(result.content.starts_with("line 1\n"));
-        assert!(result.content.contains("line 100"));
-        assert!(result.content.contains("truncated"));
+        assert!(result.starts_with("line 1\n"));
+        assert!(result.contains("line 100"));
+        assert!(result.contains("truncated"));
     }
 
     #[test]
@@ -224,9 +181,7 @@ mod tests {
         let output = "a".repeat(1000);
         // Budget so small even the message exceeds it
         let result = truncate_output(&output, 1, &TruncateOptions::default());
-        assert!(result.truncated);
-        // Still returns the truncation message
-        assert!(result.content.contains("truncated"));
+        assert!(result.contains("truncated"));
     }
 
     #[test]
@@ -237,17 +192,7 @@ mod tests {
             ..Default::default()
         };
         let result = truncate_output(&output, 10, &opts);
-        assert!(result.truncated);
-        assert!(result.content.contains("[SNIP]"));
-    }
-
-    #[test]
-    fn original_and_final_tokens_correct() {
-        let output = "a".repeat(400); // 100 tokens
-        let result = truncate_output(&output, 10, &TruncateOptions::default());
-        assert!(result.truncated);
-        assert_eq!(result.original_tokens, 100);
-        assert!(result.final_tokens <= result.original_tokens);
+        assert!(result.contains("[SNIP]"));
     }
 
     #[test]
@@ -259,14 +204,14 @@ mod tests {
             output.push('\n');
         }
         let result = truncate_output(&output, 50, &TruncateOptions::default());
-        assert!(result.truncated);
+        assert!(result.len() < output.len());
+        assert!(result.contains("truncated"));
     }
 
     #[test]
     fn very_large_input() {
         let output = "a".repeat(100_000);
         let result = truncate_output(&output, 100, &TruncateOptions::default());
-        assert!(result.truncated);
-        assert!(result.content.len() < output.len());
+        assert!(result.len() < output.len());
     }
 }

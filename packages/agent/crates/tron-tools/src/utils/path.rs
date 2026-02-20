@@ -18,32 +18,6 @@ pub fn resolve_path(file_path: &str, working_directory: &str) -> PathBuf {
     }
 }
 
-/// Expand `~` prefix to the user's home directory.
-///
-/// Only expands a leading `~/` or a bare `~`. Does not expand `~user` forms.
-pub fn expand_home(path: &str) -> String {
-    if path == "~" || path.starts_with("~/") {
-        if let Some(home) = home_dir() {
-            return path.replacen('~', &home, 1);
-        }
-    }
-    path.to_owned()
-}
-
-fn home_dir() -> Option<String> {
-    std::env::var("HOME").ok().or_else(dirs_fallback)
-}
-
-#[cfg(unix)]
-fn dirs_fallback() -> Option<String> {
-    None
-}
-
-#[cfg(not(unix))]
-fn dirs_fallback() -> Option<String> {
-    std::env::var("USERPROFILE").ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,19 +44,5 @@ mod tests {
     fn resolve_parent_reference() {
         let result = resolve_path("../foo", "/home/user/project");
         assert_eq!(result, PathBuf::from("/home/user/project/../foo"));
-    }
-
-    #[test]
-    fn expand_home_tilde() {
-        // This test depends on HOME being set, which it is in CI and dev
-        let result = expand_home("~/foo");
-        assert!(!result.starts_with('~'));
-        assert!(result.ends_with("/foo"));
-    }
-
-    #[test]
-    fn expand_home_absolute_unchanged() {
-        let result = expand_home("/absolute/path");
-        assert_eq!(result, "/absolute/path");
     }
 }
