@@ -17,11 +17,18 @@
 //! Standalone (no tron crate dependencies).
 //! Depended on by: tron-server.
 
-pub(crate) mod audio;
-pub(crate) mod decoder;
-pub mod engine;
+// Always available (no heavy deps)
 pub mod model;
 pub mod types;
 
-pub use engine::TranscriptionEngine;
+// Feature-gated (require ort + symphonia + rubato)
+#[cfg(feature = "ort")]
+pub(crate) mod audio;
+#[cfg(feature = "ort")]
+pub(crate) mod decoder;
+#[cfg(feature = "ort")]
+pub mod engine;
+
 pub use types::{ResultExt, TranscriptionError, TranscriptionResult};
+#[cfg(feature = "ort")]
+pub use engine::TranscriptionEngine;

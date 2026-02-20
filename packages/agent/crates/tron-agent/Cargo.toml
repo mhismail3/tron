@@ -9,6 +9,11 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["embeddings", "transcription"]
+embeddings = ["tron-embeddings/ort"]
+transcription = ["tron-transcription/ort"]
+
 [[bin]]
 name = "tron"
 path = "src/main.rs"
@@ -17,7 +22,7 @@ path = "src/main.rs"
 tron-core.workspace = true
 tron-events.workspace = true
 tron-settings.workspace = true
-tron-embeddings = { workspace = true, features = ["ort"] }
+tron-embeddings.workspace = true
 tron-llm.workspace = true
 tron-runtime.workspace = true
 tron-tools.workspace = true

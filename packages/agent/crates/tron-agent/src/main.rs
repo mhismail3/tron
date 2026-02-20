@@ -361,56 +361,64 @@ async fn main() -> Result<()> {
     let embedding_controller: Option<
         Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>,
     > = {
-        let emb_settings = &settings.context.memory.embedding;
-        if emb_settings.enabled {
-            let emb_config = tron_embeddings::EmbeddingConfig::from_settings(emb_settings);
-            let mut ctrl = tron_embeddings::EmbeddingController::new(emb_config.clone());
+        #[cfg(feature = "embeddings")]
+        {
+            let emb_settings = &settings.context.memory.embedding;
+            if emb_settings.enabled {
+                let emb_config = tron_embeddings::EmbeddingConfig::from_settings(emb_settings);
+                let mut ctrl = tron_embeddings::EmbeddingController::new(emb_config.clone());
 
-            // Create vector repository with a dedicated connection (VectorRepository owns a
-            // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
-            let vec_conn = rusqlite::Connection::open(&db_path).expect("db connection for vectors");
-            vec_conn
-                .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
-                .expect("vector connection pragmas");
-            let repo = tron_embeddings::VectorRepository::new(vec_conn, emb_config.dimensions);
-            repo.ensure_table().expect("vector table creation");
-            ctrl.set_vector_repo(Arc::new(parking_lot::Mutex::new(repo)));
+                // Create vector repository with a dedicated connection (VectorRepository owns a
+                // raw rusqlite::Connection, not a pooled one, because it's behind parking_lot::Mutex).
+                let vec_conn = rusqlite::Connection::open(&db_path).expect("db connection for vectors");
+                vec_conn
+                    .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
+                    .expect("vector connection pragmas");
+                let repo = tron_embeddings::VectorRepository::new(vec_conn, emb_config.dimensions);
+                repo.ensure_table().expect("vector table creation");
+                ctrl.set_vector_repo(Arc::new(parking_lot::Mutex::new(repo)));
 
-            let ctrl_arc = Arc::new(tokio::sync::Mutex::new(ctrl));
+                let ctrl_arc = Arc::new(tokio::sync::Mutex::new(ctrl));
 
-            // Fire-and-forget: load ONNX model + backfill unembedded entries
-            let service = Arc::new(tron_embeddings::ort_service::OnnxEmbeddingService::new(
-                emb_config,
-            ));
-            let service_clone = Arc::clone(&service);
-            let ctrl_for_init = Arc::clone(&ctrl_arc);
+                // Fire-and-forget: load ONNX model + backfill unembedded entries
+                let service = Arc::new(tron_embeddings::ort_service::OnnxEmbeddingService::new(
+                    emb_config,
+                ));
+                let service_clone = Arc::clone(&service);
+                let ctrl_for_init = Arc::clone(&ctrl_arc);
 
-            let _embed_init_handle = tokio::spawn(async move {
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(120),
-                    service_clone.initialize(),
-                )
-                .await
-                {
-                    Ok(Ok(())) => {
-                        ctrl_for_init.lock().await.set_service(service_clone);
-                        tracing::info!("embedding service ready — semantic memory enabled");
+                let _embed_init_handle = tokio::spawn(async move {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(120),
+                        service_clone.initialize(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {
+                            ctrl_for_init.lock().await.set_service(service_clone);
+                            tracing::info!("embedding service ready — semantic memory enabled");
+                        }
+                        Ok(Err(e)) => {
+                            tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
+                        }
+                        Err(_) => {
+                            tracing::error!(
+                                "embedding service init timed out after 120s — semantic memory disabled"
+                            );
+                        }
                     }
-                    Ok(Err(e)) => {
-                        tracing::warn!(error = %e, "embedding service init failed — semantic memory disabled");
-                    }
-                    Err(_) => {
-                        tracing::error!(
-                            "embedding service init timed out after 120s — semantic memory disabled"
-                        );
-                    }
-                }
-            });
+                });
 
-            tracing::info!("embedding controller created (vector repo ready)");
-            Some(ctrl_arc)
-        } else {
-            tracing::info!("embeddings disabled in settings");
+                tracing::info!("embedding controller created (vector repo ready)");
+                Some(ctrl_arc)
+            } else {
+                tracing::info!("embeddings disabled in settings");
+                None
+            }
+        }
+        #[cfg(not(feature = "embeddings"))]
+        {
+            tracing::info!("embeddings feature disabled");
             None
         }
     };
@@ -509,23 +517,31 @@ async fn main() -> Result<()> {
 
     // Native transcription engine (load if model files are cached)
     let transcription_engine = {
-        let model_dir = tron_transcription::model::default_model_dir();
-        if tron_transcription::model::is_model_cached(&model_dir) {
-            tracing::info!("transcription model cached — loading native engine");
-            match tron_transcription::TranscriptionEngine::new(model_dir).await {
-                Ok(engine) => {
-                    tracing::info!("native transcription engine ready");
-                    Some(engine)
+        #[cfg(feature = "transcription")]
+        {
+            let model_dir = tron_transcription::model::default_model_dir();
+            if tron_transcription::model::is_model_cached(&model_dir) {
+                tracing::info!("transcription model cached — loading native engine");
+                match tron_transcription::TranscriptionEngine::new(model_dir).await {
+                    Ok(engine) => {
+                        tracing::info!("native transcription engine ready");
+                        Some(engine)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to load transcription engine, using sidecar fallback");
+                        None
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to load transcription engine, using sidecar fallback");
-                    None
-                }
+            } else {
+                tracing::info!(
+                    "transcription model not cached — sidecar fallback (call transcribe.downloadModel to enable native)"
+                );
+                None
             }
-        } else {
-            tracing::info!(
-                "transcription model not cached — sidecar fallback (call transcribe.downloadModel to enable native)"
-            );
+        }
+        #[cfg(not(feature = "transcription"))]
+        {
+            tracing::info!("transcription feature disabled");
             None
         }
     };

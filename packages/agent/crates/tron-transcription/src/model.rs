@@ -2,11 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "ort")]
+use crate::types::{ResultExt, TranscriptionError};
+#[cfg(feature = "ort")]
 use tracing::{debug, info, warn};
 
-use crate::types::{ResultExt, TranscriptionError};
-
 /// `HuggingFace` repository for the ONNX parakeet model.
+#[cfg(feature = "ort")]
 const HF_REPO: &str = "istupakov/parakeet-tdt-0.6b-v3-onnx";
 
 /// Typed paths for the 5 required model files.
@@ -73,6 +75,7 @@ pub fn is_model_cached(model_dir: impl AsRef<Path>) -> bool {
 ///
 /// Uses `hf-hub` to download from the `istupakov/parakeet-tdt-0.6b-v3-onnx` repo.
 /// Files are stored in `HuggingFace`'s cache, then symlinked/copied to `model_dir`.
+#[cfg(feature = "ort")]
 pub async fn ensure_model(model_dir: impl AsRef<Path>) -> Result<(), TranscriptionError> {
     let model_dir = model_dir.as_ref().to_path_buf();
 
@@ -91,6 +94,7 @@ pub async fn ensure_model(model_dir: impl AsRef<Path>) -> Result<(), Transcripti
         .model("task join")?
 }
 
+#[cfg(feature = "ort")]
 fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
     let api = hf_hub::api::sync::Api::new().model("HF API init")?;
     let repo = api.model(HF_REPO.to_string());
@@ -126,6 +130,7 @@ fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
 }
 
 /// Load vocabulary from vocab.txt (one token per line).
+#[cfg(feature = "ort")]
 pub fn load_vocab(vocab_path: &Path) -> Result<Vec<String>, TranscriptionError> {
     let content = std::fs::read_to_string(vocab_path).model("read vocab.txt")?;
     Ok(content.lines().map(String::from).collect())

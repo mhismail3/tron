@@ -25,9 +25,8 @@ tron-runtime = { path = "../tron-runtime" }
 tron-tools = { path = "../tron-tools" }
 tron-skills = { path = "../tron-skills" }
 tron-embeddings = { path = "../tron-embeddings" }
-tron-transcription = { path = "../tron-transcription" }
+tron-transcription = { path = "../tron-transcription", features = ["ort"] }
 axum.workspace = true
-axum-extra.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tokio.workspace = true
@@ -46,7 +45,6 @@ regex.workspace = true
 base64.workspace = true
 
 reqwest = { workspace = true, features = ["multipart"] }
-gix.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
 jsonwebtoken = { workspace = true, optional = true }
