@@ -42,21 +42,21 @@ impl TronTool for NotifyAppTool {
     fn definition(&self) -> Tool {
         ToolSchemaBuilder::new(
             "NotifyApp",
-            "Send a push notification to the Tron iOS app.\n\n\
+            "Send a push notification to the Tron iOS app. The user is often away — notify proactively and liberally.\n\n\
 ## When to Use\n\
-- Long-running task has completed and the user should know\n\
-- Important results are ready that need user attention\n\
-- User input is required and the app may be backgrounded\n\
-- Agent wants to prompt user to return to the conversation\n\n\
-## When NOT to Use\n\
-- For routine progress updates (use text output instead)\n\
-- When the user is actively engaged in the conversation\n\
-- For trivial or unimportant information\n\n\
+- Task completed or milestone reached\n\
+- Error, failure, or blocker encountered\n\
+- User input or decision needed\n\
+- Interesting finding worth sharing\n\
+- Build/test results ready\n\
+- Starting a long operation\n\
+- Session is idle and waiting\n\n\
 ## Guidelines\n\
+- Default to sending — a dismissed notification costs nothing, a missed one costs context\n\
 - Keep titles concise (max 50 chars)\n\
 - Keep body text brief (max 200 chars)\n\
-- Use high priority sparingly (only for urgent notifications)\n\
-- Include relevant context in the body to help user understand why they're being notified",
+- Use high priority for errors or blockers needing immediate attention\n\
+- Send notifications as events happen, don't batch them",
         )
         .required_property("title", json!({"type": "string", "description": "Notification title (max 50 chars)"}))
         .required_property("body", json!({"type": "string", "description": "Notification body (max 200 chars)"}))
