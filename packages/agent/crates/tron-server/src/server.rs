@@ -182,8 +182,9 @@ impl TronServer {
 
 /// GET /health
 async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
-    let connections = state.broadcast.connection_count().await;
-    let resp = health::health_check(state.start_time, connections, 0);
+    let connections = state.broadcast.connection_count();
+    let sessions = state.rpc_context.orchestrator.active_session_count();
+    let resp = health::health_check(state.start_time, connections, sessions);
     Json(resp)
 }
 
@@ -198,7 +199,7 @@ async fn ws_upgrade_handler(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
     // Enforce max_connections
-    let current = state.broadcast.connection_count().await;
+    let current = state.broadcast.connection_count();
     if current >= state.config.max_connections {
         tracing::warn!(
             current,
@@ -213,54 +214,31 @@ async fn ws_upgrade_handler(
     let ctx = state.rpc_context;
     let broadcast = state.broadcast;
     let max_message_size = state.config.max_message_size;
+    let ping_interval = Duration::from_secs(state.config.heartbeat_interval_secs);
+    let pong_timeout = Duration::from_secs(state.config.heartbeat_timeout_secs);
 
     Ok(ws
         .max_message_size(max_message_size)
-        .on_upgrade(move |socket| run_ws_session(socket, client_id, registry, ctx, broadcast)))
+        .on_upgrade(move |socket| {
+            run_ws_session(
+                socket,
+                client_id,
+                registry,
+                ctx,
+                broadcast,
+                ping_interval,
+                pong_timeout,
+            )
+        }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpc::handlers::test_helpers::make_test_context;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use std::path::PathBuf;
     use tower::ServiceExt;
-
-    fn make_test_rpc_context() -> RpcContext {
-        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
-        {
-            let conn = pool.get().unwrap();
-            let _ = tron_events::run_migrations(&conn).unwrap();
-        }
-        let store = Arc::new(tron_events::EventStore::new(pool));
-        let mgr = Arc::new(
-            tron_runtime::orchestrator::session_manager::SessionManager::new(store.clone()),
-        );
-        let orch = Arc::new(tron_runtime::orchestrator::orchestrator::Orchestrator::new(
-            mgr.clone(),
-            10,
-        ));
-        RpcContext {
-            orchestrator: orch,
-            session_manager: mgr,
-            event_store: store,
-            skill_registry: Arc::new(parking_lot::RwLock::new(
-                tron_skills::registry::SkillRegistry::new(),
-            )),
-            task_pool: None,
-            settings_path: PathBuf::from("/tmp/tron-test-settings.json"),
-            agent_deps: None,
-            server_start_time: std::time::Instant::now(),
-            browser_service: None,
-            transcription_engine: None,
-            subagent_manager: None,
-            embedding_controller: None,
-            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
-            shutdown_coordinator: None,
-            origin: "localhost:9847".to_string(),
-        }
-    }
 
     fn make_metrics_handle() -> PrometheusHandle {
         metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -269,7 +247,7 @@ mod tests {
     }
 
     fn make_server() -> TronServer {
-        let ctx = make_test_rpc_context();
+        let ctx = make_test_context();
         TronServer::new(
             ServerConfig::default(),
             MethodRegistry::new(),
@@ -289,7 +267,7 @@ mod tests {
     async fn broadcast_manager_accessible() {
         let server = make_server();
         let bm = server.broadcast();
-        assert_eq!(bm.connection_count().await, 0);
+        assert_eq!(bm.connection_count(), 0);
     }
 
     #[test]
@@ -367,7 +345,7 @@ mod tests {
             max_connections: 10,
             ..ServerConfig::default()
         };
-        let ctx = make_test_rpc_context();
+        let ctx = make_test_context();
         let server = TronServer::new(config, MethodRegistry::new(), ctx, make_metrics_handle());
         assert_eq!(server.config().host, "0.0.0.0");
         assert_eq!(server.config().port, 9090);
@@ -393,7 +371,33 @@ mod tests {
         assert!(parsed.get("status").is_some());
         assert!(parsed.get("uptime_secs").is_some());
         assert!(parsed.get("connections").is_some());
-        assert!(parsed.get("active_sessions").is_some());
+        assert_eq!(parsed["active_sessions"], 0);
+    }
+
+    #[tokio::test]
+    async fn health_reports_active_sessions_from_orchestrator() {
+        let ctx = make_test_context();
+        // Create a session so orchestrator reports 1
+        ctx.session_manager.create_session("claude-opus-4-6", "/tmp", None).unwrap();
+        let server = TronServer::new(
+            ServerConfig::default(),
+            MethodRegistry::new(),
+            ctx,
+            make_metrics_handle(),
+        );
+        let app = server.router();
+
+        let req = Request::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), 10_000)
+            .await
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["active_sessions"], 1);
     }
 
     #[tokio::test]

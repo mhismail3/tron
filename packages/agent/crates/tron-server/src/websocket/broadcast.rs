@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::rpc::types::RpcEvent;
 use metrics::counter;
@@ -10,13 +11,15 @@ use tracing::{debug, warn};
 
 use super::connection::ClientConnection;
 
-/// Number of consecutive drops before disconnecting a slow client.
-const MAX_CONSECUTIVE_DROPS: u64 = 100;
+/// Maximum total lifetime message drops before forcibly disconnecting a slow client.
+const MAX_TOTAL_DROPS: u64 = 100;
 
 /// Manages event broadcasting to connected clients.
 pub struct BroadcastManager {
     /// Connected clients indexed by connection ID.
     connections: RwLock<HashMap<String, Arc<ClientConnection>>>,
+    /// Atomic counter tracking total connections (avoids read-locking for count queries).
+    active_count: AtomicUsize,
 }
 
 impl BroadcastManager {
@@ -24,23 +27,48 @@ impl BroadcastManager {
     pub fn new() -> Self {
         Self {
             connections: RwLock::new(HashMap::new()),
+            active_count: AtomicUsize::new(0),
         }
     }
 
     /// Add a connection.
     pub async fn add(&self, connection: Arc<ClientConnection>) {
         let mut conns = self.connections.write().await;
-        let _ = conns.insert(connection.id.clone(), connection);
+        if conns.insert(connection.id.clone(), connection).is_none() {
+            let _ = self.active_count.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Remove a connection by ID.
     pub async fn remove(&self, connection_id: &str) {
         let mut conns = self.connections.write().await;
-        let _ = conns.remove(connection_id);
+        if conns.remove(connection_id).is_some() {
+            let _ = self.active_count.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 
     /// Broadcast an event to all connections bound to the given session.
     pub async fn broadcast_to_session(&self, session_id: &str, event: &RpcEvent) {
+        self.broadcast_to(
+            |c| c.session_id().as_deref() == Some(session_id),
+            event,
+            session_id,
+        )
+        .await;
+    }
+
+    /// Broadcast an event to all connections.
+    pub async fn broadcast_all(&self, event: &RpcEvent) {
+        self.broadcast_to(|_| true, event, "all").await;
+    }
+
+    /// Serialize event, fan out to matching clients, remove slow clients.
+    async fn broadcast_to(
+        &self,
+        filter: impl Fn(&ClientConnection) -> bool,
+        event: &RpcEvent,
+        label: &str,
+    ) {
         let json = match serde_json::to_string(event) {
             Ok(j) => Arc::new(j),
             Err(e) => {
@@ -53,74 +81,38 @@ impl BroadcastManager {
             let conns = self.connections.read().await;
             let mut recipients = 0u32;
             for conn in conns.values() {
-                if conn.session_id().as_deref() == Some(session_id) {
+                if filter(conn) {
                     recipients += 1;
                     if !conn.send(Arc::clone(&json)) {
                         counter!("ws_broadcast_drops_total").increment(1);
                         let drops = conn.drop_count();
-                        if drops >= MAX_CONSECUTIVE_DROPS {
-                            warn!(conn_id = %conn.id, session_id, drops, "disconnecting slow client");
+                        if drops >= MAX_TOTAL_DROPS {
+                            warn!(conn_id = %conn.id, label, drops, "disconnecting slow client");
                             to_remove.push(conn.id.clone());
                         } else {
-                            warn!(conn_id = %conn.id, session_id, total_drops = drops, "failed to send event to client (channel full)");
+                            warn!(conn_id = %conn.id, label, total_drops = drops, "failed to send event to client (channel full)");
                         }
                     }
                 }
             }
             debug!(
                 event_type = event.event_type,
-                session_id, recipients, "broadcast event to session"
+                label, recipients, "broadcast event"
             );
         }
         if !to_remove.is_empty() {
             let mut conns = self.connections.write().await;
             for id in &to_remove {
-                let _ = conns.remove(id);
-            }
-        }
-    }
-
-    /// Broadcast an event to all connections.
-    pub async fn broadcast_all(&self, event: &RpcEvent) {
-        let json = match serde_json::to_string(event) {
-            Ok(j) => Arc::new(j),
-            Err(e) => {
-                warn!(event_type = event.event_type, error = %e, "failed to serialize event");
-                return;
-            }
-        };
-        let mut to_remove = Vec::new();
-        {
-            let conns = self.connections.read().await;
-            for conn in conns.values() {
-                if !conn.send(Arc::clone(&json)) {
-                    counter!("ws_broadcast_drops_total").increment(1);
-                    let drops = conn.drop_count();
-                    if drops >= MAX_CONSECUTIVE_DROPS {
-                        warn!(conn_id = %conn.id, drops, "disconnecting slow client");
-                        to_remove.push(conn.id.clone());
-                    } else {
-                        warn!(conn_id = %conn.id, total_drops = drops, "failed to send event to client (channel full)");
-                    }
+                if conns.remove(id).is_some() {
+                    let _ = self.active_count.fetch_sub(1, Ordering::Relaxed);
                 }
-            }
-            debug!(
-                event_type = event.event_type,
-                recipients = conns.len(),
-                "broadcast event to all"
-            );
-        }
-        if !to_remove.is_empty() {
-            let mut conns = self.connections.write().await;
-            for id in &to_remove {
-                let _ = conns.remove(id);
             }
         }
     }
 
     /// Number of active connections.
-    pub async fn connection_count(&self) -> usize {
-        self.connections.read().await.len()
+    pub fn connection_count(&self) -> usize {
+        self.active_count.load(Ordering::Relaxed)
     }
 
     /// Get connections bound to a specific session.
@@ -152,7 +144,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(32);
         let conn = ClientConnection::new(id.into(), tx);
         if let Some(sid) = session {
-            conn.bind_session(sid.into());
+            conn.bind_session(sid);
         }
         (Arc::new(conn), rx)
     }
@@ -172,7 +164,7 @@ mod tests {
         let bm = BroadcastManager::new();
         let (conn, _rx) = make_connection_with_rx("c1", None);
         bm.add(conn).await;
-        assert_eq!(bm.connection_count().await, 1);
+        assert_eq!(bm.connection_count(), 1);
     }
 
     #[tokio::test]
@@ -181,14 +173,14 @@ mod tests {
         let (conn, _rx) = make_connection_with_rx("c1", None);
         bm.add(conn).await;
         bm.remove("c1").await;
-        assert_eq!(bm.connection_count().await, 0);
+        assert_eq!(bm.connection_count(), 0);
     }
 
     #[tokio::test]
     async fn remove_nonexistent_connection() {
         let bm = BroadcastManager::new();
         bm.remove("no_such").await;
-        assert_eq!(bm.connection_count().await, 0);
+        assert_eq!(bm.connection_count(), 0);
     }
 
     #[tokio::test]
@@ -231,16 +223,16 @@ mod tests {
     #[tokio::test]
     async fn connection_count() {
         let bm = BroadcastManager::new();
-        assert_eq!(bm.connection_count().await, 0);
+        assert_eq!(bm.connection_count(), 0);
 
         let (c1, _rx1) = make_connection_with_rx("c1", None);
         let (c2, _rx2) = make_connection_with_rx("c2", None);
         bm.add(c1).await;
-        assert_eq!(bm.connection_count().await, 1);
+        assert_eq!(bm.connection_count(), 1);
         bm.add(c2).await;
-        assert_eq!(bm.connection_count().await, 2);
+        assert_eq!(bm.connection_count(), 2);
         bm.remove("c1").await;
-        assert_eq!(bm.connection_count().await, 1);
+        assert_eq!(bm.connection_count(), 1);
     }
 
     #[tokio::test]
@@ -316,7 +308,7 @@ mod tests {
         let (c2, _rx2) = make_connection_with_rx("same_id", Some("sess_b"));
         bm.add(c1).await;
         bm.add(c2).await;
-        assert_eq!(bm.connection_count().await, 1);
+        assert_eq!(bm.connection_count(), 1);
         // Should be the second connection (sess_b)
         let conns = bm.session_connections("sess_b").await;
         assert_eq!(conns.len(), 1);
@@ -342,7 +334,7 @@ mod tests {
     #[tokio::test]
     async fn default_broadcast_manager() {
         let bm = BroadcastManager::default();
-        assert_eq!(bm.connection_count().await, 0);
+        assert_eq!(bm.connection_count(), 0);
     }
 
     #[tokio::test]
@@ -363,7 +355,7 @@ mod tests {
         // Create a slow client with buffer of 1
         let (tx, _rx) = mpsc::channel(1);
         let slow_conn = Arc::new(ClientConnection::new("slow".into(), tx));
-        slow_conn.bind_session("s".into());
+        slow_conn.bind_session("s");
 
         // Create a fast client with large buffer
         let (fast_conn, mut fast_rx) = make_connection_with_rx("fast", Some("s"));
@@ -375,13 +367,13 @@ mod tests {
         let event = make_event("test.event", Some("s"));
         // First send fills the buffer
         bm.broadcast_to_session("s", &event).await;
-        // Now send MAX_CONSECUTIVE_DROPS more to exceed the threshold
-        for _ in 0..MAX_CONSECUTIVE_DROPS {
+        // Now send MAX_TOTAL_DROPS more to exceed the threshold
+        for _ in 0..MAX_TOTAL_DROPS {
             bm.broadcast_to_session("s", &event).await;
         }
 
         // Slow client should have been disconnected
-        assert_eq!(bm.connection_count().await, 1);
+        assert_eq!(bm.connection_count(), 1);
         // Fast client should still be connected and received all messages
         assert!(fast_rx.try_recv().is_ok());
     }
@@ -400,7 +392,92 @@ mod tests {
         }
 
         // Fast client should still be connected
-        assert_eq!(bm.connection_count().await, 1);
+        assert_eq!(bm.connection_count(), 1);
+    }
+
+    #[test]
+    fn slow_client_threshold_constant_value() {
+        assert_eq!(MAX_TOTAL_DROPS, 100);
+    }
+
+    #[tokio::test]
+    async fn connection_count_consistent_after_add_remove_overwrite() {
+        let bm = BroadcastManager::new();
+        let (c1, _rx1) = make_connection_with_rx("c1", None);
+        let (c2, _rx2) = make_connection_with_rx("c2", None);
+        let (c1_dup, _rx3) = make_connection_with_rx("c1", Some("s"));
+        bm.add(c1).await;
+        bm.add(c2).await;
+        // Overwrite c1 — count should stay 2
+        bm.add(c1_dup).await;
+        assert_eq!(bm.connection_count(), 2);
+        bm.remove("c1").await;
+        assert_eq!(bm.connection_count(), 1);
+        bm.remove("c2").await;
+        assert_eq!(bm.connection_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn connection_count_decremented_on_slow_client_removal() {
+        let bm = BroadcastManager::new();
+        let (tx, _rx) = mpsc::channel(1);
+        let slow = Arc::new(ClientConnection::new("slow".into(), tx));
+        slow.bind_session("s");
+        let (fast, _fast_rx) = make_connection_with_rx("fast", Some("s"));
+        bm.add(slow).await;
+        bm.add(fast).await;
+        assert_eq!(bm.connection_count(), 2);
+
+        let event = make_event("test.drop", Some("s"));
+        // Fill channel + exceed threshold
+        for _ in 0..=MAX_TOTAL_DROPS {
+            bm.broadcast_to_session("s", &event).await;
+        }
+        // Slow client removed, count decremented
+        assert_eq!(bm.connection_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn broadcast_all_disconnects_slow_client() {
+        let bm = BroadcastManager::new();
+        let (tx, _rx) = mpsc::channel(1);
+        let slow = Arc::new(ClientConnection::new("slow".into(), tx));
+        let (fast, mut fast_rx) = make_connection_with_rx("fast", None);
+        bm.add(slow).await;
+        bm.add(fast).await;
+
+        let event = make_event("test.event", None);
+        // First send fills the slow client's buffer
+        bm.broadcast_all(&event).await;
+        // Exceed threshold
+        for _ in 0..MAX_TOTAL_DROPS {
+            bm.broadcast_all(&event).await;
+        }
+        assert_eq!(bm.connection_count(), 1);
+        assert!(fast_rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn broadcast_to_session_only_removes_slow_in_target() {
+        let bm = BroadcastManager::new();
+        // Slow client in session A
+        let (tx, _rx) = mpsc::channel(1);
+        let slow_a = Arc::new(ClientConnection::new("slow_a".into(), tx));
+        slow_a.bind_session("a");
+        // Fast client in session B
+        let (fast_b, _fast_rx) = make_connection_with_rx("fast_b", Some("b"));
+        bm.add(slow_a).await;
+        bm.add(fast_b).await;
+
+        let event = make_event("test.event", Some("a"));
+        bm.broadcast_to_session("a", &event).await;
+        for _ in 0..MAX_TOTAL_DROPS {
+            bm.broadcast_to_session("a", &event).await;
+        }
+        // Slow client in A removed, B unaffected
+        assert_eq!(bm.connection_count(), 1);
+        let b_conns = bm.session_connections("b").await;
+        assert_eq!(b_conns.len(), 1);
     }
 
     #[tokio::test]

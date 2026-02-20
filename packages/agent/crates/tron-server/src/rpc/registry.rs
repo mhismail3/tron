@@ -188,7 +188,6 @@ mod tests {
             id: id.into(),
             method: method.into(),
             params,
-            idempotency_key: None,
         }
     }
 

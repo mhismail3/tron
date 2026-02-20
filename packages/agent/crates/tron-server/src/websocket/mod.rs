@@ -1,15 +1,14 @@
-//! WebSocket connection management, heartbeat, message dispatch, and broadcasting.
+//! WebSocket connection management, message dispatch, and broadcasting.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `connection` | WebSocket upgrade, per-connection read/write loops |
+//! | `connection` | Per-connection state (session binding, send channel, liveness flags) |
 //! | `handler` | JSON-RPC message parsing, method dispatch, response framing |
 //! | `event_bridge` | Orchestrator events → WebSocket broadcast (+ iOS adaptation) |
 //! | `broadcast` | Fan-out manager: subscribe/unsubscribe, per-session filtering |
-//! | `heartbeat` | Periodic ping/pong for connection liveness detection |
-//! | `session` | Per-connection session state (subscriptions, auth) |
+//! | `session` | Full session lifecycle — heartbeat lives in the outbound forwarder |
 //!
 //! ## Data Flow
 //!
@@ -20,5 +19,4 @@ pub mod broadcast;
 pub mod connection;
 pub mod event_bridge;
 pub mod handler;
-pub mod heartbeat;
 pub mod session;

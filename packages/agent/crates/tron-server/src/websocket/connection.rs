@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use tokio::sync::mpsc;
 
 /// Represents a connected WebSocket client.
@@ -12,7 +12,7 @@ pub struct ClientConnection {
     /// Unique connection ID.
     pub id: String,
     /// Bound session ID (set after `session.create` / `session.resume`).
-    session_id: Mutex<Option<String>>,
+    session_id: RwLock<Option<Arc<str>>>,
     /// Send channel to the client's WebSocket write task.
     tx: mpsc::Sender<Arc<String>>,
     /// When this connection was established.
@@ -20,8 +20,8 @@ pub struct ClientConnection {
     /// Whether the client has responded to the last ping.
     pub is_alive: AtomicBool,
     /// When the last Pong (or any activity) was received.
-    last_pong: Mutex<Instant>,
-    /// Count of messages dropped due to full channel.
+    last_pong: parking_lot::Mutex<Instant>,
+    /// Monotonically increasing count of dropped messages (never resets).
     pub dropped_messages: AtomicU64,
 }
 
@@ -31,23 +31,23 @@ impl ClientConnection {
         let now = Instant::now();
         Self {
             id,
-            session_id: Mutex::new(None),
+            session_id: RwLock::new(None),
             tx,
             connected_at: now,
             is_alive: AtomicBool::new(true),
-            last_pong: Mutex::new(now),
+            last_pong: parking_lot::Mutex::new(now),
             dropped_messages: AtomicU64::new(0),
         }
     }
 
     /// Bind this connection to a session.
-    pub fn bind_session(&self, session_id: String) {
-        *self.session_id.lock() = Some(session_id);
+    pub fn bind_session(&self, session_id: &str) {
+        *self.session_id.write() = Some(Arc::from(session_id));
     }
 
     /// Get the current bound session ID.
-    pub fn session_id(&self) -> Option<String> {
-        self.session_id.lock().clone()
+    pub fn session_id(&self) -> Option<Arc<str>> {
+        self.session_id.read().clone()
     }
 
     /// Send a text message to the client.
@@ -157,7 +157,7 @@ mod tests {
     fn bind_session() {
         let (conn, _rx) = make_connection();
         assert!(conn.session_id().is_none());
-        conn.bind_session("sess_42".into());
+        conn.bind_session("sess_42");
         assert_eq!(conn.session_id().as_deref(), Some("sess_42"));
     }
 
@@ -215,9 +215,9 @@ mod tests {
     #[test]
     fn rebind_session() {
         let (conn, _rx) = make_connection();
-        conn.bind_session("sess_1".into());
+        conn.bind_session("sess_1");
         assert_eq!(conn.session_id().as_deref(), Some("sess_1"));
-        conn.bind_session("sess_2".into());
+        conn.bind_session("sess_2");
         assert_eq!(conn.session_id().as_deref(), Some("sess_2"));
     }
 
@@ -248,6 +248,19 @@ mod tests {
         assert!(sent);
         let msg = rx.recv().await.unwrap();
         assert!(msg.is_empty());
+    }
+
+    #[test]
+    fn session_id_returns_arc_str() {
+        let (conn, _rx) = make_connection();
+        conn.bind_session("sess_arc");
+        let id1 = conn.session_id().unwrap();
+        let id2 = conn.session_id().unwrap();
+        assert_eq!(&*id1, "sess_arc");
+        // Cheap clone — both point to the same allocation
+        assert_eq!(Arc::strong_count(&id1), 3); // id1 + id2 + field
+        drop(id2);
+        assert_eq!(Arc::strong_count(&id1), 2);
     }
 
     #[test]

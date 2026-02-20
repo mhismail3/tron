@@ -49,15 +49,8 @@ impl EventBridge {
                         break;
                     }
                     result = self.rx.recv() => {
-                        match result {
-                            Ok(event) => self.bridge_tron_event(&event).await,
-                            Err(broadcast::error::RecvError::Lagged(n)) => {
-                                tracing::warn!(lagged = n, "event bridge lagged");
-                            }
-                            Err(broadcast::error::RecvError::Closed) => {
-                                tracing::info!("event bridge: sender closed, exiting");
-                                break;
-                            }
+                        if !self.handle_tron_recv(result).await {
+                            break;
                         }
                     }
                     result = browser_rx.recv() => {
@@ -88,17 +81,31 @@ impl EventBridge {
                     break;
                 }
                 result = self.rx.recv() => {
-                    match result {
-                        Ok(event) => self.bridge_tron_event(&event).await,
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            tracing::warn!(lagged = n, "event bridge lagged");
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            tracing::info!("event bridge: sender closed, exiting");
-                            break;
-                        }
+                    if !self.handle_tron_recv(result).await {
+                        break;
                     }
                 }
+            }
+        }
+    }
+
+    /// Process a `TronEvent` recv result. Returns `false` when the channel is closed.
+    async fn handle_tron_recv(
+        &mut self,
+        result: Result<TronEvent, broadcast::error::RecvError>,
+    ) -> bool {
+        match result {
+            Ok(event) => {
+                self.bridge_tron_event(&event).await;
+                true
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(lagged = n, "event bridge lagged");
+                true
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                tracing::info!("event bridge: sender closed, exiting");
+                false
             }
         }
     }
@@ -161,6 +168,14 @@ fn browser_event_to_rpc(event: &BrowserEvent) -> RpcEvent {
     }
 }
 
+/// Set a key on a JSON object if the value is `Some`. No-op for `None`.
+#[allow(clippy::ref_option)]
+fn set_opt<T: serde::Serialize>(data: &mut serde_json::Value, key: &str, val: &Option<T>) {
+    if let Some(v) = val {
+        data[key] = serde_json::json!(v);
+    }
+}
+
 /// Convert a `TronEvent` to an `RpcEvent` for WebSocket transmission.
 #[allow(clippy::too_many_lines)]
 pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
@@ -193,18 +208,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             if let Some(record) = token_record {
                 data["tokenRecord"] = record.clone();
             }
-            if let Some(c) = cost {
-                data["cost"] = serde_json::json!(c);
-            }
-            if let Some(sr) = stop_reason {
-                data["stopReason"] = serde_json::json!(sr);
-            }
-            if let Some(limit) = context_limit {
-                data["contextLimit"] = serde_json::json!(limit);
-            }
-            if let Some(m) = model {
-                data["model"] = serde_json::json!(m);
-            }
+            set_opt(&mut data, "cost", cost);
+            set_opt(&mut data, "stopReason", stop_reason);
+            set_opt(&mut data, "contextLimit", context_limit);
+            set_opt(&mut data, "model", model);
             Some(data)
         }
         TronEvent::ToolExecutionStart {
@@ -217,9 +224,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "toolName": tool_name,
                 "toolCallId": tool_call_id,
             });
-            if let Some(args) = arguments {
-                data["arguments"] = serde_json::json!(args);
-            }
+            set_opt(&mut data, "arguments", arguments);
             Some(data)
         }
         TronEvent::ToolExecutionEnd {
@@ -293,9 +298,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "toolCallId": tool_call_id,
                 "argumentsDelta": arguments_delta,
             });
-            if let Some(name) = tool_name {
-                data["toolName"] = serde_json::json!(name);
-            }
+            set_opt(&mut data, "toolName", tool_name);
             Some(data)
         }
         TronEvent::ToolCallGenerating {
@@ -316,12 +319,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             ..
         } => {
             let mut data = serde_json::json!({ "turn": turn });
-            if let Some(content) = partial_content {
-                data["partialContent"] = serde_json::json!(content);
-            }
-            if let Some(tool) = active_tool {
-                data["activeTool"] = serde_json::json!(tool);
-            }
+            set_opt(&mut data, "partialContent", partial_content);
+            set_opt(&mut data, "activeTool", active_tool);
             Some(data)
         }
         TronEvent::TurnFailed {
@@ -338,15 +337,9 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "error": error,
                 "recoverable": recoverable,
             });
-            if let Some(c) = code {
-                data["code"] = serde_json::json!(c);
-            }
-            if let Some(cat) = category {
-                data["category"] = serde_json::json!(cat);
-            }
-            if let Some(content) = partial_content {
-                data["partialContent"] = serde_json::json!(content);
-            }
+            set_opt(&mut data, "code", code);
+            set_opt(&mut data, "category", category);
+            set_opt(&mut data, "partialContent", partial_content);
             Some(data)
         }
         TronEvent::ResponseComplete {
@@ -371,9 +364,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             if let Some(record) = token_record {
                 data["tokenRecord"] = record.clone();
             }
-            if let Some(m) = model {
-                data["model"] = serde_json::json!(m);
-            }
+            set_opt(&mut data, "model", model);
             Some(data)
         }
         TronEvent::Error {
@@ -390,33 +381,15 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             ..
         } => {
             let mut data = serde_json::json!({ "message": error });
-            if let Some(ctx) = context {
-                data["context"] = serde_json::json!(ctx);
-            }
-            if let Some(c) = code {
-                data["code"] = serde_json::json!(c);
-            }
-            if let Some(p) = provider {
-                data["provider"] = serde_json::json!(p);
-            }
-            if let Some(cat) = category {
-                data["category"] = serde_json::json!(cat);
-            }
-            if let Some(s) = suggestion {
-                data["suggestion"] = serde_json::json!(s);
-            }
-            if let Some(r) = retryable {
-                data["retryable"] = serde_json::json!(r);
-            }
-            if let Some(sc) = status_code {
-                data["statusCode"] = serde_json::json!(sc);
-            }
-            if let Some(et) = error_type {
-                data["errorType"] = serde_json::json!(et);
-            }
-            if let Some(m) = model {
-                data["model"] = serde_json::json!(m);
-            }
+            set_opt(&mut data, "context", context);
+            set_opt(&mut data, "code", code);
+            set_opt(&mut data, "provider", provider);
+            set_opt(&mut data, "category", category);
+            set_opt(&mut data, "suggestion", suggestion);
+            set_opt(&mut data, "retryable", retryable);
+            set_opt(&mut data, "statusCode", status_code);
+            set_opt(&mut data, "errorType", error_type);
+            set_opt(&mut data, "model", model);
             Some(data)
         }
         TronEvent::CompactionStart {
@@ -446,12 +419,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             if let Some(r) = reason {
                 data["reason"] = serde_json::to_value(r).unwrap_or_default();
             }
-            if let Some(s) = summary {
-                data["summary"] = serde_json::json!(s);
-            }
-            if let Some(t) = estimated_context_tokens {
-                data["estimatedContextTokens"] = serde_json::json!(t);
-            }
+            set_opt(&mut data, "summary", summary);
+            set_opt(&mut data, "estimatedContextTokens", estimated_context_tokens);
             Some(data)
         }
         TronEvent::ContextWarning {
@@ -473,12 +442,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "hookNames": hook_names,
                 "hookEvent": hook_event,
             });
-            if let Some(name) = tool_name {
-                data["toolName"] = serde_json::json!(name);
-            }
-            if let Some(id) = tool_call_id {
-                data["toolCallId"] = serde_json::json!(id);
-            }
+            set_opt(&mut data, "toolName", tool_name);
+            set_opt(&mut data, "toolCallId", tool_call_id);
             Some(data)
         }
         TronEvent::HookCompleted {
@@ -496,18 +461,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "hookEvent": hook_event,
                 "result": result,
             });
-            if let Some(d) = duration {
-                data["duration"] = serde_json::json!(d);
-            }
-            if let Some(r) = reason {
-                data["reason"] = serde_json::json!(r);
-            }
-            if let Some(name) = tool_name {
-                data["toolName"] = serde_json::json!(name);
-            }
-            if let Some(id) = tool_call_id {
-                data["toolCallId"] = serde_json::json!(id);
-            }
+            set_opt(&mut data, "duration", duration);
+            set_opt(&mut data, "reason", reason);
+            set_opt(&mut data, "toolName", tool_name);
+            set_opt(&mut data, "toolCallId", tool_call_id);
             Some(data)
         }
         TronEvent::HookBackgroundStarted {
@@ -536,9 +493,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "result": result,
                 "duration": duration,
             });
-            if let Some(e) = error {
-                data["error"] = serde_json::json!(e);
-            }
+            set_opt(&mut data, "error", error);
             Some(data)
         }
         TronEvent::ApiRetry {
@@ -683,12 +638,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "spawnDepth": spawn_depth,
                 "blocking": blocking,
             });
-            if let Some(id) = tool_call_id {
-                data["toolCallId"] = serde_json::json!(id);
-            }
-            if let Some(wd) = working_directory {
-                data["workingDirectory"] = serde_json::json!(wd);
-            }
+            set_opt(&mut data, "toolCallId", tool_call_id);
+            set_opt(&mut data, "workingDirectory", working_directory);
             Some(data)
         }
         TronEvent::SubagentStatusUpdate {
@@ -703,9 +654,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "status": status,
                 "currentTurn": current_turn,
             });
-            if let Some(act) = activity {
-                data["activity"] = serde_json::json!(act);
-            }
+            set_opt(&mut data, "activity", activity);
             Some(data)
         }
         TronEvent::SubagentCompleted {
@@ -723,18 +672,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "totalTurns": total_turns,
                 "duration": duration,
             });
-            if let Some(o) = full_output {
-                data["fullOutput"] = serde_json::json!(o);
-            }
-            if let Some(s) = result_summary {
-                data["resultSummary"] = serde_json::json!(s);
-            }
-            if let Some(tu) = token_usage {
-                data["tokenUsage"] = tu.clone();
-            }
-            if let Some(m) = model {
-                data["model"] = serde_json::json!(m);
-            }
+            set_opt(&mut data, "fullOutput", full_output);
+            set_opt(&mut data, "resultSummary", result_summary);
+            set_opt(&mut data, "tokenUsage", token_usage);
+            set_opt(&mut data, "model", model);
             Some(data)
         }
         TronEvent::SubagentFailed {
@@ -778,12 +719,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "duration": duration,
                 "completedAt": completed_at,
             });
-            if let Some(tu) = token_usage {
-                data["tokenUsage"] = tu.clone();
-            }
-            if let Some(e) = error {
-                data["error"] = serde_json::json!(e);
-            }
+            set_opt(&mut data, "tokenUsage", token_usage);
+            set_opt(&mut data, "error", error);
             Some(data)
         }
         // Events with no additional data (empty object so iOS can decode `data: {}`)
@@ -966,7 +903,7 @@ mod tests {
         // Add a connection bound to session "s1"
         let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
         let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
-        conn.bind_session("s1".into());
+        conn.bind_session("s1");
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
@@ -1018,6 +955,38 @@ mod tests {
         assert!(msg.is_ok());
 
         drop(tx);
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn bridge_continues_without_browser_after_browser_channel_closes() {
+        let (tron_tx, _) = broadcast::channel::<TronEvent>(16);
+        let (browser_tx, browser_rx) = broadcast::channel::<BrowserEvent>(16);
+        let bm = Arc::new(BroadcastManager::new());
+
+        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
+        let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
+        conn.bind_session("s1");
+        bm.add(Arc::new(conn)).await;
+
+        let rx = tron_tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), Some(browser_rx), CancellationToken::new());
+        let handle = tokio::spawn(bridge.run());
+
+        // Close browser channel
+        drop(browser_tx);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Tron events should still flow
+        let _ = tron_tx.send(agent_start_event("s1")).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let msg = conn_rx.try_recv();
+        assert!(msg.is_ok());
+        let parsed: serde_json::Value = serde_json::from_str(&msg.unwrap()).unwrap();
+        assert_eq!(parsed["type"], "agent.start");
+
+        drop(tron_tx);
         let _ = handle.await;
     }
 
@@ -1935,7 +1904,7 @@ mod tests {
 
         let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
         let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
-        conn.bind_session("s1".into());
+        conn.bind_session("s1");
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();

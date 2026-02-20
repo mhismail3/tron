@@ -14,9 +14,6 @@ pub struct RpcRequest {
     /// Optional parameters object.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
-    /// Optional idempotency key for deduplication.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<String>,
 }
 
 /// Outgoing RPC response to a client.
@@ -152,14 +149,12 @@ mod tests {
             id: "req_1".into(),
             method: "session.create".into(),
             params: Some(json!({"workingDirectory": "/tmp"})),
-            idempotency_key: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: RpcRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, "req_1");
         assert_eq!(back.method, "session.create");
         assert!(back.params.is_some());
-        assert!(back.idempotency_key.is_none());
     }
 
     #[test]
@@ -168,7 +163,6 @@ mod tests {
             id: "req_2".into(),
             method: "system.ping".into(),
             params: None,
-            idempotency_key: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(!json.contains("params"));
@@ -177,17 +171,11 @@ mod tests {
     }
 
     #[test]
-    fn request_with_idempotency_key() {
-        let req = RpcRequest {
-            id: "req_3".into(),
-            method: "agent.prompt".into(),
-            params: Some(json!({"prompt": "hi"})),
-            idempotency_key: Some("idem_abc".into()),
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains("idempotencyKey"));
-        let back: RpcRequest = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.idempotency_key.as_deref(), Some("idem_abc"));
+    fn request_with_extra_field_still_parses() {
+        let raw = r#"{"id": "req_3", "method": "agent.prompt", "params": {"prompt": "hi"}, "idempotencyKey": "xyz"}"#;
+        let req: RpcRequest = serde_json::from_str(raw).unwrap();
+        assert_eq!(req.id, "req_3");
+        assert_eq!(req.method, "agent.prompt");
     }
 
     // ── RpcResponse success ─────────────────────────────────────────
@@ -372,10 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_format_request_with_idempotency_key() {
-        let raw = r#"{"id": "req_5", "method": "agent.prompt", "params": {}, "idempotencyKey": "abc123"}"#;
+    fn wire_format_extra_fields_ignored() {
+        let raw = r#"{"id": "req_5", "method": "agent.prompt", "params": {}, "idempotencyKey": "abc123", "extra": true}"#;
         let req: RpcRequest = serde_json::from_str(raw).unwrap();
-        assert_eq!(req.idempotency_key.as_deref(), Some("abc123"));
+        assert_eq!(req.id, "req_5");
     }
 
     #[test]
