@@ -66,6 +66,7 @@ struct VoiceNotesListView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 28)
+                        .offset(y: 1)
                         .foregroundStyle(.tronTeal)
                 }
             }

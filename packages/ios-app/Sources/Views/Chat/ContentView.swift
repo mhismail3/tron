@@ -576,6 +576,7 @@ struct WelcomePage: View {
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(height: 24)
+                                .offset(y: 1)
                         }
                     }
                 }
