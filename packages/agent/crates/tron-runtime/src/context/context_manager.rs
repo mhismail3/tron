@@ -102,6 +102,12 @@ impl ContextManager {
         self.messages.as_slice().to_vec()
     }
 
+    /// Borrow the message slice (zero-copy).
+    #[must_use]
+    pub fn messages_slice(&self) -> &[Message] {
+        self.messages.as_slice()
+    }
+
     /// Remove all messages from the conversation.
     ///
     /// Clears API-reported tokens since the message set changed.
@@ -145,6 +151,7 @@ impl ContextManager {
     ///
     /// Returns info about newly activated rules (empty if no new activations).
     pub fn touch_file_path(&mut self, relative_path: &str) -> Vec<ActivatedRuleInfo> {
+        let before = self.rules_tracker.activated_scoped_rules_count();
         if !self.rules_tracker.touch_path(relative_path) {
             return vec![];
         }
@@ -155,10 +162,11 @@ impl ContextManager {
             .map(String::from);
         self.dynamic_rules_content = content;
 
-        // Return all activated rules (caller decides which are "new" based on batch)
+        // Return ONLY newly activated rules (not cumulative)
         self.rules_tracker
             .activated_rules()
-            .iter()
+            .into_iter()
+            .skip(before)
             .map(|r| ActivatedRuleInfo {
                 relative_path: r.relative_path.clone(),
                 scope_dir: r.scope_dir.clone(),
@@ -587,10 +595,11 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
 
 /// Adapts context manager state for the compaction engine.
 ///
-/// Uses interior mutability (`std::sync::Mutex`) so `CompactionEngine` can
-/// modify messages during compaction.
+/// Uses interior mutability (`parking_lot::Mutex`) so `CompactionEngine` can
+/// modify messages during compaction. `parking_lot::Mutex` is used instead of
+/// `std::sync::Mutex` to avoid lock poisoning on panic.
 struct ManagerCompactionDeps {
-    messages: std::sync::Mutex<Vec<Message>>,
+    messages: parking_lot::Mutex<Vec<Message>>,
     current_tokens: u64,
     context_limit: u64,
     system_prompt_tokens: u64,
@@ -600,7 +609,7 @@ struct ManagerCompactionDeps {
 impl ManagerCompactionDeps {
     fn from_manager(manager: &ContextManager) -> Self {
         Self {
-            messages: std::sync::Mutex::new(manager.get_messages()),
+            messages: parking_lot::Mutex::new(manager.messages_slice().to_vec()),
             current_tokens: manager.get_current_tokens(),
             context_limit: manager.get_context_limit(),
             system_prompt_tokens: manager.estimate_system_prompt_tokens(),
@@ -611,10 +620,10 @@ impl ManagerCompactionDeps {
 
 impl CompactionDeps for ManagerCompactionDeps {
     fn get_messages(&self) -> Vec<Message> {
-        self.messages.lock().unwrap().clone()
+        self.messages.lock().clone()
     }
     fn set_messages(&self, messages: Vec<Message>) {
-        *self.messages.lock().unwrap() = messages;
+        *self.messages.lock() = messages;
     }
     fn get_current_tokens(&self) -> u64 {
         self.current_tokens
@@ -1249,5 +1258,76 @@ mod tests {
         cm.set_dynamic_rules_content(Some("dynamic rules".into()));
         let tokens = cm.estimate_rules_tokens();
         assert!(tokens > 0);
+    }
+
+    // -- parking_lot mutex: poison resistance --
+
+    #[test]
+    fn compaction_deps_no_poison_after_panic() {
+        let deps = ManagerCompactionDeps {
+            messages: parking_lot::Mutex::new(vec![Message::user("hello")]),
+            current_tokens: 100,
+            context_limit: 100_000,
+            system_prompt_tokens: 10,
+            tools_tokens: 5,
+        };
+
+        // Panic while holding the lock — parking_lot::Mutex doesn't poison
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = deps.messages.lock();
+            panic!("intentional panic while holding lock");
+        }));
+        assert!(result.is_err(), "panic should have been caught");
+
+        // Main thread can still lock — no poisoning
+        let msgs = deps.messages.lock();
+        assert_eq!(msgs.len(), 1);
+    }
+
+    // -- messages_slice --
+
+    #[test]
+    fn messages_slice_returns_reference() {
+        let mut cm = ContextManager::new(test_config());
+        cm.add_message(Message::user("a"));
+        cm.add_message(Message::assistant("b"));
+        let slice = cm.messages_slice();
+        assert_eq!(slice.len(), 2);
+    }
+
+    #[test]
+    fn messages_slice_empty_on_new() {
+        let cm = ContextManager::new(test_config());
+        assert!(cm.messages_slice().is_empty());
+    }
+
+    // -- touch_file_path returns only new activations --
+
+    #[test]
+    fn touch_file_path_returns_only_new_activations() {
+        let mut cm = ContextManager::new(test_config());
+        let scope_a = make_discovered(
+            "src/a",
+            "src/a/.claude/CLAUDE.md",
+            false,
+            "# Scope A rules",
+        );
+        let scope_b = make_discovered(
+            "src/b",
+            "src/b/.claude/CLAUDE.md",
+            false,
+            "# Scope B rules",
+        );
+        cm.set_rules_index(RulesIndex::new(vec![scope_a, scope_b]));
+
+        // First touch activates scope A
+        let r1 = cm.touch_file_path("src/a/foo.rs");
+        assert_eq!(r1.len(), 1);
+        assert_eq!(r1[0].scope_dir, "src/a");
+
+        // Second touch activates scope B — must NOT include scope A again
+        let r2 = cm.touch_file_path("src/b/bar.rs");
+        assert_eq!(r2.len(), 1, "should return only newly activated rules, got {r2:?}");
+        assert_eq!(r2[0].scope_dir, "src/b");
     }
 }

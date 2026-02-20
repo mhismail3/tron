@@ -253,8 +253,20 @@ fn finalize_tool_call(
     current_args: &mut String,
 ) {
     if let (Some(id), Some(name)) = (current_id.take(), current_name.take()) {
-        let arguments: Map<String, serde_json::Value> =
-            serde_json::from_str(current_args).unwrap_or_default();
+        let arguments: Map<String, serde_json::Value> = match serde_json::from_str(current_args) {
+            Ok(map) => map,
+            Err(e) => {
+                let preview: String = current_args.chars().take(200).collect();
+                tracing::warn!(
+                    tool_name = %name,
+                    tool_call_id = %id,
+                    error = %e,
+                    args_preview = %preview,
+                    "malformed tool call arguments, using empty map"
+                );
+                Map::new()
+            }
+        };
         tool_calls.push(ToolCall::new(id, name, arguments));
         current_args.clear();
     }
@@ -729,6 +741,52 @@ mod tests {
         } else {
             panic!("Expected text content");
         }
+    }
+
+    // -- finalize_tool_call unit tests --
+
+    #[test]
+    fn finalize_tool_call_with_valid_json() {
+        let mut tool_calls = Vec::new();
+        let mut id = Some("tc-1".to_string());
+        let mut name = Some("bash".to_string());
+        let mut args = r#"{"command":"ls"}"#.to_string();
+
+        finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "bash");
+        assert_eq!(tool_calls[0].id, "tc-1");
+        assert_eq!(tool_calls[0].arguments["command"], serde_json::json!("ls"));
+    }
+
+    #[test]
+    fn finalize_tool_call_with_malformed_json() {
+        let mut tool_calls = Vec::new();
+        let mut id = Some("tc-2".to_string());
+        let mut name = Some("read".to_string());
+        let mut args = "{ not valid".to_string();
+
+        finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "read");
+        assert_eq!(tool_calls[0].id, "tc-2");
+        assert!(tool_calls[0].arguments.is_empty());
+    }
+
+    #[test]
+    fn finalize_tool_call_with_empty_string() {
+        let mut tool_calls = Vec::new();
+        let mut id = Some("tc-3".to_string());
+        let mut name = Some("write".to_string());
+        let mut args = String::new();
+
+        finalize_tool_call(&mut tool_calls, &mut id, &mut name, &mut args);
+
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].name, "write");
+        assert!(tool_calls[0].arguments.is_empty());
     }
 
     #[test]

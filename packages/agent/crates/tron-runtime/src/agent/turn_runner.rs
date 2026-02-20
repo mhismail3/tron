@@ -34,32 +34,67 @@ use crate::orchestrator::event_persister::EventPersister;
 use crate::pipeline::{persistence, pricing};
 use crate::types::{RunContext, TurnResult};
 
+/// Parameters for a single turn of the agent loop.
+pub struct TurnParams<'a> {
+    /// Current turn number (1-indexed).
+    pub turn: u32,
+    /// Context manager owning messages, rules, and token tracking.
+    pub context_manager: &'a mut ContextManager,
+    /// LLM provider for streaming.
+    pub provider: &'a Arc<dyn Provider>,
+    /// Tool registry for tool lookup and execution.
+    pub registry: &'a ToolRegistry,
+    /// Optional guardrail engine for tool argument validation.
+    pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
+    /// Optional hook engine for pre/post tool use hooks.
+    pub hooks: &'a Option<Arc<HookEngine>>,
+    /// Compaction handler for pre-turn context checks.
+    pub compaction: &'a CompactionHandler,
+    /// Session identifier.
+    pub session_id: &'a str,
+    /// Event emitter for broadcasting agent lifecycle events.
+    pub emitter: &'a Arc<EventEmitter>,
+    /// Cancellation token for aborting the turn.
+    pub cancel: &'a tokio_util::sync::CancellationToken,
+    /// Run-scoped context (skill, reasoning level, subagent results).
+    pub run_context: &'a RunContext,
+    /// Optional event persister for inline event storage.
+    pub persister: Option<&'a EventPersister>,
+    /// Previous turn's context window token count (for delta tracking).
+    pub previous_context_baseline: u64,
+    /// Current subagent nesting depth.
+    pub subagent_depth: u32,
+    /// Maximum allowed subagent nesting depth.
+    pub subagent_max_depth: u32,
+    /// Optional retry configuration for provider stream retries.
+    pub retry_config: Option<&'a tron_core::retry::RetryConfig>,
+    /// Optional provider health tracker for circuit-breaking.
+    pub health_tracker: Option<&'a Arc<ProviderHealthTracker>>,
+}
+
 /// Execute a single turn of the agent loop.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    clippy::cast_possible_truncation
-)]
-#[instrument(skip_all, fields(session_id, turn, model = provider.model()))]
-pub async fn execute_turn(
-    turn: u32,
-    context_manager: &mut ContextManager,
-    provider: &Arc<dyn Provider>,
-    registry: &ToolRegistry,
-    guardrails: &Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-    hooks: &Option<Arc<HookEngine>>,
-    compaction: &CompactionHandler,
-    session_id: &str,
-    emitter: &Arc<EventEmitter>,
-    cancel: &tokio_util::sync::CancellationToken,
-    run_context: &RunContext,
-    persister: Option<&EventPersister>,
-    previous_context_baseline: u64,
-    subagent_depth: u32,
-    subagent_max_depth: u32,
-    retry_config: Option<&tron_core::retry::RetryConfig>,
-    health_tracker: Option<&Arc<ProviderHealthTracker>>,
-) -> TurnResult {
+#[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
+#[instrument(skip_all, fields(session_id, turn, model = params.provider.model()))]
+pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
+    let TurnParams {
+        turn,
+        context_manager,
+        provider,
+        registry,
+        guardrails,
+        hooks,
+        compaction,
+        session_id,
+        emitter,
+        cancel,
+        run_context,
+        persister,
+        previous_context_baseline,
+        subagent_depth,
+        subagent_max_depth,
+        retry_config,
+        health_tracker,
+    } = params;
     let turn_start = Instant::now();
 
     // 1. Check context capacity (compact if needed)
@@ -74,6 +109,7 @@ pub async fn execute_turn(
         .await
     {
         Err(e) => {
+            counter!("compaction_total", "status" => "pre_turn_error").increment(1);
             return TurnResult {
                 success: false,
                 error: Some(format!("Compaction error: {e}")),
@@ -147,10 +183,10 @@ pub async fn execute_turn(
     let request_start = Instant::now();
 
     let stream = if let Some(retry) = retry_config {
-        // Wrap with retry — factory creates a new stream on each attempt
+        // Wrap with retry — Arc avoids deep-cloning context on each attempt
         let p = provider.clone();
-        let ctx = context.clone();
-        let opts = stream_options.clone();
+        let ctx = Arc::new(context);
+        let opts = Arc::new(stream_options);
         let factory: StreamFactory = Box::new(move || {
             let p = p.clone();
             let ctx = ctx.clone();

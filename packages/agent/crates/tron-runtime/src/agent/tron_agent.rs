@@ -142,25 +142,25 @@ impl TronAgent {
             turn += 1;
             self.current_turn.store(turn, Ordering::Relaxed);
 
-            let result = turn_runner::execute_turn(
+            let result = turn_runner::execute_turn(turn_runner::TurnParams {
                 turn,
-                &mut self.context_manager,
-                &self.provider,
-                &self.registry,
-                &self.guardrails,
-                &self.hooks,
-                &self.compaction,
-                &self.session_id,
-                &self.emitter,
-                &self.abort_token,
-                &ctx,
-                self.persister.as_deref(),
+                context_manager: &mut self.context_manager,
+                provider: &self.provider,
+                registry: &self.registry,
+                guardrails: &self.guardrails,
+                hooks: &self.hooks,
+                compaction: &self.compaction,
+                session_id: &self.session_id,
+                emitter: &self.emitter,
+                cancel: &self.abort_token,
+                run_context: &ctx,
+                persister: self.persister.as_deref(),
                 previous_context_baseline,
-                self.config.subagent_depth,
-                self.config.subagent_max_depth,
-                self.config.retry.as_ref(),
-                self.config.health_tracker.as_ref(),
-            )
+                subagent_depth: self.config.subagent_depth,
+                subagent_max_depth: self.config.subagent_max_depth,
+                retry_config: self.config.retry.as_ref(),
+                health_tracker: self.config.health_tracker.as_ref(),
+            })
             .await;
 
             // Update baseline for next turn

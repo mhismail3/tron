@@ -145,6 +145,11 @@ impl Orchestrator {
     }
 
     /// Check if a session is busy (currently processing).
+    ///
+    /// This is an **advisory** check — it reads from two independent data stores
+    /// (`active_runs` and `session_manager`) without a single atomic transaction.
+    /// Callers should tolerate stale results. The authoritative guard is
+    /// `start_run()`, which rejects duplicate runs under its own lock.
     pub fn is_session_busy(&self, session_id: &str) -> bool {
         self.has_active_run(session_id) || self.session_manager.is_active(session_id)
     }
@@ -186,11 +191,15 @@ impl Orchestrator {
     #[instrument(skip(self))]
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         info!("orchestrator shutdown initiated");
-        // Cancel all active runs
+        // Cancel and clear all active runs
         {
-            let runs = self.active_runs.lock();
-            for run in runs.values() {
-                run.cancel.cancel();
+            let mut runs = self.active_runs.lock();
+            if !runs.is_empty() {
+                warn!(count = runs.len(), "clearing orphaned active runs during shutdown");
+                for run in runs.values() {
+                    run.cancel.cancel();
+                }
+                runs.clear();
             }
         }
 
@@ -456,5 +465,42 @@ mod tests {
 
         orch.shutdown().await.unwrap();
         assert!(rx.await.is_err()); // sender was dropped
+    }
+
+    // --- is_session_busy advisory tests ---
+
+    #[test]
+    fn is_session_busy_reflects_active_run() {
+        let orch = make_orchestrator();
+        assert!(!orch.is_session_busy("s1"));
+        let _token = orch.start_run("s1", "run_1").unwrap();
+        assert!(orch.is_session_busy("s1"));
+        orch.complete_run("s1");
+        assert!(!orch.is_session_busy("s1"));
+    }
+
+    #[tokio::test]
+    async fn is_session_busy_reflects_active_session() {
+        let orch = make_orchestrator();
+        let sid = orch
+            .session_manager()
+            .create_session("model", "/tmp", Some("test"))
+            .unwrap();
+        assert!(orch.is_session_busy(&sid));
+    }
+
+    // --- Orphaned run cleanup ---
+
+    #[tokio::test]
+    async fn shutdown_clears_orphaned_runs() {
+        let orch = make_orchestrator();
+        let t1 = orch.start_run("s1", "run_1").unwrap();
+        let t2 = orch.start_run("s2", "run_2").unwrap();
+        assert_eq!(orch.active_run_count(), 2);
+
+        orch.shutdown().await.unwrap();
+        assert!(t1.is_cancelled());
+        assert!(t2.is_cancelled());
+        assert_eq!(orch.active_run_count(), 0, "active_runs must be cleared after shutdown");
     }
 }

@@ -214,31 +214,44 @@ pub async fn execute_tool(
             tool_name: Some(tool_name.clone()),
             tool_call_id: Some(tool_call_id.clone()),
         });
-        // PostToolUse hooks run fire-and-forget. If the hook panics, tokio logs
-        // the panic to stderr and the HookCompleted event won't be emitted.
-        // This is acceptable because PostToolUse hooks are non-blocking by design.
+        // PostToolUse hooks run fire-and-forget with a 30s timeout to prevent leaks.
         let engine = hook_engine.clone();
         let emitter_bg = emitter.clone();
         let sid = session_id.to_owned();
         let tn = tool_name.clone();
         let tcid = tool_call_id.clone();
         let _handle = tokio::spawn(async move {
-            let bg_result = engine.execute(&hook_ctx).await;
-            let event_result = match bg_result.action {
-                HookAction::Block => EventHookResult::Block,
-                HookAction::Modify => EventHookResult::Modify,
-                HookAction::Continue => EventHookResult::Continue,
-            };
-            let _ = emitter_bg.emit(TronEvent::HookCompleted {
-                base: BaseEvent::now(&sid),
-                hook_names: vec![],
-                hook_event: "PostToolUse".into(),
-                result: event_result,
-                duration: None,
-                reason: bg_result.reason.clone(),
-                tool_name: Some(tn),
-                tool_call_id: Some(tcid),
-            });
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                engine.execute(&hook_ctx),
+            )
+            .await
+            {
+                Ok(bg_result) => {
+                    let event_result = match bg_result.action {
+                        HookAction::Block => EventHookResult::Block,
+                        HookAction::Modify => EventHookResult::Modify,
+                        HookAction::Continue => EventHookResult::Continue,
+                    };
+                    let _ = emitter_bg.emit(TronEvent::HookCompleted {
+                        base: BaseEvent::now(&sid),
+                        hook_names: vec![],
+                        hook_event: "PostToolUse".into(),
+                        result: event_result,
+                        duration: None,
+                        reason: bg_result.reason.clone(),
+                        tool_name: Some(tn),
+                        tool_call_id: Some(tcid),
+                    });
+                }
+                Err(_) => {
+                    warn!(
+                        tool_name = %tn,
+                        tool_call_id = %tcid,
+                        "PostToolUse hook timed out after 30s"
+                    );
+                }
+            }
         });
     }
 
@@ -653,6 +666,84 @@ mod tests {
         }
         assert!(saw_triggered, "should emit HookTriggered for PostToolUse");
         assert!(saw_completed, "should emit HookCompleted for PostToolUse");
+    }
+
+    #[tokio::test]
+    async fn post_tool_use_hook_timeout() {
+        use crate::hooks::errors::HookError;
+        use crate::hooks::handler::HookHandler;
+        use crate::hooks::registry::HookRegistry;
+        use crate::hooks::types::{HookExecutionMode, HookResult as HookExecResult, HookType};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // Track whether the handler completed (it shouldn't — timeout fires first)
+        let handler_completed = Arc::new(AtomicBool::new(false));
+        let handler_completed_clone = handler_completed.clone();
+
+        struct SlowHandler {
+            completed: Arc<AtomicBool>,
+        }
+
+        #[async_trait]
+        impl HookHandler for SlowHandler {
+            fn name(&self) -> &str {
+                "test-slow"
+            }
+            fn hook_type(&self) -> HookType {
+                HookType::PostToolUse
+            }
+            fn execution_mode(&self) -> HookExecutionMode {
+                HookExecutionMode::Background
+            }
+            async fn handle(&self, _ctx: &HookContext) -> Result<HookExecResult, HookError> {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                self.completed.store(true, Ordering::SeqCst);
+                Ok(HookExecResult::continue_())
+            }
+        }
+
+        tokio::time::pause();
+
+        let mut hook_registry = HookRegistry::new();
+        hook_registry.register(Arc::new(SlowHandler {
+            completed: handler_completed_clone,
+        }));
+        let hook_engine = Arc::new(HookEngine::new(hook_registry));
+
+        let registry = make_registry(vec![Arc::new(EchoTool)]);
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+
+        let mut args = Map::new();
+        let _ = args.insert("text".into(), json!("test"));
+        let tc = make_tool_call("echo", args);
+
+        let _ = execute_tool(
+            &tc,
+            &registry,
+            &None,
+            &Some(hook_engine),
+            "s1",
+            "/tmp",
+            &emitter,
+            &cancel,
+            0,
+            0,
+        )
+        .await;
+
+        // Let the spawned task start and register its timers
+        tokio::task::yield_now().await;
+
+        // Advance past the 30s timeout (but not past 60s handler sleep)
+        tokio::time::advance(std::time::Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+
+        // The handler should NOT have completed (timeout fired first)
+        assert!(
+            !handler_completed.load(Ordering::SeqCst),
+            "handler should not have completed — timeout should have fired"
+        );
     }
 
     #[tokio::test]
