@@ -1,4 +1,9 @@
 //! Chrome binary discovery on macOS.
+//!
+//! Prefers Playwright's "Chrome for Testing" over the system Chrome install.
+//! System Chrome (e.g. 145.0.7632.76) has broken headless CDP — navigation
+//! returns `net::ERR_ABORTED` and `Page.captureScreenshot` hangs indefinitely.
+//! Chrome for Testing (same major version) works perfectly.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -16,8 +21,10 @@ const KNOWN_PATHS: &[&str] = &[
 ///
 /// Search order:
 /// 1. `CHROME_PATH` environment variable
-/// 2. System application paths (Chrome, Chromium, Chrome Canary)
-/// 3. Homebrew paths
+/// 2. Playwright's Chrome for Testing (headless-compatible)
+/// 3. Playwright's `chrome-headless-shell`
+/// 4. System application paths (Chrome, Chromium, Chrome Canary)
+/// 5. Homebrew paths
 ///
 /// Returns `None` if no valid executable is found.
 pub fn find_chrome() -> Option<PathBuf> {
@@ -30,12 +37,97 @@ pub fn find_chrome() -> Option<PathBuf> {
         tracing::debug!(path = %env_path, "CHROME_PATH set but not executable, falling through");
     }
 
-    // 2. Known system paths
+    // 2. Playwright's Chrome for Testing (preferred — reliable headless CDP)
+    if let Some(path) = find_playwright_chrome() {
+        return Some(path);
+    }
+
+    // 3. Known system paths (fallback)
     for candidate in KNOWN_PATHS {
         let path = PathBuf::from(candidate);
         if is_executable(&path) {
             tracing::debug!(path = %candidate, "found Chrome binary");
             return Some(path);
+        }
+    }
+
+    None
+}
+
+/// Search Playwright's cache for Chrome for Testing or chrome-headless-shell.
+///
+/// Scans `~/Library/Caches/ms-playwright/` for `chromium-*` directories,
+/// picks the highest revision, and returns the executable path.
+fn find_playwright_chrome() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let cache_dir = PathBuf::from(&home).join("Library/Caches/ms-playwright");
+    if !cache_dir.is_dir() {
+        return None;
+    }
+
+    // Collect chromium-* dirs sorted by revision (descending)
+    let mut chromium_dirs: Vec<(u64, PathBuf)> = std::fs::read_dir(&cache_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if let Some(rev) = name.strip_prefix("chromium-") {
+                rev.parse::<u64>().ok().map(|r| (r, e.path()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    chromium_dirs.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Try "Chrome for Testing" in each revision (highest first)
+    for (rev, dir) in &chromium_dirs {
+        let binary = dir
+            .join("chrome-mac-arm64")
+            .join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+        if is_executable(&binary) {
+            tracing::info!(revision = rev, path = %binary.display(), "using Playwright Chrome for Testing");
+            return Some(binary);
+        }
+        // Also check x86_64
+        let binary = dir
+            .join("chrome-mac")
+            .join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+        if is_executable(&binary) {
+            tracing::info!(revision = rev, path = %binary.display(), "using Playwright Chrome for Testing (x86)");
+            return Some(binary);
+        }
+    }
+
+    // Try chrome-headless-shell as fallback
+    let mut shell_dirs: Vec<(u64, PathBuf)> = std::fs::read_dir(&cache_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if let Some(rev) = name.strip_prefix("chromium_headless_shell-") {
+                rev.parse::<u64>().ok().map(|r| (r, e.path()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    shell_dirs.sort_by(|a, b| b.0.cmp(&a.0));
+
+    for (rev, dir) in &shell_dirs {
+        let binary = dir
+            .join("chrome-headless-shell-mac-arm64")
+            .join("chrome-headless-shell");
+        if is_executable(&binary) {
+            tracing::info!(revision = rev, path = %binary.display(), "using Playwright chrome-headless-shell");
+            return Some(binary);
+        }
+        let binary = dir
+            .join("chrome-headless-shell-mac")
+            .join("chrome-headless-shell");
+        if is_executable(&binary) {
+            tracing::info!(revision = rev, path = %binary.display(), "using Playwright chrome-headless-shell (x86)");
+            return Some(binary);
         }
     }
 
@@ -187,21 +279,66 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn find_chrome_real_system() {
-        let chrome_path =
-            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-        if chrome_path.exists() {
-            let key = "CHROME_PATH";
-            let prev = std::env::var(key).ok();
-            remove_env(key);
+        let key = "CHROME_PATH";
+        let prev = std::env::var(key).ok();
+        remove_env(key);
 
-            let result = find_chrome();
-            assert!(
-                result.is_some(),
-                "Chrome is installed but find_chrome() returned None"
-            );
-            assert!(is_executable(result.as_ref().unwrap()));
+        let result = find_chrome();
+        // Should find either Playwright Chrome or system Chrome
+        assert!(
+            result.is_some(),
+            "No Chrome binary found (Playwright or system)"
+        );
+        assert!(is_executable(result.as_ref().unwrap()));
 
-            restore_env(key, prev);
+        restore_env(key, prev);
+    }
+
+    #[test]
+    fn find_playwright_chrome_returns_none_without_cache() {
+        // With HOME pointing to a temp dir, no Playwright cache exists
+        let dir = tempfile::tempdir().unwrap();
+        let key = "HOME";
+        let prev = std::env::var(key).ok();
+        set_env(key, dir.path().to_str().unwrap());
+
+        let result = find_playwright_chrome();
+        assert!(result.is_none());
+
+        restore_env(key, prev);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn find_playwright_chrome_picks_highest_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("Library/Caches/ms-playwright");
+        std::fs::create_dir_all(&cache).unwrap();
+
+        // Create two fake chromium dirs with executables
+        for rev in [1100, 1200] {
+            let chrome_dir = cache
+                .join(format!("chromium-{rev}"))
+                .join("chrome-mac-arm64")
+                .join("Google Chrome for Testing.app/Contents/MacOS");
+            std::fs::create_dir_all(&chrome_dir).unwrap();
+            let binary = chrome_dir.join("Google Chrome for Testing");
+            std::fs::write(&binary, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
+
+        let key = "HOME";
+        let prev = std::env::var(key).ok();
+        set_env(key, dir.path().to_str().unwrap());
+
+        let result = find_playwright_chrome();
+        assert!(result.is_some());
+        let path_str = result.unwrap().to_string_lossy().to_string();
+        assert!(
+            path_str.contains("chromium-1200"),
+            "should pick highest revision, got: {path_str}"
+        );
+
+        restore_env(key, prev);
     }
 }

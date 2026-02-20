@@ -117,7 +117,7 @@ impl BrowserSession {
                         Arc::clone(&frame_counter),
                     ));
 
-                    return Ok(Self {
+                    let session = Self {
                         cmd_tx,
                         is_streaming,
                         current_url: parking_lot::RwLock::new(None),
@@ -126,7 +126,14 @@ impl BrowserSession {
                         _frame_tx: frame_tx,
                         screencast_session_id,
                         frame_counter,
-                    });
+                    };
+
+                    // Enable CDP domains required for navigation and observation.
+                    let _ = session.send_cdp("Page.enable", json!({})).await;
+                    let _ = session.send_cdp("Network.enable", json!({})).await;
+                    let _ = session.send_cdp("Runtime.enable", json!({})).await;
+
+                    return Ok(session);
                 }
                 Err(e) if attempt < Self::MAX_PORT_ATTEMPTS - 1 => {
                     tracing::warn!(port, attempt, error = %e, "port conflict, retrying");
@@ -182,17 +189,42 @@ impl BrowserSession {
 
     /// Navigate to a URL.
     pub async fn navigate(&self, url: &str) -> Result<(), BrowserError> {
-        let _ = self
+        let result = self
             .send_cdp("Page.navigate", json!({ "url": url }))
             .await
             .map_err(|e| BrowserError::NavigationFailed {
                 url: url.into(),
                 reason: e.to_string(),
             })?;
-        // Wait for load
-        let _ = self.send_cdp("Page.loadEventFired", json!({})).await;
+
+        // Check for navigation errors (e.g. net::ERR_ABORTED)
+        if let Some(error_text) = result["errorText"].as_str() {
+            if !error_text.is_empty() {
+                return Err(BrowserError::NavigationFailed {
+                    url: url.into(),
+                    reason: error_text.to_string(),
+                });
+            }
+        }
+
+        // Best-effort wait for page load (10s timeout, non-fatal)
+        let _ = tokio::time::timeout(Duration::from_secs(10), self.wait_for_load()).await;
+
         *self.current_url.write() = Some(url.to_string());
         Ok(())
+    }
+
+    /// Poll `document.readyState` until "complete" or timeout.
+    async fn wait_for_load(&self) -> Result<(), BrowserError> {
+        for _ in 0..100 {
+            if let Ok(val) = self.evaluate("document.readyState").await {
+                if val.as_str() == Some("complete") {
+                    return Ok(());
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(()) // Timeout is non-fatal
     }
 
     /// Go back in browser history.
@@ -513,9 +545,7 @@ impl BrowserSession {
 
     /// Start streaming screencast frames.
     ///
-    /// Enables the Page CDP domain (required for Chrome to dispatch events)
-    /// then starts `Page.screencastFrame` events. The handler loop forwards
-    /// frames onto the broadcast channel stored on this session.
+    /// `Page.enable` is called at launch — Chrome dispatches events from then on.
     pub async fn start_screencast(
         &self,
         session_id: String,
@@ -525,10 +555,6 @@ impl BrowserSession {
 
         *self.screencast_session_id.write() = Some(session_id);
         self.frame_counter.store(0, Ordering::Relaxed);
-
-        // Enable the Page domain — Chrome won't dispatch Page.screencastFrame
-        // events without this. Playwright does it internally; we must be explicit.
-        let _ = self.send_cdp("Page.enable", json!({})).await?;
 
         let _ = self
             .send_cdp(
