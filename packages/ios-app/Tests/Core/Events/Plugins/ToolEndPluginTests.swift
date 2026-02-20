@@ -15,8 +15,8 @@ final class ToolEndPluginTests: XCTestCase {
                 "toolCallId": "tool-call-abc",
                 "toolName": "Read",
                 "success": true,
-                "result": "File content here",
-                "durationMs": 150
+                "output": "File content here",
+                "duration": 150
             }
         }
         """.data(using: .utf8)!
@@ -28,8 +28,8 @@ final class ToolEndPluginTests: XCTestCase {
         XCTAssertEqual(event.data.toolCallId, "tool-call-abc")
         XCTAssertEqual(event.data.toolName, "Read")
         XCTAssertTrue(event.data.success)
-        XCTAssertEqual(event.data.result, "File content here")
-        XCTAssertEqual(event.data.durationMs, 150)
+        XCTAssertEqual(event.data.output, "File content here")
+        XCTAssertEqual(event.data.duration, 150)
     }
 
     func testParseWithError() throws {
@@ -137,8 +137,8 @@ final class ToolEndPluginTests: XCTestCase {
                 "toolCallId": "tool-call-def",
                 "toolName": "Write",
                 "success": true,
-                "result": "File written successfully",
-                "durationMs": 200
+                "output": "File written successfully",
+                "duration": 200
             }
         }
         """.data(using: .utf8)!
@@ -155,8 +155,8 @@ final class ToolEndPluginTests: XCTestCase {
         XCTAssertEqual(toolResult.toolCallId, "tool-call-def")
         XCTAssertEqual(toolResult.toolName, "Write")
         XCTAssertTrue(toolResult.success)
-        XCTAssertEqual(toolResult.result, "File written successfully")
-        XCTAssertEqual(toolResult.durationMs, 200)
+        XCTAssertEqual(toolResult.output, "File written successfully")
+        XCTAssertEqual(toolResult.duration, 200)
     }
 
     func testTransformDisplayResult() throws {
@@ -166,7 +166,7 @@ final class ToolEndPluginTests: XCTestCase {
             "data": {
                 "toolCallId": "tool-5",
                 "success": true,
-                "result": "Success content"
+                "output": "Success content"
             }
         }
         """.data(using: .utf8)!

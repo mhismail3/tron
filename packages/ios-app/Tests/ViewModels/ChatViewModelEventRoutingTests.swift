@@ -50,9 +50,9 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             toolCallId: toolCallId,
             toolName: nil,
             success: success,
-            result: result,
+            output: result,
             error: success ? nil : result,
-            durationMs: durationMs,
+            duration: durationMs,
             details: nil,
             rawDetails: nil
         )

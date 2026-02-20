@@ -79,7 +79,7 @@ enum AgentTurnPlugin: DispatchableEventPlugin {
         case unknown
 
         enum CodingKeys: String, CodingKey {
-            case type, text, id, name, input, toolUseId = "tool_use_id", content, isError = "is_error", thinking
+            case type, text, id, name, arguments, toolUseId = "tool_use_id", content, isError = "is_error", thinking
         }
 
         init(from decoder: Decoder) throws {
@@ -94,8 +94,8 @@ enum AgentTurnPlugin: DispatchableEventPlugin {
             case "tool_use":
                 let id = try container.decode(String.self, forKey: .id)
                 let name = try container.decode(String.self, forKey: .name)
-                let input = try container.decodeIfPresent([String: AnyCodable].self, forKey: .input) ?? [:]
-                self = .toolUse(id: id, name: name, input: input)
+                let arguments = try container.decodeIfPresent([String: AnyCodable].self, forKey: .arguments) ?? [:]
+                self = .toolUse(id: id, name: name, input: arguments)
 
             case "tool_result":
                 let toolUseId = try container.decode(String.self, forKey: .toolUseId)

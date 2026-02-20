@@ -875,28 +875,22 @@ struct ToolResultParser {
             if let t = truncated { return "Area \"\(t)\"" }
             return "Area details"
 
-        // List/search actions — count extraction
-        case "list":
-            if let result, let match = result.firstMatch(of: /Tasks \((\d+)/) {
-                let count = Int(match.1) ?? 0
+        // List/search actions — extract counts from JSON arrays or text-format headers
+        case "list", "search":
+            if let count = extractListCount(from: result, jsonKey: "tasks") {
+                if action == "search" {
+                    return "\(count) result\(count == 1 ? "" : "s")"
+                }
                 return "\(count) task\(count == 1 ? "" : "s")"
             }
-            return "Tasks listed"
-        case "search":
-            if let result, let match = result.firstMatch(of: /\((\d+)\)/) {
-                let count = Int(match.1) ?? 0
-                return "\(count) result\(count == 1 ? "" : "s")"
-            }
-            return "Search complete"
+            return action == "search" ? "Search complete" : "Tasks listed"
         case "list_projects":
-            if let result, let match = result.firstMatch(of: /Projects \((\d+)\)/) {
-                let count = Int(match.1) ?? 0
+            if let count = extractListCount(from: result, jsonKey: "projects") {
                 return "\(count) project\(count == 1 ? "" : "s")"
             }
             return "Projects listed"
         case "list_areas":
-            if let result, let match = result.firstMatch(of: /Areas \((\d+)\)/) {
-                let count = Int(match.1) ?? 0
+            if let count = extractListCount(from: result, jsonKey: "areas") {
                 return "\(count) area\(count == 1 ? "" : "s")"
             }
             return "Areas listed"
@@ -906,19 +900,64 @@ struct ToolResultParser {
         }
     }
 
-    /// Extract entity name from tool result text
-    /// Matches ID patterns like "task_xxx: Name [status]" or "# Name" headers
+    /// Extract entity name from tool result.
+    /// Tries JSON `title` field first, falls back to text-format parsing for historical events.
     private static func extractEntityName(from result: String?) -> String? {
         guard let result else { return nil }
-        // Match "entity_id: Name" — strip trailing [status]
-        if let match = result.firstMatch(of: /(?:task_|proj_|area_)\w+:\s+(.+?)(?:\s+\[|$)/) {
-            let name = String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !name.isEmpty { return name }
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Try JSON format first (canonical)
+        if trimmed.hasPrefix("{"),
+           let data = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let title = json["title"] as? String,
+           !title.isEmpty {
+            return title
         }
-        // Match "# Name" header (get actions)
-        if let match = result.firstMatch(of: /(?m)^#\s+(.+)$/) {
-            return String(match.1).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Fallback: text-format parsing for historical events
+        let firstLine = trimmed.components(separatedBy: "\n").first ?? trimmed
+
+        // Match "# Title" header
+        if firstLine.hasPrefix("# ") {
+            let title = String(firstLine.dropFirst(2))
+            return title.isEmpty ? nil : title
         }
+
+        // Match "Verb entity_id: Title [status]" — extract title after first ": "
+        if let colonRange = firstLine.range(of: ": ") {
+            var name = String(firstLine[colonRange.upperBound...])
+            // Strip trailing [status] bracket
+            if let bracketStart = name.range(of: " [") {
+                name = String(name[name.startIndex..<bracketStart.lowerBound])
+            }
+            return name.isEmpty ? nil : name
+        }
+
+        return nil
+    }
+
+    /// Extract count from list results.
+    /// Tries JSON array first, falls back to text-format header parsing for historical events.
+    private static func extractListCount(from result: String?, jsonKey: String) -> Int? {
+        guard let result else { return nil }
+
+        // Try JSON format first (canonical)
+        if let data = result.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let items = json[jsonKey] as? [Any] {
+            return items.count
+        }
+
+        // Fallback: text-format header parsing for historical events
+        // Matches patterns like "Tasks (3/5):", "Areas (3)", "Search results for ... (3):"
+        if let match = result.range(of: #"\((\d+)(?:/\d+)?\)"#, options: .regularExpression) {
+            let numStr = String(result[match]).replacingOccurrences(of: "(", with: "").components(separatedBy: "/").first ?? ""
+            if let count = Int(numStr.replacingOccurrences(of: ")", with: "")) {
+                return count
+            }
+        }
+
         return nil
     }
 

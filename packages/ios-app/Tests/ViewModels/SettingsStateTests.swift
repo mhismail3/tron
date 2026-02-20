@@ -9,7 +9,7 @@ final class SettingsStateTests: XCTestCase {
     func testInitialValuesMatchDefaults() {
         let state = SettingsState()
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
-        XCTAssertEqual(state.preserveRecentTurns, 5)
+        XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 8)
@@ -29,7 +29,7 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
 
         // Change everything
-        state.preserveRecentTurns = 10
+        state.preserveRecentCount = 10
         state.forceAlwaysCompact = true
         state.triggerTokenThreshold = 0.90
         state.defaultTurnFallback = 15
@@ -43,7 +43,7 @@ final class SettingsStateTests: XCTestCase {
         state.resetToDefaults()
 
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
-        XCTAssertEqual(state.preserveRecentTurns, 5)
+        XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertFalse(state.forceAlwaysCompact)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 8)
@@ -57,7 +57,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testBuildCompactionUpdate() {
         let state = SettingsState()
-        state.preserveRecentTurns = 7
+        state.preserveRecentCount = 7
         state.forceAlwaysCompact = true
         state.triggerTokenThreshold = 0.85
         state.defaultTurnFallback = 12

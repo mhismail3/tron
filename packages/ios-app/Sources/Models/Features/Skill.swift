@@ -66,7 +66,11 @@ struct SkillMetadata: Identifiable, Codable, Equatable {
 /// Response from skill.list RPC call
 struct SkillListResponse: Codable {
     let skills: [Skill]
-    let totalCount: Int
+    var totalCount: Int { skills.count }
+
+    private enum CodingKeys: String, CodingKey {
+        case skills
+    }
 }
 
 /// Response from skill.get RPC call

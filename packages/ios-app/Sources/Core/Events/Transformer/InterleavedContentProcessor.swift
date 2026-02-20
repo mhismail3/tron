@@ -213,7 +213,7 @@ enum InterleavedContentProcessor {
         let arguments: String
         if let toolCallArgs = toolCall?.arguments {
             arguments = toolCallArgs
-        } else if let inputDict = block["input"] as? [String: Any],
+        } else if let inputDict = (block["arguments"] ?? block["input"]) as? [String: Any],
                   let jsonData = try? JSONSerialization.data(withJSONObject: inputDict, options: [.sortedKeys]),
                   let jsonString = String(data: jsonData, encoding: .utf8) {
             arguments = jsonString

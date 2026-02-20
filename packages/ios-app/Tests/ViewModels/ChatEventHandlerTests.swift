@@ -144,9 +144,9 @@ final class ChatEventHandlerTests: XCTestCase {
             toolCallId: "tool_123",
             toolName: "Bash",
             success: true,
-            result: "Success!",
+            output: "Success!",
             error: nil,
-            durationMs: 150,
+            duration: 150,
             details: nil,
             rawDetails: nil
         )
@@ -166,9 +166,9 @@ final class ChatEventHandlerTests: XCTestCase {
             toolCallId: "tool_123",
             toolName: "Bash",
             success: false,
-            result: nil,
+            output: nil,
             error: "Command failed",
-            durationMs: 50,
+            duration: 50,
             details: nil,
             rawDetails: nil
         )

@@ -58,7 +58,7 @@ struct ToolResultPayload {
         self.toolCallId = toolCallId
         self.content = payload.string("content") ?? ""
         self.isError = payload.bool("isError") ?? false
-        self.durationMs = payload.int("duration") ?? payload.int("durationMs") ?? 0
+        self.durationMs = payload.int("duration") ?? 0
         self.affectedFiles = payload.stringArray("affectedFiles")
         self.truncated = payload.bool("truncated")
         self.blobId = payload.string("blobId")

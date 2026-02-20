@@ -64,12 +64,7 @@ pub async fn handle_message(
         warn!(method, "unknown RPC method");
     }
 
-    let mut response = registry.dispatch(request, ctx).await;
-    if response.success
-        && let Some(result) = response.result.as_mut()
-    {
-        crate::rpc::adapters::adapt_rpc_result_for_ios(&method, result, ctx);
-    }
+    let response = registry.dispatch(request, ctx).await;
     let json = serde_json::to_string(&response).unwrap_or_else(|e| {
         tracing::error!(error = %e, "Failed to serialize response");
         SERIALIZATION_FALLBACK.to_string()
@@ -134,19 +129,6 @@ mod tests {
             _ctx: &RpcContext,
         ) -> Result<Value, RpcError> {
             Ok(params.unwrap_or(json!(null)))
-        }
-    }
-
-    struct StaticHandler(Value);
-
-    #[async_trait]
-    impl MethodHandler for StaticHandler {
-        async fn handle(
-            &self,
-            _params: Option<Value>,
-            _ctx: &RpcContext,
-        ) -> Result<Value, RpcError> {
-            Ok(self.0.clone())
         }
     }
 
@@ -307,97 +289,6 @@ mod tests {
         assert!(resp.success);
         let result = resp.result.unwrap();
         assert_eq!(result["big"].as_str().unwrap().len(), 10_000);
-    }
-
-    #[tokio::test]
-    async fn settings_get_is_adapted_in_websocket_handler() {
-        let mut reg = MethodRegistry::new();
-        reg.register(
-            "settings.get",
-            StaticHandler(json!({
-                "models": {"default": "claude-opus-4-6"},
-                "server": {"maxConcurrentSessions": 7, "defaultWorkspace": "/tmp"},
-                "context": {
-                    "compactor": {"maxTokens": 160000, "preserveRecentCount": 8},
-                    "memory": {"ledger": {}, "autoInject": {}},
-                    "rules": {},
-                    "tasks": {}
-                },
-                "tools": {}
-            })),
-        );
-        let ctx = make_test_ctx();
-        let msg = r#"{"id":"r8","method":"settings.get"}"#;
-        let result = handle_message(msg, &reg, &ctx)
-            .await
-            .response
-            .result
-            .unwrap();
-        assert_eq!(result["defaultModel"], "claude-opus-4-6");
-        assert_eq!(result["maxConcurrentSessions"], 7);
-        assert_eq!(result["defaultWorkspace"], "/tmp");
-        assert!(result["compaction"]["preserveRecentTurns"].is_number());
-        assert!(result["memory"].is_object());
-    }
-
-    #[tokio::test]
-    async fn skill_list_is_adapted_in_websocket_handler() {
-        let mut reg = MethodRegistry::new();
-        reg.register(
-            "skill.list",
-            StaticHandler(json!({
-                "skills": [{"name": "alpha"}, {"name": "beta"}]
-            })),
-        );
-        let ctx = make_test_ctx();
-        let msg = r#"{"id":"r9","method":"skill.list"}"#;
-        let result = handle_message(msg, &reg, &ctx)
-            .await
-            .response
-            .result
-            .unwrap();
-        assert_eq!(result["totalCount"], 2);
-    }
-
-    #[tokio::test]
-    async fn session_get_history_task_manager_output_is_adapted() {
-        let raw_task_json = serde_json::to_string(&json!({
-            "tasks": [{"id": "task-1", "title": "Review PR", "status": "pending"}],
-            "count": 1
-        }))
-        .unwrap();
-
-        let mut reg = MethodRegistry::new();
-        reg.register(
-            "session.getHistory",
-            StaticHandler(json!({
-                "messages": [{
-                    "id": "m1",
-                    "role": "tool",
-                    "toolUse": {"name": "TaskManager"},
-                    "content": {"content": raw_task_json}
-                }],
-                "hasMore": false
-            })),
-        );
-        let ctx = make_test_ctx();
-        let msg = r#"{"id":"r10","method":"session.getHistory"}"#;
-        let result = handle_message(msg, &reg, &ctx)
-            .await
-            .response
-            .result
-            .unwrap();
-        let rendered = result["messages"][0]["content"]["content"]
-            .as_str()
-            .unwrap();
-        assert!(
-            rendered.contains("Tasks"),
-            "expected adapted TaskManager text"
-        );
-        assert!(
-            !rendered.trim_start().starts_with('{'),
-            "expected non-JSON adapted TaskManager text"
-        );
     }
 
     #[test]

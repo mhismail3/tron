@@ -252,7 +252,7 @@ final class ChatEventHandler {
             toolCallId: pluginResult.toolCallId,
             status: status,
             result: pluginResult.displayResult,
-            durationMs: pluginResult.durationMs,
+            durationMs: pluginResult.duration,
             isAskUserQuestion: false  // Caller determines this from message content
         )
     }

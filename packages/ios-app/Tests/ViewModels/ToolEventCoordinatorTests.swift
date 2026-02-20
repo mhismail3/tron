@@ -1230,9 +1230,9 @@ extension ToolEndPlugin.Result {
             toolCallId: toolCallId,
             toolName: nil,
             success: success,
-            result: success ? displayResult : nil,
+            output: success ? displayResult : nil,
             error: success ? nil : displayResult,
-            durationMs: durationMs,
+            duration: durationMs,
             details: details,
             rawDetails: nil
         )

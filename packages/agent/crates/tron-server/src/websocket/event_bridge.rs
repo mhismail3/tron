@@ -200,7 +200,6 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             let mut data = serde_json::json!({
                 "turn": turn,
                 "duration": duration,
-                "durationMs": duration,
             });
             if let Some(usage) = token_usage {
                 data["tokenUsage"] = serde_json::to_value(usage).unwrap_or_default();
@@ -240,12 +239,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                 "toolName": tool_name,
                 "toolCallId": tool_call_id,
                 "duration": duration,
-                "durationMs": duration,
                 "success": success,
             });
-            // Extract result text from TronToolResult
             if let Some(tool_result) = result {
-                let mut result_text = match &tool_result.content {
+                let result_text = match &tool_result.content {
                     tron_core::tools::ToolResultBody::Text(t) => t.clone(),
                     tron_core::tools::ToolResultBody::Blocks(blocks) => blocks
                         .iter()
@@ -259,15 +256,8 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
                         .collect::<Vec<_>>()
                         .join("\n"),
                 };
-                result_text = crate::rpc::adapters::adapt_tool_execution_result_for_ios(
-                    tool_name,
-                    success,
-                    &result_text,
-                    tool_result.details.as_ref(),
-                );
                 if success {
                     data["output"] = serde_json::json!(result_text);
-                    data["result"] = serde_json::json!(result_text);
                 } else {
                     data["error"] = serde_json::json!(result_text);
                 }
@@ -1083,7 +1073,6 @@ mod tests {
         let data = rpc.data.unwrap();
         assert_eq!(data["turn"], 2);
         assert_eq!(data["duration"], 5000);
-        assert_eq!(data["durationMs"], 5000);
         assert_eq!(data["tokenUsage"]["inputTokens"], 100);
         assert_eq!(data["tokenUsage"]["outputTokens"], 50);
         assert_eq!(data["cost"], 0.005);
@@ -1092,7 +1081,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_end_success_has_required_ios_fields() {
+    fn tool_end_success_has_required_fields() {
         use tron_core::tools::{ToolResultBody, TronToolResult};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
@@ -1115,13 +1104,13 @@ mod tests {
         assert_eq!(data["toolCallId"], "tc_1");
         assert_eq!(data["toolName"], "bash");
         assert_eq!(data["duration"], 1500);
-        assert_eq!(data["durationMs"], 1500);
         assert_eq!(data["output"], "file1.txt\nfile2.txt");
-        assert_eq!(data["result"], "file1.txt\nfile2.txt");
+        assert!(data.get("result").is_none());
+        assert!(data.get("durationMs").is_none());
     }
 
     #[test]
-    fn tool_end_error_has_required_ios_fields() {
+    fn tool_end_error_has_required_fields() {
         use tron_core::tools::{ToolResultBody, TronToolResult};
         let event = TronEvent::ToolExecutionEnd {
             base: BaseEvent::now("s1"),
@@ -1143,7 +1132,8 @@ mod tests {
         // On error, output/result should NOT be set
         assert!(data.get("output").is_none());
         assert!(data.get("result").is_none());
-        assert_eq!(data["durationMs"], 500);
+        assert_eq!(data["duration"], 500);
+        assert!(data.get("durationMs").is_none());
     }
 
     #[test]
@@ -1186,7 +1176,8 @@ mod tests {
         let data = rpc.data.unwrap();
         // Even without result, success must be present (iOS requires it)
         assert_eq!(data["success"], true);
-        assert_eq!(data["durationMs"], 1500);
+        assert_eq!(data["duration"], 1500);
+        assert!(data.get("durationMs").is_none());
     }
 
     #[test]
@@ -1316,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn session_created_has_full_ios_fields() {
+    fn session_created_has_required_fields() {
         let event = TronEvent::SessionCreated {
             base: BaseEvent::now("s1"),
             model: "claude-opus-4-6".into(),

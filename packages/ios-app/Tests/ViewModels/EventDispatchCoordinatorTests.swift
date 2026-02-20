@@ -82,9 +82,9 @@ final class EventDispatchCoordinatorTests: XCTestCase {
             toolCallId: "tool_123",
             toolName: "Read",
             success: true,
-            result: "file contents",
+            output: "file contents",
             error: nil,
-            durationMs: 150,
+            duration: 150,
             details: nil,
             rawDetails: nil
         )
@@ -98,7 +98,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
 
         // Then: Handler should be called
         XCTAssertEqual(mockContext.handleToolEndCalledWith?.toolCallId, "tool_123")
-        XCTAssertEqual(mockContext.handleToolEndCalledWith?.durationMs, 150)
+        XCTAssertEqual(mockContext.handleToolEndCalledWith?.duration, 150)
     }
 
     // MARK: - Turn Lifecycle Event Tests

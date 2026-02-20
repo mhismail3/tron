@@ -21,27 +21,62 @@ struct ServerSettings: Decodable {
     let tools: ToolSettings
 
     private enum CodingKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, maxConcurrentSessions
-        case anthropicAccounts, anthropicAccount
-        case compaction, memory, rules, tasks, tools
+        case models, server, context, tools
+    }
+
+    private enum ModelsKeys: String, CodingKey {
+        case `default`
+    }
+
+    private enum ServerKeys: String, CodingKey {
+        case maxConcurrentSessions, defaultWorkspace, anthropicAccount, anthropicAccounts
+    }
+
+    private enum ContextKeys: String, CodingKey {
+        case compactor, memory, rules, tasks
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        defaultModel = (try? container.decodeIfPresent(String.self, forKey: .defaultModel)) ?? "claude-sonnet-4-6"
-        defaultWorkspace = try? container.decodeIfPresent(String.self, forKey: .defaultWorkspace)
-        maxConcurrentSessions = (try? container.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions)) ?? 10
-        anthropicAccounts = try? container.decodeIfPresent([String].self, forKey: .anthropicAccounts)
-        anthropicAccount = try? container.decodeIfPresent(String.self, forKey: .anthropicAccount)
-        compaction = (try? container.decodeIfPresent(CompactionSettings.self, forKey: .compaction)) ?? .defaults
-        memory = (try? container.decodeIfPresent(MemorySettings.self, forKey: .memory)) ?? .defaults
-        rules = (try? container.decodeIfPresent(RulesSettings.self, forKey: .rules)) ?? .defaults
-        tasks = (try? container.decodeIfPresent(TaskSettings.self, forKey: .tasks)) ?? .defaults
+
+        // models.default
+        if let modelsContainer = try? container.nestedContainer(keyedBy: ModelsKeys.self, forKey: .models) {
+            defaultModel = (try? modelsContainer.decodeIfPresent(String.self, forKey: .default)) ?? "claude-sonnet-4-6"
+        } else {
+            defaultModel = "claude-sonnet-4-6"
+        }
+
+        // server.*
+        if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
+            maxConcurrentSessions = (try? serverContainer.decodeIfPresent(Int.self, forKey: .maxConcurrentSessions)) ?? 10
+            defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
+            anthropicAccounts = try? serverContainer.decodeIfPresent([String].self, forKey: .anthropicAccounts)
+            anthropicAccount = try? serverContainer.decodeIfPresent(String.self, forKey: .anthropicAccount)
+        } else {
+            maxConcurrentSessions = 10
+            defaultWorkspace = nil
+            anthropicAccounts = nil
+            anthropicAccount = nil
+        }
+
+        // context.*
+        if let contextContainer = try? container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context) {
+            compaction = (try? contextContainer.decodeIfPresent(CompactionSettings.self, forKey: .compactor)) ?? .defaults
+            memory = (try? contextContainer.decodeIfPresent(MemorySettings.self, forKey: .memory)) ?? .defaults
+            rules = (try? contextContainer.decodeIfPresent(RulesSettings.self, forKey: .rules)) ?? .defaults
+            tasks = (try? contextContainer.decodeIfPresent(TaskSettings.self, forKey: .tasks)) ?? .defaults
+        } else {
+            compaction = .defaults
+            memory = .defaults
+            rules = .defaults
+            tasks = .defaults
+        }
+
         tools = (try? container.decodeIfPresent(ToolSettings.self, forKey: .tools)) ?? .defaults
     }
 
     struct CompactionSettings: Decodable {
-        let preserveRecentTurns: Int
+        let preserveRecentCount: Int
         let forceAlways: Bool
         let triggerTokenThreshold: Double
         let alertZoneThreshold: Double
@@ -49,20 +84,20 @@ struct ServerSettings: Decodable {
         let alertTurnFallback: Int
 
         static let defaults = CompactionSettings(
-            preserveRecentTurns: 5, forceAlways: false,
+            preserveRecentCount: 5, forceAlways: false,
             triggerTokenThreshold: 0.70, alertZoneThreshold: 0.50,
             defaultTurnFallback: 8, alertTurnFallback: 5
         )
 
         private enum CodingKeys: String, CodingKey {
-            case preserveRecentTurns, forceAlways, triggerTokenThreshold
+            case preserveRecentCount, forceAlways, triggerTokenThreshold
             case alertZoneThreshold, defaultTurnFallback, alertTurnFallback
         }
 
-        init(preserveRecentTurns: Int, forceAlways: Bool,
+        init(preserveRecentCount: Int, forceAlways: Bool,
              triggerTokenThreshold: Double, alertZoneThreshold: Double,
              defaultTurnFallback: Int, alertTurnFallback: Int) {
-            self.preserveRecentTurns = preserveRecentTurns
+            self.preserveRecentCount = preserveRecentCount
             self.forceAlways = forceAlways
             self.triggerTokenThreshold = triggerTokenThreshold
             self.alertZoneThreshold = alertZoneThreshold
@@ -72,7 +107,7 @@ struct ServerSettings: Decodable {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            preserveRecentTurns = (try? container.decodeIfPresent(Int.self, forKey: .preserveRecentTurns)) ?? 5
+            preserveRecentCount = (try? container.decodeIfPresent(Int.self, forKey: .preserveRecentCount)) ?? 5
             forceAlways = (try? container.decodeIfPresent(Bool.self, forKey: .forceAlways)) ?? false
             triggerTokenThreshold = (try? container.decodeIfPresent(Double.self, forKey: .triggerTokenThreshold)) ?? 0.70
             alertZoneThreshold = (try? container.decodeIfPresent(Double.self, forKey: .alertZoneThreshold)) ?? 0.50

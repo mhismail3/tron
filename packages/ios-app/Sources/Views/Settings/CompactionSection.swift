@@ -3,7 +3,7 @@ import SwiftUI
 struct CompactionSection: View {
     @Binding var triggerTokenThreshold: Double
     @Binding var defaultTurnFallback: Int
-    @Binding var preserveRecentTurns: Int
+    @Binding var preserveRecentCount: Int
     @Binding var forceAlwaysCompact: Bool
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
@@ -73,14 +73,14 @@ struct CompactionSection: View {
                 Label("Keep Recent Turns", systemImage: "arrow.counterclockwise.circle")
                     .font(TronTypography.subheadline)
                 Spacer()
-                Text("\(preserveRecentTurns)")
+                Text("\(preserveRecentCount)")
                     .font(TronTypography.subheadline)
                     .foregroundStyle(.tronEmerald)
                     .monospacedDigit()
                     .frame(minWidth: 20)
-                TronStepper(value: $preserveRecentTurns, range: 0...10)
+                TronStepper(value: $preserveRecentCount, range: 0...10)
             }
-            .onChange(of: preserveRecentTurns) { _, newValue in
+            .onChange(of: preserveRecentCount) { _, newValue in
                 updateServerSetting {
                     ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
                 }

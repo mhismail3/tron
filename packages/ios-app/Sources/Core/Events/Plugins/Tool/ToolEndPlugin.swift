@@ -19,17 +19,15 @@ enum ToolEndPlugin: DispatchableEventPlugin {
             let toolCallId: String
             let toolName: String?
             let success: Bool
-            let result: String?
             let output: String?
             let error: String?
-            let durationMs: Int?
             let duration: Int?
             let details: ToolDetails?
             /// Raw details dictionary for tool-specific structured results
             let rawDetails: [String: AnyCodable]?
 
             enum CodingKeys: String, CodingKey {
-                case toolCallId, toolName, success, result, output, error, durationMs, duration, details
+                case toolCallId, toolName, success, output, error, duration, details
             }
 
             init(from decoder: Decoder) throws {
@@ -37,9 +35,7 @@ enum ToolEndPlugin: DispatchableEventPlugin {
                 toolCallId = try container.decode(String.self, forKey: .toolCallId)
                 toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
                 success = try container.decode(Bool.self, forKey: .success)
-                result = try container.decodeIfPresent(String.self, forKey: .result)
                 error = try container.decodeIfPresent(String.self, forKey: .error)
-                durationMs = try container.decodeIfPresent(Int.self, forKey: .durationMs)
                 duration = try container.decodeIfPresent(Int.self, forKey: .duration)
                 details = try container.decodeIfPresent(ToolDetails.self, forKey: .details)
                 rawDetails = try container.decodeIfPresent([String: AnyCodable].self, forKey: .details)
@@ -74,9 +70,9 @@ enum ToolEndPlugin: DispatchableEventPlugin {
         let toolCallId: String
         let toolName: String?
         let success: Bool
-        let result: String?
+        let output: String?
         let error: String?
-        let durationMs: Int?
+        let duration: Int?
         let details: EventData.ToolDetails?
         /// Raw details dictionary for tool-specific structured results
         let rawDetails: [String: AnyCodable]?
@@ -84,7 +80,7 @@ enum ToolEndPlugin: DispatchableEventPlugin {
         /// Display-friendly result text.
         var displayResult: String {
             if success {
-                return result ?? ""
+                return output ?? ""
             } else {
                 return error ?? "Error"
             }
@@ -98,9 +94,9 @@ enum ToolEndPlugin: DispatchableEventPlugin {
             toolCallId: event.data.toolCallId,
             toolName: event.data.toolName,
             success: event.data.success,
-            result: event.data.result ?? event.data.output,
+            output: event.data.output,
             error: event.data.error,
-            durationMs: event.data.durationMs ?? event.data.duration,
+            duration: event.data.duration,
             details: event.data.details,
             rawDetails: event.data.rawDetails
         )

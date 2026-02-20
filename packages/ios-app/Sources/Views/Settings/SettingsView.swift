@@ -107,7 +107,7 @@ struct SettingsView: View {
                 CompactionSection(
                     triggerTokenThreshold: Bindable(settingsState).triggerTokenThreshold,
                     defaultTurnFallback: Bindable(settingsState).defaultTurnFallback,
-                    preserveRecentTurns: Bindable(settingsState).preserveRecentTurns,
+                    preserveRecentCount: Bindable(settingsState).preserveRecentCount,
                     forceAlwaysCompact: Bindable(settingsState).forceAlwaysCompact,
                     updateServerSetting: updateServerSetting
                 )

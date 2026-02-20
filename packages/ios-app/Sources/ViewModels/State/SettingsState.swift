@@ -12,7 +12,7 @@ final class SettingsState {
     // MARK: - Server-Authoritative Settings
 
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
-    var preserveRecentTurns: Int = 5
+    var preserveRecentCount: Int = 5
     var forceAlwaysCompact: Bool = false
     var triggerTokenThreshold: Double = 0.70
     var defaultTurnFallback: Int = 8
@@ -51,7 +51,7 @@ final class SettingsState {
         guard !isLoaded else { return }
         do {
             let settings = try await rpcClient.settings.get()
-            preserveRecentTurns = settings.compaction.preserveRecentTurns
+            preserveRecentCount = settings.compaction.preserveRecentCount
             forceAlwaysCompact = settings.compaction.forceAlways
             triggerTokenThreshold = settings.compaction.triggerTokenThreshold
             defaultTurnFallback = settings.compaction.defaultTurnFallback
@@ -85,7 +85,7 @@ final class SettingsState {
     // MARK: - Reset
 
     func resetToDefaults() {
-        preserveRecentTurns = 5
+        preserveRecentCount = 5
         forceAlwaysCompact = false
         triggerTokenThreshold = 0.70
         defaultTurnFallback = 8

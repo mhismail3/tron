@@ -35,7 +35,7 @@ enum AskUserQuestionTransformer {
         let argumentsJson: String
         if let toolCallArgs = toolCall?.arguments {
             argumentsJson = toolCallArgs
-        } else if let inputDict = contentBlock["input"] as? [String: Any],
+        } else if let inputDict = (contentBlock["arguments"] ?? contentBlock["input"]) as? [String: Any],
                   let jsonData = try? JSONSerialization.data(withJSONObject: inputDict),
                   let jsonString = String(data: jsonData, encoding: .utf8) {
             argumentsJson = jsonString

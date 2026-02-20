@@ -57,61 +57,25 @@ struct ToolsSection: View {
     }
 }
 
-// MARK: - Tool Item Row (expandable sub-container showing description)
+// MARK: - Tool Item Row
 
 @available(iOS 26.0, *)
 struct ToolItemRow: View {
     let tool: String
-    @State private var isExpanded = false
-
-    private var toolName: String {
-        if let colonIndex = tool.firstIndex(of: ":") {
-            return String(tool[..<colonIndex])
-        }
-        return tool
-    }
-
-    private var toolDescription: String {
-        if let colonIndex = tool.firstIndex(of: ":") {
-            let afterColon = tool.index(after: colonIndex)
-            return String(tool[afterColon...]).trimmingCharacters(in: .whitespaces)
-        }
-        return ""
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "wrench.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronSlate)
+        HStack(spacing: 8) {
+            Image(systemName: "wrench.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                .foregroundStyle(.tronSlate)
 
-                Text(toolName)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronSlate)
+            Text(tool)
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(.tronSlate)
 
-                Spacer()
-
-                Image(systemName: "chevron.down")
-                    .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                    .foregroundStyle(.tronTextDisabled)
-                    .rotationEffect(.degrees(isExpanded ? -180 : 0))
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
-            }
-            .padding(8)
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .onTapGesture {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    isExpanded.toggle()
-                }
-            }
-
-            if isExpanded && !toolDescription.isEmpty {
-                ContextMarkdownContent(content: toolDescription)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-            }
+            Spacer()
         }
+        .padding(8)
         .sectionFill(.tronSlate, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
