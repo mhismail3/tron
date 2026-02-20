@@ -49,7 +49,9 @@ struct ModelPickerStateTests {
     static func makeModelInfo(
         id: String,
         name: String = "",
-        contextWindow: Int = 200_000
+        contextWindow: Int = 200_000,
+        isLegacy: Bool = false,
+        sortOrder: Int? = nil
     ) -> ModelInfo {
         ModelInfo(
             id: id,
@@ -60,12 +62,13 @@ struct ModelPickerStateTests {
             supportsThinking: true,
             supportsImages: true,
             tier: nil,
-            isLegacy: false,
+            isLegacy: isLegacy,
             supportsReasoning: nil,
             reasoningLevels: nil,
             defaultReasoningLevel: nil,
             thinkingLevel: nil,
-            supportedThinkingLevels: nil
+            supportedThinkingLevels: nil,
+            sortOrder: sortOrder
         )
     }
 
@@ -354,18 +357,18 @@ struct ModelPickerStateTests {
         #expect(state.optimisticModelName == nil)
     }
 
-    // MARK: - Opus 4.6 Recognition Tests
+    // MARK: - isLatestGeneration Tests (isLegacy-driven)
 
-    @Test("Opus 4.6 is recognized as latest generation")
-    func testOpus46IsLatestGeneration() {
-        let model = Self.makeModelInfo(id: "claude-opus-4-6")
+    @Test("isLegacy: false → isLatestGeneration: true")
+    func testIsLatestGeneration_notLegacy() {
+        let model = Self.makeModelInfo(id: "claude-opus-4-6", isLegacy: false)
         #expect(model.isLatestGeneration == true)
     }
 
-    @Test("Opus 4.5 is still recognized as latest generation (regression)")
-    func testOpus45StillLatestGeneration() {
-        let model = Self.makeModelInfo(id: "claude-opus-4-5-20251101")
-        #expect(model.isLatestGeneration == true)
+    @Test("isLegacy: true → isLatestGeneration: false")
+    func testIsLatestGeneration_legacy() {
+        let model = Self.makeModelInfo(id: "claude-opus-4-5-20251101", isLegacy: true)
+        #expect(model.isLatestGeneration == false)
     }
 
     @Test("Opus 4.6 supports reasoning")

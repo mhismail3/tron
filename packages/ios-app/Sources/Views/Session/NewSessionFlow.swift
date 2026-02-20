@@ -253,14 +253,9 @@ struct NewSessionFlow: View {
     }
 
     private var modelDescription: String {
-        if selectedModel.contains("opus") && (selectedModel.contains("4-6") || selectedModel.contains("4.6")) {
-            return "Claude Opus 4.6 is the most capable model with adaptive thinking"
-        } else if selectedModel.contains("opus") {
-            return "Claude Opus 4.5 is the most capable model"
-        } else if selectedModel.contains("sonnet") {
-            return "Claude Sonnet is fast and highly capable"
-        } else if selectedModel.contains("haiku") {
-            return "Claude Haiku is optimized for speed"
+        if let model = availableModels.first(where: { $0.id == selectedModel }),
+           let desc = model.modelDescription {
+            return desc
         }
         return ""
     }
@@ -285,8 +280,7 @@ struct NewSessionFlow: View {
                 // otherwise use the first recommended model
                 if let defaultMatch = models.first(where: { $0.id == defaultModel }) {
                     selectedModel = defaultMatch.id
-                } else if let recommended = models.first(where: { $0.isLatestGeneration && $0.id.contains("opus") }) {
-                    // Fallback to latest Opus
+                } else if let recommended = models.first(where: { $0.recommended == true && $0.isAnthropic }) {
                     selectedModel = recommended.id
                 } else if let first = models.first {
                     selectedModel = first.id

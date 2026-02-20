@@ -3,8 +3,16 @@ import Foundation
 // MARK: - Model Name Formatter
 
 /// Unified model name formatting for Claude models.
-/// Consolidates duplicate formatting logic from ChatView, Message, EventTypes, and RPCTypes.
+/// Uses server-provided metadata when available, falls back to ID heuristic parsing.
 enum ModelNameFormatter {
+
+    /// Server model data, populated from model.list response.
+    /// Written on main actor by ModelClient, read by String extensions.
+    nonisolated(unsafe) private(set) static var serverModels: [String: ModelInfo] = [:]
+
+    static func updateFromServer(_ models: [ModelInfo]) {
+        serverModels = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
+    }
 
     /// Output format for model names
     enum Style {
@@ -25,6 +33,21 @@ enum ModelNameFormatter {
     ///   - fallback: Optional fallback string if model can't be parsed
     /// - Returns: Formatted model name
     static func format(_ modelId: String, style: Style, fallback: String? = nil) -> String {
+        // Use server metadata when available
+        if let info = serverModels[modelId] {
+            switch style {
+            case .short:
+                return info.name
+            case .full:
+                return info.isAnthropic ? "Claude \(info.name)" : info.name
+            case .compact:
+                return info.name.lowercased().replacingOccurrences(of: " ", with: "-")
+            case .tierOnly:
+                return info.isAnthropic ? (info.tier?.capitalized ?? info.name) : info.name
+            }
+        }
+
+        // Fallback: heuristic ID parsing for models not in cache
         let lowered = modelId.lowercased()
 
         // Check for OpenAI Codex models first
@@ -295,46 +318,11 @@ extension String {
 
 // MARK: - Quick Lookup Helper
 
-/// Central mapping of model IDs to human-readable display names for known models
-private let modelDisplayNames: [String: String] = [
-    // Claude 4.6 family
-    "claude-opus-4-6": "Opus 4.6",
-    "claude-sonnet-4-6": "Sonnet 4.6",
-
-    // Claude 4.5 family
-    "claude-opus-4-5-20251101": "Opus 4.5",
-    "claude-sonnet-4-5-20250929": "Sonnet 4.5",
-    "claude-haiku-4-5-20251001": "Haiku 4.5",
-
-    // Claude 4.1 family
-    "claude-opus-4-1-20250805": "Opus 4.1",
-
-    // Claude 4 family
-    "claude-opus-4-20250514": "Opus 4",
-    "claude-sonnet-4-20250514": "Sonnet 4",
-
-    // Claude 3.7 family
-    "claude-3-7-sonnet-20250219": "Sonnet 3.7",
-
-    // Claude 3.5 family
-    "claude-3-5-sonnet-20241022": "Sonnet 3.5",
-    "claude-3-5-sonnet-20240620": "Sonnet 3.5",
-    "claude-3-5-haiku-20241022": "Haiku 3.5",
-
-    // Claude 3 family
-    "claude-3-opus-20240229": "Opus 3",
-    "claude-3-sonnet-20240229": "Sonnet 3",
-    "claude-3-haiku-20240307": "Haiku 3",
-]
-
-/// Formats a model ID into a friendly display name using the central mapping.
-/// Falls back to shortModelName for models not in the lookup table.
+/// Formats a model ID into a friendly display name.
+/// Uses server cache when available, falls back to heuristic parsing.
 func formatModelDisplayName(_ modelId: String) -> String {
-    // Direct lookup first
-    if let displayName = modelDisplayNames[modelId] {
-        return displayName
+    if let info = ModelNameFormatter.serverModels[modelId] {
+        return info.name
     }
-
-    // Use ModelNameFormatter for all other models (Gemini, Codex, etc.)
     return modelId.shortModelName
 }

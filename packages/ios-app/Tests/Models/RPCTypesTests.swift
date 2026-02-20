@@ -571,26 +571,18 @@ final class SystemTypesTests: XCTestCase {
 @MainActor
 final class ModelTypesExtendedTests: XCTestCase {
 
-    func testModelInfoIsLatestGeneration() throws {
-        // Claude 4.6
-        let claude46 = createModelInfo(id: "claude-opus-4-6")
-        XCTAssertTrue(claude46.isLatestGeneration)
+    func testModelInfoIsLatestGeneration_usesIsLegacyFlag() throws {
+        // isLegacy: false → isLatestGeneration: true
+        let latest = createModelInfo(id: "claude-opus-4-6", isLegacy: false)
+        XCTAssertTrue(latest.isLatestGeneration)
 
-        // Claude 4.5 (still latest generation)
-        let claude45 = createModelInfo(id: "claude-opus-4-5-20251101")
-        XCTAssertTrue(claude45.isLatestGeneration)
+        // isLegacy: true → isLatestGeneration: false
+        let legacy = createModelInfo(id: "claude-sonnet-4-20250514", isLegacy: true)
+        XCTAssertFalse(legacy.isLatestGeneration)
 
-        // Claude 4 (not latest)
-        let claude4 = createModelInfo(id: "claude-sonnet-4-20250514")
-        XCTAssertFalse(claude4.isLatestGeneration)
-
-        // GPT-5.2 Codex
-        let gpt52 = createModelInfo(id: "gpt-5.2-codex", provider: "openai-codex")
-        XCTAssertTrue(gpt52.isLatestGeneration)
-
-        // Gemini 3
-        let gemini3 = createModelInfo(id: "gemini-3-pro-preview", provider: "google")
-        XCTAssertTrue(gemini3.isLatestGeneration)
+        // isLegacy: nil → isLatestGeneration: true (defaults to not-legacy)
+        let unknown = createModelInfo(id: "gpt-5.2-codex", provider: "openai-codex")
+        XCTAssertTrue(unknown.isLatestGeneration)
     }
 
     func testModelInfoProviderFlags() throws {
@@ -603,22 +595,33 @@ final class ModelTypesExtendedTests: XCTestCase {
         XCTAssertFalse(codex.isAnthropic)
         XCTAssertTrue(codex.isCodex)
 
-        let gemini = createModelInfo(id: "gemini-3-pro", provider: "google")
+        let gemini = createModelInfo(id: "gemini-3-pro", provider: "google", family: "Gemini 3")
         XCTAssertTrue(gemini.isGemini)
         XCTAssertTrue(gemini.isGemini3)
     }
 
-    func testModelInfoGeminiTier() throws {
-        let pro = createModelInfo(id: "gemini-3-pro-preview", provider: "google")
+    func testModelInfoIsGemini3_usesFamily() throws {
+        let gemini3 = createModelInfo(id: "gemini-3-pro", provider: "google", family: "Gemini 3")
+        XCTAssertTrue(gemini3.isGemini3)
+
+        let gemini25 = createModelInfo(id: "gemini-2.5-pro", provider: "google", family: "Gemini 2.5")
+        XCTAssertFalse(gemini25.isGemini3)
+
+        let noFamily = createModelInfo(id: "gemini-x", provider: "google")
+        XCTAssertFalse(noFamily.isGemini3)
+    }
+
+    func testModelInfoGeminiTier_usesTierField() throws {
+        let pro = createModelInfo(id: "gemini-3-pro-preview", provider: "google", tier: "pro")
         XCTAssertEqual(pro.geminiTier, "pro")
 
-        let flash = createModelInfo(id: "gemini-3-flash", provider: "google")
+        let flash = createModelInfo(id: "gemini-3-flash", provider: "google", tier: "flash")
         XCTAssertEqual(flash.geminiTier, "flash")
 
-        let flashLite = createModelInfo(id: "gemini-3-flash-lite", provider: "google")
+        let flashLite = createModelInfo(id: "gemini-3-flash-lite", provider: "google", tier: "flash-lite")
         XCTAssertEqual(flashLite.geminiTier, "flash-lite")
 
-        let notGemini = createModelInfo(id: "claude-opus", provider: "anthropic")
+        let notGemini = createModelInfo(id: "claude-opus", provider: "anthropic", tier: "opus")
         XCTAssertNil(notGemini.geminiTier)
     }
 
@@ -630,22 +633,48 @@ final class ModelTypesExtendedTests: XCTestCase {
         XCTAssertFalse(stable.isPreview)
     }
 
-    private func createModelInfo(id: String, provider: String = "anthropic") -> ModelInfo {
+    func testModelInfoSortOrderDecoding() throws {
+        let json = """
+        {"id": "claude-opus-4-6", "name": "Opus 4.6", "provider": "anthropic", "contextWindow": 200000, "sortOrder": 0}
+        """.data(using: .utf8)!
+        let model = try JSONDecoder().decode(ModelInfo.self, from: json)
+        XCTAssertEqual(model.sortOrder, 0)
+    }
+
+    func testModelInfoDisplayName() throws {
+        let claude = createModelInfo(id: "claude-opus-4-6", provider: "anthropic", name: "Opus 4.6")
+        XCTAssertEqual(claude.displayName, "Claude Opus 4.6")
+
+        let gemini = createModelInfo(id: "gemini-3-pro", provider: "google", name: "Gemini 3 Pro")
+        XCTAssertEqual(gemini.displayName, "Gemini 3 Pro")
+    }
+
+    private func createModelInfo(
+        id: String,
+        provider: String = "anthropic",
+        name: String? = nil,
+        tier: String? = nil,
+        family: String? = nil,
+        isLegacy: Bool? = nil,
+        sortOrder: Int? = nil
+    ) -> ModelInfo {
         ModelInfo(
             id: id,
-            name: id,
+            name: name ?? id,
             provider: provider,
             contextWindow: 200_000,
             maxOutputTokens: nil,
             supportsThinking: nil,
             supportsImages: nil,
-            tier: nil,
-            isLegacy: nil,
+            tier: tier,
+            isLegacy: isLegacy,
             supportsReasoning: nil,
             reasoningLevels: nil,
             defaultReasoningLevel: nil,
             thinkingLevel: nil,
-            supportedThinkingLevels: nil
+            supportedThinkingLevels: nil,
+            family: family,
+            sortOrder: sortOrder
         )
     }
 }

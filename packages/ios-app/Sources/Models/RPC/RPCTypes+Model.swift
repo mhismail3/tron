@@ -49,13 +49,15 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let recommended: Bool?
     /// Release date (YYYY-MM-DD)
     let releaseDate: String?
+    /// Sort order within provider (server-authoritative)
+    let sortOrder: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name, provider, contextWindow, maxOutputTokens
         case supportsThinking, supportsImages, tier, isLegacy
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case thinkingLevel, supportedThinkingLevels
-        case family, maxOutput, recommended, releaseDate
+        case family, maxOutput, recommended, releaseDate, sortOrder
         case inputCostPerMillion, outputCostPerMillion
         case modelDescription = "description"
     }
@@ -82,7 +84,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         inputCostPerMillion: Double? = nil,
         outputCostPerMillion: Double? = nil,
         recommended: Bool? = nil,
-        releaseDate: String? = nil
+        releaseDate: String? = nil,
+        sortOrder: Int? = nil
     ) {
         self.id = id
         self.name = name
@@ -105,6 +108,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.outputCostPerMillion = outputCostPerMillion
         self.recommended = recommended
         self.releaseDate = releaseDate
+        self.sortOrder = sortOrder
     }
 
     // MARK: - Formatted Display Helpers
@@ -138,95 +142,24 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         return "\(contextWindow) context"
     }
 
-    /// Properly formatted display name (e.g., "Claude Opus 4.5", "Claude Sonnet 4")
+    /// Properly formatted display name (e.g., "Claude Opus 4.6", "Gemini 3 Pro")
     var displayName: String {
-        // For OpenAI and MiniMax models, use the name directly
-        if provider == "openai-codex" || provider == "openai" || provider == "minimax" {
-            return name
-        }
-        return id.fullModelName
+        isAnthropic ? "Claude \(name)" : name
     }
 
-    /// Short tier name: "Opus", "Sonnet", "Haiku"
+    /// Short tier name: "Opus", "Sonnet", "Haiku" (Anthropic), or full name for others
     var shortName: String {
-        // For OpenAI and MiniMax models, use the name directly
-        if provider == "openai-codex" || provider == "openai" || provider == "minimax" {
-            return name
-        }
-        return ModelNameFormatter.format(id, style: .tierOnly, fallback: name)
+        isAnthropic ? (tier?.capitalized ?? name) : name
     }
 
-    /// Formats model name properly: "Claude Opus 4.5", "GPT-5.2 Codex", "Gemini 3 Pro", etc.
-    /// Uses full format for Claude models, short format for Codex (avoids redundant "OpenAI" prefix)
+    /// Formatted model name for UI display
     var formattedModelName: String {
-        let lowerId = id.lowercased()
-        if lowerId.contains("codex") {
-            // Codex: "GPT-5.2 Codex" (short format - no "OpenAI" prefix)
-            return id.shortModelName
-        }
-        if lowerId.contains("gemini") {
-            // Gemini: Use the server-provided name or format nicely
-            // e.g., "gemini-3-pro-preview" → "Gemini 3 Pro"
-            return formatGeminiName()
-        }
-        if lowerId.contains("minimax") {
-            return name
-        }
-        // Claude: "Claude Opus 4.5" (full format with "Claude" prefix)
-        return id.fullModelName
+        isAnthropic ? "Claude \(name)" : name
     }
 
-    /// Format Gemini model name nicely
-    private func formatGeminiName() -> String {
-        // If server provides a good name, use it
-        if !name.lowercased().contains("gemini") {
-            // Server name doesn't mention Gemini, construct it
-        } else if name != id {
-            return name
-        }
-
-        // Parse from ID: "gemini-3-pro-preview" → "Gemini 3 Pro"
-        let lowerId = id.lowercased()
-        var parts: [String] = ["Gemini"]
-
-        // Version
-        if lowerId.contains("gemini-3") {
-            parts.append("3")
-        } else if lowerId.contains("gemini-2.5") || lowerId.contains("2-5") {
-            parts.append("2.5")
-        } else if lowerId.contains("gemini-2") {
-            parts.append("2")
-        }
-
-        // Tier
-        if lowerId.contains("flash-lite") {
-            parts.append("Flash Lite")
-        } else if lowerId.contains("flash") {
-            parts.append("Flash")
-        } else if lowerId.contains("pro") {
-            parts.append("Pro")
-        }
-
-        return parts.joined(separator: " ")
-    }
-
-    /// Whether this is a latest generation model (Claude 4.5+/4.6+, GPT-5.x Codex, or Gemini 3)
+    /// Whether this is a latest generation model (server-driven via isLegacy flag)
     var isLatestGeneration: Bool {
-        let lowerId = id.lowercased()
-        // Claude 4.5 and 4.6 families
-        if lowerId.hasPrefix("claude") && (lowerId.contains("4-5") || lowerId.contains("4.5") ||
-           lowerId.contains("4-6") || lowerId.contains("4.6")) {
-            return true
-        }
-        // GPT-5.x Codex models are also "latest"
-        if lowerId.contains("codex") && (lowerId.contains("5.") || lowerId.contains("-5-")) {
-            return true
-        }
-        // Gemini 3 models are also "latest"
-        if lowerId.contains("gemini-3") {
-            return true
-        }
-        return false
+        !(isLegacy ?? false)
     }
 
     /// Whether this is an Anthropic model
@@ -251,8 +184,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 
     /// Whether this is a Gemini 3 model (latest Google models)
     var isGemini3: Bool {
-        let lowerId = id.lowercased()
-        return isGemini && lowerId.contains("gemini-3")
+        isGemini && (family ?? "").hasPrefix("Gemini 3")
     }
 
     /// Whether this is a preview model
@@ -260,14 +192,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         id.lowercased().contains("preview")
     }
 
-    /// Gemini tier (pro, flash, flash-lite)
+    /// Gemini tier (pro, flash, flash-lite) — uses server-provided tier field
     var geminiTier: String? {
-        guard isGemini else { return nil }
-        let lowerId = id.lowercased()
-        if lowerId.contains("flash-lite") { return "flash-lite" }
-        if lowerId.contains("flash") { return "flash" }
-        if lowerId.contains("pro") { return "pro" }
-        return nil
+        isGemini ? tier : nil
     }
 }
 

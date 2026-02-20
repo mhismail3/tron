@@ -32,6 +32,7 @@ fn known_models() -> Vec<Value> {
             "recommended": true,
             "isLegacy": false,
             "releaseDate": "2026-02-01",
+            "sortOrder": 0,
         }),
         serde_json::json!({
             "id": "claude-sonnet-4-6",
@@ -52,6 +53,7 @@ fn known_models() -> Vec<Value> {
             "recommended": true,
             "isLegacy": false,
             "releaseDate": "2026-02-17",
+            "sortOrder": 1,
         }),
         serde_json::json!({
             "id": "claude-opus-4-5-20251101",
@@ -70,6 +72,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": false,
             "releaseDate": "2025-11-01",
+            "sortOrder": 2,
         }),
         serde_json::json!({
             "id": "claude-sonnet-4-5-20250929",
@@ -88,6 +91,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": true,
             "releaseDate": "2025-09-29",
+            "sortOrder": 3,
         }),
         serde_json::json!({
             "id": "claude-haiku-4-5-20251001",
@@ -106,6 +110,7 @@ fn known_models() -> Vec<Value> {
             "recommended": true,
             "isLegacy": false,
             "releaseDate": "2025-10-01",
+            "sortOrder": 4,
         }),
         serde_json::json!({
             "id": "claude-opus-4-1-20250805",
@@ -124,6 +129,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": true,
             "releaseDate": "2025-08-05",
+            "sortOrder": 5,
         }),
         serde_json::json!({
             "id": "claude-opus-4-20250514",
@@ -142,6 +148,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": true,
             "releaseDate": "2025-05-14",
+            "sortOrder": 6,
         }),
         serde_json::json!({
             "id": "claude-sonnet-4-20250514",
@@ -160,6 +167,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": true,
             "releaseDate": "2025-05-14",
+            "sortOrder": 7,
         }),
         serde_json::json!({
             "id": "claude-3-7-sonnet-20250219",
@@ -178,6 +186,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": true,
             "releaseDate": "2025-02-19",
+            "sortOrder": 8,
         }),
         serde_json::json!({
             "id": "claude-3-haiku-20240307",
@@ -196,6 +205,7 @@ fn known_models() -> Vec<Value> {
             "recommended": false,
             "isLegacy": true,
             "releaseDate": "2024-03-07",
+            "sortOrder": 9,
         }),
         // ── OpenAI Codex Models ──
         serde_json::json!({
@@ -216,6 +226,7 @@ fn known_models() -> Vec<Value> {
             "defaultReasoningLevel": "medium",
             "recommended": true,
             "isLegacy": false,
+            "sortOrder": 0,
         }),
         serde_json::json!({
             "id": "gpt-5.3-codex-spark",
@@ -235,6 +246,7 @@ fn known_models() -> Vec<Value> {
             "defaultReasoningLevel": "low",
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 1,
         }),
         serde_json::json!({
             "id": "gpt-5.2-codex",
@@ -254,6 +266,7 @@ fn known_models() -> Vec<Value> {
             "defaultReasoningLevel": "medium",
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 2,
         }),
         serde_json::json!({
             "id": "gpt-5.1-codex-max",
@@ -273,6 +286,7 @@ fn known_models() -> Vec<Value> {
             "defaultReasoningLevel": "high",
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 3,
         }),
         serde_json::json!({
             "id": "gpt-5.1-codex-mini",
@@ -292,6 +306,7 @@ fn known_models() -> Vec<Value> {
             "defaultReasoningLevel": "low",
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 4,
         }),
         // ── Google Gemini Models ──
         // Pricing: TS uses inputCostPer1k, we multiply by 1000 for per-million
@@ -313,6 +328,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["low", "medium", "high"],
             "recommended": true,
             "isLegacy": false,
+            "sortOrder": 0,
         }),
         serde_json::json!({
             "id": "gemini-3-flash-preview",
@@ -330,6 +346,7 @@ fn known_models() -> Vec<Value> {
             "isPreview": true,
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 1,
         }),
         serde_json::json!({
             "id": "gemini-2.5-pro",
@@ -348,6 +365,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["low", "medium", "high"],
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 2,
         }),
         serde_json::json!({
             "id": "gemini-2.5-flash",
@@ -366,6 +384,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["minimal", "low", "medium", "high"],
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 3,
         }),
         serde_json::json!({
             "id": "gemini-2.5-flash-lite",
@@ -382,6 +401,7 @@ fn known_models() -> Vec<Value> {
             "description": "Gemini 2.5 Flash Lite — flash-lite tier",
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 4,
         }),
         // ── MiniMax Models ──
         serde_json::json!({
@@ -400,6 +420,7 @@ fn known_models() -> Vec<Value> {
             "supportsReasoning": false,
             "recommended": true,
             "isLegacy": false,
+            "sortOrder": 0,
         }),
         serde_json::json!({
             "id": "MiniMax-M2.5-highspeed",
@@ -417,6 +438,7 @@ fn known_models() -> Vec<Value> {
             "supportsReasoning": false,
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 1,
         }),
         serde_json::json!({
             "id": "MiniMax-M2.1",
@@ -434,6 +456,7 @@ fn known_models() -> Vec<Value> {
             "supportsReasoning": false,
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 2,
         }),
         serde_json::json!({
             "id": "MiniMax-M2.1-highspeed",
@@ -451,6 +474,7 @@ fn known_models() -> Vec<Value> {
             "supportsReasoning": false,
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 3,
         }),
         serde_json::json!({
             "id": "MiniMax-M2",
@@ -468,6 +492,7 @@ fn known_models() -> Vec<Value> {
             "supportsReasoning": false,
             "recommended": false,
             "isLegacy": false,
+            "sortOrder": 4,
         }),
     ]
 }
@@ -706,6 +731,11 @@ mod tests {
             assert!(model["name"].is_string());
             assert!(model["provider"].is_string());
             assert!(model["contextWindow"].is_number());
+            assert!(
+                model["sortOrder"].is_number(),
+                "Model {} missing sortOrder",
+                model["id"]
+            );
         }
     }
 

@@ -9,28 +9,44 @@ final class ModelFilteringServiceTests: XCTestCase {
     private func makeModels() -> [ModelInfo] {
         [
             // Anthropic latest models
-            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic"),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", name: "Opus 4.6",
+                      family: "Claude 4.6", tier: "opus", isLegacy: false, sortOrder: 0),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", name: "Opus 4.5",
+                      family: "Claude 4.5", tier: "opus", isLegacy: false, sortOrder: 2),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", name: "Sonnet 4.5",
+                      family: "Claude 4.5", tier: "sonnet", isLegacy: false, sortOrder: 3),
+            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic", name: "Haiku 4.5",
+                      family: "Claude 4.5", tier: "haiku", isLegacy: false, sortOrder: 4),
 
             // Anthropic legacy models
-            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic"),
-            makeModel(id: "claude-3-5-sonnet-20241022", provider: "anthropic"),
-            makeModel(id: "claude-3-haiku-20240307", provider: "anthropic"),
+            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", name: "Sonnet 4",
+                      family: "Claude 4", tier: "sonnet", isLegacy: true, sortOrder: 7),
+            makeModel(id: "claude-3-5-sonnet-20241022", provider: "anthropic", name: "Sonnet 3.5",
+                      family: "Claude 3.5", tier: "sonnet", isLegacy: true, sortOrder: 10),
+            makeModel(id: "claude-3-haiku-20240307", provider: "anthropic", name: "Haiku 3",
+                      family: "Claude 3", tier: "haiku", isLegacy: true, sortOrder: 9),
 
             // OpenAI Codex models
-            makeModel(id: "gpt-5.3-codex", provider: "openai-codex"),
-            makeModel(id: "gpt-5.2-codex", provider: "openai-codex"),
-            makeModel(id: "gpt-5.1-codex", provider: "openai-codex"),
-            makeModel(id: "gpt-5.0-codex", provider: "openai-codex"),
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex", name: "GPT-5.3 Codex",
+                      family: "GPT-5.3", isLegacy: false, sortOrder: 0),
+            makeModel(id: "gpt-5.2-codex", provider: "openai-codex", name: "GPT-5.2 Codex",
+                      family: "GPT-5.2", isLegacy: false, sortOrder: 2),
+            makeModel(id: "gpt-5.1-codex", provider: "openai-codex", name: "GPT-5.1 Codex",
+                      family: "GPT-5.1", isLegacy: false, sortOrder: 3),
+            makeModel(id: "gpt-5.0-codex", provider: "openai-codex", name: "GPT-5.0 Codex",
+                      family: "GPT-5.0", isLegacy: false, sortOrder: 4),
 
             // Gemini models
-            makeModel(id: "gemini-3-pro-preview", provider: "google"),
-            makeModel(id: "gemini-3-flash", provider: "google"),
-            makeModel(id: "gemini-3-flash-lite", provider: "google"),
-            makeModel(id: "gemini-2.5-pro", provider: "google"),
-            makeModel(id: "gemini-2.5-flash", provider: "google"),
+            makeModel(id: "gemini-3-pro-preview", provider: "google", name: "Gemini 3 Pro",
+                      family: "Gemini 3", tier: "pro", isLegacy: false, sortOrder: 0),
+            makeModel(id: "gemini-3-flash", provider: "google", name: "Gemini 3 Flash",
+                      family: "Gemini 3", tier: "flash", isLegacy: false, sortOrder: 1),
+            makeModel(id: "gemini-3-flash-lite", provider: "google", name: "Gemini 3 Flash Lite",
+                      family: "Gemini 3", tier: "flash-lite", isLegacy: false, sortOrder: 2),
+            makeModel(id: "gemini-2.5-pro", provider: "google", name: "Gemini 2.5 Pro",
+                      family: "Gemini 2.5", tier: "pro", isLegacy: false, sortOrder: 3),
+            makeModel(id: "gemini-2.5-flash", provider: "google", name: "Gemini 2.5 Flash",
+                      family: "Gemini 2.5", tier: "flash", isLegacy: false, sortOrder: 4),
         ]
     }
 
@@ -41,13 +57,15 @@ final class ModelFilteringServiceTests: XCTestCase {
         contextWindow: Int = 200_000,
         maxOutputTokens: Int? = 16_000,
         family: String? = nil,
+        tier: String? = nil,
         maxOutput: Int? = nil,
         description: String? = nil,
         inputCostPerMillion: Double? = nil,
         outputCostPerMillion: Double? = nil,
-        recommended: Bool? = nil
+        recommended: Bool? = nil,
+        isLegacy: Bool? = nil,
+        sortOrder: Int? = nil
     ) -> ModelInfo {
-        // Use JSONDecoder to create ModelInfo since it has no public init
         var json: [String: Any] = [
             "id": id,
             "name": name ?? id,
@@ -56,54 +74,51 @@ final class ModelFilteringServiceTests: XCTestCase {
             "maxOutputTokens": maxOutputTokens as Any
         ]
         if let family { json["family"] = family }
+        if let tier { json["tier"] = tier }
         if let maxOutput { json["maxOutput"] = maxOutput }
         if let description { json["description"] = description }
         if let inputCostPerMillion { json["inputCostPerMillion"] = inputCostPerMillion }
         if let outputCostPerMillion { json["outputCostPerMillion"] = outputCostPerMillion }
         if let recommended { json["recommended"] = recommended }
+        if let isLegacy { json["isLegacy"] = isLegacy }
+        if let sortOrder { json["sortOrder"] = sortOrder }
         let data = try! JSONSerialization.data(withJSONObject: json)
         return try! JSONDecoder().decode(ModelInfo.self, from: data)
     }
 
     // MARK: - Categorize Tests
 
-    func test_categorizeModels_separatesAnthropicBy45VsLegacy() {
+    func test_categorizeModels_separatesAnthropicByLegacyFlag() {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
-        // Should have Anthropic (Latest), OpenAI Codex (Latest), Gemini 3, Legacy sections
         let anthropicLatest = groups.first { $0.tier == "Anthropic (Latest)" }
         XCTAssertNotNil(anthropicLatest)
         XCTAssertEqual(anthropicLatest?.models.count, 4) // Opus 4.6, Opus 4.5, Sonnet 4.5, Haiku 4.5
 
-        // All should be latest generation models
         anthropicLatest?.models.forEach { model in
             XCTAssertTrue(model.isLatestGeneration, "Expected \(model.id) to be latest generation")
         }
     }
 
-    func test_categorizeModels_separatesCodexByVersion() {
+    func test_categorizeModels_separatesCodexByLegacyFlag() {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
         let codexLatest = groups.first { $0.tier == "OpenAI Codex (Latest)" }
         XCTAssertNotNil(codexLatest)
-        XCTAssertEqual(codexLatest?.models.count, 1) // Only 5.3
-
-        XCTAssertEqual(codexLatest?.models.first?.id, "gpt-5.3-codex")
+        // All OpenAI models in test data are isLegacy: false
+        XCTAssertEqual(codexLatest?.models.count, 4)
     }
 
-    func test_categorizeModels_separatesGeminiByVersion() {
+    func test_categorizeModels_separatesGeminiByFamily() {
         let models = makeModels()
         let groups = ModelFilteringService.categorize(models)
 
-        let gemini3 = groups.first { $0.tier == "Gemini 3" }
-        XCTAssertNotNil(gemini3)
-        XCTAssertEqual(gemini3?.models.count, 3) // Pro, Flash, Flash Lite
-
-        gemini3?.models.forEach { model in
-            XCTAssertTrue(model.isGemini3, "Expected \(model.id) to be Gemini 3")
-        }
+        // All Gemini models in test data are isLegacy: false
+        let geminiLatest = groups.first { $0.tier.contains("Gemini") }
+        XCTAssertNotNil(geminiLatest)
+        XCTAssertEqual(geminiLatest?.models.count, 5)
     }
 
     func test_categorizeModels_groupsLegacyTogether() {
@@ -113,11 +128,9 @@ final class ModelFilteringServiceTests: XCTestCase {
         let legacy = groups.first { $0.tier == "Legacy" }
         XCTAssertNotNil(legacy)
 
-        // Should contain: legacy Anthropic + Codex 5.1/5.0 + Gemini 2.5
         let legacyModels = legacy!.models
         XCTAssertTrue(legacyModels.contains { $0.id.contains("sonnet-4-20250514") })
-        XCTAssertTrue(legacyModels.contains { $0.id.contains("5.1") })
-        XCTAssertTrue(legacyModels.contains { $0.id.contains("gemini-2.5") })
+        XCTAssertTrue(legacyModels.contains { $0.id.contains("3-5-sonnet") })
     }
 
     func test_categorizeModels_handlesEmptyArray() {
@@ -129,25 +142,18 @@ final class ModelFilteringServiceTests: XCTestCase {
         let models = [makeModel(id: "unknown-model-v1", provider: "unknown-provider")]
         let groups = ModelFilteringService.categorize(models)
 
-        // Unknown providers should go to legacy or be handled gracefully
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups.first?.tier, "Legacy")
     }
 
     // MARK: - Filter Tests
 
-    func test_filterLatest_returnsOnlyLatestModels() {
+    func test_filterLatest_returnsOnlyNonLegacyModels() {
         let models = makeModels()
         let latest = ModelFilteringService.filterLatest(models)
 
-        // Should include: Anthropic 4.5, Codex 5.3, Gemini 3
-        XCTAssertEqual(latest.count, 8) // 4 + 1 + 3
-
         latest.forEach { model in
-            let isLatest = model.isLatestGeneration ||
-                          (model.isCodex && model.id.contains("5.3")) ||
-                          model.isGemini3
-            XCTAssertTrue(isLatest, "Expected \(model.id) to be latest")
+            XCTAssertFalse(model.isLegacy ?? false, "Expected \(model.id) to not be legacy")
         }
     }
 
@@ -155,21 +161,21 @@ final class ModelFilteringServiceTests: XCTestCase {
         let models = makeModels()
         let legacy = ModelFilteringService.filterLegacy(models)
 
-        // Should exclude: Anthropic 4.5, Codex 5.3, Gemini 3
         legacy.forEach { model in
-            XCTAssertFalse(model.isLatestGeneration && model.isAnthropic)
-            XCTAssertFalse(model.isCodex && model.id.contains("5.3"))
-            XCTAssertFalse(model.isGemini3)
+            XCTAssertTrue(model.isLegacy ?? false, "Expected \(model.id) to be legacy")
         }
     }
 
     // MARK: - Sort Tests
 
-    func test_sortByTier_anthropicOpusFirst() {
+    func test_sortByTier_usesSortOrder() {
         let models = [
-            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
+            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic",
+                      isLegacy: false, sortOrder: 4),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic",
+                      isLegacy: false, sortOrder: 2),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic",
+                      isLegacy: false, sortOrder: 3),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
@@ -179,12 +185,12 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertEqual(sorted[2].id, "claude-haiku-4-5-20250501")
     }
 
-    func test_sortByTier_codex53BeforeCodex52() {
+    func test_sortByTier_codexBySortOrder() {
         let models = [
-            makeModel(id: "gpt-5.0-codex", provider: "openai-codex"),
-            makeModel(id: "gpt-5.3-codex", provider: "openai-codex"),
-            makeModel(id: "gpt-5.2-codex", provider: "openai-codex"),
-            makeModel(id: "gpt-5.1-codex", provider: "openai-codex"),
+            makeModel(id: "gpt-5.0-codex", provider: "openai-codex", sortOrder: 4),
+            makeModel(id: "gpt-5.3-codex", provider: "openai-codex", sortOrder: 0),
+            makeModel(id: "gpt-5.2-codex", provider: "openai-codex", sortOrder: 2),
+            makeModel(id: "gpt-5.1-codex", provider: "openai-codex", sortOrder: 3),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
@@ -195,11 +201,11 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertEqual(sorted[3].id, "gpt-5.0-codex")
     }
 
-    func test_sortByTier_geminiProBeforeFlash() {
+    func test_sortByTier_geminiBySortOrder() {
         let models = [
-            makeModel(id: "gemini-3-flash-lite", provider: "google"),
-            makeModel(id: "gemini-3-pro-preview", provider: "google"),
-            makeModel(id: "gemini-3-flash", provider: "google"),
+            makeModel(id: "gemini-3-flash-lite", provider: "google", sortOrder: 2),
+            makeModel(id: "gemini-3-pro-preview", provider: "google", sortOrder: 0),
+            makeModel(id: "gemini-3-flash", provider: "google", sortOrder: 1),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
@@ -209,25 +215,10 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertEqual(sorted[2].id, "gemini-3-flash-lite")
     }
 
-    func test_sortByTier_newerVersionFirst_sameTier() {
-        let models = [
-            makeModel(id: "claude-sonnet-3-5-20241022", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic"),
-        ]
-
-        let sorted = ModelFilteringService.sortByTier(models)
-
-        // 4.5 > 4 > 3.5 (all sonnet)
-        XCTAssertEqual(sorted[0].id, "claude-sonnet-4-5-20250501")
-        XCTAssertEqual(sorted[1].id, "claude-sonnet-4-20250514")
-        XCTAssertEqual(sorted[2].id, "claude-sonnet-3-5-20241022")
-    }
-
     func test_sortByTier_opus46BeforeOpus45() {
         let models = [
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", sortOrder: 2),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", sortOrder: 0),
         ]
 
         let sorted = ModelFilteringService.sortByTier(models)
@@ -238,9 +229,9 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_categorizeModels_opus46InLatestSection() {
         let models = [
-            makeModel(id: "claude-opus-4-6", provider: "anthropic"),
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic"),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", isLegacy: false, sortOrder: 0),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", isLegacy: false, sortOrder: 2),
+            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", isLegacy: true, sortOrder: 7),
         ]
 
         let groups = ModelFilteringService.categorize(models)
@@ -253,10 +244,9 @@ final class ModelFilteringServiceTests: XCTestCase {
     // MARK: - Deduplicate Tests
 
     func test_uniqueByFormattedName_removesDuplicates() {
-        // Two models with same formatted name but different IDs
         let models = [
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-5-20250601", provider: "anthropic"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", name: "Sonnet 4.5"),
+            makeModel(id: "claude-sonnet-4-5-20250601", provider: "anthropic", name: "Sonnet 4.5"),
         ]
 
         let unique = ModelFilteringService.uniqueByFormattedName(models)
@@ -265,10 +255,9 @@ final class ModelFilteringServiceTests: XCTestCase {
     }
 
     func test_uniqueByFormattedName_preservesFirst() {
-        // Two Sonnet 4.5 models with different dates but same formatted name
         let models = [
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-5-20250601", provider: "anthropic"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", name: "Sonnet 4.5"),
+            makeModel(id: "claude-sonnet-4-5-20250601", provider: "anthropic", name: "Sonnet 4.5"),
         ]
 
         let unique = ModelFilteringService.uniqueByFormattedName(models)
@@ -279,9 +268,9 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_uniqueByFormattedName_preservesAllWhenNoDuplicates() {
         let models = [
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic"),
-            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic"),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", name: "Opus 4.5"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", name: "Sonnet 4.5"),
+            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic", name: "Haiku 4.5"),
         ]
 
         let unique = ModelFilteringService.uniqueByFormattedName(models)
@@ -303,9 +292,9 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_organizeByProviderFamily_groupsByFamily() {
         let models = [
-            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6", sortOrder: 0),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 2),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 3),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
 
@@ -316,9 +305,9 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_organizeByProviderFamily_newestFamilyFirst() {
         let models = [
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
-            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
-            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", family: "Claude 4"),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 3),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6", sortOrder: 0),
+            makeModel(id: "claude-sonnet-4-20250514", provider: "anthropic", family: "Claude 4", sortOrder: 7),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
         let families = groups[0].families
@@ -330,8 +319,8 @@ final class ModelFilteringServiceTests: XCTestCase {
 
     func test_organizeByProviderFamily_latestFamilyMarked() {
         let models = [
-            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-opus-4-6", provider: "anthropic", family: "Claude 4.6", sortOrder: 0),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 3),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
         let families = groups[0].families
@@ -346,7 +335,6 @@ final class ModelFilteringServiceTests: XCTestCase {
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
 
-        // Only anthropic - no openai-codex or google
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups[0].id, "anthropic")
     }
@@ -371,16 +359,16 @@ final class ModelFilteringServiceTests: XCTestCase {
         XCTAssertEqual(groups[2].families[0].id, "Gemini 3")
     }
 
-    func test_organizeByProviderFamily_modelsSortedByTier() {
+    func test_organizeByProviderFamily_modelsSortedBySortOrder() {
         let models = [
-            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
-            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
-            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5"),
+            makeModel(id: "claude-haiku-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 4),
+            makeModel(id: "claude-opus-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 2),
+            makeModel(id: "claude-sonnet-4-5-20250501", provider: "anthropic", family: "Claude 4.5", sortOrder: 3),
         ]
         let groups = ModelFilteringService.organizeByProviderFamily(models)
         let familyModels = groups[0].families[0].models
 
-        // Opus > Sonnet > Haiku
+        // Sorted by sortOrder: 2, 3, 4
         XCTAssertEqual(familyModels[0].id, "claude-opus-4-5-20250501")
         XCTAssertEqual(familyModels[1].id, "claude-sonnet-4-5-20250501")
         XCTAssertEqual(familyModels[2].id, "claude-haiku-4-5-20250501")
@@ -391,7 +379,6 @@ final class ModelFilteringServiceTests: XCTestCase {
     func test_categorize_producesConsistentOrder() {
         let models = makeModels()
 
-        // Run twice, should produce same order
         let groups1 = ModelFilteringService.categorize(models)
         let groups2 = ModelFilteringService.categorize(models)
 

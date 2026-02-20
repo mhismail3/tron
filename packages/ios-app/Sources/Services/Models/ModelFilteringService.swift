@@ -43,13 +43,13 @@ enum ModelFilteringService {
     // MARK: - Categorization
 
     /// Categorize models into logical groups for UI display.
-    /// Groups: Anthropic (Latest), OpenAI Codex (Latest), Gemini 3, Legacy
+    /// Uses server-provided `isLegacy` flag for categorization.
     static func categorize(_ models: [ModelInfo]) -> [ModelGroup] {
         guard !models.isEmpty else { return [] }
 
         var groups: [ModelGroup] = []
 
-        // Anthropic latest (4.5+/4.6+)
+        // Latest models by provider
         let latestAnthropic = models.filter { $0.isAnthropic && $0.isLatestGeneration }
             |> uniqueByFormattedName
             |> sortByTier
@@ -57,49 +57,37 @@ enum ModelFilteringService {
             groups.append(ModelGroup(tier: "Anthropic (Latest)", models: latestAnthropic))
         }
 
-        // OpenAI Codex 5.3 (latest)
-        let latestCodex = models.filter { $0.isCodex && $0.id.lowercased().contains("5.3") }
+        let latestCodex = models.filter { $0.isCodex && $0.isLatestGeneration }
+            |> sortByTier
         if !latestCodex.isEmpty {
             groups.append(ModelGroup(tier: "OpenAI Codex (Latest)", models: latestCodex))
         }
 
-        // Gemini 3 models (latest)
-        let gemini3 = models.filter { $0.isGemini3 }
-            |> sortByGeminiTier
-        if !gemini3.isEmpty {
-            groups.append(ModelGroup(tier: "Gemini 3", models: gemini3))
+        let latestGemini = models.filter { $0.isGemini && $0.isLatestGeneration }
+            |> sortByTier
+        if !latestGemini.isEmpty {
+            let label = latestGemini.first.flatMap(\.family) ?? "Gemini (Latest)"
+            groups.append(ModelGroup(tier: label, models: latestGemini))
         }
 
-        // Legacy: everything else
-        var legacyModels: [ModelInfo] = []
-
-        // Legacy Anthropic (non-4.5)
-        let legacyAnthropic = models.filter { $0.isAnthropic && !$0.isLatestGeneration }
-            |> uniqueByFormattedName
-            |> sortByTier
-        legacyModels.append(contentsOf: legacyAnthropic)
-
-        // Legacy Codex (5.2, 5.1, 5.0, etc.)
-        let legacyCodex = models.filter { $0.isCodex && !$0.id.lowercased().contains("5.3") }
-            |> sortByCodexVersion
-        legacyModels.append(contentsOf: legacyCodex)
-
-        // Legacy Gemini (2.5, 2.0)
-        let legacyGemini = models.filter { $0.isGemini && !$0.isGemini3 }
-            |> sortByGeminiTier
-        legacyModels.append(contentsOf: legacyGemini)
-
-        // MiniMax models (all current generation)
+        // MiniMax models
         let minimax = models.filter { $0.isMiniMax }
+            |> sortByTier
         if !minimax.isEmpty {
             groups.append(ModelGroup(tier: "MiniMax", models: minimax))
         }
 
-        // Unknown providers (not Anthropic, Codex, Gemini, or MiniMax)
-        let unknown = models.filter {
+        // Legacy: everything marked legacy + unknown providers
+        var legacyModels: [ModelInfo] = []
+        legacyModels.append(contentsOf: (models.filter { $0.isAnthropic && !$0.isLatestGeneration }
+            |> uniqueByFormattedName |> sortByTier))
+        legacyModels.append(contentsOf: (models.filter { $0.isCodex && !$0.isLatestGeneration }
+            |> sortByTier))
+        legacyModels.append(contentsOf: (models.filter { $0.isGemini && !$0.isLatestGeneration }
+            |> sortByTier))
+        legacyModels.append(contentsOf: models.filter {
             !$0.isAnthropic && !$0.isCodex && !$0.isGemini && !$0.isMiniMax
-        }
-        legacyModels.append(contentsOf: unknown)
+        })
 
         if !legacyModels.isEmpty {
             groups.append(ModelGroup(tier: "Legacy", models: legacyModels))
@@ -151,7 +139,7 @@ enum ModelFilteringService {
 
             var familyGroups: [FamilyGroup] = []
             for (index, (familyName, familyModels)) in sortedFamilies.enumerated() {
-                let sorted = sortByTier(familyModels)
+                let sorted = familyModels.sorted { ($0.sortOrder ?? 999) < ($1.sortOrder ?? 999) }
                 familyGroups.append(FamilyGroup(
                     id: familyName,
                     models: sorted,
@@ -220,65 +208,27 @@ enum ModelFilteringService {
 
     // MARK: - Filtering
 
-    /// Filter to latest versions only (4.5, 5.3, Gemini 3)
+    /// Filter to latest versions only (server-driven via isLegacy flag)
     static func filterLatest(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.filter { model in
-            (model.isAnthropic && model.isLatestGeneration) ||
-            (model.isCodex && model.id.lowercased().contains("5.3")) ||
-            model.isGemini3
-        }
+        models.filter { !($0.isLegacy ?? false) }
     }
 
-    /// Filter to legacy versions only
+    /// Filter to legacy versions only (server-driven via isLegacy flag)
     static func filterLegacy(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.filter { model in
-            if model.isAnthropic { return !model.isLatestGeneration }
-            if model.isCodex { return !model.id.lowercased().contains("5.3") }
-            if model.isGemini { return !model.isGemini3 }
-            return true
-        }
+        models.filter { $0.isLegacy ?? false }
     }
 
     // MARK: - Sorting
 
-    /// Sort by tier/version priority.
-    /// Anthropic: Opus > Sonnet > Haiku, newer versions first within tier.
-    /// Codex: 5.2 > 5.1 > 5.0
-    /// Gemini: Pro > Flash > Flash Lite
+    /// Sort by server-provided sortOrder within each provider.
+    /// Cross-provider: uses providerPriority.
     static func sortByTier(_ models: [ModelInfo]) -> [ModelInfo] {
         models.sorted { m1, m2 in
-            // Different providers: sort by provider
             if m1.provider != m2.provider {
                 return providerPriority(m1) < providerPriority(m2)
             }
-
-            // Same provider: use provider-specific sorting
-            if m1.isAnthropic {
-                return compareAnthropic(m1, m2)
-            } else if m1.isCodex {
-                return codexVersionPriority(m1) > codexVersionPriority(m2)
-            } else if m1.isGemini {
-                return geminiTierPriority(m1) < geminiTierPriority(m2)
-            } else if m1.isMiniMax {
-                // MiniMax: recommended first, then alphabetical
-                let r1 = m1.recommended ?? false
-                let r2 = m2.recommended ?? false
-                if r1 != r2 { return r1 }
-            }
-
-            // Fallback: alphabetical
-            return m1.id < m2.id
+            return (m1.sortOrder ?? 999) < (m2.sortOrder ?? 999)
         }
-    }
-
-    /// Sort Codex models by version (5.2 > 5.1 > 5.0)
-    static func sortByCodexVersion(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.sorted { codexVersionPriority($0) > codexVersionPriority($1) }
-    }
-
-    /// Sort Gemini models by tier (Pro > Flash > Flash Lite)
-    static func sortByGeminiTier(_ models: [ModelInfo]) -> [ModelInfo] {
-        models.sorted { geminiTierPriority($0) < geminiTierPriority($1) }
     }
 
     // MARK: - Deduplication
@@ -302,53 +252,6 @@ enum ModelFilteringService {
         if model.isGemini { return 2 }
         if model.isMiniMax { return 3 }
         return 99
-    }
-
-    private static func compareAnthropic(_ m1: ModelInfo, _ m2: ModelInfo) -> Bool {
-        let tier1 = anthropicTierPriority(m1)
-        let tier2 = anthropicTierPriority(m2)
-        if tier1 != tier2 {
-            return tier1 < tier2  // Opus (0) < Sonnet (1) < Haiku (2)
-        }
-        // Same tier: newer version first
-        return anthropicVersionPriority(m1) > anthropicVersionPriority(m2)
-    }
-
-    private static func anthropicTierPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("opus") { return 0 }
-        if id.contains("sonnet") { return 1 }
-        if id.contains("haiku") { return 2 }
-        return 3
-    }
-
-    private static func anthropicVersionPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("4-6") || id.contains("4.6") { return 46 }
-        if id.contains("4-5") || id.contains("4.5") { return 45 }
-        if id.contains("4-1") || id.contains("4.1") { return 41 }
-        if id.contains("-4-") || id.contains("opus-4") || id.contains("sonnet-4") || id.contains("haiku-4") { return 40 }
-        if id.contains("3-5") || id.contains("3.5") { return 35 }
-        if id.contains("-3-") { return 30 }
-        return 0
-    }
-
-    private static func codexVersionPriority(_ model: ModelInfo) -> Int {
-        let id = model.id.lowercased()
-        if id.contains("5.3") { return 53 }
-        if id.contains("5.2") { return 52 }
-        if id.contains("5.1") { return 51 }
-        if id.contains("5.0") || id.contains("-5-") { return 50 }
-        return 0
-    }
-
-    private static func geminiTierPriority(_ model: ModelInfo) -> Int {
-        switch model.geminiTier {
-        case "pro": return 0
-        case "flash": return 1
-        case "flash-lite": return 2
-        default: return 3
-        }
     }
 }
 

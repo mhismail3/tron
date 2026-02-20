@@ -62,9 +62,10 @@ final class ModelClient: ModelClientProtocol {
             params: EmptyParams()
         )
 
-        // Update cache
+        // Update cache and name formatter
         modelCache = result.models
         modelCacheTime = Date()
+        ModelNameFormatter.updateFromServer(result.models)
 
         return result.models
     }
