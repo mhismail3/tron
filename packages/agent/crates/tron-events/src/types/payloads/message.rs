@@ -16,6 +16,12 @@ pub struct UserMessagePayload {
     /// Number of images attached.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_count: Option<i64>,
+    /// Skills attached to this message (raw iOS objects: `[{name, source, displayName}]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Value>,
+    /// Spells attached to this message (same format as skills).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spells: Option<Value>,
 }
 
 /// Payload for `message.assistant` events.

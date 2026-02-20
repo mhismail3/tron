@@ -284,4 +284,67 @@ mod tests {
         // (exact behavior depends on SessionState reconstruction logic)
         assert!(!state.model.is_empty());
     }
+
+    #[test]
+    fn reconstruct_multimodal_user_message() {
+        let store = make_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let sid = &session.session.id;
+
+        // Persist a multimodal user message (content blocks array)
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({
+                    "content": [
+                        {"type": "text", "text": "describe this image"},
+                        {"type": "image", "data": "base64data", "mimeType": "image/png"}
+                    ],
+                    "imageCount": 1
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let _ = store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": "I see an image"}],
+                    "turn": 1
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let state = reconstruct(&store, sid).unwrap();
+        assert_eq!(state.messages.len(), 2);
+        assert!(state.messages[0].is_user());
+
+        // Verify the typed Message::User has Blocks content with image data
+        if let Message::User { content, .. } = &state.messages[0] {
+            match content {
+                tron_core::messages::UserMessageContent::Blocks(blocks) => {
+                    assert_eq!(blocks.len(), 2);
+                    assert!(blocks[0].is_text());
+                    assert!(blocks[1].is_image());
+                    if let tron_core::content::UserContent::Image { data, mime_type } = &blocks[1] {
+                        assert_eq!(data, "base64data");
+                        assert_eq!(mime_type, "image/png");
+                    } else {
+                        panic!("Expected image block");
+                    }
+                }
+                tron_core::messages::UserMessageContent::Text(_) => {
+                    panic!("Expected Blocks content, got Text");
+                }
+            }
+        } else {
+            panic!("Expected User message");
+        }
+    }
 }

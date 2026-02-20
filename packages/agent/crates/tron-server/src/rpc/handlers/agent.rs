@@ -35,6 +35,104 @@ fn extract_skills(value: Option<&Value>) -> Vec<String> {
 }
 
 // =============================================================================
+// User event payload builder
+// =============================================================================
+
+/// Build the JSON payload for a `message.user` event.
+///
+/// When the prompt includes images, attachments, skills, or spells, the payload
+/// is enriched so that session resume can reconstruct iOS chips and the LLM can
+/// see previously-sent images in reconstructed history.
+///
+/// Format matches `UserContent` serde (`content.rs`), the iOS parser
+/// (`MessagePayloads.swift`), and the reconstruction pipeline
+/// (`reconstruct.rs` + `session_reconstructor.rs`).
+fn build_user_event_payload(
+    prompt: &str,
+    images: Option<&[Value]>,
+    attachments: Option<&[Value]>,
+    raw_skills: Option<&[Value]>,
+    raw_spells: Option<&[Value]>,
+) -> Value {
+    let has_images = images.is_some_and(|v| !v.is_empty());
+    let has_attachments = attachments.is_some_and(|v| !v.is_empty());
+
+    let (content, image_count) = if !has_images && !has_attachments {
+        (Value::String(prompt.to_owned()), None)
+    } else {
+        let mut blocks = vec![serde_json::json!({"type": "text", "text": prompt})];
+        let mut img_count: i64 = 0;
+
+        // Add images from `images` param
+        if let Some(imgs) = images {
+            for img in imgs {
+                let data = img.get("data").and_then(|v| v.as_str());
+                let mime = img
+                    .get("mediaType")
+                    .or_else(|| img.get("mimeType"))
+                    .and_then(|v| v.as_str());
+                if let (Some(d), Some(m)) = (data, mime) {
+                    blocks.push(serde_json::json!({
+                        "type": "image",
+                        "data": d,
+                        "mimeType": m,
+                    }));
+                    img_count += 1;
+                }
+            }
+        }
+
+        // Add attachments (images or documents based on MIME type)
+        if let Some(atts) = attachments {
+            for att in atts {
+                let data = att.get("data").and_then(|v| v.as_str());
+                let mime = att.get("mimeType").and_then(|v| v.as_str());
+                if let (Some(d), Some(m)) = (data, mime) {
+                    if m.starts_with("image/") {
+                        blocks.push(serde_json::json!({
+                            "type": "image",
+                            "data": d,
+                            "mimeType": m,
+                        }));
+                        img_count += 1;
+                    } else {
+                        let mut block = serde_json::json!({
+                            "type": "document",
+                            "data": d,
+                            "mimeType": m,
+                        });
+                        if let Some(name) = att.get("fileName").and_then(|v| v.as_str()) {
+                            block["fileName"] = Value::String(name.to_owned());
+                        }
+                        blocks.push(block);
+                    }
+                }
+            }
+        }
+
+        // If all images/attachments were malformed and skipped, fall back to string
+        if blocks.len() == 1 {
+            (Value::String(prompt.to_owned()), None)
+        } else {
+            let count = if img_count > 0 { Some(img_count) } else { None };
+            (Value::Array(blocks), count)
+        }
+    };
+
+    let mut payload = serde_json::json!({ "content": content });
+    if let Some(c) = image_count {
+        payload["imageCount"] = Value::Number(c.into());
+    }
+    if let Some(skills) = raw_skills.filter(|s| !s.is_empty()) {
+        payload["skills"] = Value::Array(skills.to_vec());
+    }
+    if let Some(spells) = raw_spells.filter(|s| !s.is_empty()) {
+        payload["spells"] = Value::Array(spells.to_vec());
+    }
+    payload
+}
+
+// =============================================================================
 // Subagent results — reconstruction from event store
 // =============================================================================
 
@@ -396,6 +494,16 @@ impl MethodHandler for PromptHandler {
             .and_then(|p| p.get("attachments"))
             .and_then(|v| v.as_array())
             .cloned();
+        let raw_skills_json = params
+            .as_ref()
+            .and_then(|p| p.get("skills"))
+            .and_then(|v| v.as_array())
+            .cloned();
+        let raw_spells_json = params
+            .as_ref()
+            .and_then(|p| p.get("spells"))
+            .and_then(|v| v.as_array())
+            .cloned();
         let skills = {
             let v = extract_skills(params.as_ref().and_then(|p| p.get("skills")));
             if v.is_empty() { None } else { Some(v) }
@@ -457,6 +565,8 @@ impl MethodHandler for PromptHandler {
             let attachments_clone = attachments.clone();
             let skills_clone = skills.clone();
             let spells_clone = spells.clone();
+            let raw_skills_clone = raw_skills_json.clone();
+            let raw_spells_clone = raw_spells_json.clone();
 
             let handle = tokio::spawn(async move {
                 use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
@@ -698,10 +808,17 @@ impl MethodHandler for PromptHandler {
                 agent.set_persister(Some(persister.clone()));
 
                 // 7b. Persist message.user event BEFORE agent runs (matches TS server)
+                let user_event_payload = build_user_event_payload(
+                    &prompt_clone,
+                    images_clone.as_deref(),
+                    attachments_clone.as_deref(),
+                    raw_skills_clone.as_deref(),
+                    raw_spells_clone.as_deref(),
+                );
                 let _ = event_store.append(&tron_events::AppendOptions {
                     session_id: &session_id_clone,
                     event_type: tron_events::EventType::MessageUser,
-                    payload: serde_json::json!({"content": prompt_clone}),
+                    payload: user_event_payload,
                     parent_id: None,
                 });
 
@@ -3207,6 +3324,106 @@ mod tests {
         assert_eq!(results[0].1["task"], "task-3");
     }
 
+    // ── Event persistence integration tests ──
+
+    #[tokio::test]
+    async fn prompt_text_only_event_has_string_content() {
+        let ctx = make_text_context("Reply.");
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(Some(json!({"sessionId": sid, "prompt": "hello"})), &ctx)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["message.user"], None)
+            .unwrap();
+        assert!(!events.is_empty(), "expected message.user event");
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["content"], "hello");
+        assert!(payload.get("imageCount").is_none());
+        assert!(payload.get("skills").is_none());
+    }
+
+    #[tokio::test]
+    async fn prompt_with_images_event_has_content_blocks() {
+        let ctx = make_text_context("I see the image.");
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(
+                Some(json!({
+                    "sessionId": sid,
+                    "prompt": "look at this",
+                    "images": [
+                        {"data": "base64img", "mediaType": "image/png"}
+                    ]
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["message.user"], None)
+            .unwrap();
+        assert!(!events.is_empty(), "expected message.user event");
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        let content = payload["content"].as_array().expect("content should be array");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["data"], "base64img");
+        assert_eq!(payload["imageCount"], 1);
+    }
+
+    #[tokio::test]
+    async fn prompt_with_skills_event_has_skills_array() {
+        let ctx = make_text_context("Using skill.");
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp", None)
+            .unwrap();
+
+        let _ = PromptHandler
+            .handle(
+                Some(json!({
+                    "sessionId": sid,
+                    "prompt": "use this skill",
+                    "skills": [{"name": "my-skill", "source": "global", "displayName": "My Skill"}]
+                })),
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["message.user"], None)
+            .unwrap();
+        assert!(!events.is_empty(), "expected message.user event");
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["content"], "use this skill"); // text-only
+        let skills = payload["skills"].as_array().expect("skills should be array");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0]["name"], "my-skill");
+    }
+
     // ── format_subagent_results tests ──
 
     #[test]
@@ -3303,5 +3520,184 @@ mod tests {
         assert!(formatted.contains("task-2"));
         assert!(formatted.contains("out-1"));
         assert!(formatted.contains("out-2"));
+    }
+
+    // ── build_user_event_payload tests ──
+
+    #[test]
+    fn payload_text_only() {
+        let payload = build_user_event_payload("hello", None, None, None, None);
+        assert_eq!(payload["content"], "hello");
+        assert!(payload.get("imageCount").is_none());
+        assert!(payload.get("skills").is_none());
+        assert!(payload.get("spells").is_none());
+    }
+
+    #[test]
+    fn payload_with_single_image() {
+        let images = vec![json!({"data": "base64img", "mediaType": "image/png"})];
+        let payload = build_user_event_payload("look", Some(&images), None, None, None);
+        let content = payload["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "look");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["data"], "base64img");
+        assert_eq!(content[1]["mimeType"], "image/png");
+        assert_eq!(payload["imageCount"], 1);
+    }
+
+    #[test]
+    fn payload_with_multiple_images() {
+        let images = vec![
+            json!({"data": "img1", "mediaType": "image/png"}),
+            json!({"data": "img2", "mediaType": "image/jpeg"}),
+            json!({"data": "img3", "mediaType": "image/webp"}),
+        ];
+        let payload = build_user_event_payload("see", Some(&images), None, None, None);
+        let content = payload["content"].as_array().unwrap();
+        assert_eq!(content.len(), 4); // text + 3 images
+        assert_eq!(payload["imageCount"], 3);
+    }
+
+    #[test]
+    fn payload_with_document_attachment() {
+        let atts = vec![json!({
+            "data": "pdfdata",
+            "mimeType": "application/pdf",
+            "fileName": "report.pdf"
+        })];
+        let payload = build_user_event_payload("read this", None, Some(&atts), None, None);
+        let content = payload["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[1]["type"], "document");
+        assert_eq!(content[1]["data"], "pdfdata");
+        assert_eq!(content[1]["mimeType"], "application/pdf");
+        assert_eq!(content[1]["fileName"], "report.pdf");
+        assert!(payload.get("imageCount").is_none());
+    }
+
+    #[test]
+    fn payload_with_image_attachment() {
+        let atts = vec![json!({
+            "data": "jpgdata",
+            "mimeType": "image/jpeg",
+            "fileName": "photo.jpg"
+        })];
+        let payload = build_user_event_payload("see", None, Some(&atts), None, None);
+        let content = payload["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["data"], "jpgdata");
+        assert_eq!(content[1]["mimeType"], "image/jpeg");
+        assert_eq!(payload["imageCount"], 1);
+    }
+
+    #[test]
+    fn payload_mixed_images_and_documents() {
+        let images = vec![json!({"data": "img1", "mediaType": "image/png"})];
+        let atts = vec![
+            json!({"data": "img2", "mimeType": "image/jpeg"}),
+            json!({"data": "doc1", "mimeType": "application/pdf", "fileName": "f.pdf"}),
+        ];
+        let payload =
+            build_user_event_payload("mixed", Some(&images), Some(&atts), None, None);
+        let content = payload["content"].as_array().unwrap();
+        // text + 1 image param + 1 image att + 1 doc att = 4
+        assert_eq!(content.len(), 4);
+        assert_eq!(payload["imageCount"], 2); // only image blocks
+    }
+
+    #[test]
+    fn payload_with_skills_only() {
+        let skills = vec![json!({"name": "my-skill", "source": "global", "displayName": "My Skill"})];
+        let payload = build_user_event_payload("hello", None, None, Some(&skills), None);
+        assert_eq!(payload["content"], "hello"); // text-only path
+        let s = payload["skills"].as_array().unwrap();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0]["name"], "my-skill");
+        assert_eq!(s[0]["source"], "global");
+    }
+
+    #[test]
+    fn payload_with_spells_only() {
+        let spells = vec![json!({"name": "my-spell", "source": "global"})];
+        let payload = build_user_event_payload("cast", None, None, None, Some(&spells));
+        assert_eq!(payload["content"], "cast");
+        let s = payload["spells"].as_array().unwrap();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0]["name"], "my-spell");
+    }
+
+    #[test]
+    fn payload_with_skills_and_images() {
+        let images = vec![json!({"data": "img", "mediaType": "image/png"})];
+        let skills = vec![json!({"name": "sk", "source": "global"})];
+        let spells = vec![json!({"name": "sp", "source": "global"})];
+        let payload = build_user_event_payload(
+            "hi",
+            Some(&images),
+            None,
+            Some(&skills),
+            Some(&spells),
+        );
+        assert!(payload["content"].is_array()); // multimodal
+        assert!(payload["skills"].is_array());
+        assert!(payload["spells"].is_array());
+    }
+
+    #[test]
+    fn payload_empty_images_array() {
+        let images: Vec<Value> = vec![];
+        let payload = build_user_event_payload("text", Some(&images), None, None, None);
+        assert_eq!(payload["content"], "text"); // text-only path
+        assert!(payload.get("imageCount").is_none());
+    }
+
+    #[test]
+    fn payload_empty_attachments_array() {
+        let atts: Vec<Value> = vec![];
+        let payload = build_user_event_payload("text", None, Some(&atts), None, None);
+        assert_eq!(payload["content"], "text");
+    }
+
+    #[test]
+    fn payload_malformed_image_no_data() {
+        let images = vec![json!({"mediaType": "image/png"})]; // missing data
+        let payload = build_user_event_payload("oops", Some(&images), None, None, None);
+        // Malformed image skipped, falls back to text-only (only text block)
+        assert_eq!(payload["content"], "oops");
+    }
+
+    #[test]
+    fn payload_malformed_image_no_mime() {
+        let images = vec![json!({"data": "base64"})]; // missing mediaType/mimeType
+        let payload = build_user_event_payload("oops", Some(&images), None, None, None);
+        assert_eq!(payload["content"], "oops");
+    }
+
+    #[test]
+    fn payload_media_type_key_variant() {
+        // iOS sends `mediaType`, verify it works
+        let images = vec![json!({"data": "d", "mediaType": "image/webp"})];
+        let payload = build_user_event_payload("pic", Some(&images), None, None, None);
+        let content = payload["content"].as_array().unwrap();
+        assert_eq!(content[1]["mimeType"], "image/webp");
+    }
+
+    #[test]
+    fn payload_document_no_filename() {
+        let atts = vec![json!({"data": "docdata", "mimeType": "application/pdf"})];
+        let payload = build_user_event_payload("doc", None, Some(&atts), None, None);
+        let content = payload["content"].as_array().unwrap();
+        assert_eq!(content[1]["type"], "document");
+        assert!(content[1].get("fileName").is_none());
+    }
+
+    #[test]
+    fn payload_empty_skills_not_stored() {
+        let skills: Vec<Value> = vec![];
+        let payload = build_user_event_payload("hi", None, None, Some(&skills), None);
+        assert!(payload.get("skills").is_none());
     }
 }

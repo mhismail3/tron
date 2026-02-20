@@ -2062,4 +2062,67 @@ mod tests {
         let ids = extract_tool_use_ids(&Value::String("hello".to_string()));
         assert!(ids.is_empty());
     }
+
+    // ── Multimodal user message reconstruction ──
+
+    #[test]
+    fn multimodal_user_message_reconstructs() {
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({
+                    "content": [
+                        {"type": "text", "text": "look at this"},
+                        {"type": "image", "data": "base64img", "mimeType": "image/png"}
+                    ],
+                    "imageCount": 1
+                }),
+            ),
+        ];
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].role, "user");
+        // Content should be the array, not stringified
+        let content = &msgs[0].content;
+        let arr = content.as_array().expect("content should be array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[1]["type"], "image");
+        assert_eq!(arr[1]["data"], "base64img");
+    }
+
+    #[test]
+    fn multimodal_user_content_merges_with_string() {
+        // First user message is multimodal array, second is plain string
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({
+                    "content": [
+                        {"type": "text", "text": "image here"},
+                        {"type": "image", "data": "imgdata", "mimeType": "image/png"}
+                    ]
+                }),
+            ),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "follow up"}),
+            ),
+        ];
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+        // Consecutive user messages merge
+        assert_eq!(msgs.len(), 1);
+        let arr = msgs[0].content.as_array().expect("merged content should be array");
+        // First array's blocks + second normalized to [{type:text, text:...}]
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[0]["text"], "image here");
+        assert_eq!(arr[1]["type"], "image");
+        assert_eq!(arr[2]["type"], "text");
+        assert_eq!(arr[2]["text"], "follow up");
+    }
 }
