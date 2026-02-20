@@ -90,7 +90,7 @@ final class SettingsState {
         triggerTokenThreshold = 0.70
         defaultTurnFallback = 8
         memoryLedgerEnabled = true
-        memoryAutoInject = false
+        memoryAutoInject = true
         memoryAutoInjectCount = 5
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true

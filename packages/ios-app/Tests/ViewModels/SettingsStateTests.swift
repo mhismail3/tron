@@ -14,7 +14,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 8)
         XCTAssertTrue(state.memoryLedgerEnabled)
-        XCTAssertFalse(state.memoryAutoInject)
+        XCTAssertTrue(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
         XCTAssertFalse(state.isLoaded)
@@ -34,7 +34,7 @@ final class SettingsStateTests: XCTestCase {
         state.triggerTokenThreshold = 0.90
         state.defaultTurnFallback = 15
         state.memoryLedgerEnabled = false
-        state.memoryAutoInject = true
+        state.memoryAutoInject = false
         state.memoryAutoInjectCount = 8
         state.maxConcurrentSessions = 25
         state.quickSessionWorkspace = "/some/other/path"
@@ -48,7 +48,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.defaultTurnFallback, 8)
         XCTAssertTrue(state.memoryLedgerEnabled)
-        XCTAssertFalse(state.memoryAutoInject)
+        XCTAssertTrue(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
     }

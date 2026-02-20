@@ -12,8 +12,7 @@ struct TronMobileApp: App {
     // Appearance mode (Light / Dark / Auto)
     @State private var appearanceSettings = AppearanceSettings.shared
 
-    // Whether container is ready (database initialized, etc.)
-    @State private var isReady = false
+    @State private var initializer = AppInitializer()
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -32,20 +31,25 @@ struct TronMobileApp: App {
         WindowGroup {
             Group {
                 if #available(iOS 26.0, *) {
-                    if isReady {
+                    switch initializer.state {
+                    case .ready:
                         ContentView(
                             deepLinkSessionId: $deepLinkSessionId,
                             deepLinkScrollTarget: $deepLinkScrollTarget
                         )
                         .environment(\.dependencies, container)
-                    } else {
-                        // Loading state while initializing
+                    case .loading:
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .tronEmerald))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color.tronBackground)
+                    case .failed(let message):
+                        InitializationErrorView(message: message) {
+                            Task { await initializeApp() }
+                        }
+                        .background(Color.tronBackground)
                     }
                 } else {
-                    // Fallback for older iOS versions
                     Text("This app requires iOS 26 or later")
                         .foregroundStyle(.tronTextPrimary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -53,16 +57,7 @@ struct TronMobileApp: App {
             }
             .preferredColorScheme(appearanceSettings.mode.colorScheme)
             .task {
-                // Initialize container on app launch
-                do {
-                    try await container.initialize()
-                    isReady = true
-
-                    // Request push notification authorization
-                    await setupPushNotifications()
-                } catch {
-                    TronLogger.shared.error("Failed to initialize container: \(error)", category: .session)
-                }
+                await initializeApp()
             }
             .onReceive(NotificationCenter.default.publisher(for: .deviceTokenDidUpdate)) { notification in
                 // When device token updates, register with server immediately
@@ -143,6 +138,17 @@ struct TronMobileApp: App {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Initialization
+
+    private func initializeApp() async {
+        await initializer.initialize {
+            try await container.initialize()
+        }
+        if initializer.isReady {
+            await setupPushNotifications()
         }
     }
 
