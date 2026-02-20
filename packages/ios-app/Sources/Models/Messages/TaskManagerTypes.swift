@@ -29,8 +29,20 @@ struct TaskManagerChipData: Equatable, Identifiable {
     let entityDetail: EntityDetail?
     /// Parsed list result from tool result (nil for entity actions)
     var listResult: ListResult? = nil
+    /// Duration in milliseconds (nil while running)
+    var durationMs: Int? = nil
     /// Current status of the tool call
     var status: TaskManagerChipStatus = .completed
+
+    /// Formatted duration for display
+    var formattedDuration: String? {
+        guard let ms = durationMs else { return nil }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.1fs", Double(ms) / 1000.0)
+        }
+    }
 }
 
 // MARK: - List Result

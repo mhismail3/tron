@@ -40,6 +40,12 @@ struct TaskManagerChip: View {
                 .foregroundStyle(.tronSlate.opacity(0.7))
                 .lineLimit(1)
 
+            if let duration = data.formattedDuration {
+                Text(duration)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronSlate.opacity(0.5))
+            }
+
             if data.status == .completed {
                 Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
@@ -98,6 +104,12 @@ struct TaskManagerChipFallback: View {
                 .font(TronTypography.codeCaption)
                 .foregroundStyle(.tronSlate.opacity(0.7))
                 .lineLimit(1)
+
+            if let duration = data.formattedDuration {
+                Text(duration)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronSlate.opacity(0.5))
+            }
 
             if data.status == .completed {
                 Image(systemName: "chevron.right")

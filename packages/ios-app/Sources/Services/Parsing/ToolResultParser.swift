@@ -144,6 +144,7 @@ struct ToolResultParser {
                 arguments: tool.arguments,
                 entityDetail: nil,
                 listResult: nil,
+                durationMs: nil,
                 status: .running
             )
         }
@@ -161,6 +162,7 @@ struct ToolResultParser {
             arguments: tool.arguments,
             entityDetail: entityDetail,
             listResult: listResult,
+            durationMs: tool.durationMs,
             status: .completed
         )
     }

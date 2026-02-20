@@ -1,7 +1,7 @@
 //! Tool executor — guardrails → pre-hooks → execute → post-hooks pipeline.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::hooks::engine::HookEngine;
@@ -18,6 +18,20 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::agent::event_emitter::EventEmitter;
 use crate::types::ToolExecutionResult;
+
+/// Convert a `Duration` to milliseconds, rounding up (ceiling).
+///
+/// `Duration::as_millis()` truncates sub-millisecond values to 0, which makes
+/// fast tools (file glob, SQLite lookup) report "0ms". This function ensures
+/// at least 1ms is reported for any non-zero duration.
+fn duration_ceil_ms(d: Duration) -> u64 {
+    let micros = d.as_micros();
+    if micros == 0 {
+        return 0;
+    }
+    // Ceiling division: (micros + 999) / 1000, minimum 1
+    ((micros + 999) / 1000) as u64
+}
 
 /// Execute a single tool call through the full pipeline.
 ///
@@ -50,7 +64,7 @@ pub async fn execute_tool(
         return ToolExecutionResult {
             tool_call_id,
             result: tron_core::tools::error_result(format!("Tool not found: {tool_name}")),
-            duration_ms: start.elapsed().as_millis() as u64,
+            duration_ms: duration_ceil_ms(start.elapsed()),
             blocked_by_hook: false,
             blocked_by_guardrail: false,
             stops_turn: false,
@@ -80,7 +94,7 @@ pub async fn execute_tool(
                 return ToolExecutionResult {
                     tool_call_id,
                     result: tron_core::tools::error_result(reason),
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: duration_ceil_ms(start.elapsed()),
                     blocked_by_hook: false,
                     blocked_by_guardrail: true,
                     stops_turn,
@@ -132,7 +146,7 @@ pub async fn execute_tool(
                 return ToolExecutionResult {
                     tool_call_id,
                     result: tron_core::tools::error_result(reason),
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: duration_ceil_ms(start.elapsed()),
                     blocked_by_hook: true,
                     blocked_by_guardrail: false,
                     stops_turn,
@@ -179,7 +193,7 @@ pub async fn execute_tool(
         }
     };
 
-    let duration_ms = start.elapsed().as_millis() as u64;
+    let duration_ms = duration_ceil_ms(start.elapsed());
 
     // Record tool metrics
     counter!("tool_executions_total", "tool" => tool_name.clone()).increment(1);
