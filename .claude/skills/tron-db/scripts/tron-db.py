@@ -19,7 +19,11 @@ Commands:
     stats       Database statistics
 
 Environment:
-    TRON_DB - Path to database (default: ~/.tron/database/prod.db or beta.db)
+    TRON_DB - Path to database (default: ~/.tron/database/tron.db)
+
+Origin filtering:
+    --origin prod   Filter to production (localhost:9847)
+    --origin beta   Filter to dev/beta (localhost:9846)
 """
 
 import os
@@ -30,19 +34,24 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 
+# Origin mapping: friendly name -> server origin string
+ORIGIN_MAP = {
+    "prod": "localhost:9847",
+    "beta": "localhost:9846",
+    "dev": "localhost:9846",
+}
+
 
 def get_db_path():
     """Find the Tron database."""
     if os.environ.get("TRON_DB"):
         return os.environ["TRON_DB"]
 
-    tron_dir = Path.home() / ".tron" / "database"
-    for db_name in ["prod.db", "beta.db"]:
-        db_path = tron_dir / db_name
-        if db_path.exists():
-            return str(db_path)
+    db_path = Path.home() / ".tron" / "database" / "tron.db"
+    if db_path.exists():
+        return str(db_path)
 
-    print("Error: No Tron database found at ~/.tron/database/prod.db or beta.db", file=sys.stderr)
+    print("Error: No Tron database found at ~/.tron/database/tron.db", file=sys.stderr)
     print("Set TRON_DB environment variable to specify database path", file=sys.stderr)
     sys.exit(1)
 
@@ -53,6 +62,23 @@ def get_connection():
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def resolve_origin(origin_arg):
+    """Resolve a friendly origin name to the server origin string."""
+    if not origin_arg:
+        return None
+    return ORIGIN_MAP.get(origin_arg.lower(), origin_arg)
+
+
+def format_origin(origin):
+    """Format origin string to friendly name."""
+    if not origin:
+        return "-"
+    for name, value in ORIGIN_MAP.items():
+        if origin == value and name != "dev":
+            return name
+    return origin
 
 
 def format_timestamp(ts):
@@ -127,11 +153,13 @@ def output_json(data):
 def cmd_sessions(args):
     """List recent sessions."""
     conn = get_connection()
+    origin = resolve_origin(args.origin)
 
     query = """
         SELECT
             id,
             title,
+            origin,
             created_at,
             last_activity_at,
             event_count,
@@ -139,11 +167,17 @@ def cmd_sessions(args):
             total_input_tokens + total_output_tokens as total_tokens,
             total_cost
         FROM sessions
-        ORDER BY last_activity_at DESC
-        LIMIT ?
     """
+    params = []
 
-    rows = conn.execute(query, (args.limit,)).fetchall()
+    if origin:
+        query += " WHERE origin = ?"
+        params.append(origin)
+
+    query += " ORDER BY last_activity_at DESC LIMIT ?"
+    params.append(args.limit)
+
+    rows = conn.execute(query, params).fetchall()
 
     if args.json:
         output_json([dict(r) for r in rows])
@@ -154,6 +188,7 @@ def cmd_sessions(args):
         table_rows.append([
             r["id"][:20] + "..." if len(r["id"]) > 20 else r["id"],
             truncate(r["title"], 30) or "(untitled)",
+            format_origin(r["origin"]),
             format_timestamp(r["last_activity_at"]),
             r["event_count"] or 0,
             r["turn_count"] or 0,
@@ -161,7 +196,7 @@ def cmd_sessions(args):
             format_cost(r["total_cost"]),
         ])
 
-    print_table(table_rows, ["Session ID", "Title", "Last Activity", "Events", "Turns", "Tokens", "Cost"])
+    print_table(table_rows, ["Session ID", "Title", "Origin", "Last Activity", "Events", "Turns", "Tokens", "Cost"])
 
 
 def cmd_session(args):
@@ -190,6 +225,7 @@ def cmd_session(args):
 
     print(f"Session: {row['id']}")
     print(f"Title: {row['title'] or '(untitled)'}")
+    print(f"Origin: {format_origin(row['origin'])} ({row['origin'] or '-'})")
     print(f"Workspace: {row['workspace_path'] or '-'}")
     print(f"Model: {row['latest_model'] or '-'}")
     print()
@@ -212,6 +248,12 @@ def cmd_session(args):
         print(f"Forked from: {row['parent_session_id']}")
         print(f"Fork event: {row['fork_from_event_id']}")
 
+    if row['spawning_session_id']:
+        print()
+        print(f"Spawned by: {row['spawning_session_id']}")
+        print(f"Spawn type: {row['spawn_type'] or '-'}")
+        print(f"Spawn task: {row['spawn_task'] or '-'}")
+
 
 def cmd_events(args):
     """Get events for a session."""
@@ -225,8 +267,10 @@ def cmd_events(args):
             timestamp,
             turn,
             tool_name,
+            model,
             input_tokens,
             output_tokens,
+            latency_ms,
             payload
         FROM events
         WHERE session_id = ? OR session_id LIKE ?
@@ -260,12 +304,14 @@ def cmd_events(args):
             r["type"],
             r["turn"] if r["turn"] is not None else "-",
             r["tool_name"] or "-",
+            r["model"] or "-",
             format_tokens(r["input_tokens"]) if r["input_tokens"] else "-",
             format_tokens(r["output_tokens"]) if r["output_tokens"] else "-",
+            f"{r['latency_ms']}ms" if r["latency_ms"] else "-",
             format_timestamp(r["timestamp"]),
         ])
 
-    print_table(table_rows, ["Seq", "Type", "Turn", "Tool", "In", "Out", "Time"])
+    print_table(table_rows, ["Seq", "Type", "Turn", "Tool", "Model", "In", "Out", "Latency", "Time"])
 
 
 def cmd_messages(args):
@@ -446,6 +492,7 @@ def cmd_logs(args):
             message,
             error_message,
             error_stack,
+            trace_id,
             data
         FROM logs
         WHERE session_id = ? OR session_id LIKE ?
@@ -477,7 +524,8 @@ def cmd_logs(args):
     for r in rows:
         level_colors = {"error": "!", "fatal": "!!", "warn": "?", "info": "", "debug": ".", "trace": ".."}
         prefix = level_colors.get(r["level"], "")
-        print(f"{prefix}[{r['level'].upper():5}] {format_timestamp(r['timestamp'])} [{r['component']}]")
+        trace = f" trace={r['trace_id']}" if r["trace_id"] else ""
+        print(f"{prefix}[{r['level'].upper():5}] {format_timestamp(r['timestamp'])} [{r['component']}]{trace}")
         print(f"  {r['message']}")
         if r["error_message"]:
             print(f"  Error: {r['error_message']}")
@@ -498,10 +546,12 @@ def cmd_tokens(args):
             SELECT
                 turn,
                 type,
+                model,
                 input_tokens,
                 output_tokens,
                 cache_read_tokens,
                 cache_creation_tokens,
+                latency_ms,
                 timestamp
             FROM events
             WHERE (session_id = ? OR session_id LIKE ?)
@@ -520,32 +570,47 @@ def cmd_tokens(args):
             table_rows.append([
                 r["turn"] if r["turn"] is not None else "-",
                 r["type"],
+                r["model"] or "-",
                 format_tokens(r["input_tokens"]),
                 format_tokens(r["output_tokens"]),
                 format_tokens(r["cache_read_tokens"]),
+                f"{r['latency_ms']}ms" if r["latency_ms"] else "-",
                 format_timestamp(r["timestamp"]),
             ])
 
-        print_table(table_rows, ["Turn", "Type", "Input", "Output", "Cache Read", "Time"])
+        print_table(table_rows, ["Turn", "Type", "Model", "Input", "Output", "Cache Read", "Latency", "Time"])
     else:
         # Top sessions by token usage
+        origin = resolve_origin(args.origin)
         order_col = "total_cost" if args.sort == "cost" else "total_input_tokens + total_output_tokens"
+
+        where_clauses = ["total_input_tokens > 0 OR total_output_tokens > 0"]
+        params = []
+
+        if origin:
+            where_clauses.append("origin = ?")
+            params.append(origin)
+
+        where = " AND ".join(f"({c})" for c in where_clauses)
+
         query = f"""
             SELECT
                 id,
                 title,
+                origin,
                 total_input_tokens,
                 total_output_tokens,
                 total_cache_read_tokens,
                 total_cost,
                 last_activity_at
             FROM sessions
-            WHERE total_input_tokens > 0 OR total_output_tokens > 0
+            WHERE {where}
             ORDER BY {order_col} DESC
             LIMIT ?
         """
+        params.append(args.limit)
 
-        rows = conn.execute(query, (args.limit,)).fetchall()
+        rows = conn.execute(query, params).fetchall()
 
         if args.json:
             output_json([dict(r) for r in rows])
@@ -557,13 +622,14 @@ def cmd_tokens(args):
             table_rows.append([
                 r["id"][:20] + "..." if len(r["id"]) > 20 else r["id"],
                 truncate(r["title"], 25) or "(untitled)",
+                format_origin(r["origin"]),
                 format_tokens(r["total_input_tokens"]),
                 format_tokens(r["total_output_tokens"]),
                 format_tokens(total),
                 format_cost(r["total_cost"]),
             ])
 
-        print_table(table_rows, ["Session", "Title", "Input", "Output", "Total", "Cost"])
+        print_table(table_rows, ["Session", "Title", "Origin", "Input", "Output", "Total", "Cost"])
 
 
 def cmd_turn(args):
@@ -577,8 +643,10 @@ def cmd_turn(args):
             type,
             timestamp,
             tool_name,
+            model,
             input_tokens,
             output_tokens,
+            latency_ms,
             payload
         FROM events
         WHERE (session_id = ? OR session_id LIKE ?)
@@ -602,8 +670,12 @@ def cmd_turn(args):
         print(f"[{r['sequence']}] {r['type']}", end="")
         if r["tool_name"]:
             print(f" ({r['tool_name']})", end="")
+        if r["model"]:
+            print(f" [{r['model']}]", end="")
         if r["input_tokens"] or r["output_tokens"]:
             print(f" - {format_tokens(r['input_tokens'])} in / {format_tokens(r['output_tokens'])} out", end="")
+        if r["latency_ms"]:
+            print(f" ({r['latency_ms']}ms)", end="")
         print()
 
         if args.verbose and r["payload"]:
@@ -687,27 +759,50 @@ def cmd_search(args):
 def cmd_stats(args):
     """Database statistics."""
     conn = get_connection()
+    origin = resolve_origin(args.origin)
 
-    stats_query = """
-        SELECT
-            (SELECT COUNT(*) FROM sessions) as total_sessions,
-            (SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL) as active_sessions,
-            (SELECT COUNT(*) FROM events) as total_events,
-            (SELECT COUNT(*) FROM logs) as total_logs,
-            (SELECT COUNT(*) FROM workspaces) as total_workspaces,
-            (SELECT COALESCE(SUM(total_cost), 0) FROM sessions) as total_cost,
-            (SELECT COALESCE(SUM(total_input_tokens + total_output_tokens), 0) FROM sessions) as total_tokens
-    """
-
-    row = conn.execute(stats_query).fetchone()
+    if origin:
+        stats_query = """
+            SELECT
+                (SELECT COUNT(*) FROM sessions WHERE origin = ?) as total_sessions,
+                (SELECT COUNT(*) FROM sessions WHERE origin = ? AND ended_at IS NULL) as active_sessions,
+                (SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.origin = ?) as total_events,
+                (SELECT COUNT(*) FROM logs WHERE origin = ?) as total_logs,
+                (SELECT COUNT(*) FROM workspaces) as total_workspaces,
+                (SELECT COALESCE(SUM(total_cost), 0) FROM sessions WHERE origin = ?) as total_cost,
+                (SELECT COALESCE(SUM(total_input_tokens + total_output_tokens), 0) FROM sessions WHERE origin = ?) as total_tokens
+        """
+        row = conn.execute(stats_query, (origin, origin, origin, origin, origin, origin)).fetchone()
+    else:
+        stats_query = """
+            SELECT
+                (SELECT COUNT(*) FROM sessions) as total_sessions,
+                (SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL) as active_sessions,
+                (SELECT COUNT(*) FROM events) as total_events,
+                (SELECT COUNT(*) FROM logs) as total_logs,
+                (SELECT COUNT(*) FROM workspaces) as total_workspaces,
+                (SELECT COALESCE(SUM(total_cost), 0) FROM sessions) as total_cost,
+                (SELECT COALESCE(SUM(total_input_tokens + total_output_tokens), 0) FROM sessions) as total_tokens
+        """
+        row = conn.execute(stats_query).fetchone()
 
     if args.json:
         output_json(dict(row))
         return
 
-    print("=== Tron Database Statistics ===")
+    title = f"Tron Database Statistics"
+    if origin:
+        title += f" ({args.origin})"
+    print(f"=== {title} ===")
     print()
     print(f"Database: {get_db_path()}")
+    if not origin:
+        # Show origin breakdown
+        origin_rows = conn.execute(
+            "SELECT origin, COUNT(*) as cnt FROM sessions GROUP BY origin ORDER BY cnt DESC"
+        ).fetchall()
+        if origin_rows:
+            print(f"Origins: {', '.join(f'{format_origin(r['origin'])}={r['cnt']}' for r in origin_rows)}")
     print()
     print(f"Sessions: {row['total_sessions']} ({row['active_sessions']} active)")
     print(f"Events: {row['total_events']:,}")
@@ -722,19 +817,25 @@ def cmd_stats(args):
         SELECT
             id,
             title,
+            origin,
             last_activity_at
         FROM sessions
-        ORDER BY last_activity_at DESC
-        LIMIT 5
     """
-    recent = conn.execute(recent_query).fetchall()
+    recent_params = []
+    if origin:
+        recent_query += " WHERE origin = ?"
+        recent_params.append(origin)
+    recent_query += " ORDER BY last_activity_at DESC LIMIT 5"
+
+    recent = conn.execute(recent_query, recent_params).fetchall()
 
     if recent:
         print()
         print("Recent Sessions:")
         for r in recent:
             title = truncate(r["title"], 40) or "(untitled)"
-            print(f"  {format_timestamp(r['last_activity_at'])} - {title}")
+            o = format_origin(r["origin"])
+            print(f"  {format_timestamp(r['last_activity_at'])} [{o}] {title}")
 
 
 # === Main ===
@@ -750,6 +851,7 @@ def main():
     # sessions
     p_sessions = subparsers.add_parser("sessions", help="List recent sessions")
     p_sessions.add_argument("--limit", type=int, default=20, help="Max results")
+    p_sessions.add_argument("--origin", help="Filter by origin (prod, beta, or raw origin string)")
     p_sessions.set_defaults(func=cmd_sessions)
 
     # session
@@ -795,6 +897,7 @@ def main():
     p_tokens.add_argument("session_id", nargs="?", help="Session ID for per-turn breakdown")
     p_tokens.add_argument("--sort", choices=["tokens", "cost"], default="tokens", help="Sort by")
     p_tokens.add_argument("--limit", type=int, default=20, help="Max results (for session list)")
+    p_tokens.add_argument("--origin", help="Filter by origin (prod, beta)")
     p_tokens.set_defaults(func=cmd_tokens)
 
     # turn
@@ -813,6 +916,7 @@ def main():
 
     # stats
     p_stats = subparsers.add_parser("stats", help="Database statistics")
+    p_stats.add_argument("--origin", help="Filter by origin (prod, beta)")
     p_stats.set_defaults(func=cmd_stats)
 
     args = parser.parse_args()

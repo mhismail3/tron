@@ -2,7 +2,7 @@
 name: Tron Database Accessor
 description: Query patterns and CLI for debugging Tron agent sessions, events, and logs
 autoInject: false
-version: "1.0.0"
+version: "2.0.0"
 tools:
   - Bash
 tags:
@@ -17,14 +17,12 @@ Debug Tron agent behavior by querying the events database. Use this skill when i
 ## Database Location
 
 ```bash
-# Production database
-DB="$HOME/.tron/database/prod.db"
+# Single unified database (prod and beta share one file)
+DB="$HOME/.tron/database/tron.db"
 
-# Beta database (if using beta channel)
-DB="$HOME/.tron/database/beta.db"
-
-# Check which exists
-ls -la ~/.tron/database/*.db
+# Sessions are distinguished by `origin` column:
+#   localhost:9847 = prod
+#   localhost:9846 = dev/beta
 ```
 
 ## CLI Tool
@@ -33,18 +31,43 @@ A CLI tool is available for common queries:
 
 ```bash
 ~/.tron/skills/tron-db/scripts/tron-db.py --help
+
+# Filter by origin (prod vs beta)
+~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin prod
+~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin beta
 ```
 
 ## Schema Overview
 
 | Table | Purpose |
 |-------|---------|
-| `sessions` | Session metadata, token counts, costs |
+| `sessions` | Session metadata, token counts, costs, origin |
 | `events` | Immutable event log (messages, tools, config changes) |
-| `logs` | Structured application logs |
+| `logs` | Structured application logs with tracing |
 | `blobs` | Content-addressable blob storage |
 | `workspaces` | Project/directory associations |
 | `branches` | Session branching support |
+| `tasks` | Task management (project/area scoped) |
+| `areas` | Task area groupings |
+| `projects` | Task project groupings |
+| `memory_vectors` | Semantic memory embeddings |
+
+### Key Columns
+
+**sessions.origin** — Server origin string identifying the instance:
+- `localhost:9847` = production
+- `localhost:9846` = dev/beta
+
+**events** denormalized columns (indexed, extracted from payload):
+- `model`, `provider_type` — which model/provider handled the turn
+- `latency_ms` — provider response latency
+- `stop_reason` — why the turn ended
+- `has_thinking` — whether thinking blocks were present
+- `cost` — per-event cost
+
+**logs** tracing columns:
+- `trace_id`, `parent_trace_id`, `depth` — distributed tracing support
+- `origin` — same server origin as sessions
 
 ## Event Types Reference
 
@@ -81,6 +104,7 @@ A CLI tool is available for common queries:
 SELECT
   id,
   title,
+  origin,
   datetime(created_at) as started,
   datetime(last_activity_at) as last_active,
   event_count,
@@ -92,7 +116,25 @@ ORDER BY last_activity_at DESC
 LIMIT 20;
 ```
 
-### 2. Get Session Details
+### 2. List Sessions by Origin (Prod vs Beta)
+
+```sql
+-- Production sessions only
+SELECT id, title, datetime(last_activity_at) as last_active, event_count
+FROM sessions
+WHERE origin = 'localhost:9847'
+ORDER BY last_activity_at DESC
+LIMIT 20;
+
+-- Beta/dev sessions only
+SELECT id, title, datetime(last_activity_at) as last_active, event_count
+FROM sessions
+WHERE origin = 'localhost:9846'
+ORDER BY last_activity_at DESC
+LIMIT 20;
+```
+
+### 3. Get Session Details
 
 ```sql
 SELECT
@@ -104,7 +146,7 @@ LEFT JOIN workspaces w ON s.workspace_id = w.id
 WHERE s.id = 'SESSION_ID';
 ```
 
-### 3. Get All Events for a Session
+### 4. Get All Events for a Session
 
 ```sql
 SELECT
@@ -114,13 +156,15 @@ SELECT
   datetime(timestamp) as time,
   turn,
   tool_name,
+  model,
+  latency_ms,
   substr(payload, 1, 200) as payload_preview
 FROM events
 WHERE session_id = 'SESSION_ID'
 ORDER BY sequence;
 ```
 
-### 4. Get Messages Only (User/Assistant)
+### 5. Get Messages Only (User/Assistant)
 
 ```sql
 SELECT
@@ -135,7 +179,7 @@ WHERE session_id = 'SESSION_ID'
 ORDER BY sequence;
 ```
 
-### 5. Get Tool Executions for a Session
+### 6. Get Tool Executions for a Session
 
 ```sql
 SELECT
@@ -151,7 +195,7 @@ WHERE e.session_id = 'SESSION_ID'
 ORDER BY e.sequence;
 ```
 
-### 6. Find Errors in a Session
+### 7. Find Errors in a Session
 
 ```sql
 -- Event-level errors
@@ -180,7 +224,7 @@ WHERE session_id = 'SESSION_ID'
 ORDER BY timestamp;
 ```
 
-### 7. Get Logs for a Session
+### 8. Get Logs for a Session
 
 ```sql
 SELECT
@@ -188,13 +232,14 @@ SELECT
   level,
   component,
   message,
+  trace_id,
   data
 FROM logs
 WHERE session_id = 'SESSION_ID'
 ORDER BY timestamp;
 ```
 
-### 8. Get Logs by Level
+### 9. Get Logs by Level
 
 ```sql
 -- Errors and fatals only
@@ -214,7 +259,7 @@ LIMIT 50;
 SELECT * FROM logs WHERE level_num >= 40 ORDER BY timestamp DESC LIMIT 100;
 ```
 
-### 9. Get Logs by Component
+### 10. Get Logs by Component
 
 ```sql
 SELECT
@@ -228,7 +273,7 @@ ORDER BY timestamp DESC
 LIMIT 50;
 ```
 
-### 10. Events in Time Range
+### 11. Events in Time Range
 
 ```sql
 SELECT
@@ -242,12 +287,13 @@ WHERE e.timestamp BETWEEN '2024-01-15T00:00:00' AND '2024-01-15T23:59:59'
 ORDER BY e.timestamp;
 ```
 
-### 11. Token Usage by Session
+### 12. Token Usage by Session
 
 ```sql
 SELECT
   id,
   title,
+  origin,
   total_input_tokens,
   total_output_tokens,
   total_cache_read_tokens,
@@ -260,15 +306,17 @@ ORDER BY total_cost DESC
 LIMIT 20;
 ```
 
-### 12. Token Usage by Turn
+### 13. Token Usage by Turn
 
 ```sql
 SELECT
   turn,
   type,
+  model,
   input_tokens,
   output_tokens,
   cache_read_tokens,
+  latency_ms,
   datetime(timestamp) as time
 FROM events
 WHERE session_id = 'SESSION_ID'
@@ -276,12 +324,13 @@ WHERE session_id = 'SESSION_ID'
 ORDER BY sequence;
 ```
 
-### 13. Find Sessions by Workspace
+### 14. Find Sessions by Workspace
 
 ```sql
 SELECT
   s.id,
   s.title,
+  s.origin,
   datetime(s.created_at) as created,
   s.event_count,
   s.turn_count
@@ -291,7 +340,7 @@ WHERE w.path LIKE '%/my-project%'
 ORDER BY s.last_activity_at DESC;
 ```
 
-### 14. Full-Text Search Events
+### 15. Full-Text Search Events
 
 ```sql
 SELECT
@@ -307,7 +356,7 @@ ORDER BY e.timestamp DESC
 LIMIT 20;
 ```
 
-### 15. Full-Text Search Logs
+### 16. Full-Text Search Logs
 
 ```sql
 SELECT
@@ -323,7 +372,7 @@ ORDER BY l.timestamp DESC
 LIMIT 20;
 ```
 
-### 16. Get Specific Turn Events
+### 17. Get Specific Turn Events
 
 ```sql
 SELECT
@@ -331,15 +380,17 @@ SELECT
   type,
   datetime(timestamp) as time,
   tool_name,
+  model,
   input_tokens,
-  output_tokens
+  output_tokens,
+  latency_ms
 FROM events
 WHERE session_id = 'SESSION_ID'
   AND turn = 3
 ORDER BY sequence;
 ```
 
-### 17. Compaction History
+### 18. Compaction History
 
 ```sql
 SELECT
@@ -355,7 +406,7 @@ WHERE session_id = 'SESSION_ID'
 ORDER BY sequence;
 ```
 
-### 18. API Retries
+### 19. API Retries
 
 ```sql
 SELECT
@@ -370,7 +421,7 @@ ORDER BY timestamp DESC
 LIMIT 20;
 ```
 
-### 19. Session Fork History
+### 20. Session Fork History
 
 ```sql
 SELECT
@@ -384,12 +435,46 @@ WHERE s.parent_session_id IS NOT NULL
 ORDER BY s.created_at DESC;
 ```
 
-### 20. Database Statistics
+### 21. Subagent Sessions
+
+```sql
+SELECT
+  s.id,
+  s.title,
+  s.spawning_session_id,
+  s.spawn_type,
+  s.spawn_task,
+  s.origin,
+  datetime(s.created_at) as created
+FROM sessions s
+WHERE s.spawning_session_id IS NOT NULL
+ORDER BY s.created_at DESC;
+```
+
+### 22. Model Usage Across Sessions
+
+```sql
+SELECT
+  model,
+  COUNT(*) as turn_count,
+  SUM(input_tokens) as total_input,
+  SUM(output_tokens) as total_output,
+  AVG(latency_ms) as avg_latency_ms,
+  SUM(cost) as total_cost
+FROM events
+WHERE model IS NOT NULL
+GROUP BY model
+ORDER BY turn_count DESC;
+```
+
+### 23. Database Statistics
 
 ```sql
 SELECT
   (SELECT COUNT(*) FROM sessions) as total_sessions,
   (SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL) as active_sessions,
+  (SELECT COUNT(*) FROM sessions WHERE origin = 'localhost:9847') as prod_sessions,
+  (SELECT COUNT(*) FROM sessions WHERE origin = 'localhost:9846') as beta_sessions,
   (SELECT COUNT(*) FROM events) as total_events,
   (SELECT COUNT(*) FROM logs) as total_logs,
   (SELECT SUM(total_cost) FROM sessions) as total_cost_usd,
@@ -401,8 +486,8 @@ SELECT
 ## Quick Reference: sqlite3 Commands
 
 ```bash
-# Open database (use prod.db or beta.db as appropriate)
-sqlite3 ~/.tron/database/prod.db
+# Open database
+sqlite3 ~/.tron/database/tron.db
 
 # Pretty output
 .mode column
@@ -469,3 +554,16 @@ SELECT * FROM sessions;
    ```bash
    ~/.tron/skills/tron-db/scripts/tron-db.py events SESSION_ID --type compaction
    ```
+
+### Compare Prod vs Beta
+
+```bash
+# Show only prod sessions
+~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin prod
+
+# Show only beta sessions
+~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin beta
+
+# Stats for a specific origin
+~/.tron/skills/tron-db/scripts/tron-db.py stats --origin prod
+```
