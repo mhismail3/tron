@@ -7,37 +7,16 @@ struct TokenBadge: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Input/Output tokens (using computed newInputTokens for delta display)
-            HStack(spacing: 2) {
-                Image(systemName: "arrow.down")
-                    .font(TronTypography.labelSM)
-                Text(record.formattedNewInput)
-            }
-
             HStack(spacing: 2) {
                 Image(systemName: "arrow.up")
                     .font(TronTypography.labelSM)
+                Text(record.formattedContextWindow)
+            }
+
+            HStack(spacing: 2) {
+                Image(systemName: "arrow.down")
+                    .font(TronTypography.labelSM)
                 Text(record.formattedOutput)
-            }
-
-            // Cache read
-            if let cacheRead = record.formattedCacheRead {
-                HStack(spacing: 2) {
-                    Image(systemName: "bolt.fill")
-                        .font(TronTypography.labelSM)
-                    Text(cacheRead)
-                }
-                .foregroundStyle(.tronAmberLight)
-            }
-
-            // Cache write
-            if let cacheWrite = record.formattedCacheWrite {
-                HStack(spacing: 2) {
-                    Image(systemName: "pencil")
-                        .font(TronTypography.labelSM)
-                    Text(cacheWrite)
-                }
-                .foregroundStyle(.tronAmberLight.opacity(0.7))
             }
         }
         .font(TronTypography.codeSM)

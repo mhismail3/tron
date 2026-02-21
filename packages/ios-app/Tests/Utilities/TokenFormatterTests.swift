@@ -60,8 +60,16 @@ final class TokenFormatterTests: XCTestCase {
     // MARK: - formatPair() Tests
 
     func test_formatPair_formatsInputOutput() {
-        XCTAssertEqual(TokenFormatter.formatPair(input: 1000, output: 2000), "↓1.0k ↑2.0k")
-        XCTAssertEqual(TokenFormatter.formatPair(input: 500, output: 1500), "↓500 ↑1.5k")
+        XCTAssertEqual(TokenFormatter.formatPair(input: 1000, output: 2000), "↑1.0k ↓2.0k")
+        XCTAssertEqual(TokenFormatter.formatPair(input: 500, output: 1500), "↑500 ↓1.5k")
+    }
+
+    func test_formatPair_zeroInput_zeroOutput() {
+        XCTAssertEqual(TokenFormatter.formatPair(input: 0, output: 0), "↑0 ↓0")
+    }
+
+    func test_formatPair_millionInput() {
+        XCTAssertEqual(TokenFormatter.formatPair(input: 1_500_000, output: 100), "↑1.5M ↓100")
     }
 
     // MARK: - Int Extension Tests
@@ -125,45 +133,38 @@ final class TokenFormatterTests: XCTestCase {
     // MARK: - formatFullSession() Tests (includes cache tokens)
 
     func test_formatFullSession_noCacheTokens_returnsBasePair() {
-        // No cache tokens - just returns the base pair
         let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 0, cacheWrite: 0)
-        XCTAssertEqual(result, "↓500 ↑63")
+        XCTAssertEqual(result, "↑500 ↓63")
     }
 
-    func test_formatFullSession_cacheReadOnly_includesLightningBolt() {
-        // Cache read only - shows ⚡ symbol
+    func test_formatFullSession_cacheReadOnly_noCacheIndicator() {
         let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 20300, cacheWrite: 0)
-        XCTAssertEqual(result, "↓500 ↑63 ⚡20.3k")
+        XCTAssertEqual(result, "↑500 ↓63")
     }
 
-    func test_formatFullSession_cacheWriteOnly_includesPencil() {
-        // Cache write only - shows ✏ symbol
+    func test_formatFullSession_cacheWriteOnly_noCacheIndicator() {
         let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 0, cacheWrite: 8000)
-        XCTAssertEqual(result, "↓500 ↑63 ✏8.0k")
+        XCTAssertEqual(result, "↑500 ↓63")
     }
 
-    func test_formatFullSession_bothCacheReadAndWrite_includesBoth() {
-        // Both cache read and write
+    func test_formatFullSession_bothCacheReadAndWrite_noCacheIndicator() {
         let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: 20000, cacheWrite: 8000)
-        XCTAssertEqual(result, "↓500 ↑63 ⚡20.0k ✏8.0k")
+        XCTAssertEqual(result, "↑500 ↓63")
     }
 
     func test_formatFullSession_largeNumbers_formatsCorrectly() {
-        // Large numbers format correctly
         let result = TokenFormatter.formatFullSession(input: 100000, output: 25000, cacheRead: 1500000, cacheWrite: 500000)
-        XCTAssertEqual(result, "↓100.0k ↑25.0k ⚡1.5M ✏500.0k")
+        XCTAssertEqual(result, "↑100.0k ↓25.0k")
     }
 
     func test_formatFullSession_nilValues_treatedAsZero() {
-        // nil values should be treated as 0 (no cache display)
         let result = TokenFormatter.formatFullSession(input: 500, output: 63, cacheRead: nil, cacheWrite: nil)
-        XCTAssertEqual(result, "↓500 ↑63")
+        XCTAssertEqual(result, "↑500 ↓63")
     }
 
     // MARK: - SessionInfo.formattedTokens Tests
 
-    func test_sessionInfo_formattedTokens_includesCacheWhenPresent() {
-        // Create SessionInfo with cache tokens via JSON decoding
+    func test_sessionInfo_formattedTokens_combinesInputAndCacheRead() {
         let json = """
         {
             "sessionId": "test_session",
@@ -180,7 +181,8 @@ final class TokenFormatterTests: XCTestCase {
         """.data(using: .utf8)!
 
         let session = try! JSONDecoder().decode(SessionInfo.self, from: json)
-        XCTAssertEqual(session.formattedTokens, "↓502 ↑63 ⚡20.3k")
+        // totalInputTokens = 502 + 20300 = 20802
+        XCTAssertEqual(session.formattedTokens, "↑20.8k ↓63")
     }
 
     func test_sessionInfo_formattedTokens_noCacheWhenZero() {
@@ -200,10 +202,10 @@ final class TokenFormatterTests: XCTestCase {
         """.data(using: .utf8)!
 
         let session = try! JSONDecoder().decode(SessionInfo.self, from: json)
-        XCTAssertEqual(session.formattedTokens, "↓502 ↑63")
+        XCTAssertEqual(session.formattedTokens, "↑502 ↓63")
     }
 
-    func test_sessionInfo_formattedTokens_showsBothCacheTypes() {
+    func test_sessionInfo_formattedTokens_combinesInputAndBothCacheTypes() {
         let json = """
         {
             "sessionId": "test_session",
@@ -220,6 +222,7 @@ final class TokenFormatterTests: XCTestCase {
         """.data(using: .utf8)!
 
         let session = try! JSONDecoder().decode(SessionInfo.self, from: json)
-        XCTAssertEqual(session.formattedTokens, "↓502 ↑63 ⚡18.0k ✏2.0k")
+        // totalInputTokens = 502 + 18000 = 18502
+        XCTAssertEqual(session.formattedTokens, "↑18.5k ↓63")
     }
 }

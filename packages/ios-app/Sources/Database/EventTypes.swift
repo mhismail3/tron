@@ -537,16 +537,13 @@ struct CachedSession: Identifiable, Codable {
     /// Server origin (host:port) this session was synced from
     var serverOrigin: String?
 
-    var totalTokens: Int { inputTokens + outputTokens }
+    /// Total input tokens sent to model (uncached + cache read)
+    var totalInputTokens: Int { inputTokens + cacheReadTokens }
 
-    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ⚡20.3k ✏8.0k")
+    var totalTokens: Int { totalInputTokens + outputTokens }
+
     var formattedTokens: String {
-        TokenFormatter.formatFullSession(
-            input: inputTokens,
-            output: outputTokens,
-            cacheRead: cacheReadTokens > 0 ? cacheReadTokens : nil,
-            cacheWrite: cacheCreationTokens > 0 ? cacheCreationTokens : nil
-        )
+        TokenFormatter.formatPair(input: totalInputTokens, output: outputTokens)
     }
 
     /// Formatted cache tokens - separate read/creation for visibility

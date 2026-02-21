@@ -284,41 +284,19 @@ struct CachedSessionSidebarRow: View {
     @ViewBuilder
     private var sessionTokenStats: some View {
         HStack(spacing: 4) {
-            // Input tokens
             HStack(spacing: 2) {
-                Image(systemName: "arrow.down")
+                Image(systemName: "arrow.up")
                     .font(TronTypography.labelSM)
-                Text(session.inputTokens.formattedTokenCount)
+                Text(session.totalInputTokens.formattedTokenCount)
             }
             .foregroundStyle(.tronTextDisabled)
 
-            // Output tokens
             HStack(spacing: 2) {
-                Image(systemName: "arrow.up")
+                Image(systemName: "arrow.down")
                     .font(TronTypography.labelSM)
                 Text(session.outputTokens.formattedTokenCount)
             }
             .foregroundStyle(.tronTextDisabled)
-
-            // Cache read
-            if session.cacheReadTokens > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "bolt.fill")
-                        .font(TronTypography.labelSM)
-                    Text(session.cacheReadTokens.formattedTokenCount)
-                }
-                .foregroundStyle(.tronAmberLight)
-            }
-
-            // Cache write
-            if session.cacheCreationTokens > 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: "pencil")
-                        .font(TronTypography.labelSM)
-                    Text(session.cacheCreationTokens.formattedTokenCount)
-                }
-                .foregroundStyle(.tronAmberLight.opacity(0.7))
-            }
         }
         .font(TronTypography.pill)
     }

@@ -32,38 +32,18 @@ enum TokenFormatter {
         }
     }
 
-    /// Format input/output token pair with arrows: "↓1.2k ↑3.4k"
-    /// - Parameters:
-    ///   - input: Input token count
-    ///   - output: Output token count
-    /// - Returns: Formatted string with arrows
+    /// Format input/output token pair with arrows: "↑1.2k ↓3.4k"
+    /// ↑ = sent to model (input), ↓ = received from model (output)
     static func formatPair(input: Int, output: Int) -> String {
         let inStr = format(input, style: .compact)
         let outStr = format(output, style: .compact)
-        return "↓\(inStr) ↑\(outStr)"
+        return "↑\(inStr) ↓\(outStr)"
     }
 
-    /// Format full session tokens including cache: "↓1.2k ↑3.4k ⚡20.3k ✏8.0k"
-    /// - Parameters:
-    ///   - input: Input token count
-    ///   - output: Output token count
-    ///   - cacheRead: Cache read tokens (nil or 0 to hide)
-    ///   - cacheWrite: Cache write/creation tokens (nil or 0 to hide)
-    /// - Returns: Formatted string with arrows and optional cache indicators
+    /// Format session tokens as simplified input/output pair.
+    /// Cache breakdown is available in the Analytics section.
     static func formatFullSession(input: Int, output: Int, cacheRead: Int?, cacheWrite: Int?) -> String {
-        var result = formatPair(input: input, output: output)
-
-        // Add cache read if non-zero (lightning bolt = read from cache)
-        if let read = cacheRead, read > 0 {
-            result += " ⚡\(format(read, style: .compact))"
-        }
-
-        // Add cache write if non-zero (pencil = write to cache)
-        if let write = cacheWrite, write > 0 {
-            result += " ✏\(format(write, style: .compact))"
-        }
-
-        return result
+        formatPair(input: input, output: output)
     }
 
     // MARK: - Private

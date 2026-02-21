@@ -77,15 +77,11 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
         return createdAt
     }
 
-    /// Formatted token counts including cache (e.g., "↓1.2k ↑3.4k ⚡20.3k ✏8.0k")
+    /// Total input tokens sent to model (uncached + cache read)
+    var totalInputTokens: Int { (inputTokens ?? 0) + (cacheReadTokens ?? 0) }
+
     var formattedTokens: String {
-        let result = TokenFormatter.formatFullSession(
-            input: inputTokens ?? 0,
-            output: outputTokens ?? 0,
-            cacheRead: cacheReadTokens,
-            cacheWrite: cacheCreationTokens
-        )
-        // DEBUG: Log token values for session cards
+        let result = TokenFormatter.formatPair(input: totalInputTokens, output: outputTokens ?? 0)
         logger.debug("[SESSION-TOKENS] \(sessionId.prefix(12)): in=\(inputTokens ?? 0) out=\(outputTokens ?? 0) cacheRead=\(cacheReadTokens ?? 0) cacheWrite=\(cacheCreationTokens ?? 0) -> \(result)", category: .session)
         return result
     }
