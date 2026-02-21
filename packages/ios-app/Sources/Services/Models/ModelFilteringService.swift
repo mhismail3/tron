@@ -111,13 +111,13 @@ enum ModelFilteringService {
         }
 
         let providers: [ProviderDef] = [
-            ProviderDef(id: "anthropic", displayName: "Anthropic", color: .tronAmber, icon: "IconAnthropic",
+            ProviderDef(id: "anthropic", displayName: "Anthropic", color: .tronCoral, icon: "IconAnthropic",
                         filter: { $0.isAnthropic }),
             ProviderDef(id: "openai-codex", displayName: "OpenAI", color: .tronSlate, icon: "IconOpenAI",
                         filter: { $0.isCodex }),
             ProviderDef(id: "google", displayName: "Google", color: .tronCyan, icon: "IconGoogle",
                         filter: { $0.isGemini }),
-            ProviderDef(id: "minimax", displayName: "MiniMax", color: .tronIndigo, icon: "IconMiniMax",
+            ProviderDef(id: "minimax", displayName: "MiniMax", color: .tronRose, icon: "IconMiniMax",
                         filter: { $0.isMiniMax }),
         ]
 

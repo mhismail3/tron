@@ -55,6 +55,8 @@ extension Color {
     static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
+    static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
+    static let tronRose = Color(lightHex: "#D4245F", darkHex: "#E62B6C")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronPinkLight = Color(lightHex: "#EC4899", darkHex: "#F472B6")
 
@@ -526,6 +528,8 @@ extension ShapeStyle where Self == Color {
     static var tronCyan: Color { .tronCyan }
     static var tronIndigo: Color { .tronIndigo }
     static var tronTeal: Color { .tronTeal }
+    static var tronCoral: Color { .tronCoral }
+    static var tronRose: Color { .tronRose }
     static var tronPink: Color { .tronPink }
     static var tronPinkLight: Color { .tronPinkLight }
 
