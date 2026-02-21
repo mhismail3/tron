@@ -7,7 +7,7 @@ final class SessionStateChecker {
 
     // MARK: - Dependencies
 
-    private let rpcClient: RPCClient
+    private var rpcClient: RPCClient
 
     // MARK: - Initialization
 
@@ -15,10 +15,9 @@ final class SessionStateChecker {
         self.rpcClient = rpcClient
     }
 
-    /// Update the RPC client reference
+    /// Update the RPC client reference when server settings change.
     func updateRPCClient(_ client: RPCClient) {
-        // Note: This is a workaround since rpcClient is let
-        // In practice, EventStoreManager handles client updates
+        rpcClient = client
     }
 
     // MARK: - State Checking

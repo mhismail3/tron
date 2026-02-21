@@ -97,6 +97,11 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
                 // Server changed - clear workspace deleted states since they may be invalid
                 workspaceDeletedForSession = [:]
+                // Refresh sessions once the new connection establishes.
+                // refreshSessionList() is a no-op if not yet connected.
+                Task {
+                    await eventStoreManager.refreshSessionList()
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .navigationModeAction)) { notification in
                 // Handle navigation mode change from ChatView toolbar (iPad)

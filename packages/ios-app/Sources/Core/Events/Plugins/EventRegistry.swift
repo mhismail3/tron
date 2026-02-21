@@ -97,6 +97,7 @@ final class EventRegistry: @unchecked Sendable {
         register(SessionUpdatedPlugin.self)
         register(SessionArchivedPlugin.self)
         register(SessionUnarchivedPlugin.self)
+        register(SessionDeletedPlugin.self)
 
         // Subagent events
         register(SubagentSpawnedPlugin.self)

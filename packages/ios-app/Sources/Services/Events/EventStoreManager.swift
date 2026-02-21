@@ -107,6 +107,8 @@ final class EventStoreManager {
     /// Update the RPC client (e.g., when server settings change)
     func updateRPCClient(_ client: RPCClient) {
         rpcClient = client
+        sessionStateChecker.updateRPCClient(client)
+        sessionSynchronizer.updateRPCClient(client)
         setupGlobalEventHandlers()
         logger.info("RPC client updated to \(client.serverOrigin)", category: .session)
     }
@@ -179,6 +181,11 @@ final class EventStoreManager {
         case SessionUnarchivedPlugin.eventType:
             if let result = event.getResult() as? SessionUnarchivedPlugin.Result {
                 handleSessionUnarchived(result)
+            }
+
+        case SessionDeletedPlugin.eventType:
+            if let result = event.getResult() as? SessionDeletedPlugin.Result {
+                handleSessionDeleted(result)
             }
 
         default:
@@ -279,6 +286,16 @@ final class EventStoreManager {
 
         // Refresh from server to get the restored session
         Task { await refreshSessionList() }
+    }
+
+    /// Handle session.deleted: remove session from dashboard and local DB
+    private func handleSessionDeleted(_ result: SessionDeletedPlugin.Result) {
+        let sessionId = result.sessionId
+        logger.info("Global: session.deleted for \(sessionId)", category: .session)
+
+        sessions.removeAll { $0.id == sessionId }
+        try? eventDB.events.deleteBySession(sessionId)
+        try? eventDB.sessions.delete(sessionId)
     }
 
     // MARK: - State Setters (for extensions)

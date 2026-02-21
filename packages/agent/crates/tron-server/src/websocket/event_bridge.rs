@@ -114,9 +114,27 @@ impl EventBridge {
         let event_type = event.event_type();
         tracing::debug!(event_type, "bridging event to client");
         let rpc_event = tron_event_to_rpc(event);
-        let session_id = event.session_id();
 
-        if session_id.is_empty() {
+        // Session lifecycle events affect the session list, not just one session's
+        // content. Broadcasting to all clients ensures dashboards stay in sync.
+        // Processing-state events (turn_start, agent_end) enable instant
+        // "Thinking..." indicators on dashboards without polling delay.
+        let is_global = matches!(
+            event,
+            TronEvent::SessionCreated { .. }
+                | TronEvent::SessionUpdated { .. }
+                | TronEvent::SessionArchived { .. }
+                | TronEvent::SessionUnarchived { .. }
+                | TronEvent::SessionDeleted { .. }
+                | TronEvent::SessionForked { .. }
+                | TronEvent::TurnStart { .. }
+                | TronEvent::AgentEnd { .. }
+                | TronEvent::AgentReady { .. }
+                | TronEvent::Error { .. }
+        );
+
+        let session_id = event.session_id();
+        if is_global || session_id.is_empty() {
             self.broadcast.broadcast_all(&rpc_event).await;
         } else {
             self.broadcast
@@ -890,31 +908,149 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let bm = Arc::new(BroadcastManager::new());
 
-        // Add a connection bound to session "s1"
-        let (conn_tx, mut conn_rx) = tokio::sync::mpsc::channel(32);
-        let conn = super::super::connection::ClientConnection::new("c1".into(), conn_tx);
-        conn.bind_session("s1");
-        bm.add(Arc::new(conn)).await;
+        // Two clients: C1 bound to "s1", C2 unbound (dashboard)
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
+        conn1.bind_session("s1");
+        bm.add(Arc::new(conn1)).await;
+
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
+        bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
         let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
-
-        // Spawn bridge
         let handle = tokio::spawn(bridge.run());
 
-        // Send an event
+        // AgentStart is NOT in the global list — should only reach C1 (bound to "s1")
         let _ = tx.send(agent_start_event("s1")).unwrap();
-
-        // Give bridge time to process
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        // Check that the connection received the event
-        let msg = conn_rx.try_recv();
+        let msg = conn1_rx.try_recv();
         assert!(msg.is_ok());
         let parsed: serde_json::Value = serde_json::from_str(&msg.unwrap()).unwrap();
         assert_eq!(parsed["type"], "agent.start");
 
-        // Drop sender to close bridge
+        // C2 should NOT receive AgentStart (session-scoped)
+        assert!(conn2_rx.try_recv().is_err());
+
+        drop(tx);
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn bridge_broadcasts_session_lifecycle_to_all() {
+        let (tx, _) = broadcast::channel(16);
+        let bm = Arc::new(BroadcastManager::new());
+
+        // C1 bound to "s1", C2 unbound (dashboard)
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
+        conn1.bind_session("s1");
+        bm.add(Arc::new(conn1)).await;
+
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
+        bm.add(Arc::new(conn2)).await;
+
+        let rx = tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let handle = tokio::spawn(bridge.run());
+
+        // SessionCreated for "s2" — both clients should receive it
+        let _ = tx
+            .send(TronEvent::SessionCreated {
+                base: BaseEvent::now("s2"),
+                model: "claude-opus-4-6".into(),
+                working_directory: "/tmp".into(),
+            })
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let msg1 = conn1_rx.try_recv();
+        assert!(msg1.is_ok(), "C1 should receive session.created");
+        let parsed1: serde_json::Value = serde_json::from_str(&msg1.unwrap()).unwrap();
+        assert_eq!(parsed1["type"], "session.created");
+
+        let msg2 = conn2_rx.try_recv();
+        assert!(msg2.is_ok(), "C2 should receive session.created");
+        let parsed2: serde_json::Value = serde_json::from_str(&msg2.unwrap()).unwrap();
+        assert_eq!(parsed2["type"], "session.created");
+
+        drop(tx);
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn bridge_broadcasts_turn_start_to_all() {
+        let (tx, _) = broadcast::channel(16);
+        let bm = Arc::new(BroadcastManager::new());
+
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
+        conn1.bind_session("s1");
+        bm.add(Arc::new(conn1)).await;
+
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
+        bm.add(Arc::new(conn2)).await;
+
+        let rx = tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let handle = tokio::spawn(bridge.run());
+
+        // TurnStart for "s1" — both clients should receive it (global)
+        let _ = tx
+            .send(TronEvent::TurnStart {
+                base: BaseEvent::now("s1"),
+                turn: 1,
+            })
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(
+            conn1_rx.try_recv().is_ok(),
+            "C1 should receive turn_start"
+        );
+        assert!(
+            conn2_rx.try_recv().is_ok(),
+            "C2 should receive turn_start"
+        );
+
+        drop(tx);
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn bridge_keeps_content_events_session_scoped() {
+        let (tx, _) = broadcast::channel(16);
+        let bm = Arc::new(BroadcastManager::new());
+
+        let (conn1_tx, mut conn1_rx) = tokio::sync::mpsc::channel(32);
+        let conn1 = super::super::connection::ClientConnection::new("c1".into(), conn1_tx);
+        conn1.bind_session("s1");
+        bm.add(Arc::new(conn1)).await;
+
+        let (conn2_tx, mut conn2_rx) = tokio::sync::mpsc::channel(32);
+        let conn2 = super::super::connection::ClientConnection::new("c2".into(), conn2_tx);
+        bm.add(Arc::new(conn2)).await;
+
+        let rx = tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let handle = tokio::spawn(bridge.run());
+
+        // MessageUpdate for "s1" — only C1 should receive it
+        let _ = tx
+            .send(TronEvent::MessageUpdate {
+                base: BaseEvent::now("s1"),
+                content: "hello".into(),
+            })
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(conn1_rx.try_recv().is_ok(), "C1 should receive message_update");
+        assert!(conn2_rx.try_recv().is_err(), "C2 should NOT receive message_update");
+
         drop(tx);
         let _ = handle.await;
     }

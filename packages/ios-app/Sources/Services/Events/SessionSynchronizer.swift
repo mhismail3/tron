@@ -7,7 +7,7 @@ final class SessionSynchronizer {
 
     // MARK: - Dependencies
 
-    private let rpcClient: RPCClient
+    private var rpcClient: RPCClient
     private let eventDB: EventDatabase
     private let cache: TurnContentCache
 
@@ -24,6 +24,11 @@ final class SessionSynchronizer {
         self.rpcClient = rpcClient
         self.eventDB = eventDB
         self.cache = cache
+    }
+
+    /// Update the RPC client reference when server settings change.
+    func updateRPCClient(_ client: RPCClient) {
+        rpcClient = client
     }
 
     // MARK: - Sync Operations
