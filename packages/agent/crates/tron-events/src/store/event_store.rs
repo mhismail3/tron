@@ -375,16 +375,24 @@ impl EventStore {
             counters.turn_count = Some(1);
         }
 
-        // Token usage from payload
-        if let Some(tu) = opts.payload.get("tokenUsage") {
-            counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
-            counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
-            counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
-            counters.cache_creation_tokens = tu.get("cacheCreationTokens").and_then(Value::as_i64);
+        // Token usage: only count from stream.turn_end to avoid double-counting
+        // (message.assistant carries identical tokenUsage)
+        if opts.event_type == EventType::StreamTurnEnd {
+            if let Some(tu) = opts.payload.get("tokenUsage") {
+                counters.input_tokens = tu.get("inputTokens").and_then(Value::as_i64);
+                counters.output_tokens = tu.get("outputTokens").and_then(Value::as_i64);
+                counters.cache_read_tokens = tu.get("cacheReadTokens").and_then(Value::as_i64);
+                counters.cache_creation_tokens =
+                    tu.get("cacheCreationTokens").and_then(Value::as_i64);
+            }
+            if let Some(cost) = opts.payload.get("cost").and_then(Value::as_f64) {
+                counters.cost = Some(cost);
+            }
+        }
 
-            // Last turn context window: prefer tokenRecord.computed.contextWindowTokens
-            // (includes cache reads for Anthropic), fall back to raw inputTokens
-            if opts.event_type == EventType::MessageAssistant {
+        // Last turn context window (SET, not increment): set on message.assistant
+        if opts.event_type == EventType::MessageAssistant {
+            if let Some(tu) = opts.payload.get("tokenUsage") {
                 counters.last_turn_input_tokens = opts
                     .payload
                     .get("tokenRecord")
@@ -393,11 +401,6 @@ impl EventStore {
                     .and_then(Value::as_i64)
                     .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
             }
-        }
-
-        // Cost from payload
-        if let Some(cost) = opts.payload.get("cost").and_then(Value::as_f64) {
-            counters.cost = Some(cost);
         }
 
         let _ = SessionRepo::increment_counters(&tx, opts.session_id, &counters)?;
@@ -1258,8 +1261,24 @@ mod tests {
             })
             .unwrap();
 
+        // Token counters only count from stream.turn_end, not message.assistant
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "tokenUsage": {
+                        "inputTokens": 100,
+                        "outputTokens": 50,
+                        "cacheReadTokens": 10,
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
         let session = store.get_session(&cr.session.id).unwrap().unwrap();
-        assert_eq!(session.event_count, 3); // root + 2 appended
+        assert_eq!(session.event_count, 4); // root + user + assistant + turn_end
         assert_eq!(session.message_count, 2);
         assert_eq!(session.total_input_tokens, 100);
         assert_eq!(session.total_output_tokens, 50);
@@ -1355,6 +1374,328 @@ mod tests {
 
         let session = store.get_session(&cr.session.id).unwrap().unwrap();
         assert_eq!(session.last_turn_input_tokens, 0); // unchanged from default
+    }
+
+    // ── Token double-counting prevention ────────────────────────────
+
+    #[test]
+    fn token_counters_only_from_stream_turn_end() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        // message.assistant with tokenUsage should NOT increment token counters
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Response",
+                    "tokenUsage": {
+                        "inputTokens": 100,
+                        "outputTokens": 50,
+                        "cacheReadTokens": 10,
+                        "cacheCreationTokens": 5,
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.total_input_tokens, 0, "message.assistant should not count tokens");
+        assert_eq!(session.total_output_tokens, 0);
+        assert_eq!(session.total_cache_read_tokens, 0);
+        assert_eq!(session.total_cache_creation_tokens, 0);
+        // But message_count and turn_count should still increment
+        assert_eq!(session.message_count, 1);
+        assert_eq!(session.turn_count, 1);
+
+        // stream.turn_end with same tokenUsage SHOULD increment
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "tokenUsage": {
+                        "inputTokens": 100,
+                        "outputTokens": 50,
+                        "cacheReadTokens": 10,
+                        "cacheCreationTokens": 5,
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.total_input_tokens, 100);
+        assert_eq!(session.total_output_tokens, 50);
+        assert_eq!(session.total_cache_read_tokens, 10);
+        assert_eq!(session.total_cache_creation_tokens, 5);
+        // turn_end should not affect message/turn counts
+        assert_eq!(session.message_count, 1);
+        assert_eq!(session.turn_count, 1);
+    }
+
+    #[test]
+    fn cost_only_from_stream_turn_end() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        // message.assistant with cost should NOT increment cost
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Response",
+                    "cost": 0.005,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert!(
+            session.total_cost < f64::EPSILON,
+            "message.assistant should not count cost"
+        );
+
+        // stream.turn_end with cost SHOULD increment
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "cost": 0.005,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert!((session.total_cost - 0.005).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn no_double_counting_with_both_events() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        // Simulate a real turn: message.assistant then stream.turn_end with identical tokens
+        let token_usage = serde_json::json!({
+            "inputTokens": 500,
+            "outputTokens": 100,
+            "cacheReadTokens": 12000,
+            "cacheCreationTokens": 200,
+        });
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Response",
+                    "tokenUsage": token_usage,
+                    "cost": 0.01,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "tokenUsage": token_usage,
+                    "cost": 0.01,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        // Tokens should be counted exactly once (from stream.turn_end only)
+        assert_eq!(session.total_input_tokens, 500);
+        assert_eq!(session.total_output_tokens, 100);
+        assert_eq!(session.total_cache_read_tokens, 12000);
+        assert_eq!(session.total_cache_creation_tokens, 200);
+        assert!((session.total_cost - 0.01).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn stream_turn_end_without_token_usage_no_counter_change() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        // stream.turn_end with no tokenUsage (e.g. tool-only turn)
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.total_input_tokens, 0);
+        assert_eq!(session.total_output_tokens, 0);
+        assert_eq!(session.total_cache_read_tokens, 0);
+        assert_eq!(session.total_cache_creation_tokens, 0);
+        assert!(session.total_cost < f64::EPSILON);
+    }
+
+    #[test]
+    fn events_without_token_usage_dont_affect_counters() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::ToolResult,
+                payload: serde_json::json!({"toolCallId": "t1", "content": "ok"}),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.total_input_tokens, 0);
+        assert_eq!(session.total_output_tokens, 0);
+    }
+
+    #[test]
+    fn last_turn_input_tokens_still_set_on_message_assistant() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        // Even though token counters don't increment from message.assistant,
+        // last_turn_input_tokens (SET semantics) should still be set
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Response",
+                    "tokenUsage": {"inputTokens": 500, "outputTokens": 100},
+                    "tokenRecord": {
+                        "computed": {"contextWindowTokens": 12000}
+                    }
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.last_turn_input_tokens, 12000);
+        // But token totals should be zero (not counted from message.assistant)
+        assert_eq!(session.total_input_tokens, 0);
+        assert_eq!(session.total_output_tokens, 0);
+    }
+
+    #[test]
+    fn multi_turn_no_double_counting() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        // Turn 1
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Hi",
+                    "tokenUsage": {"inputTokens": 100, "outputTokens": 20},
+                    "cost": 0.001,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "tokenUsage": {"inputTokens": 100, "outputTokens": 20},
+                    "cost": 0.001,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Turn 2
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"content": "More"}),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": "Sure",
+                    "tokenUsage": {"inputTokens": 200, "outputTokens": 30},
+                    "cost": 0.002,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "tokenUsage": {"inputTokens": 200, "outputTokens": 30},
+                    "cost": 0.002,
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        // Should be sum of turn_end events only, not doubled
+        assert_eq!(session.total_input_tokens, 300);
+        assert_eq!(session.total_output_tokens, 50);
+        assert!((session.total_cost - 0.003).abs() < f64::EPSILON);
+        assert_eq!(session.turn_count, 2);
+        assert_eq!(session.message_count, 4); // 2 user + 2 assistant
     }
 
     #[test]
@@ -1791,7 +2132,7 @@ mod tests {
             .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
             .unwrap();
 
-        // Turn 1: user → assistant(tool_use) → tool.result → assistant(end_turn)
+        // Turn 1: user → assistant(tool_use) → turn_end → tool.result → assistant(end_turn) → turn_end
         store
             .append(&AppendOptions {
                 session_id: &cr.session.id,
@@ -1808,6 +2149,17 @@ mod tests {
                 payload: serde_json::json!({
                     "content": [{"type": "tool_use", "id": "tool_1", "name": "Bash", "arguments": {"command": "ls"}}],
                     "turn": 1,
+                    "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
                     "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
                 }),
                 parent_id: None,
@@ -1841,8 +2193,19 @@ mod tests {
             })
             .unwrap();
 
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
+                    "tokenUsage": {"inputTokens": 300, "outputTokens": 20}
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
         let session = store.get_session(&cr.session.id).unwrap().unwrap();
-        assert_eq!(session.event_count, 5); // root + 4
+        assert_eq!(session.event_count, 7); // root + 6
         assert_eq!(session.message_count, 3); // 1 user + 2 assistant
         assert_eq!(session.total_input_tokens, 500);
         assert_eq!(session.total_output_tokens, 50);
@@ -1850,8 +2213,8 @@ mod tests {
         let events = store
             .get_events_by_session(&cr.session.id, &ListEventsOptions::default())
             .unwrap();
-        assert_eq!(events.len(), 5);
-        for i in 0..5 {
+        assert_eq!(events.len(), 7);
+        for i in 0..7 {
             assert_eq!(events[i].sequence, i as i64);
         }
     }
@@ -2194,6 +2557,16 @@ mod tests {
                 payload: serde_json::json!({
                     "content": [{"type": "text", "text": "Hi"}],
                     "turn": 1,
+                    "tokenUsage": {"inputTokens": 100, "outputTokens": 50}
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+        store
+            .append(&AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::StreamTurnEnd,
+                payload: serde_json::json!({
                     "tokenUsage": {"inputTokens": 100, "outputTokens": 50}
                 }),
                 parent_id: None,
