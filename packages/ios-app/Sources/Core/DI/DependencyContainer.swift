@@ -169,8 +169,12 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     // MARK: - Server Settings Management
 
     func updateServerSettings(host: String, port: String, useTLS: Bool) {
-        // Skip if nothing changed
-        guard host != _serverHost || port != _serverPort || useTLS != _useTLS else {
+        // Compare against the current RPCClient's actual URL, not @AppStorage.
+        // SettingsView shares the same @AppStorage keys and updates them before
+        // calling this method, so _serverPort already has the new value by the
+        // time we check. Using the running client's origin avoids this race.
+        let newOrigin = "\(host):\(port)"
+        guard newOrigin != rpcClient.serverOrigin || useTLS != _useTLS else {
             TronLogger.shared.debug("Server settings unchanged, skipping update", category: .general)
             return
         }
