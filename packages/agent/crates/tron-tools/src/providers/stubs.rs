@@ -136,6 +136,7 @@ impl EventStoreQuery for StubEventStoreQuery {
     async fn recall_memory(
         &self,
         _query: &str,
+        _workspace_id: Option<&str>,
         _limit: u32,
     ) -> Result<Vec<MemoryEntry>, ToolError> {
         Err(not_available("Memory recall"))
@@ -283,7 +284,7 @@ mod tests {
     #[tokio::test]
     async fn stub_event_store_query_returns_error() {
         let store = StubEventStoreQuery;
-        let err = store.recall_memory("test query", 10).await;
+        let err = store.recall_memory("test query", None, 10).await;
         assert!(err.is_err());
     }
 

@@ -53,6 +53,7 @@ pub async fn execute_tool(
     cancel: &CancellationToken,
     subagent_depth: u32,
     subagent_max_depth: u32,
+    workspace_id: Option<&str>,
 ) -> ToolExecutionResult {
     let start = Instant::now();
     let tool_call_id = tool_call.id.clone();
@@ -182,6 +183,7 @@ pub async fn execute_tool(
         cancellation: cancel.clone(),
         subagent_depth,
         subagent_max_depth,
+        workspace_id: workspace_id.map(String::from),
     };
 
     let tool_result = if cancel.is_cancelled() {
@@ -390,7 +392,7 @@ mod tests {
         let tc = make_tool_call("echo", args);
 
         let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
 
@@ -410,7 +412,7 @@ mod tests {
 
         let tc = make_tool_call("nonexistent", Map::new());
         let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
 
@@ -471,6 +473,7 @@ mod tests {
             &cancel,
             0,
             0,
+            None,
         )
         .await;
 
@@ -486,7 +489,7 @@ mod tests {
 
         let tc = make_tool_call("ask_user", Map::new());
         let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
 
@@ -504,7 +507,7 @@ mod tests {
 
         let tc = make_tool_call("echo", Map::new());
         let result = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
 
@@ -523,7 +526,7 @@ mod tests {
         let tc = make_tool_call("echo", args);
 
         let _ = execute_tool(
-            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
 
@@ -590,6 +593,7 @@ mod tests {
             &cancel,
             0,
             0,
+            None,
         )
         .await;
 
@@ -659,6 +663,7 @@ mod tests {
             &cancel,
             0,
             0,
+            None,
         )
         .await;
 
@@ -743,6 +748,7 @@ mod tests {
             &cancel,
             0,
             0,
+            None,
         )
         .await;
 
@@ -774,11 +780,11 @@ mod tests {
         let tc2 = make_tool_call("ask_user", Map::new());
 
         let r1 = execute_tool(
-            &tc1, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc1, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
         let r2 = execute_tool(
-            &tc2, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0,
+            &tc2, &registry, &None, &None, "s1", "/tmp", &emitter, &cancel, 0, 0, None,
         )
         .await;
 

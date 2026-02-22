@@ -70,6 +70,8 @@ pub struct TurnParams<'a> {
     pub retry_config: Option<&'a tron_core::retry::RetryConfig>,
     /// Optional provider health tracker for circuit-breaking.
     pub health_tracker: Option<&'a Arc<ProviderHealthTracker>>,
+    /// Workspace ID for scoping tool context (e.g. memory recall).
+    pub workspace_id: Option<&'a str>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -94,6 +96,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         subagent_max_depth,
         retry_config,
         health_tracker,
+        workspace_id,
     } = params;
     let turn_start = Instant::now();
 
@@ -519,6 +522,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                             cancel,
                             subagent_depth,
                             subagent_max_depth,
+                            workspace_id,
                         )
                         .await;
                         (idx, result)

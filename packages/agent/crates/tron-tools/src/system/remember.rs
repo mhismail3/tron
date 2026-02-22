@@ -143,7 +143,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.",
     async fn execute(
         &self,
         params: Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
         let action = match validate_required_string(&params, "action", "query action") {
             Ok(a) => a,
@@ -166,7 +166,7 @@ Use read_blob to retrieve full content when tool results reference a blob_id.",
         let content = match action.as_str() {
             "recall" => {
                 let q = query.unwrap_or_default();
-                let entries = self.store.recall_memory(&q, limit).await?;
+                let entries = self.store.recall_memory(&q, ctx.workspace_id.as_deref(), limit).await?;
                 format_entries(&entries)
             }
             "search" | "memory" => {
@@ -266,6 +266,7 @@ mod tests {
         async fn recall_memory(
             &self,
             _query: &str,
+            _workspace_id: Option<&str>,
             _limit: u32,
         ) -> Result<Vec<MemoryEntry>, ToolError> {
             Ok(vec![MemoryEntry {

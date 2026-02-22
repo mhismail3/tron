@@ -198,6 +198,7 @@ mod tests {
             cancellation: tokio_util::sync::CancellationToken::new(),
             subagent_depth: 0,
             subagent_max_depth: 0,
+            workspace_id: None,
         }
     }
 

@@ -1,8 +1,8 @@
 //! ONNX Runtime embedding service (feature-gated behind `ort`).
 //!
-//! Downloads Qwen3-Embedding-0.6B-ONNX via `hf-hub`, tokenizes with
-//! `tokenizers`, runs inference via `ort`, then applies last-token pooling
-//! and Matryoshka truncation (1024d → 512d) with L2 normalization.
+//! Downloads EmbeddingGemma-300M-ONNX via `hf-hub`, tokenizes with
+//! `tokenizers`, runs inference via `ort`, then applies mean pooling
+//! and Matryoshka truncation (768d → 512d) with L2 normalization.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +21,7 @@ struct InferenceState {
     tokenizer: tokenizers::Tokenizer,
 }
 
-/// ONNX-based embedding service using Qwen3-Embedding-0.6B.
+/// ONNX-based embedding service using EmbeddingGemma-300M.
 pub struct OnnxEmbeddingService {
     config: EmbeddingConfig,
     state: parking_lot::Mutex<Option<InferenceState>>,
@@ -86,6 +86,10 @@ fn initialize_inner(
 
     let model_filename = format!("onnx/model_{}.onnx", config.dtype);
     let model_path = repo.get(&model_filename)?;
+    // EmbeddingGemma uses split ONNX files (model.onnx + model.onnx_data).
+    // Download the external data file to the same directory so ONNX Runtime finds it.
+    let model_data_filename = format!("onnx/model_{}.onnx_data", config.dtype);
+    let _data_path = repo.get(&model_data_filename).ok();
     let tokenizer_path = repo.get("tokenizer.json")?;
 
     info!(model = %model_path.display(), tokenizer = %tokenizer_path.display(), "model files ready");
@@ -167,13 +171,19 @@ fn run_inference_inner(
     let input_ids_tensor = ort::value::Tensor::from_array((shape.clone(), input_ids))?;
     let attention_mask_tensor =
         ort::value::Tensor::from_array((shape.clone(), attention_mask.clone()))?;
-    let position_ids_tensor = ort::value::Tensor::from_array((shape, position_ids))?;
 
-    let outputs = session.run(ort::inputs![
-        input_ids_tensor,
-        attention_mask_tensor,
-        position_ids_tensor
-    ])?;
+    // Some ONNX models accept only input_ids + attention_mask (2 inputs),
+    // others also need position_ids (3 inputs). Check the model's actual inputs.
+    let outputs = if session.inputs().len() >= 3 {
+        let position_ids_tensor = ort::value::Tensor::from_array((shape, position_ids))?;
+        session.run(ort::inputs![
+            input_ids_tensor,
+            attention_mask_tensor,
+            position_ids_tensor
+        ])?
+    } else {
+        session.run(ort::inputs![input_ids_tensor, attention_mask_tensor])?
+    };
 
     let output_value = &outputs[0];
     let (output_shape, output_data) = output_value.try_extract_tensor::<f32>()?;
@@ -186,11 +196,11 @@ fn run_inference_inner(
     let seq_len_out = dims[1];
     let hidden_dim = dims[2];
 
+    // Mean pooling: sum(token_embeddings * attention_mask) / sum(attention_mask)
     let mut results = Vec::with_capacity(batch_size);
     for i in 0..batch_size {
-        let last_idx = last_non_padding_index(&attention_mask, i, max_len);
-        let base = i * seq_len_out * hidden_dim + last_idx * hidden_dim;
-        let embedding: Vec<f32> = output_data[base..base + hidden_dim].to_vec();
+        let embedding =
+            mean_pool(&output_data, &attention_mask, i, max_len, seq_len_out, hidden_dim);
         let truncated = matryoshka_truncate(&embedding, config.dimensions);
         results.push(truncated);
     }
@@ -198,16 +208,41 @@ fn run_inference_inner(
     Ok(results)
 }
 
-/// Find the index of the last non-padding token for batch item `i`.
-fn last_non_padding_index(attention_mask: &[i64], batch_idx: usize, seq_len: usize) -> usize {
-    let offset = batch_idx * seq_len;
-    let mut last = 0;
-    for j in 0..seq_len {
-        if attention_mask[offset + j] != 0 {
-            last = j;
+/// Mean pooling over non-padding tokens for a single batch item.
+///
+/// For each hidden dimension, sums the token values weighted by the attention mask,
+/// then divides by the total number of non-padding tokens.
+fn mean_pool(
+    output_data: &[f32],
+    attention_mask: &[i64],
+    batch_idx: usize,
+    seq_len: usize,
+    seq_len_out: usize,
+    hidden_dim: usize,
+) -> Vec<f32> {
+    let mask_offset = batch_idx * seq_len;
+    let data_offset = batch_idx * seq_len_out * hidden_dim;
+    let mut sum = vec![0.0f32; hidden_dim];
+    let mut mask_sum = 0.0f32;
+
+    for j in 0..seq_len.min(seq_len_out) {
+        let mask_val = attention_mask[mask_offset + j] as f32;
+        if mask_val > 0.0 {
+            mask_sum += mask_val;
+            let token_base = data_offset + j * hidden_dim;
+            for d in 0..hidden_dim {
+                sum[d] += output_data[token_base + d] * mask_val;
+            }
         }
     }
-    last
+
+    if mask_sum > 0.0 {
+        for d in 0..hidden_dim {
+            sum[d] /= mask_sum;
+        }
+    }
+
+    sum
 }
 
 #[async_trait]
@@ -246,6 +281,18 @@ impl EmbeddingService for OnnxEmbeddingService {
     fn dimensions(&self) -> usize {
         self.config.dimensions
     }
+
+    fn count_tokens(&self, text: &str) -> usize {
+        let guard = self.state.lock();
+        if let Some(ref state) = *guard {
+            state
+                .tokenizer
+                .encode(text, false)
+                .map_or(text.len() / 4, |enc| enc.len())
+        } else {
+            text.len() / 4
+        }
+    }
 }
 
 #[cfg(test)]
@@ -267,22 +314,53 @@ mod tests {
     }
 
     #[test]
-    fn last_non_padding_basic() {
-        let mask = vec![1i64, 1, 1, 0, 0];
-        assert_eq!(last_non_padding_index(&mask, 0, 5), 2);
+    fn mean_pool_uniform_mask() {
+        // 1 batch item, 3 tokens, 4 hidden dims, all tokens active
+        let output_data = vec![
+            1.0, 2.0, 3.0, 4.0, // token 0
+            5.0, 6.0, 7.0, 8.0, // token 1
+            9.0, 10.0, 11.0, 12.0, // token 2
+        ];
+        let mask = vec![1i64, 1, 1];
+        let result = mean_pool(&output_data, &mask, 0, 3, 3, 4);
+        assert_eq!(result, vec![5.0, 6.0, 7.0, 8.0]);
     }
 
     #[test]
-    fn last_non_padding_all_ones() {
-        let mask = vec![1i64, 1, 1, 1];
-        assert_eq!(last_non_padding_index(&mask, 0, 4), 3);
+    fn mean_pool_with_padding() {
+        // 1 batch item, 4 tokens (2 real + 2 padding), 2 hidden dims
+        let output_data = vec![
+            2.0, 4.0, // token 0 (real)
+            6.0, 8.0, // token 1 (real)
+            0.0, 0.0, // token 2 (padding)
+            0.0, 0.0, // token 3 (padding)
+        ];
+        let mask = vec![1i64, 1, 0, 0];
+        let result = mean_pool(&output_data, &mask, 0, 4, 4, 2);
+        assert_eq!(result, vec![4.0, 6.0]);
     }
 
     #[test]
-    fn last_non_padding_batch_offset() {
-        // batch of 2, seq_len 3
-        let mask = vec![1i64, 1, 0, 1, 1, 1];
-        assert_eq!(last_non_padding_index(&mask, 0, 3), 1);
-        assert_eq!(last_non_padding_index(&mask, 1, 3), 2);
+    fn mean_pool_batch_offset() {
+        // 2 batch items, seq_len 2, hidden_dim 2
+        let output_data = vec![
+            1.0, 2.0, // batch 0, token 0
+            3.0, 4.0, // batch 0, token 1
+            10.0, 20.0, // batch 1, token 0
+            30.0, 40.0, // batch 1, token 1
+        ];
+        let mask = vec![1i64, 1, 1, 0]; // batch 0: both active, batch 1: only first
+        let r0 = mean_pool(&output_data, &mask, 0, 2, 2, 2);
+        let r1 = mean_pool(&output_data, &mask, 1, 2, 2, 2);
+        assert_eq!(r0, vec![2.0, 3.0]);
+        assert_eq!(r1, vec![10.0, 20.0]);
+    }
+
+    #[test]
+    fn mean_pool_all_padding_returns_zeros() {
+        let output_data = vec![1.0, 2.0, 3.0, 4.0];
+        let mask = vec![0i64, 0];
+        let result = mean_pool(&output_data, &mask, 0, 2, 2, 2);
+        assert_eq!(result, vec![0.0, 0.0]);
     }
 }

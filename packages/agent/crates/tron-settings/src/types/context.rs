@@ -117,19 +117,22 @@ pub struct MemoryEmbeddingSettings {
     pub max_cross_project_tokens: usize,
     /// Top-K results for cross-project search.
     pub cross_project_top_k: usize,
+    /// Temporal decay half-life in days for memory ranking.
+    pub half_life_days: f64,
 }
 
 impl Default for MemoryEmbeddingSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            model: "onnx-community/Qwen3-Embedding-0.6B-ONNX".to_string(),
+            model: "onnx-community/embeddinggemma-300m-ONNX".to_string(),
             dtype: "q4".to_string(),
             dimensions: 512,
             cache_dir: "~/.tron/mods/models".to_string(),
             max_workspace_lessons_tokens: 2000,
             max_cross_project_tokens: 1000,
             cross_project_top_k: 5,
+            half_life_days: 30.0,
         }
     }
 }
@@ -142,6 +145,12 @@ pub struct MemoryAutoInjectSettings {
     pub enabled: bool,
     /// Number of memories to auto-inject (1–10).
     pub count: usize,
+    /// Use the user's prompt to find semantically relevant past sessions
+    /// instead of purely chronological selection.
+    pub semantic_injection: bool,
+    /// Number of most-recent entries always included regardless of semantic
+    /// relevance (0–count). Clamped to `count` at runtime.
+    pub recency_anchor_count: usize,
 }
 
 impl Default for MemoryAutoInjectSettings {
@@ -149,6 +158,8 @@ impl Default for MemoryAutoInjectSettings {
         Self {
             enabled: true,
             count: 5,
+            semantic_injection: true,
+            recency_anchor_count: 2,
         }
     }
 }
@@ -262,6 +273,8 @@ mod tests {
         assert_eq!(m.embedding.dimensions, 512);
         assert!(m.auto_inject.enabled);
         assert_eq!(m.auto_inject.count, 5);
+        assert!(m.auto_inject.semantic_injection);
+        assert_eq!(m.auto_inject.recency_anchor_count, 2);
         assert!(m.ledger.enabled);
     }
 

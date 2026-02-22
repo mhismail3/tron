@@ -50,6 +50,8 @@ pub struct ToolContext {
     pub subagent_depth: u32,
     /// Maximum nesting depth allowed for spawning children.
     pub subagent_max_depth: u32,
+    /// Workspace ID for scoping memory recall (resolved from working directory).
+    pub workspace_id: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -520,8 +522,13 @@ pub trait MessageBus: Send + Sync {
 /// Event store queries (`Remember` tool).
 #[async_trait]
 pub trait EventStoreQuery: Send + Sync {
-    /// Semantic memory recall.
-    async fn recall_memory(&self, query: &str, limit: u32) -> Result<Vec<MemoryEntry>, ToolError>;
+    /// Semantic memory recall with optional workspace scoping.
+    async fn recall_memory(
+        &self,
+        query: &str,
+        workspace_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<MemoryEntry>, ToolError>;
     /// Full-text search.
     async fn search_memory(
         &self,
@@ -620,6 +627,7 @@ mod tests {
             cancellation: CancellationToken::new(),
             subagent_depth: 0,
             subagent_max_depth: 0,
+            workspace_id: None,
         };
         assert_eq!(ctx.tool_call_id, "call-1");
         assert_eq!(ctx.session_id, "sess-1");
@@ -635,6 +643,7 @@ mod tests {
             cancellation: CancellationToken::new(),
             subagent_depth: 0,
             subagent_max_depth: 0,
+            workspace_id: None,
         };
         assert_eq!(ctx.subagent_depth, 0);
         assert_eq!(ctx.subagent_max_depth, 0);
@@ -649,6 +658,7 @@ mod tests {
             cancellation: CancellationToken::new(),
             subagent_depth: 2,
             subagent_max_depth: 5,
+            workspace_id: None,
         };
         assert_eq!(ctx.subagent_depth, 2);
         assert_eq!(ctx.subagent_max_depth, 5);

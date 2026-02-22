@@ -20,6 +20,7 @@ doctest = false
 tron-events.workspace = true
 tron-settings.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 parking_lot.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

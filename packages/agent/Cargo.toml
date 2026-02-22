@@ -13,6 +13,7 @@ members = [
     "crates/tron-server",
     "crates/tron-agent",
     "crates/tron-bench",
+    "crates/tron-backfill",
 ]
 default-members = [
     "crates/tron-core",

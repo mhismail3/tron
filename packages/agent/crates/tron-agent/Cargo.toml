@@ -30,6 +30,7 @@ tron-skills.workspace = true
 tron-server = { workspace = true, features = ["apns"] }
 tron-transcription.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 clap.workspace = true
 rusqlite.workspace = true
 tokio.workspace = true

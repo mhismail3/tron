@@ -19,6 +19,8 @@ final class SettingsState {
     var memoryLedgerEnabled: Bool = true
     var memoryAutoInject: Bool = true
     var memoryAutoInjectCount: Int = 5
+    var memorySemanticInjection: Bool = true
+    var memoryRecencyAnchorCount: Int = 2
     var maxConcurrentSessions: Int = 10
     var rulesDiscoverStandaloneFiles: Bool = true
     var taskAutoInjectEnabled: Bool = false
@@ -58,6 +60,8 @@ final class SettingsState {
             memoryLedgerEnabled = settings.memory.ledger.enabled
             memoryAutoInject = settings.memory.autoInject.enabled
             memoryAutoInjectCount = settings.memory.autoInject.count
+            memorySemanticInjection = settings.memory.autoInject.semanticInjection
+            memoryRecencyAnchorCount = settings.memory.autoInject.recencyAnchorCount
             maxConcurrentSessions = settings.maxConcurrentSessions
             rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
             taskAutoInjectEnabled = settings.tasks.autoInject.enabled
@@ -92,6 +96,8 @@ final class SettingsState {
         memoryLedgerEnabled = true
         memoryAutoInject = true
         memoryAutoInjectCount = 5
+        memorySemanticInjection = true
+        memoryRecencyAnchorCount = 2
         maxConcurrentSessions = 10
         rulesDiscoverStandaloneFiles = true
         taskAutoInjectEnabled = false
@@ -110,7 +116,10 @@ final class SettingsState {
                 triggerTokenThreshold: 0.70,
                 defaultTurnFallback: 8
                 ),
-                memory: .init(ledger: .init(enabled: true)),
+                memory: .init(
+                    ledger: .init(enabled: true),
+                    autoInject: .init(enabled: true, count: 5, semanticInjection: true, recencyAnchorCount: 2)
+                ),
                 rules: .init(discoverStandaloneFiles: true),
                 tasks: .init(autoInject: .init(enabled: false))
             ),

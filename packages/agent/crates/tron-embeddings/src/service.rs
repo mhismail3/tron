@@ -30,6 +30,13 @@ pub trait EmbeddingService: Send + Sync {
 
     /// Output embedding dimensions.
     fn dimensions(&self) -> usize;
+
+    /// Count tokens in text using the model's tokenizer.
+    ///
+    /// Default implementation estimates `text.len() / 4`.
+    fn count_tokens(&self, text: &str) -> usize {
+        text.len() / 4
+    }
 }
 
 /// Mock embedding service for testing.

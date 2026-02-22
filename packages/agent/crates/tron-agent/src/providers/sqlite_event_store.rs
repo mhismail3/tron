@@ -3,11 +3,14 @@
 //! Provides the Remember tool with actual database access for session queries,
 //! event lookups, FTS search, blob retrieval, and schema introspection.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use tron_embeddings::{HybridSearchOptions, apply_temporal_decay};
 use tron_events::EventStore;
+use tron_events::EventType;
 use tron_events::sqlite::repositories::event::ListEventsOptions;
 use tron_tools::errors::ToolError;
 use tron_tools::traits::{EventStoreQuery, MemoryEntry, SessionInfo};
@@ -42,64 +45,150 @@ fn tool_err(msg: impl std::fmt::Display) -> ToolError {
 
 #[async_trait]
 impl EventStoreQuery for SqliteEventStoreQuery {
-    async fn recall_memory(&self, query: &str, limit: u32) -> Result<Vec<MemoryEntry>, ToolError> {
+    async fn recall_memory(
+        &self,
+        query: &str,
+        workspace_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<MemoryEntry>, ToolError> {
         if query.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Try semantic vector search first
+        // 1. FTS search (scoped to memory.ledger events)
+        let memory_types = [EventType::MemoryLedger];
+        let fts_opts = tron_events::sqlite::repositories::search::SearchOptions {
+            workspace_id,
+            session_id: None,
+            types: Some(&memory_types),
+            limit: Some(i64::from(limit) * 2), // over-fetch for RRF
+            offset: None,
+        };
+        let fts_raw = self.store.search(query, &fts_opts).unwrap_or_default();
+        #[allow(clippy::cast_possible_truncation)]
+        let fts_results: Vec<(String, f32)> = fts_raw
+            .iter()
+            .map(|r| (r.event_id.clone(), r.score as f32))
+            .collect();
+
+        // 2. Hybrid search (if embeddings ready)
         if let Some(ref ec) = self.embedding_controller {
             let ctrl = ec.lock().await;
             if ctrl.is_ready() {
-                let opts = tron_embeddings::SearchOptions {
-                    limit: limit as usize,
+                let half_life_days = ctrl.config().half_life_days;
+                let cross_project_top_k = ctrl.config().cross_project_top_k;
+
+                // 2a. Local hybrid search (vector + FTS)
+                let local_opts = tron_embeddings::SearchOptions {
+                    limit: limit as usize * 2,
+                    workspace_id: workspace_id.map(String::from),
                     ..Default::default()
                 };
-                if let Ok(results) = ctrl.search(query, &opts).await {
-                    if !results.is_empty() {
-                        let entries: Vec<MemoryEntry> = results
-                            .into_iter()
-                            .filter_map(|r| {
-                                let event = self.store.get_event(&r.event_id).ok().flatten()?;
-                                let payload: Value = serde_json::from_str(&event.payload).ok()?;
-                                let title = payload
-                                    .get("title")
-                                    .and_then(Value::as_str)
-                                    .unwrap_or("Untitled");
-                                let lessons = payload
-                                    .get("lessons")
-                                    .and_then(Value::as_array)
-                                    .map(|arr| {
-                                        arr.iter()
-                                            .filter_map(Value::as_str)
-                                            .collect::<Vec<_>>()
-                                            .join("; ")
-                                    })
-                                    .unwrap_or_default();
-                                let content = if lessons.is_empty() {
-                                    title.to_string()
-                                } else {
-                                    format!("{title}: {lessons}")
-                                };
-                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                                let score = (r.similarity * 100.0).round() as u32;
-                                Some(MemoryEntry {
-                                    content,
-                                    session_id: Some(event.session_id),
-                                    score: Some(score.min(100)),
-                                    timestamp: Some(event.timestamp),
-                                })
-                            })
-                            .collect();
-                        if !entries.is_empty() {
-                            return Ok(entries);
+                let mut all_results = ctrl.hybrid_search(
+                    query,
+                    &fts_results,
+                    &HybridSearchOptions { limit: limit as usize, ..Default::default() },
+                    &local_opts,
+                ).await.unwrap_or_default();
+
+                // 2b. Cross-project search (vector-only, excludes current workspace)
+                if let Some(ws) = workspace_id {
+                    if cross_project_top_k > 0 {
+                        let cross_opts = tron_embeddings::SearchOptions {
+                            limit: cross_project_top_k * 2,
+                            exclude_workspace_id: Some(ws.to_string()),
+                            ..Default::default()
+                        };
+                        if let Ok(mut cross) = ctrl.hybrid_search(
+                            query,
+                            &[], // vector-only for cross-project
+                            &HybridSearchOptions { limit: cross_project_top_k, ..Default::default() },
+                            &cross_opts,
+                        ).await {
+                            all_results.append(&mut cross);
                         }
+                    }
+                }
+
+                if !all_results.is_empty() {
+                    // 3. Apply temporal decay
+                    let now = chrono::Utc::now();
+                    let mut timestamps: HashMap<String, chrono::DateTime<chrono::Utc>> = HashMap::new();
+                    for r in &all_results {
+                        if let Ok(Some(event)) = self.store.get_event(&r.event_id) {
+                            if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&event.timestamp) {
+                                let _ = timestamps.insert(r.event_id.clone(), ts.with_timezone(&chrono::Utc));
+                            }
+                        }
+                    }
+                    apply_temporal_decay(&mut all_results, &timestamps, half_life_days, now);
+
+                    // 4. Convert to MemoryEntry (capped at limit)
+                    let entries: Vec<MemoryEntry> = all_results
+                        .into_iter()
+                        .take(limit as usize)
+                        .filter_map(|r| {
+                            let event = self.store.get_event(&r.event_id).ok().flatten()?;
+                            let payload: Value = serde_json::from_str(&event.payload).ok()?;
+                            let title = payload
+                                .get("title")
+                                .and_then(Value::as_str)
+                                .unwrap_or("Untitled");
+                            let lessons = payload
+                                .get("lessons")
+                                .and_then(Value::as_array)
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(Value::as_str)
+                                        .collect::<Vec<_>>()
+                                        .join("; ")
+                                })
+                                .unwrap_or_default();
+                            let content = if lessons.is_empty() {
+                                title.to_string()
+                            } else {
+                                format!("{title}: {lessons}")
+                            };
+                            // Normalize RRF score to 0-100 (max theoretical = 2/60 ≈ 0.033)
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            let normalized = ((r.score / 0.034) * 100.0).round().min(100.0) as u32;
+                            Some(MemoryEntry {
+                                content,
+                                session_id: Some(event.session_id),
+                                score: Some(normalized),
+                                timestamp: Some(event.timestamp),
+                            })
+                        })
+                        .collect();
+                    if !entries.is_empty() {
+                        return Ok(entries);
                     }
                 }
             }
         }
 
-        // Fall back to FTS
+        // 5. Fall back to FTS-only if no hybrid results
+        if !fts_raw.is_empty() {
+            return Ok(fts_raw
+                .into_iter()
+                .take(limit as usize)
+                .map(|r| {
+                    let content = if r.snippet.is_empty() {
+                        r.event_type.to_string()
+                    } else {
+                        r.snippet
+                    };
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let normalized = ((-r.score).min(20.0) / 20.0 * 100.0) as u32;
+                    MemoryEntry {
+                        content,
+                        session_id: Some(r.session_id),
+                        score: Some(normalized.min(100)),
+                        timestamp: Some(r.timestamp),
+                    }
+                })
+                .collect());
+        }
         self.search_memory(None, query, limit, 0).await
     }
 
@@ -352,7 +441,7 @@ mod tests {
     #[tokio::test]
     async fn search_empty_query_returns_empty() {
         let q = SqliteEventStoreQuery::new(setup_store());
-        let r = q.recall_memory("", 10).await.unwrap();
+        let r = q.recall_memory("", None, 10).await.unwrap();
         assert!(r.is_empty());
     }
 

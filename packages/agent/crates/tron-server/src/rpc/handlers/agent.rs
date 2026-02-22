@@ -696,6 +696,13 @@ impl MethodHandler for PromptHandler {
                     vec![]
                 };
 
+                // Resolve workspace ID once for memory injection and tool context
+                let resolved_ws_id = event_store
+                    .get_workspace_by_path(&working_dir)
+                    .ok()
+                    .flatten()
+                    .map(|ws| ws.id);
+
                 // 5. Load workspace memory from ledger entries
                 // (rules.loaded / memory.loaded events are emitted optimistically
                 // at session.create time so iOS shows pills immediately)
@@ -705,16 +712,26 @@ impl MethodHandler for PromptHandler {
                     if auto_inject.enabled {
                         if let Some(ref ec) = embedding_controller {
                             let ctrl = ec.lock().await;
-                            let workspace_id = event_store
-                                .get_workspace_by_path(&working_dir)
-                                .ok()
-                                .flatten()
-                                .map(|ws| ws.id);
-                            workspace_id.and_then(|ws_id| {
-                                let count = auto_inject.count.clamp(1, 10);
-                                ctrl.load_workspace_memory(&event_store, &ws_id, count)
+                            match resolved_ws_id.as_deref() {
+                                Some(ws_id) => {
+                                    let count = auto_inject.count.clamp(1, 10);
+                                    let ctx = if auto_inject.semantic_injection {
+                                        Some(prompt_clone.as_str())
+                                    } else {
+                                        None
+                                    };
+                                    ctrl.load_workspace_memory(
+                                        &event_store,
+                                        ws_id,
+                                        count,
+                                        ctx,
+                                        auto_inject.recency_anchor_count,
+                                    )
+                                    .await
                                     .map(|wm| wm.content)
-                            })
+                                }
+                                None => None,
+                            }
                         } else {
                             None
                         }
@@ -777,6 +794,7 @@ impl MethodHandler for PromptHandler {
                         jitter_factor: settings.retry.jitter_factor,
                     }),
                     health_tracker: Some(health_tracker),
+                    workspace_id: resolved_ws_id.clone(),
                     ..AgentConfig::default()
                 };
 

@@ -16,6 +16,8 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertTrue(state.memoryLedgerEnabled)
         XCTAssertTrue(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
+        XCTAssertTrue(state.memorySemanticInjection)
+        XCTAssertEqual(state.memoryRecencyAnchorCount, 2)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
@@ -36,6 +38,8 @@ final class SettingsStateTests: XCTestCase {
         state.memoryLedgerEnabled = false
         state.memoryAutoInject = false
         state.memoryAutoInjectCount = 8
+        state.memorySemanticInjection = false
+        state.memoryRecencyAnchorCount = 4
         state.maxConcurrentSessions = 25
         state.quickSessionWorkspace = "/some/other/path"
 
@@ -50,6 +54,8 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertTrue(state.memoryLedgerEnabled)
         XCTAssertTrue(state.memoryAutoInject)
         XCTAssertEqual(state.memoryAutoInjectCount, 5)
+        XCTAssertTrue(state.memorySemanticInjection)
+        XCTAssertEqual(state.memoryRecencyAnchorCount, 2)
         XCTAssertEqual(state.maxConcurrentSessions, 10)
     }
 

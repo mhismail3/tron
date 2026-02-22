@@ -154,6 +154,9 @@ pub struct AgentConfig {
     /// Shared provider health tracker for recording success/failure outcomes.
     #[serde(skip)]
     pub health_tracker: Option<Arc<ProviderHealthTracker>>,
+    /// Workspace ID for scoping memory recall (resolved from working directory).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 
 const fn default_max_turns() -> u32 {
@@ -178,6 +181,7 @@ impl Default for AgentConfig {
             subagent_max_depth: 0,
             retry: None,
             health_tracker: None,
+            workspace_id: None,
         }
     }
 }

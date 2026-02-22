@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use tron_settings::types::MemoryEmbeddingSettings;
 
-/// Full embedding dimensions before Matryoshka truncation.
-const FULL_DIMENSIONS: usize = 1024;
+/// Full embedding dimensions before Matryoshka truncation (EmbeddingGemma-300M: 768d).
+const FULL_DIMENSIONS: usize = 768;
 
 /// Configuration for the embedding system.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -28,6 +28,8 @@ pub struct EmbeddingConfig {
     pub max_cross_project_tokens: usize,
     /// Top-K results for cross-project search.
     pub cross_project_top_k: usize,
+    /// Temporal decay half-life in days for memory ranking.
+    pub half_life_days: f64,
 }
 
 impl Default for EmbeddingConfig {
@@ -49,6 +51,7 @@ impl EmbeddingConfig {
             max_workspace_lessons_tokens: s.max_workspace_lessons_tokens,
             max_cross_project_tokens: s.max_cross_project_tokens,
             cross_project_top_k: s.cross_project_top_k,
+            half_life_days: s.half_life_days,
         }
     }
 
@@ -76,17 +79,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config_matches_typescript() {
+    fn default_config_uses_embedding_gemma() {
         let config = EmbeddingConfig::default();
         assert!(config.enabled);
-        assert_eq!(config.model, "onnx-community/Qwen3-Embedding-0.6B-ONNX");
+        assert_eq!(config.model, "onnx-community/embeddinggemma-300m-ONNX");
         assert_eq!(config.dtype, "q4");
         assert_eq!(config.dimensions, 512);
-        assert_eq!(config.full_dimensions, 1024);
+        assert_eq!(config.full_dimensions, 768);
         assert_eq!(config.cache_dir, "~/.tron/mods/models");
         assert_eq!(config.max_workspace_lessons_tokens, 2000);
         assert_eq!(config.max_cross_project_tokens, 1000);
         assert_eq!(config.cross_project_top_k, 5);
+        assert!((config.half_life_days - 30.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -100,17 +104,19 @@ mod tests {
             max_workspace_lessons_tokens: 500,
             max_cross_project_tokens: 250,
             cross_project_top_k: 3,
+            half_life_days: 14.0,
         };
         let config = EmbeddingConfig::from_settings(&settings);
         assert!(!config.enabled);
         assert_eq!(config.model, "custom-model");
         assert_eq!(config.dtype, "q8");
         assert_eq!(config.dimensions, 256);
-        assert_eq!(config.full_dimensions, 1024);
+        assert_eq!(config.full_dimensions, 768);
         assert_eq!(config.cache_dir, "/tmp/models");
         assert_eq!(config.max_workspace_lessons_tokens, 500);
         assert_eq!(config.max_cross_project_tokens, 250);
         assert_eq!(config.cross_project_top_k, 3);
+        assert!((config.half_life_days - 14.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -159,7 +165,7 @@ mod tests {
         let config: EmbeddingConfig = serde_json::from_str(json).unwrap();
         assert!(!config.enabled);
         assert_eq!(config.dimensions, 512);
-        assert_eq!(config.full_dimensions, 1024);
+        assert_eq!(config.full_dimensions, 768);
     }
 
     #[test]

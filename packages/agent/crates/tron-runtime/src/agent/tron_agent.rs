@@ -160,6 +160,7 @@ impl TronAgent {
                 subagent_max_depth: self.config.subagent_max_depth,
                 retry_config: self.config.retry.as_ref(),
                 health_tracker: self.config.health_tracker.as_ref(),
+                workspace_id: self.config.workspace_id.as_deref(),
             })
             .await;
 

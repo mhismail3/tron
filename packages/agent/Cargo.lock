@@ -3728,6 +3728,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "clap",
  "metrics-exporter-prometheus",
  "parking_lot",
@@ -3748,6 +3749,27 @@ dependencies = [
  "tron-skills",
  "tron-tools",
  "tron-transcription",
+]
+
+[[package]]
+name = "tron-backfill"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tron-embeddings",
+ "tron-events",
+ "tron-settings",
+ "uuid",
 ]
 
 [[package]]
@@ -3788,6 +3810,7 @@ name = "tron-embeddings"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "hf-hub",
  "ndarray 0.16.1",
  "ort",

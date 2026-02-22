@@ -147,21 +147,29 @@ struct ServerSettings: Decodable {
         struct AutoInjectSettings: Decodable {
             let enabled: Bool
             let count: Int
-            static let defaults = AutoInjectSettings(enabled: true, count: 5)
+            let semanticInjection: Bool
+            let recencyAnchorCount: Int
+            static let defaults = AutoInjectSettings(
+                enabled: true, count: 5, semanticInjection: true, recencyAnchorCount: 2
+            )
 
             private enum CodingKeys: String, CodingKey {
-                case enabled, count
+                case enabled, count, semanticInjection, recencyAnchorCount
             }
 
-            init(enabled: Bool, count: Int) {
+            init(enabled: Bool, count: Int, semanticInjection: Bool, recencyAnchorCount: Int) {
                 self.enabled = enabled
                 self.count = count
+                self.semanticInjection = semanticInjection
+                self.recencyAnchorCount = recencyAnchorCount
             }
 
             init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 enabled = (try? container.decodeIfPresent(Bool.self, forKey: .enabled)) ?? true
                 count = (try? container.decodeIfPresent(Int.self, forKey: .count)) ?? 5
+                semanticInjection = (try? container.decodeIfPresent(Bool.self, forKey: .semanticInjection)) ?? true
+                recencyAnchorCount = (try? container.decodeIfPresent(Int.self, forKey: .recencyAnchorCount)) ?? 2
             }
         }
     }
@@ -296,6 +304,8 @@ struct ServerSettingsUpdate: Encodable {
             struct AutoInjectUpdate: Encodable {
                 var enabled: Bool?
                 var count: Int?
+                var semanticInjection: Bool?
+                var recencyAnchorCount: Int?
             }
         }
 
