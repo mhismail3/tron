@@ -43,6 +43,12 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
 
     /// Remove the catching-up notification message after processing is complete
     func removeCatchingUpMessage()
+
+    /// Whether a catch-up is currently in progress (suppresses real-time events)
+    var isCatchingUp: Bool { get set }
+
+    /// Clean up stale streaming state before catch-up processing
+    func cleanUpStreamingState()
 }
 
 /// Coordinates session connection, reconnection, and catch-up for ChatViewModel.
@@ -131,14 +137,10 @@ final class ConnectionCoordinator {
     func reconnectAndResume(context: ConnectionContext) async {
         context.logInfo("reconnectAndResume() - checking connection state")
 
-        // Check if we're already connected
-        if context.isConnected {
-            context.logDebug("Already connected, checking agent state")
-        } else {
+        if !context.isConnected {
             context.logInfo("Not connected, reconnecting...")
             await context.connect()
 
-            // Wait briefly for connection
             if !context.isConnected {
                 try? await Task.sleep(for: .milliseconds(100))
             }
@@ -147,15 +149,30 @@ final class ConnectionCoordinator {
                 context.logWarning("Failed to reconnect")
                 return
             }
+        }
 
-            // Re-resume the session after reconnection
-            do {
-                try await context.resumeSession(sessionId: context.sessionId)
-                context.logInfo("Session re-resumed after reconnection")
-            } catch {
-                context.logError("Failed to re-resume session: \(error)")
-                return
+        // Always re-resume the session to bind it to the new WebSocket connection.
+        // After disconnect/reconnect, the new connection has a different client ID
+        // and won't receive session-scoped events until session.resume is called.
+        do {
+            try await context.resumeSession(sessionId: context.sessionId)
+            context.logInfo("Session re-resumed on new connection")
+        } catch {
+            context.logError("Failed to re-resume session: \(error)")
+
+            let isNotFound: Bool
+            if let rpcError = error as? RPCError {
+                isNotFound = rpcError.errorCode == .sessionNotFound
+            } else {
+                let errorString = error.localizedDescription.lowercased()
+                isNotFound = errorString.contains("not found") || errorString.contains("does not exist")
             }
+            if isNotFound {
+                context.logWarning("Session \(context.sessionId) not found on server - dismissing view")
+                context.shouldDismiss = true
+                context.showError("Session not found on server")
+            }
+            return
         }
 
         // Check if agent is running and catch up on any missed content
@@ -191,6 +208,13 @@ final class ConnectionCoordinator {
             let agentState = try await context.getAgentState(sessionId: context.sessionId)
             if agentState.isRunning {
                 context.logInfo("Agent is currently running - setting up streaming state for in-progress session")
+
+                // Suppress real-time events during catch-up to prevent duplicates
+                context.isCatchingUp = true
+
+                // Clean up stale streaming state from previous connection
+                context.cleanUpStreamingState()
+
                 context.isProcessing = true
 
                 // Add in-chat catching-up notification
@@ -209,15 +233,17 @@ final class ConnectionCoordinator {
                 await context.processCatchUpContent(accumulatedText: accumulatedText, toolCalls: toolCalls, contentSequence: contentSequence)
 
                 // Remove the catching-up notification now that content has been processed.
-                // This provides immediate feedback that catch-up is complete, rather than
-                // waiting for the next turn_end which may not come for a while.
                 context.removeCatchingUpMessage()
+
+                // Re-enable real-time events now that catch-up is complete
+                context.isCatchingUp = false
 
                 context.logInfo("Processed catch-up content for in-progress turn")
             } else {
                 context.logDebug("Agent is not running - normal session resume")
             }
         } catch {
+            context.isCatchingUp = false
             context.logWarning("Failed to check agent state: \(error.localizedDescription)")
         }
     }

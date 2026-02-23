@@ -1222,6 +1222,32 @@ impl MethodHandler for GetAgentStateHandler {
                 .unwrap_or(false)
         };
 
+        let (current_turn_text, current_turn_tool_calls, content_sequence) = if is_running {
+            tracing::info!(session_id = %session_id, "agent.getState: session is running, fetching accumulator");
+            match ctx.orchestrator.turn_accumulators().get_state(&session_id) {
+                Some((text, tools, seq)) => {
+                    tracing::info!(
+                        session_id = %session_id,
+                        text_len = text.len(),
+                        tool_count = tools.as_array().map(|a| a.len()).unwrap_or(0),
+                        seq_count = seq.as_array().map(|a| a.len()).unwrap_or(0),
+                        "agent.getState: returning accumulated content"
+                    );
+                    (
+                        Some(Value::String(text)),
+                        Some(tools),
+                        Some(seq),
+                    )
+                }
+                None => {
+                    tracing::warn!(session_id = %session_id, "agent.getState: no accumulator found despite isRunning=true");
+                    (None, None, None)
+                }
+            }
+        } else {
+            (None, None, None)
+        };
+
         Ok(serde_json::json!({
             "sessionId": session_id,
             "isRunning": is_running,
@@ -1237,11 +1263,9 @@ impl MethodHandler for GetAgentStateHandler {
             },
             "tools": tool_names,
             "wasInterrupted": was_interrupted,
-            // Resume-related fields — iOS uses these to show in-progress turn content
-            // when reconnecting to a running session. Null when not running.
-            "currentTurnText": null,
-            "currentTurnToolCalls": null,
-            "contentSequence": null,
+            "currentTurnText": current_turn_text,
+            "currentTurnToolCalls": current_turn_tool_calls,
+            "contentSequence": content_sequence,
         }))
     }
 }

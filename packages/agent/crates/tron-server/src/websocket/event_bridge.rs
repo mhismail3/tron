@@ -7,6 +7,7 @@ use crate::rpc::types::RpcEvent;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tron_core::events::TronEvent;
+use tron_runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
 use tron_tools::cdp::types::BrowserEvent;
 
 use super::broadcast::BroadcastManager;
@@ -17,6 +18,7 @@ pub struct EventBridge {
     browser_rx: Option<broadcast::Receiver<BrowserEvent>>,
     broadcast: Arc<BroadcastManager>,
     cancel: CancellationToken,
+    accumulators: Arc<TurnAccumulatorMap>,
 }
 
 impl EventBridge {
@@ -28,12 +30,14 @@ impl EventBridge {
         broadcast: Arc<BroadcastManager>,
         browser_rx: Option<broadcast::Receiver<BrowserEvent>>,
         cancel: CancellationToken,
+        accumulators: Arc<TurnAccumulatorMap>,
     ) -> Self {
         Self {
             rx,
             browser_rx,
             broadcast,
             cancel,
+            accumulators,
         }
     }
 
@@ -111,6 +115,8 @@ impl EventBridge {
     }
 
     async fn bridge_tron_event(&self, event: &TronEvent) {
+        self.accumulators.update_from_event(event);
+
         let event_type = event.event_type();
         tracing::debug!(event_type, "bridging event to client");
         let rpc_event = tron_event_to_rpc(event);
@@ -919,7 +925,7 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // AgentStart is NOT in the global list — should only reach C1 (bound to "s1")
@@ -954,7 +960,7 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // SessionCreated for "s2" — both clients should receive it
@@ -996,7 +1002,7 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // TurnStart for "s1" — both clients should receive it (global)
@@ -1036,7 +1042,7 @@ mod tests {
         bm.add(Arc::new(conn2)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // MessageUpdate for "s1" — only C1 should receive it
@@ -1065,7 +1071,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // Send event with empty session_id (global)
@@ -1096,7 +1102,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tron_tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), Some(browser_rx), CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), Some(browser_rx), CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // Close browser channel
@@ -2035,7 +2041,7 @@ mod tests {
         bm.add(Arc::new(conn)).await;
 
         let rx = tx.subscribe();
-        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new());
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), Arc::new(TurnAccumulatorMap::new()));
         let handle = tokio::spawn(bridge.run());
 
         // Send CompactionStart
@@ -2191,5 +2197,64 @@ mod tests {
         assert_eq!(data["completedAt"], "2024-01-01T00:00:00Z");
         assert_eq!(data["tokenUsage"]["input"], 50);
         assert!(data.get("error").is_none());
+    }
+
+    // ── Turn accumulator integration tests ──
+
+    #[tokio::test]
+    async fn bridge_feeds_events_to_accumulator() {
+        let map = Arc::new(TurnAccumulatorMap::new());
+        let (tx, _) = broadcast::channel(16);
+        let bm = Arc::new(BroadcastManager::new());
+        let rx = tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), map.clone());
+        let handle = tokio::spawn(bridge.run());
+
+        let _ = tx.send(TronEvent::TurnStart {
+            base: BaseEvent::now("s1"),
+            turn: 1,
+        });
+        let _ = tx.send(TronEvent::MessageUpdate {
+            base: BaseEvent::now("s1"),
+            content: "hello".into(),
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let state = map.get_state("s1");
+        assert!(state.is_some());
+        let (text, _, _) = state.unwrap();
+        assert_eq!(text, "hello");
+
+        drop(tx);
+        let _ = handle.await;
+    }
+
+    #[tokio::test]
+    async fn bridge_accumulator_clears_on_agent_end() {
+        let map = Arc::new(TurnAccumulatorMap::new());
+        let (tx, _) = broadcast::channel(16);
+        let bm = Arc::new(BroadcastManager::new());
+        let rx = tx.subscribe();
+        let bridge = EventBridge::new(rx, bm.clone(), None, CancellationToken::new(), map.clone());
+        let handle = tokio::spawn(bridge.run());
+
+        let _ = tx.send(TronEvent::TurnStart {
+            base: BaseEvent::now("s1"),
+            turn: 1,
+        });
+        let _ = tx.send(TronEvent::MessageUpdate {
+            base: BaseEvent::now("s1"),
+            content: "hello".into(),
+        });
+        let _ = tx.send(TronEvent::AgentEnd {
+            base: BaseEvent::now("s1"),
+            error: None,
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(map.get_state("s1").is_none());
+
+        drop(tx);
+        let _ = handle.await;
     }
 }

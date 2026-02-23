@@ -30,3 +30,4 @@ pub mod session_manager;
 pub mod session_reconstructor;
 pub mod subagent_manager;
 pub mod tool_call_tracker;
+pub mod turn_accumulator;

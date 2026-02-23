@@ -111,7 +111,9 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
         // Then: Should NOT call connect (already connected)
         XCTAssertFalse(mockContext.connectCalled)
-        // But should check agent state
+        // But MUST always resume session to bind new connection
+        XCTAssertTrue(mockContext.resumeSessionCalled)
+        // And should check agent state
         XCTAssertTrue(mockContext.getAgentStateCalled)
     }
 
@@ -243,6 +245,78 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
         // Then: Should not crash, isProcessing stays false
         XCTAssertFalse(mockContext.isProcessing)
+    }
+
+    // MARK: - isCatchingUp Tests
+
+    func testCatchUpSetsAndClearsIsCatchingUpFlag() async {
+        // Given: Agent is running with content
+        mockContext.agentStateIsRunning = true
+        mockContext.agentStateCurrentTurnText = "content"
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: After catch-up completes, flag should be cleared
+        XCTAssertFalse(mockContext.isCatchingUp)
+    }
+
+    func testCatchUpSetsIsCatchingUpBeforeProcessing() async {
+        // Given: Agent is running
+        mockContext.agentStateIsRunning = true
+        mockContext.agentStateCurrentTurnText = "content"
+        mockContext.captureIsCatchingUpDuringCatchUp = true
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: isCatchingUp should have been true when processCatchUpContent was called
+        XCTAssertTrue(mockContext.wasCatchingUpDuringProcess)
+    }
+
+    func testCatchUpClearsIsCatchingUpOnError() async {
+        // Given: Get state will fail
+        mockContext.getAgentStateShouldFail = true
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: isCatchingUp should be cleared even on error
+        XCTAssertFalse(mockContext.isCatchingUp)
+    }
+
+    func testCatchUpCallsCleanUpStreamingState() async {
+        // Given: Agent is running
+        mockContext.agentStateIsRunning = true
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: Should clean up stale streaming state
+        XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
+    }
+
+    func testCatchUpDoesNotCleanUpWhenNotRunning() async {
+        // Given: Agent is NOT running
+        mockContext.agentStateIsRunning = false
+
+        // When: Check agent state
+        await coordinator.checkAndResumeAgentState(context: mockContext)
+
+        // Then: Should NOT clean up streaming state
+        XCTAssertFalse(mockContext.cleanUpStreamingStateCalled)
+    }
+
+    func testReconnectAndResumeCallsCleanUpStreamingState() async {
+        // Given: Already connected, agent running
+        mockContext.isConnected = true
+        mockContext.agentStateIsRunning = true
+
+        // When: Reconnect and resume
+        await coordinator.reconnectAndResume(context: mockContext)
+
+        // Then: Should clean up stale streaming state during catch-up
+        XCTAssertTrue(mockContext.cleanUpStreamingStateCalled)
     }
 
     // MARK: - Fetch Tasks Tests
@@ -411,6 +485,10 @@ final class MockConnectionContext: ConnectionContext {
     var processCatchUpContentCalled = false
     var lastCatchUpText: String?
     var lastCatchUpToolCalls: [CurrentTurnToolCall]?
+    var isCatchingUp = false
+    var cleanUpStreamingStateCalled = false
+    var captureIsCatchingUpDuringCatchUp = false
+    var wasCatchingUpDuringProcess = false
 
     // MARK: - Test Configuration
     var connectWillSucceed = true
@@ -515,12 +593,19 @@ final class MockConnectionContext: ConnectionContext {
         processCatchUpContentCalled = true
         lastCatchUpText = accumulatedText
         lastCatchUpToolCalls = toolCalls
+        if captureIsCatchingUpDuringCatchUp {
+            wasCatchingUpDuringProcess = isCatchingUp
+        }
     }
 
     var removeCatchingUpMessageCalled = false
 
     func removeCatchingUpMessage() {
         removeCatchingUpMessageCalled = true
+    }
+
+    func cleanUpStreamingState() {
+        cleanUpStreamingStateCalled = true
     }
 
     func showError(_ message: String) {

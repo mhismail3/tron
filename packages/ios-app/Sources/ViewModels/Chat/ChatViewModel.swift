@@ -137,6 +137,8 @@ final class ChatViewModel: ChatEventContext {
     var thinkingMessageId: UUID?
     /// ID of the catching-up notification message (removed on turn_end/complete)
     var catchingUpMessageId: UUID?
+    /// True while catch-up content is being processed — suppresses real-time events to prevent duplicates
+    var isCatchingUp = false
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
     /// ID of the memory-updating-in-progress notification (replaced when memory update completes)
@@ -267,6 +269,9 @@ final class ChatViewModel: ChatEventContext {
                     if self.agentPhase != .idle {
                         self.agentPhase = .idle
                     }
+                    self.streamingManager.reset()
+                    self.isCompacting = false
+                    self.compactionInProgressMessageId = nil
                 }
             }
         }
@@ -436,6 +441,9 @@ final class ChatViewModel: ChatEventContext {
 
     /// Unified event handler - dispatches ParsedEventV2 to specific handlers
     private func handleEventV2(_ event: ParsedEventV2) {
+        // Suppress real-time events during catch-up to prevent duplicates
+        guard !isCatchingUp else { return }
+
         switch event {
         case .plugin(let type, _, _, let transform):
             handlePluginEvent(type: type, transform: transform)

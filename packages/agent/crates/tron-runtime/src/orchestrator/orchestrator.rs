@@ -15,6 +15,7 @@ use crate::agent::event_emitter::EventEmitter;
 use crate::errors::RuntimeError;
 use crate::orchestrator::session_manager::{SessionFilter, SessionManager};
 use crate::orchestrator::tool_call_tracker::ToolCallTracker;
+use crate::orchestrator::turn_accumulator::TurnAccumulatorMap;
 
 /// Tracks an active agent run within a session.
 struct ActiveRun {
@@ -35,6 +36,8 @@ pub struct Orchestrator {
     active_runs: Mutex<HashMap<String, ActiveRun>>,
     /// Tool call tracker shared with RPC handlers.
     tool_tracker: Mutex<ToolCallTracker>,
+    /// Accumulates in-progress turn content for session resume catch-up.
+    turn_accumulators: Arc<TurnAccumulatorMap>,
 }
 
 impl Orchestrator {
@@ -47,6 +50,7 @@ impl Orchestrator {
             run_semaphore: Arc::new(Semaphore::new(max_concurrent)),
             active_runs: Mutex::new(HashMap::new()),
             tool_tracker: Mutex::new(ToolCallTracker::new()),
+            turn_accumulators: Arc::new(TurnAccumulatorMap::new()),
         }
     }
 
@@ -63,6 +67,11 @@ impl Orchestrator {
     /// Subscribe to all orchestrator events.
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {
         self.broadcast.subscribe()
+    }
+
+    /// Get the turn accumulator map (for session resume catch-up).
+    pub fn turn_accumulators(&self) -> &Arc<TurnAccumulatorMap> {
+        &self.turn_accumulators
     }
 
     /// Start tracking a run for a session. Returns the `CancellationToken`.

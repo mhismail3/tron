@@ -53,6 +53,21 @@ extension ChatViewModel: ConnectionContext {
         logger.info("Removed catching-up notification after processing", category: .session)
     }
 
+    func cleanUpStreamingState() {
+        streamingManager.reset()
+        // Remove any in-flight streaming message
+        if let streamingId = streamingManager.streamingMessageId {
+            messages.removeAll { $0.id == streamingId }
+        }
+        // Remove running tool messages (will be re-created from catch-up)
+        let runningToolIds = currentToolMessages.keys
+        messages.removeAll { runningToolIds.contains($0.id) }
+        // Clear turn tracking state
+        thinkingMessageId = nil
+        currentTurnToolCalls.removeAll()
+        currentToolMessages.removeAll()
+    }
+
     // Note: The following methods are already defined in other extensions:
     // - setSessionProcessing(_:) in ChatViewModel+TurnLifecycleContext.swift
     // - showErrorAlert(_:) in ChatViewModel.swift

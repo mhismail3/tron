@@ -22,6 +22,7 @@ use tron_llm::provider::{
 };
 use tron_runtime::orchestrator::orchestrator::Orchestrator;
 use tron_runtime::orchestrator::session_manager::SessionManager;
+use tron_runtime::orchestrator::turn_accumulator::TurnAccumulatorMap;
 use tron_server::config::ServerConfig;
 use tron_server::rpc::context::{AgentDeps, RpcContext};
 use tron_server::rpc::registry::MethodRegistry;
@@ -87,6 +88,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         server.broadcast().clone(),
         None,
         server.shutdown().token(),
+        orchestrator.turn_accumulators().clone(),
     );
     let _bridge_handle = tokio::spawn(bridge.run());
 
@@ -259,6 +261,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         server.broadcast().clone(),
         None,
         server.shutdown().token(),
+        orchestrator.turn_accumulators().clone(),
     );
     drop(tokio::spawn(bridge.run()));
 

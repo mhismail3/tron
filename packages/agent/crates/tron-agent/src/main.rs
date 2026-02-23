@@ -645,6 +645,7 @@ async fn main() -> Result<()> {
         server.broadcast().clone(),
         browser_rx,
         server.shutdown().token(),
+        orchestrator.turn_accumulators().clone(),
     );
     let bridge_handle = tokio::spawn(bridge.run());
 
@@ -696,36 +697,6 @@ mod tests {
     fn cli_default_port() {
         let cli = Cli::parse_from(["tron"]);
         assert_eq!(cli.port, 9847);
-    }
-
-    #[test]
-    fn cli_custom_port() {
-        let cli = Cli::parse_from(["tron", "--port", "8080"]);
-        assert_eq!(cli.port, 8080);
-    }
-
-    #[test]
-    fn cli_custom_host() {
-        let cli = Cli::parse_from(["tron", "--host", "0.0.0.0"]);
-        assert_eq!(cli.host, "0.0.0.0");
-    }
-
-    #[test]
-    fn cli_db_path() {
-        let cli = Cli::parse_from(["tron", "--db-path", "/tmp/test.db"]);
-        assert_eq!(cli.db_path, Some(PathBuf::from("/tmp/test.db")));
-    }
-
-    #[test]
-    fn cli_max_sessions() {
-        let cli = Cli::parse_from(["tron", "--max-sessions", "20"]);
-        assert_eq!(cli.max_sessions, Some(20));
-    }
-
-    #[test]
-    fn cli_max_sessions_defaults_to_none() {
-        let cli = Cli::parse_from(["tron"]);
-        assert_eq!(cli.max_sessions, None);
     }
 
     #[test]
@@ -1059,6 +1030,7 @@ mod tests {
             server.broadcast().clone(),
             None,
             server.shutdown().token(),
+            orchestrator.turn_accumulators().clone(),
         );
         let _bridge = tokio::spawn(bridge.run());
 

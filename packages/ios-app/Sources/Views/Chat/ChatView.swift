@@ -307,7 +307,14 @@ struct ChatView: View {
             // React when connection transitions to connected
             if newState.isConnected && !oldState.isConnected {
                 Task {
-                    await viewModel.connectAndResume()
+                    if initialLoadComplete {
+                        // Reconnection after initial setup — use reconnect flow + reload messages
+                        await viewModel.reconnectAndResume()
+                        await viewModel.syncAndLoadMessagesForResume()
+                    } else {
+                        // First connection — use initial connect flow
+                        await viewModel.connectAndResume()
+                    }
                 }
             }
 
