@@ -213,19 +213,15 @@ struct WebFetchToolDetailSheet: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(Color.tronInfo)
-                    .frame(width: 3)
-
-                Text(parsed.answer)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(tint.body)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+            VStack(alignment: .leading, spacing: 8) {
+                let blocks = MarkdownBlockParser.parse(parsed.answer)
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    MarkdownBlockView(block: block, textColor: tint.body)
+                }
             }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
             .sectionFill(.tronInfo)
         }
     }
@@ -328,18 +324,15 @@ struct WebFetchToolDetailSheet: View {
                     .tint(.tronInfo)
             }
 
-            HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(Color.tronInfo)
-                    .frame(width: 3)
-
-                Text(answer)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(tint.body)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+            VStack(alignment: .leading, spacing: 8) {
+                let blocks = MarkdownBlockParser.parse(answer)
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    MarkdownBlockView(block: block, textColor: tint.body)
+                }
             }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
             .sectionFill(.tronInfo)
         }
     }
