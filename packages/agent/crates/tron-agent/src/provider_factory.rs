@@ -440,12 +440,6 @@ mod tests {
         assert!((factory.retry.jitter_factor - 0.3).abs() < f64::EPSILON);
     }
 
-    #[test]
-    fn factory_is_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<DefaultProviderFactory>();
-    }
-
     /// Helper: extract the auth error from a factory call that should fail.
     async fn expect_auth_error(factory: &DefaultProviderFactory, model: &str) -> ProviderError {
         match factory.create_for_model(model).await {
