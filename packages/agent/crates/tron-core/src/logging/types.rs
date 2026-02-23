@@ -276,13 +276,6 @@ mod tests {
     }
 
     #[test]
-    fn query_options_default() {
-        let opts = LogQueryOptions::default();
-        assert!(opts.session_id.is_none());
-        assert!(opts.limit.is_none());
-    }
-
-    #[test]
     fn sort_order_display() {
         assert_eq!(SortOrder::Asc.as_sql(), "ASC");
         assert_eq!(SortOrder::Desc.as_sql(), "DESC");

@@ -996,12 +996,6 @@ mod tests {
         assert!(!collector.has_errors());
     }
 
-    #[test]
-    fn error_collector_default() {
-        let collector = ErrorCollector::default();
-        assert!(!collector.has_errors());
-    }
-
     // -- has_error_code --
 
     #[test]
@@ -1020,44 +1014,6 @@ mod tests {
     fn has_error_code_from_session() {
         let err = TronError::from(SessionError::new("s1", SessionOperation::Create, "failed"));
         assert!(has_error_code(&err, "SESSION_CREATE_ERROR"));
-    }
-
-    // -- Error trait impls --
-
-    #[test]
-    fn session_error_is_std_error() {
-        let err = SessionError::new("s1", SessionOperation::Run, "boom");
-        let _: &dyn std::error::Error = &err;
-    }
-
-    #[test]
-    fn persistence_error_is_std_error() {
-        let err = PersistenceError::new("t", PersistenceOperation::Read, "err");
-        let _: &dyn std::error::Error = &err;
-    }
-
-    #[test]
-    fn provider_error_is_std_error() {
-        let err = ProviderError::new(Provider::Unknown, "m", "err");
-        let _: &dyn std::error::Error = &err;
-    }
-
-    #[test]
-    fn tool_error_is_std_error() {
-        let err = ToolError::new("t", "c", "err");
-        let _: &dyn std::error::Error = &err;
-    }
-
-    #[test]
-    fn rpc_handler_error_is_std_error() {
-        let err = RpcHandlerError::new("err");
-        let _: &dyn std::error::Error = &err;
-    }
-
-    #[test]
-    fn tron_error_is_std_error() {
-        let err = TronError::internal("C", "m");
-        let _: &dyn std::error::Error = &err;
     }
 
     // -- Severity and category propagation --

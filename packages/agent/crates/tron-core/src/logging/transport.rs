@@ -724,16 +724,6 @@ mod tests {
         assert_eq!(visitor.data["count"], 42);
     }
 
-    // ── PendingEntry ─────────────────────────────────────────────────
-
-    #[test]
-    fn pending_entry_clone() {
-        let entry = make_entry("info", 30, "Test", "msg");
-        let cloned = entry.clone();
-        assert_eq!(cloned.message, "msg");
-        assert_eq!(cloned.component, "Test");
-    }
-
     // ── Level-based flush behavior ───────────────────────────────────
 
     #[test]

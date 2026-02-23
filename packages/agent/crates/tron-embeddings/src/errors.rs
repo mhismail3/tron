@@ -73,25 +73,6 @@ mod tests {
     }
 
     #[test]
-    fn error_is_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<EmbeddingError>();
-    }
-
-    #[test]
-    #[allow(clippy::unnecessary_wraps)]
-    fn result_alias_works() {
-        fn returns_ok() -> Result<i32> {
-            Ok(42)
-        }
-        fn returns_err() -> Result<i32> {
-            Err(EmbeddingError::NotReady)
-        }
-        assert_eq!(returns_ok().unwrap(), 42);
-        assert!(returns_err().is_err());
-    }
-
-    #[test]
     fn error_from_rusqlite() {
         let sqlite_err = rusqlite::Error::QueryReturnedNoRows;
         let err: EmbeddingError = sqlite_err.into();

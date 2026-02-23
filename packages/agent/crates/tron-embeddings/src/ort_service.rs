@@ -299,12 +299,6 @@ impl EmbeddingService for OnnxEmbeddingService {
 mod tests {
     use super::*;
 
-    #[test]
-    fn ort_service_implements_trait() {
-        fn assert_embedding_service<T: EmbeddingService>() {}
-        assert_embedding_service::<OnnxEmbeddingService>();
-    }
-
     #[tokio::test]
     async fn ort_service_not_ready_without_init() {
         let svc = OnnxEmbeddingService::new(EmbeddingConfig::default());

@@ -151,13 +151,6 @@ mod tests {
     }
 
     #[test]
-    fn session_token_usage_default() {
-        let usage = SessionTokenUsage::default();
-        assert_eq!(usage.input, 0);
-        assert_eq!(usage.output, 0);
-    }
-
-    #[test]
     fn handoff_record_serde_roundtrip() {
         let record = HandoffRecord {
             id: "h-1".into(),

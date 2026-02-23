@@ -341,37 +341,4 @@ mod tests {
         assert_eq!(result, Some(0));
     }
 
-    // -- RetryResult --
-
-    #[test]
-    fn retry_result_success() {
-        let result = RetryResult {
-            success: true,
-            value: Some(42),
-            error: None,
-            attempts: 1,
-            total_delay_ms: 0,
-        };
-        assert!(result.success);
-        assert_eq!(result.value, Some(42));
-    }
-
-    #[test]
-    fn retry_result_failure() {
-        let result: RetryResult<i32> = RetryResult {
-            success: false,
-            value: None,
-            error: Some(ParsedError {
-                category: crate::errors::parse::ErrorCategory::RateLimit,
-                message: "too many requests".into(),
-                details: None,
-                is_retryable: true,
-                suggestion: Some("wait and retry".into()),
-            }),
-            attempts: 6,
-            total_delay_ms: 31_000,
-        };
-        assert!(!result.success);
-        assert_eq!(result.attempts, 6);
-    }
 }

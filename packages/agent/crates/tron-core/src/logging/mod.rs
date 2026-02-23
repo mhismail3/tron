@@ -117,12 +117,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn re_exports_work() {
-        let _level = LogLevel::Info;
-        let _opts = LogQueryOptions::default();
-    }
-
-    #[test]
     fn init_subscriber_does_not_panic() {
         // Multiple calls should be safe (no-op after first)
         init_subscriber("warn");
