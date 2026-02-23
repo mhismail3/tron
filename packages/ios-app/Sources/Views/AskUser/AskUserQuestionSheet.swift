@@ -36,13 +36,18 @@ struct AskUserQuestionSheet: View {
                     // Single question - simple scrollable content
                     singleQuestionView
                 } else {
-                    // Multiple questions - TabView with scrollable cards + bottom dots
+                    // Multiple questions - TabView with scrollable cards
                     multipleQuestionsView
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
+                if questions.count > 1 {
+                    ToolbarItem(placement: .topBarLeading) {
+                        pageIndicators
+                    }
+                }
                 ToolbarItem(placement: .principal) {
                     Text(readOnly ? "Answers" : "Questions")
                         .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
@@ -96,34 +101,27 @@ struct AskUserQuestionSheet: View {
     // MARK: - Multiple Questions View
 
     private var multipleQuestionsView: some View {
-        VStack(spacing: 0) {
-            // TabView takes available space
-            TabView(selection: $currentQuestionIndex) {
-                ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
-                    ScrollView(.vertical) {
-                        QuestionCardView(
-                            question: question,
-                            answer: binding(for: question),
-                            questionNumber: index + 1,
-                            totalQuestions: questions.count,
-                            status: toolData.status,
-                            readOnly: readOnly
-                        )
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
-                        .padding(.bottom, 24)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .tag(index)
+        TabView(selection: $currentQuestionIndex) {
+            ForEach(Array(questions.enumerated()), id: \.element.id) { index, question in
+                ScrollView(.vertical) {
+                    QuestionCardView(
+                        question: question,
+                        answer: binding(for: question),
+                        questionNumber: index + 1,
+                        totalQuestions: questions.count,
+                        status: toolData.status,
+                        readOnly: readOnly
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 24)
                 }
+                .scrollBounceBehavior(.basedOnSize)
+                .tag(index)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
-
-            // Page indicators pinned at bottom
-            pageIndicators
-                .padding(.bottom, 16)
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .animation(.easeInOut(duration: 0.2), value: currentQuestionIndex)
     }
 
     // MARK: - Page Indicators
@@ -143,7 +141,6 @@ struct AskUserQuestionSheet: View {
                     }
             }
         }
-        .padding(.vertical, 12)
     }
 
     private func dotColor(for index: Int) -> Color {
