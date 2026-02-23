@@ -281,7 +281,8 @@ struct ContextAuditView: View {
                             VStack(spacing: 10) {
                                 SystemPromptSection(
                                     tokens: snapshot.breakdown.systemPrompt,
-                                    content: snapshot.systemPromptContent
+                                    content: snapshot.systemPromptContent,
+                                    environment: snapshot.environment
                                 )
 
                                 ToolsSection(

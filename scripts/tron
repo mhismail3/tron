@@ -59,6 +59,8 @@ INSTALLED_BINARY="$TRON_HOME/tron"
 # Service configuration
 PLIST_NAME="com.tron.server"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+BETA_PLIST_NAME="com.tron.server.beta"
+BETA_PLIST_PATH="$HOME/Library/LaunchAgents/$BETA_PLIST_NAME.plist"
 PROD_PORT=9847
 DEV_PORT=9846
 
@@ -220,6 +222,84 @@ service_stop() {
     fi
 }
 
+# Beta service helpers
+beta_service_is_running() {
+    launchctl list 2>/dev/null | grep -q "$BETA_PLIST_NAME"
+}
+
+beta_service_start() {
+    if [ ! -f "$RELEASE_BINARY" ]; then
+        print_error "No release binary found. Build first with: tron dev -b"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$DEV_LOG_FILE")"
+
+    # Always regenerate the plist (binary path or env may have changed)
+    create_beta_launchd_plist
+
+    if beta_service_is_running; then
+        # Already loaded — just restart it (picks up new binary)
+        print_status "Restarting beta service..."
+        launchctl unload "$BETA_PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    : > "$DEV_LOG_FILE"
+    launchctl load "$BETA_PLIST_PATH"
+
+    # kickstart to run immediately (RunAtLoad is false)
+    launchctl kickstart "gui/$(id -u)/$BETA_PLIST_NAME" 2>/dev/null || true
+    sleep 2
+
+    local pid
+    pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$pid" ]; then
+        print_success "Beta service running (PID: $pid)"
+        echo "  Server: http://localhost:$DEV_PORT"
+        echo "  Health: http://localhost:$DEV_PORT/health"
+        echo "  Log:    $DEV_LOG_FILE"
+        echo ""
+        echo "  Stop with: tron dev --stop"
+        echo "  Tail log:  tron dev --log"
+        echo ""
+        echo "  Auto-restarts on crash and deploy restart."
+    else
+        print_error "Beta service failed to start. Check: tron dev --log"
+        return 1
+    fi
+}
+
+beta_service_stop() {
+    if ! beta_service_is_running; then
+        # Also check for stale processes on the port
+        local pid
+        pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$pid" ]; then
+            print_status "Stopping stale process on port $DEV_PORT (PID: $pid)..."
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+            rm -f "$DEV_PID_FILE"
+            print_success "Stopped"
+            return 0
+        fi
+        print_warning "Beta service is not running"
+        return 0
+    fi
+
+    print_status "Stopping beta service..."
+    launchctl unload "$BETA_PLIST_PATH" 2>/dev/null || true
+    sleep 1
+
+    if ! beta_service_is_running; then
+        print_success "Beta service stopped"
+    else
+        print_error "Failed to stop beta service"
+        return 1
+    fi
+}
+
 health_check() {
     local response
     response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PROD_PORT/health" 2>/dev/null || echo "000")
@@ -262,6 +342,8 @@ create_launchd_plist() {
         <string>$HOME</string>
         <key>TRON_DATA_DIR</key>
         <string>$TRON_HOME</string>
+        <key>TRON_REPO_ROOT</key>
+        <string>$RUST_WORKSPACE</string>
         <key>RUST_LOG</key>
         <string>info</string>
     </dict>
@@ -271,6 +353,64 @@ create_launchd_plist() {
 
     <key>StandardErrorPath</key>
     <string>$PROD_LOG_FILE</string>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>
+PLIST
+}
+
+create_beta_launchd_plist() {
+    cat > "$BETA_PLIST_PATH" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$BETA_PLIST_NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>$RELEASE_BINARY</string>
+        <string>--port</string>
+        <string>$DEV_PORT</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>TRON_DATA_DIR</key>
+        <string>$TRON_HOME</string>
+        <key>TRON_REPO_ROOT</key>
+        <string>$RUST_WORKSPACE</string>
+        <key>RUST_LOG</key>
+        <string>debug</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>$DEV_LOG_FILE</string>
+
+    <key>StandardErrorPath</key>
+    <string>$DEV_LOG_FILE</string>
 
     <key>SoftResourceLimits</key>
     <dict>
@@ -471,16 +611,16 @@ cmd_dev() {
                 echo "Options:"
                 echo "  -b, --build     Build before starting"
                 echo "  -t, --test      Run tests before starting"
-                echo "  -d, --daemon    Run in background (log to $DEV_LOG_FILE)"
-                echo "  --stop          Stop background dev server"
+                echo "  -d, --daemon    Run as launchd service (auto-restarts on crash/deploy)"
+                echo "  --stop          Stop dev server (launchd or foreground)"
                 echo "  --log           Tail the dev log"
                 echo ""
                 echo "Examples:"
-                echo "  tron dev          # Foreground (auto-builds local changes)"
+                echo "  tron dev          # Foreground (cargo run, auto-builds local changes)"
                 echo "  tron dev -b       # Explicit build then foreground"
-                echo "  tron dev -bd      # Build then background"
+                echo "  tron dev -bd      # Build then background (launchd, survives deploys)"
                 echo "  tron dev -bt      # Build, test, then foreground"
-                echo "  tron dev --stop   # Stop background server"
+                echo "  tron dev --stop   # Stop dev server"
                 echo ""
                 return 0
                 ;;
@@ -503,19 +643,19 @@ cmd_dev() {
         fi
     fi
 
-    # Check if something is already listening on the dev port
-    local existing_pid
-    existing_pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
-    if [ -n "$existing_pid" ]; then
-        print_error "Port $DEV_PORT already in use (PID: $existing_pid)"
-        echo "  Stop it with: tron dev --stop"
-        return 1
-    fi
-
-    if [ "$daemon" = true ]; then
-        dev_start_daemon
-    else
+    # For foreground mode, check port isn't in use
+    if [ "$daemon" = false ]; then
+        local existing_pid
+        existing_pid=$(lsof -t -i :$DEV_PORT -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$existing_pid" ]; then
+            print_error "Port $DEV_PORT already in use (PID: $existing_pid)"
+            echo "  Stop it with: tron dev --stop"
+            return 1
+        fi
         dev_start_foreground
+    else
+        # Daemon mode: use launchd beta service (auto-restarts on crash/deploy)
+        beta_service_start
     fi
 }
 
@@ -533,51 +673,21 @@ dev_start_foreground() {
     RUST_LOG="${RUST_LOG:-debug}" exec cargo run --release --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron -- --port "$DEV_PORT"
 }
 
-dev_start_daemon() {
-    if [ ! -f "$RELEASE_BINARY" ]; then
-        print_error "No release binary found. Build first: tron dev -bd"
-        return 1
-    fi
-
-    mkdir -p "$(dirname "$DEV_LOG_FILE")"
-    : > "$DEV_LOG_FILE"
-
-    RUST_LOG="${RUST_LOG:-debug}" nohup "$RELEASE_BINARY" --port "$DEV_PORT" \
-        >> "$DEV_LOG_FILE" 2>&1 &
-    local pid=$!
-    echo "$pid" > "$DEV_PID_FILE"
-
-    # Wait briefly and verify it started
-    sleep 2
-    if kill -0 "$pid" 2>/dev/null; then
-        echo ""
-        print_success "Dev server running in background (PID: $pid)"
-        echo "  Server: http://localhost:$DEV_PORT"
-        echo "  Health: http://localhost:$DEV_PORT/health"
-        echo "  Log:    $DEV_LOG_FILE"
-        echo ""
-        echo "  Stop with: tron dev --stop"
-        echo "  Tail log:  tron dev --log"
-        echo ""
-    else
-        print_error "Dev server failed to start. Check log:"
-        echo "  $DEV_LOG_FILE"
-        rm -f "$DEV_PID_FILE"
-        return 1
-    fi
-}
-
 dev_stop() {
-    local pid
+    # Try launchd beta service first
+    if beta_service_is_running; then
+        beta_service_stop
+        return
+    fi
 
-    # Try PID file first
+    # Legacy: try PID file from old nohup mode
+    local pid
     if [ -f "$DEV_PID_FILE" ]; then
         pid=$(cat "$DEV_PID_FILE")
         if kill -0 "$pid" 2>/dev/null; then
             print_status "Stopping dev server (PID: $pid)..."
             kill "$pid"
             sleep 1
-            # Force kill if still running
             if kill -0 "$pid" 2>/dev/null; then
                 kill -9 "$pid" 2>/dev/null || true
             fi
@@ -1098,8 +1208,15 @@ cmd_uninstall() {
         sleep 1
     fi
 
-    print_status "Removing launchd service..."
+    # Also stop beta service if running
+    if beta_service_is_running; then
+        print_status "Stopping beta service..."
+        launchctl unload "$BETA_PLIST_PATH" 2>/dev/null || true
+    fi
+
+    print_status "Removing launchd services..."
     rm -f "$PLIST_PATH"
+    rm -f "$BETA_PLIST_PATH"
 
     print_status "Removing CLI..."
     rm -f "$BIN_DIR/tron"

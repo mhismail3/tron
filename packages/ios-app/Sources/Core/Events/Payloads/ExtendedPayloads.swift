@@ -247,6 +247,12 @@ struct DetailedMessageInfo: Codable, Identifiable {
     }
 }
 
+/// Environment metadata for a session.
+struct EnvironmentInfo: Codable {
+    let workingDirectory: String?
+    let serverOrigin: String?
+}
+
 /// Result from context.getDetailedSnapshot RPC method
 struct DetailedContextSnapshotResult: Codable {
     let currentTokens: Int
@@ -270,6 +276,10 @@ struct DetailedContextSnapshotResult: Codable {
     let sessionMemories: LoadedMemory?
     /// Task context summary (if tasks exist)
     let taskContext: LoadedTaskContext?
+    /// Full composed system prompt as sent to the LLM (single source of truth via compose_context_parts)
+    let composedSystemPrompt: String?
+    /// Environment metadata (working directory, server origin)
+    let environment: EnvironmentInfo?
 }
 
 /// A single auto-injected memory entry

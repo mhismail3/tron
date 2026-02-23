@@ -873,6 +873,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let si = GoogleProvider::build_system_instruction(&context);
         assert!(si.is_none());
@@ -891,6 +892,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let si = GoogleProvider::build_system_instruction(&context).unwrap();
         assert_eq!(si.parts.len(), 1);
@@ -913,6 +915,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
@@ -946,6 +949,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
@@ -981,6 +985,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);
@@ -1005,6 +1010,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let opts = ProviderStreamOptions::default();
         let gc = provider.build_generation_config(&opts);

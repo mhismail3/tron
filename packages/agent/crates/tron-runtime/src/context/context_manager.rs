@@ -525,6 +525,31 @@ impl ContextManager {
         self.trigger_compaction_if_needed();
     }
 
+    // ── Context construction ────────────────────────────────────────────
+
+    /// Build the stable portion of a [`Context`] from managed state.
+    ///
+    /// Includes: `system_prompt`, `working_directory`, `rules_content`,
+    /// `memory_content`, `dynamic_rules_context`. Callers fill in external
+    /// fields (`messages`, `tools`, `skill_context`, `task_context`,
+    /// `subagent_results_context`, `server_origin`).
+    #[must_use]
+    pub fn build_base_context(&self) -> tron_core::messages::Context {
+        tron_core::messages::Context {
+            system_prompt: Some(self.get_system_prompt().to_owned()),
+            messages: vec![],
+            tools: None,
+            working_directory: Some(self.get_working_directory().to_owned()),
+            rules_content: self.get_rules_content().map(String::from),
+            memory_content: self.get_full_memory_content(),
+            skill_context: None,
+            subagent_results_context: None,
+            task_context: None,
+            dynamic_rules_context: self.get_dynamic_rules_content().map(String::from),
+            server_origin: None,
+        }
+    }
+
     // ── Export ───────────────────────────────────────────────────────────
 
     #[must_use]
@@ -1299,6 +1324,79 @@ mod tests {
     fn messages_slice_empty_on_new() {
         let cm = ContextManager::new(test_config());
         assert!(cm.messages_slice().is_empty());
+    }
+
+    // -- build_base_context --
+
+    #[test]
+    fn build_base_context_has_system_prompt() {
+        let cm = ContextManager::new(test_config());
+        let ctx = cm.build_base_context();
+        assert_eq!(ctx.system_prompt.as_deref(), Some("You are helpful."));
+    }
+
+    #[test]
+    fn build_base_context_has_working_directory() {
+        let cm = ContextManager::new(test_config());
+        let ctx = cm.build_base_context();
+        assert_eq!(ctx.working_directory.as_deref(), Some("/tmp"));
+    }
+
+    #[test]
+    fn build_base_context_includes_rules() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_rules_content(Some("# My Rules".into()));
+        let ctx = cm.build_base_context();
+        assert_eq!(ctx.rules_content.as_deref(), Some("# My Rules"));
+    }
+
+    #[test]
+    fn build_base_context_includes_memory() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_memory_content(Some("Remember this.".into()));
+        let ctx = cm.build_base_context();
+        assert_eq!(ctx.memory_content.as_deref(), Some("Remember this."));
+    }
+
+    #[test]
+    fn build_base_context_includes_dynamic_rules() {
+        let mut cm = ContextManager::new(test_config());
+        cm.set_dynamic_rules_content(Some("dynamic rule".into()));
+        let ctx = cm.build_base_context();
+        assert_eq!(ctx.dynamic_rules_context.as_deref(), Some("dynamic rule"));
+    }
+
+    #[test]
+    fn build_base_context_none_fields_are_none() {
+        let cm = ContextManager::new(test_config());
+        let ctx = cm.build_base_context();
+        assert!(ctx.skill_context.is_none());
+        assert!(ctx.task_context.is_none());
+        assert!(ctx.subagent_results_context.is_none());
+        assert!(ctx.server_origin.is_none());
+    }
+
+    #[test]
+    fn build_base_context_no_rules_no_memory() {
+        let cm = ContextManager::new(test_config());
+        let ctx = cm.build_base_context();
+        assert!(ctx.rules_content.is_none());
+        assert!(ctx.memory_content.is_none());
+    }
+
+    #[test]
+    fn build_base_context_messages_empty() {
+        let mut cm = ContextManager::new(test_config());
+        cm.add_message(Message::user("hi"));
+        let ctx = cm.build_base_context();
+        assert!(ctx.messages.is_empty());
+    }
+
+    #[test]
+    fn build_base_context_tools_none() {
+        let cm = ContextManager::new(test_config());
+        let ctx = cm.build_base_context();
+        assert!(ctx.tools.is_none());
     }
 
     // -- touch_file_path returns only new activations --

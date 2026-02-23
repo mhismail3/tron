@@ -14,6 +14,7 @@
 #![deny(unsafe_code)]
 
 pub mod config;
+pub mod deploy;
 pub mod health;
 pub mod metrics;
 pub mod platform;

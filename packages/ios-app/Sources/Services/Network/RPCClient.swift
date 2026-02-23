@@ -120,7 +120,7 @@ final class RPCClient: RPCTransport {
         // Also check connection state to prevent races during state transitions.
         // If we're already connecting or reconnecting, don't start another connection.
         switch connectionState {
-        case .connected, .connecting, .reconnecting:
+        case .connected, .connecting, .reconnecting, .deployRestarting:
             logger.debug("Connection already in progress (\(connectionState)), skipping", category: .rpc)
             return
         case .disconnected, .failed:
@@ -241,6 +241,14 @@ final class RPCClient: RPCTransport {
         if eventType == ConnectedPlugin.eventType,
            let result = eventV2.getResult() as? ConnectedPlugin.Result {
             logger.info("Server version: \(result.version ?? "unknown")", category: .rpc)
+        }
+
+        // Handle server restart notification at the transport level
+        // (sets deploy-aware reconnection before any ChatViewModel sees the event)
+        if eventType == ServerRestartingPlugin.eventType,
+           let result = eventV2.getResult() as? ServerRestartingPlugin.Result {
+            logger.info("Server restarting: reason=\(result.reason), commit=\(result.commit), expectedMs=\(result.restartExpectedMs)", category: .rpc)
+            webSocket?.setDeployRestarting(expectedMs: result.restartExpectedMs)
         }
 
         // Publish event to async stream

@@ -890,6 +890,12 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleAreaDeletedCalled = true
     }
 
+    // MARK: - Server
+    var handleServerRestartingCalledWith: ServerRestartingPlugin.Result?
+    func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
+        handleServerRestartingCalledWith = result
+    }
+
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

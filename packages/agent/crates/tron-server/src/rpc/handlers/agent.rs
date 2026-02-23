@@ -567,6 +567,7 @@ impl MethodHandler for PromptHandler {
             let spells_clone = spells.clone();
             let raw_skills_clone = raw_skills_json.clone();
             let raw_spells_clone = raw_spells_json.clone();
+            let server_origin = ctx.origin.clone();
 
             let handle = tokio::spawn(async move {
                 use tron_runtime::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
@@ -780,6 +781,7 @@ impl MethodHandler for PromptHandler {
                 let config = AgentConfig {
                     model: model.clone(),
                     working_directory: Some(working_dir),
+                    server_origin: Some(server_origin),
                     enable_thinking: true,
                     max_turns: settings.agent.max_turns,
                     compaction: tron_runtime::context::types::CompactionConfig {

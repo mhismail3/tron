@@ -72,6 +72,8 @@ pub struct TurnParams<'a> {
     pub health_tracker: Option<&'a Arc<ProviderHealthTracker>>,
     /// Workspace ID for scoping tool context (e.g. memory recall).
     pub workspace_id: Option<&'a str>,
+    /// Server origin (e.g. `"localhost:9847"`) for system prompt.
+    pub server_origin: Option<&'a str>,
 }
 
 /// Execute a single turn of the agent loop.
@@ -97,6 +99,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         retry_config,
         health_tracker,
         workspace_id,
+        server_origin,
     } = params;
     let turn_start = Instant::now();
 
@@ -142,24 +145,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     }
     debug!(session_id, turn, "turn started");
 
-    // 3. Build context
-    let messages = context_manager.get_messages();
-    let context = tron_core::messages::Context {
-        system_prompt: Some(context_manager.get_system_prompt().to_owned()),
-        messages,
-        tools: Some(registry.definitions()),
-        working_directory: Some(context_manager.get_working_directory().to_owned()),
-        rules_content: context_manager.get_rules_content().map(String::from),
-        memory_content: context_manager.get_full_memory_content(),
-        skill_context: run_context.skill_context.clone(),
-        subagent_results_context: run_context.subagent_results.clone(),
-        task_context: run_context.task_context.clone(),
-        dynamic_rules_context: run_context.dynamic_rules_context.clone().or_else(|| {
-            context_manager
-                .get_dynamic_rules_content()
-                .map(String::from)
-        }),
-    };
+    // 3. Build context (base from CM, external fields from RunContext/params)
+    let mut context = context_manager.build_base_context();
+    context.messages = context_manager.get_messages();
+    context.tools = Some(registry.definitions());
+    context.skill_context = run_context.skill_context.clone();
+    context.subagent_results_context = run_context.subagent_results.clone();
+    context.task_context = run_context.task_context.clone();
+    context.dynamic_rules_context = run_context
+        .dynamic_rules_context
+        .clone()
+        .or(context.dynamic_rules_context);
+    context.server_origin = server_origin.map(String::from);
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
     let stream_options = ProviderStreamOptions {

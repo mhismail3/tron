@@ -195,6 +195,20 @@ extension ChatViewModel {
         logInfo("Agent ready - post-processing complete")
     }
 
+    func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
+        logger.info("Server restarting: reason=\(result.reason), commit=\(result.commit), expectedMs=\(result.restartExpectedMs)", category: .events)
+
+        // Reset processing state — the server is shutting down, so any in-progress
+        // agent run is about to be interrupted. Clear state now for a clean slate.
+        if agentPhase != .idle {
+            agentPhase = .idle
+        }
+        isCompacting = false
+        compactionInProgressMessageId = nil
+        postProcessingTimeoutTask?.cancel()
+        postProcessingTimeoutTask = nil
+    }
+
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {
         logger.info("Compaction started (reason: \(pluginResult.reason))", category: .events)
 

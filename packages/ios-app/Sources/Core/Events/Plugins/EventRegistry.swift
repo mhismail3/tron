@@ -135,6 +135,9 @@ final class EventRegistry: @unchecked Sendable {
         // Agent turn events
         register(AgentTurnPlugin.self)
 
+        // Server events
+        register(ServerRestartingPlugin.self)
+
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 

@@ -206,6 +206,16 @@ struct ConnectionIndicator: View {
                         .scaleEffect(1.5)
                         .opacity(0.5)
                 )
+        case .deployRestarting:
+            Circle()
+                .fill(Color.tronInfo)
+                .frame(width: 8, height: 8)
+                .overlay(
+                    Circle()
+                        .stroke(Color.tronInfo.opacity(0.5), lineWidth: 2)
+                        .scaleEffect(1.5)
+                        .opacity(0.5)
+                )
         case .disconnected:
             Circle()
                 .fill(Color.tronTextMuted)

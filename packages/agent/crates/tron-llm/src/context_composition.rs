@@ -67,6 +67,13 @@ pub fn compose_context_parts(context: &Context) -> Vec<String> {
         }
     }
 
+    // Environment details: server origin + working directory
+    if let Some(ref origin) = context.server_origin {
+        if !origin.is_empty() {
+            parts.push(format!("Server: {origin}"));
+        }
+    }
+
     if let Some(ref wd) = context.working_directory {
         if !wd.is_empty() {
             parts.push(format!("Current working directory: {wd}"));
@@ -114,6 +121,13 @@ pub fn compose_context_parts_grouped(context: &Context) -> GroupedContextParts {
     if let Some(ref memory) = context.memory_content {
         if !memory.is_empty() {
             stable.push(memory.clone());
+        }
+    }
+
+    // Environment details: server origin + working directory
+    if let Some(ref origin) = context.server_origin {
+        if !origin.is_empty() {
+            stable.push(format!("Server: {origin}"));
         }
     }
 
@@ -171,6 +185,7 @@ mod tests {
             subagent_results_context: None,
             task_context: Some("Task #1: Fix the bug".into()),
             dynamic_rules_context: Some("Rule: no console.log".into()),
+            server_origin: None,
         }
     }
 
@@ -208,6 +223,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
         assert!(parts.is_empty());
@@ -226,6 +242,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
@@ -245,6 +262,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let parts = compose_context_parts(&ctx);
         assert_eq!(parts.len(), 1);
@@ -288,6 +306,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());
@@ -307,9 +326,37 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert_eq!(grouped.stable.len(), 2);
+        assert!(grouped.volatile.is_empty());
+    }
+
+    #[test]
+    fn compose_parts_with_server_origin() {
+        let ctx = Context {
+            server_origin: Some("localhost:9847".into()),
+            working_directory: Some("/Users/test/project".into()),
+            ..Default::default()
+        };
+        let parts = compose_context_parts(&ctx);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], "Server: localhost:9847");
+        assert_eq!(parts[1], "Current working directory: /Users/test/project");
+    }
+
+    #[test]
+    fn grouped_server_origin_is_stable() {
+        let ctx = Context {
+            server_origin: Some("localhost:9846".into()),
+            working_directory: Some("/tmp".into()),
+            ..Default::default()
+        };
+        let grouped = compose_context_parts_grouped(&ctx);
+        assert_eq!(grouped.stable.len(), 2);
+        assert_eq!(grouped.stable[0], "Server: localhost:9846");
+        assert_eq!(grouped.stable[1], "Current working directory: /tmp");
         assert!(grouped.volatile.is_empty());
     }
 
@@ -326,6 +373,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let grouped = compose_context_parts_grouped(&ctx);
         assert!(grouped.stable.is_empty());

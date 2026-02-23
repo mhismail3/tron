@@ -8,6 +8,7 @@ enum ConnectionState: Equatable, Sendable {
     case connecting
     case connected
     case reconnecting(attempt: Int, nextRetrySeconds: Int)  // Enhanced with countdown
+    case deployRestarting(remainingSeconds: Int)  // Server deploying, patient reconnection
     case failed(reason: String)
 
     var isConnected: Bool {
@@ -16,8 +17,10 @@ enum ConnectionState: Equatable, Sendable {
     }
 
     var isReconnecting: Bool {
-        if case .reconnecting = self { return true }
-        return false
+        switch self {
+        case .reconnecting, .deployRestarting: return true
+        default: return false
+        }
     }
 
     /// Whether the user can interact with the session (send messages, etc.)
@@ -33,6 +36,7 @@ enum ConnectionState: Equatable, Sendable {
         case .connecting: return "Connecting..."
         case .connected: return "Connected"
         case .reconnecting(let attempt, let seconds): return "Reconnecting (\(attempt)) in \(seconds)s..."
+        case .deployRestarting(let seconds): return "Server deploying... \(seconds)s"
         case .failed(let reason): return "Failed: \(reason)"
         }
     }
@@ -95,6 +99,15 @@ final class WebSocketService {
     /// Tracks whether the app is in the background to pause heartbeats and save battery
     /// Note: We only pause heartbeats, we don't disconnect - reconnecting is expensive and error-prone
     private var isInBackground = false
+
+    // MARK: - Deploy Restart State
+
+    /// Set when the server broadcasts `server.restarting` before a deploy shutdown.
+    /// Triggers patient reconnection instead of the normal 3-attempt reconnect.
+    private var isDeployRestarting = false
+
+    /// Expected total restart time in milliseconds (from server event).
+    private var deployRestartExpectedMs: Int = 0
 
     init(serverURL: URL) {
         self.serverURL = serverURL
@@ -160,6 +173,8 @@ final class WebSocketService {
         logger.logWebSocketState("Disconnecting")
         logger.info("Disconnecting from server", category: .websocket)
         isConnectedFlag = false
+        isDeployRestarting = false
+        deployRestartExpectedMs = 0
 
         // Cancel all background tasks
         pingTask?.cancel()
@@ -201,6 +216,18 @@ final class WebSocketService {
         } else {
             logger.info("App returning to foreground - resuming heartbeats", category: .websocket)
         }
+    }
+
+    /// Signal that the server is about to restart for a deploy.
+    /// Sets deploy-aware reconnection mode — more patient than normal reconnection.
+    /// Called when the `server.restarting` event is received.
+    func setDeployRestarting(expectedMs: Int) {
+        isDeployRestarting = true
+        deployRestartExpectedMs = expectedMs
+        // Show deploy state immediately (even though connection is still alive for now)
+        let totalExpectedSeconds = max(1, (expectedMs + 5000) / 1000) // server delay + startup buffer
+        connectionState = .deployRestarting(remainingSeconds: totalExpectedSeconds)
+        logger.info("Deploy restart signaled: expectedMs=\(expectedMs), totalExpected=\(totalExpectedSeconds)s", category: .websocket)
     }
 
     /// Verify connection is alive by sending a ping.
@@ -468,9 +495,16 @@ final class WebSocketService {
             return
         }
 
-        // Start persistent reconnection in a tracked task
-        reconnectTask = Task { [weak self] in
-            await self?.startReconnection()
+        // Use deploy-aware reconnection if we received server.restarting
+        if isDeployRestarting {
+            reconnectTask = Task { [weak self] in
+                await self?.startDeployReconnection()
+            }
+        } else {
+            // Start persistent reconnection in a tracked task
+            reconnectTask = Task { [weak self] in
+                await self?.startReconnection()
+            }
         }
     }
 
@@ -511,6 +545,64 @@ final class WebSocketService {
         }
     }
 
+    /// Deploy-aware reconnection — waits for the server to restart, then reconnects with more patience.
+    /// Uses 10 attempts (vs 3 for normal) with 3s delays (vs 5s) since we know the server is coming back.
+    private func startDeployReconnection() async {
+        let maxDeployAttempts = 10
+        let deployRetryDelay: TimeInterval = 3.0
+
+        // Phase 1: Wait for the server to finish shutting down and restarting.
+        // Show countdown during expected restart time.
+        let totalWaitSeconds = max(1, (deployRestartExpectedMs + 5000) / 1000)
+        logger.info("Deploy reconnection: waiting \(totalWaitSeconds)s for server restart", category: .websocket)
+
+        var remainingSeconds = totalWaitSeconds
+        while remainingSeconds > 0 && !Task.isCancelled {
+            connectionState = .deployRestarting(remainingSeconds: remainingSeconds)
+            try? await Task.sleep(for: .seconds(1))
+            remainingSeconds -= 1
+        }
+
+        guard !Task.isCancelled else { return }
+        connectionState = .deployRestarting(remainingSeconds: 0)
+
+        // Phase 2: Attempt to reconnect.
+        reconnectAttempts = 0
+        while reconnectAttempts < maxDeployAttempts && !isConnectedFlag && !Task.isCancelled {
+            reconnectAttempts += 1
+            logger.info("Deploy reconnect attempt \(reconnectAttempts)/\(maxDeployAttempts)", category: .websocket)
+
+            connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: 0)
+            await connect()
+
+            if isConnectedFlag {
+                logger.info("Deploy reconnection successful on attempt \(reconnectAttempts)", category: .websocket)
+                isDeployRestarting = false
+                deployRestartExpectedMs = 0
+                reconnectAttempts = 0
+                return
+            }
+
+            // Wait before next attempt
+            if reconnectAttempts < maxDeployAttempts && !Task.isCancelled {
+                var delay = Int(deployRetryDelay)
+                while delay > 0 && !isConnectedFlag && !Task.isCancelled {
+                    connectionState = .reconnecting(attempt: reconnectAttempts, nextRetrySeconds: delay)
+                    try? await Task.sleep(for: .seconds(1))
+                    delay -= 1
+                }
+            }
+        }
+
+        // Exhausted all deploy reconnection attempts
+        if !isConnectedFlag && !Task.isCancelled {
+            logger.warning("Deploy reconnection failed after \(maxDeployAttempts) attempts", category: .websocket)
+            isDeployRestarting = false
+            deployRestartExpectedMs = 0
+            connectionState = .failed(reason: "Server deploy failed - tap to retry")
+        }
+    }
+
     /// Manual retry triggered from UI - resets attempt counter for fresh backoff
     func manualRetry() async {
         guard !isConnectedFlag && !isConnectionInProgress else {
@@ -522,8 +614,10 @@ final class WebSocketService {
         reconnectTask?.cancel()
         reconnectTask = nil
 
-        // Reset attempt counter for fresh backoff
+        // Reset attempt counter and deploy state for fresh connection
         reconnectAttempts = 0
+        isDeployRestarting = false
+        deployRestartExpectedMs = 0
         connectionState = .connecting
         logger.info("Manual retry triggered", category: .websocket)
 

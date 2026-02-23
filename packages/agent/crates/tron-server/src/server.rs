@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use crate::rpc::context::RpcContext;
@@ -11,7 +12,7 @@ use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use axum::routing::get;
+use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
@@ -61,6 +62,8 @@ pub struct AppState {
     pub config: ServerConfig,
     /// Prometheus metrics handle for rendering.
     pub metrics_handle: Arc<PrometheusHandle>,
+    /// Guard preventing double-restart during deploy.
+    pub deploy_restart_initiated: Arc<AtomicBool>,
 }
 
 /// The main Tron server.
@@ -71,6 +74,7 @@ pub struct TronServer {
     shutdown: Arc<ShutdownCoordinator>,
     rpc_context: Arc<RpcContext>,
     metrics_handle: Arc<PrometheusHandle>,
+    deploy_restart_initiated: Arc<AtomicBool>,
     start_time: Instant,
 }
 
@@ -92,6 +96,7 @@ impl TronServer {
             shutdown,
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
+            deploy_restart_initiated: Arc::new(AtomicBool::new(false)),
             start_time: Instant::now(),
         }
     }
@@ -106,12 +111,15 @@ impl TronServer {
             rpc_context: self.rpc_context.clone(),
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
+            deploy_restart_initiated: self.deploy_restart_initiated.clone(),
         };
 
         Router::new()
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
             .route("/ws", get(ws_upgrade_handler))
+            .route("/deploy/status", get(crate::deploy::status_handler))
+            .route("/deploy/restart", post(crate::deploy::restart_handler))
             .with_state(state)
             // Outermost layers execute first on request, last on response.
             .layer(CatchPanicLayer::new())
@@ -177,6 +185,11 @@ impl TronServer {
     /// Get the RPC context.
     pub fn rpc_context(&self) -> &Arc<RpcContext> {
         &self.rpc_context
+    }
+
+    /// Get the deploy restart initiated flag.
+    pub fn deploy_restart_initiated(&self) -> &Arc<AtomicBool> {
+        &self.deploy_restart_initiated
     }
 }
 

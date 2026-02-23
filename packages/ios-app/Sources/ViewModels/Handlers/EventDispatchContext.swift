@@ -68,6 +68,10 @@ import Foundation
     func handleAreaDeleted(_ result: AreaDeletedPlugin.Result)
 }
 
+@MainActor protocol ServerEventHandler: AnyObject {
+    func handleServerRestarting(_ result: ServerRestartingPlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -80,5 +84,6 @@ import Foundation
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-    UICanvasEventHandler, TaskEventHandler, EventDispatchLogger {}
+    UICanvasEventHandler, TaskEventHandler, ServerEventHandler,
+    EventDispatchLogger {}
 

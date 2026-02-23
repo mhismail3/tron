@@ -2,14 +2,17 @@
 //! previewCompaction, confirmCompaction, canAcceptTurn, clear, compact.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use parking_lot::RwLock;
 use serde_json::{Value, json};
 use tracing::instrument;
 
 use tron_runtime::context::context_manager::ContextManager;
 use tron_runtime::context::summarizer::KeywordSummarizer;
 use tron_runtime::context::types::{CompactionConfig, ContextManagerConfig};
+use tron_skills::registry::SkillRegistry;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
@@ -109,6 +112,30 @@ fn build_context_manager_for_session(
         artifacts,
         context_manager: cm,
     })
+}
+
+// =============================================================================
+// Skill context helper
+// =============================================================================
+
+/// Build skill context from active skill names using the shared registry.
+///
+/// Returns `None` when no matching skills are found or the result is empty.
+fn build_active_skill_context(
+    skill_names: &[String],
+    skill_registry: &Arc<RwLock<SkillRegistry>>,
+) -> Option<String> {
+    if skill_names.is_empty() {
+        return None;
+    }
+    let registry = skill_registry.read();
+    let name_refs: Vec<&str> = skill_names.iter().map(String::as_str).collect();
+    let (found, _) = registry.get_many(&name_refs);
+    if found.is_empty() {
+        return None;
+    }
+    let ctx = tron_skills::injector::build_skill_context(&found);
+    if ctx.is_empty() { None } else { Some(ctx) }
 }
 
 // =============================================================================
@@ -251,6 +278,25 @@ impl MethodHandler for GetDetailedSnapshotHandler {
                 .collect()
         };
 
+        // Build composed system prompt using the SAME composition path as the LLM.
+        // This is the single source of truth — compose_context_parts() is the sole
+        // authority on what goes into the system prompt.
+        let composed_system_prompt = {
+            let active_skill_names: Vec<String> = added_skills
+                .iter()
+                .filter_map(|s| s.get("name").and_then(Value::as_str).map(String::from))
+                .collect();
+            let skill_context = build_active_skill_context(&active_skill_names, &ctx.skill_registry);
+
+            let mut composed_context = cm.build_base_context();
+            composed_context.server_origin = session.origin.clone();
+            composed_context.skill_context = skill_context;
+            // subagent_results_context and task_context are per-turn volatile — None in static view
+
+            let composed_parts = tron_llm::compose_context_parts(&composed_context);
+            composed_parts.join("\n\n")
+        };
+
         // Build rules matching iOS LoadedRules shape: { files, totalFiles, tokens }
         let rules_info: Option<Value> = {
             let wd_path = Path::new(&session.working_directory);
@@ -377,6 +423,11 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             "memory": memory_info,
             "sessionMemories": session_memories,
             "taskContext": null,
+            "composedSystemPrompt": composed_system_prompt,
+            "environment": {
+                "workingDirectory": session.working_directory,
+                "serverOrigin": session.origin,
+            },
         }))
     }
 }
@@ -753,7 +804,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_detailed_snapshot_all_14_ios_fields() {
+    async fn get_detailed_snapshot_all_ios_fields() {
         let (ctx, sid) = ctx_with_session();
         let result = GetDetailedSnapshotHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -769,6 +820,8 @@ mod tests {
             "systemPromptContent",
             "toolsContent",
             "addedSkills",
+            "composedSystemPrompt",
+            "environment",
         ];
         for field in &required_fields {
             assert!(
@@ -1279,5 +1332,240 @@ mod tests {
             result["memory"].is_null(),
             "memory should be null with no ledger entries"
         );
+    }
+
+    // ── composedSystemPrompt ──
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_has_composed_system_prompt() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result["composedSystemPrompt"].is_string(),
+            "composedSystemPrompt should be a string"
+        );
+        assert!(
+            !result["composedSystemPrompt"].as_str().unwrap().is_empty(),
+            "composedSystemPrompt should be non-empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_contains_system_prompt() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let composed = result["composedSystemPrompt"].as_str().unwrap();
+        let raw = result["systemPromptContent"].as_str().unwrap();
+        assert!(
+            composed.contains(raw),
+            "composed should contain the raw system prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_contains_working_dir() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let composed = result["composedSystemPrompt"].as_str().unwrap();
+        assert!(
+            composed.contains("Current working directory:"),
+            "composed should contain working directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_with_rules() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_dir = tmp.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(claude_dir.join("AGENTS.md"), "# Test Rules\nBe helpful.").unwrap();
+
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", tmp.path().to_str().unwrap(), None)
+            .unwrap();
+
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let composed = result["composedSystemPrompt"].as_str().unwrap();
+        assert!(
+            composed.contains("# Project Rules"),
+            "composed should contain rules header"
+        );
+        assert!(
+            composed.contains("Be helpful."),
+            "composed should contain rules content"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_without_rules_or_memory() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let composed = result["composedSystemPrompt"].as_str().unwrap();
+        // Should still have system prompt and working directory even without rules/memory
+        assert!(!composed.is_empty());
+        assert!(composed.contains("Current working directory:"));
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_no_server_origin() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let composed = result["composedSystemPrompt"].as_str().unwrap();
+        // Default test session has no origin
+        assert!(
+            !composed.contains("Server:"),
+            "composed should not contain Server: when origin is None"
+        );
+    }
+
+    // ── environment ──
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_environment_has_working_directory() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let env = &result["environment"];
+        assert!(env.is_object());
+        assert_eq!(env["workingDirectory"].as_str().unwrap(), "/tmp");
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_environment_server_origin_null() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert!(
+            result["environment"]["serverOrigin"].is_null(),
+            "serverOrigin should be null when session has no origin"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_matches_compose_fn() {
+        let (ctx, sid) = ctx_with_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+
+        // Manually build the same Context and compose — should match
+        let prepared = build_context_manager_for_session(&sid, &ctx).unwrap();
+        let base = prepared.context_manager.build_base_context();
+        let parts = tron_llm::compose_context_parts(&base);
+        let expected = parts.join("\n\n");
+
+        assert_eq!(
+            result["composedSystemPrompt"].as_str().unwrap(),
+            expected,
+            "composedSystemPrompt should match compose_context_parts() output"
+        );
+    }
+
+    // Helper: create a context with a session that has a server origin
+    fn ctx_with_origin_session() -> (RpcContext, String) {
+        use crate::rpc::context::RpcContext;
+        use tron_events::EventStore;
+        use tron_runtime::orchestrator::orchestrator::Orchestrator;
+        use tron_runtime::orchestrator::session_manager::SessionManager;
+
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = Arc::new(
+            SessionManager::new(store.clone()).with_origin("localhost:9847".to_string()),
+        );
+        let orch = Arc::new(Orchestrator::new(mgr.clone(), 10));
+        let ctx = RpcContext {
+            orchestrator: orch,
+            session_manager: mgr.clone(),
+            event_store: store,
+            skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+            task_pool: None,
+            settings_path: std::path::PathBuf::from("/tmp/tron-test-settings.json"),
+            agent_deps: None,
+            server_start_time: std::time::Instant::now(),
+            browser_service: None,
+            transcription_engine: None,
+            embedding_controller: None,
+            subagent_manager: None,
+            health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
+            shutdown_coordinator: None,
+            origin: "localhost:9847".to_string(),
+        };
+        let sid = mgr
+            .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))
+            .unwrap();
+        (ctx, sid)
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_environment_server_origin_present() {
+        let (ctx, sid) = ctx_with_origin_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(
+            result["environment"]["serverOrigin"].as_str().unwrap(),
+            "localhost:9847",
+            "serverOrigin should match the session's origin"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_detailed_snapshot_composed_with_server_origin() {
+        let (ctx, sid) = ctx_with_origin_session();
+        let result = GetDetailedSnapshotHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap();
+        let composed = result["composedSystemPrompt"].as_str().unwrap();
+        assert!(
+            composed.contains("Server: localhost:9847"),
+            "composed should contain Server: when origin is set"
+        );
+    }
+
+    // ── build_active_skill_context ──
+
+    #[test]
+    fn build_active_skill_context_empty_names() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        assert!(build_active_skill_context(&[], &registry).is_none());
+    }
+
+    #[test]
+    fn build_active_skill_context_unknown_skill() {
+        let registry = Arc::new(RwLock::new(SkillRegistry::new()));
+        let names = vec!["nonexistent".to_string()];
+        assert!(build_active_skill_context(&names, &registry).is_none());
     }
 }

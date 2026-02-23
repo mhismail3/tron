@@ -142,6 +142,9 @@ pub struct AgentConfig {
     /// Working directory for file operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
+    /// Server origin (e.g. `"localhost:9847"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_origin: Option<String>,
     /// Current subagent nesting depth (0 = root agent).
     #[serde(default)]
     pub subagent_depth: u32,
@@ -177,6 +180,7 @@ impl Default for AgentConfig {
             stop_sequences: Vec::new(),
             compaction: CompactionConfig::default(),
             working_directory: None,
+            server_origin: None,
             subagent_depth: 0,
             subagent_max_depth: 0,
             retry: None,

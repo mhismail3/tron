@@ -71,6 +71,13 @@ struct ConnectionStatusPill: View {
                         .foregroundStyle(color.opacity(0.5))
                         .contentTransition(.numericText())
                 }
+
+                if case .deployRestarting(let seconds) = state, seconds > 0 {
+                    Text("(\(seconds)s)")
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(color.opacity(0.5))
+                        .contentTransition(.numericText())
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -91,6 +98,11 @@ struct ConnectionStatusPill: View {
         let color = statusColor(for: state)
         switch state {
         case .connecting, .reconnecting:
+            ProgressView()
+                .scaleEffect(0.6)
+                .frame(width: iconSize, height: iconSize)
+                .tint(color)
+        case .deployRestarting:
             ProgressView()
                 .scaleEffect(0.6)
                 .frame(width: iconSize, height: iconSize)
@@ -116,6 +128,8 @@ struct ConnectionStatusPill: View {
         case .connecting: return hasSeenDisconnect ? "Reconnecting" : "Connecting"
         case .reconnecting(let attempt, _):
             return "Reconnecting (Attempt \(attempt))"
+        case .deployRestarting:
+            return "Server Deploying"
         case .connected: return "Connected"
         }
     }
@@ -124,6 +138,7 @@ struct ConnectionStatusPill: View {
         switch state {
         case .connected: return .tronEmerald
         case .connecting, .reconnecting: return .tronWarning
+        case .deployRestarting: return .tronInfo
         case .disconnected, .failed: return .tronError
         }
     }
@@ -177,7 +192,7 @@ struct ConnectionStatusPill: View {
                 }
             }
 
-        case .connecting, .reconnecting:
+        case .connecting, .reconnecting, .deployRestarting:
             disconnectDebounceTask?.cancel()
             disconnectDebounceTask = nil
             displayedState = newState
@@ -194,6 +209,7 @@ struct ConnectionStatusPill: View {
         ConnectionStatusPill(connectionState: .connecting) { }
         ConnectionStatusPill(connectionState: .reconnecting(attempt: 1, nextRetrySeconds: 5)) { }
         ConnectionStatusPill(connectionState: .reconnecting(attempt: 2, nextRetrySeconds: 0)) { }
+        ConnectionStatusPill(connectionState: .deployRestarting(remainingSeconds: 8)) { }
         ConnectionStatusPill(connectionState: .connected) { }
         ConnectionStatusPill(connectionState: .failed(reason: "Connection lost")) { }
     }

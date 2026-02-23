@@ -391,6 +391,9 @@ pub struct Context {
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
+    /// Server origin (e.g. `"localhost:9847"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_origin: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -761,6 +764,7 @@ mod tests {
             subagent_results_context: None,
             task_context: None,
             dynamic_rules_context: None,
+            server_origin: None,
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: Context = serde_json::from_str(&json).unwrap();

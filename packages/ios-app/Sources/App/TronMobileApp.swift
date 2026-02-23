@@ -131,7 +131,7 @@ struct TronMobileApp: App {
                             // Session list will refresh via ContentView's onChange(of: connectionState)
                             TronLogger.shared.info("Triggering reconnection on foreground return (state: \(container.rpcClient.connectionState))", category: .rpc)
                             await container.manualRetry()
-                        case .connecting, .reconnecting:
+                        case .connecting, .reconnecting, .deployRestarting:
                             // Already in progress, let it continue
                             TronLogger.shared.debug("Reconnection already in progress on foreground return", category: .rpc)
                         }

@@ -653,6 +653,25 @@ async fn main() -> Result<()> {
 
     tracing::info!("Tron agent listening on http://{addr} ({method_count} RPC methods registered)");
 
+    // Post-deploy sentinel processing
+    {
+        let artifacts = tron_settings::tron_home_dir().join("artifacts");
+        match tron_server::deploy::complete_sentinel(&artifacts) {
+            Ok(Some(sentinel)) => {
+                tracing::info!(
+                    commit = sentinel.commit.as_str(),
+                    previous = sentinel.previous_commit.as_str(),
+                    "post-deploy restart completed successfully"
+                );
+                if let Err(e) = tron_server::deploy::write_last_deployment(&artifacts, &sentinel) {
+                    tracing::warn!(error = %e, "failed to write last-deployment.json");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(error = %e, "failed to process restart sentinel"),
+        }
+    }
+
     // Wait for shutdown signal
     tokio::signal::ctrl_c()
         .await
