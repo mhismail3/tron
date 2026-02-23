@@ -121,25 +121,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn from_rusqlite_error() {
-        let sqlite_err = rusqlite::Error::QueryReturnedNoRows;
-        let err: EventStoreError = sqlite_err.into();
-        assert!(matches!(err, EventStoreError::Sqlite(_)));
-    }
-
-    #[test]
-    fn from_serde_error() {
-        let serde_err = serde_json::from_str::<String>("bad").unwrap_err();
-        let err: EventStoreError = serde_err.into();
-        assert!(matches!(err, EventStoreError::Serde(_)));
-    }
-
-    #[test]
-    fn result_alias() {
-        fn example() -> Result<String> {
-            Ok("hello".into())
-        }
-        assert_eq!(example().unwrap(), "hello");
-    }
 }

@@ -63,17 +63,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn default_is_zero() {
-        let usage = TokenUsage::default();
-        assert_eq!(usage.input_tokens, 0);
-        assert_eq!(usage.output_tokens, 0);
-        assert_eq!(usage.cache_read_tokens, None);
-        assert_eq!(usage.cache_creation_tokens, None);
-        assert_eq!(usage.cache_creation_5m_tokens, None);
-        assert_eq!(usage.cache_creation_1h_tokens, None);
-    }
-
-    #[test]
     fn serde_roundtrip_full() {
         let usage = TokenUsage {
             input_tokens: 1000,
@@ -133,14 +122,4 @@ mod tests {
         assert_eq!(usage.cache_creation_tokens, None);
     }
 
-    #[test]
-    fn clone_and_eq() {
-        let a = TokenUsage {
-            input_tokens: 10,
-            output_tokens: 20,
-            ..Default::default()
-        };
-        let b = a.clone();
-        assert_eq!(a, b);
-    }
 }

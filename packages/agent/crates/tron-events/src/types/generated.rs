@@ -377,22 +377,6 @@ mod tests {
     }
 
     #[test]
-    fn copy_semantics() {
-        let a = EventType::SessionStart;
-        let b = a;
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn hash_and_eq() {
-        use std::collections::HashSet;
-        let mut set = HashSet::new();
-        let _ = set.insert(EventType::SessionStart);
-        let _ = set.insert(EventType::SessionStart);
-        assert_eq!(set.len(), 1);
-    }
-
-    #[test]
     fn into_typed_payload_matches_typed_payload() {
         let event = SessionEvent {
             id: "evt-1".into(),

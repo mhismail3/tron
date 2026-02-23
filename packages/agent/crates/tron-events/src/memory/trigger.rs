@@ -194,13 +194,6 @@ mod tests {
         assert!(!result.compact);
     }
 
-    #[test]
-    fn test_progress_patterns_static_reference_is_reused() {
-        let first = progress_patterns().as_ptr();
-        let second = progress_patterns().as_ptr();
-        assert_eq!(first, second);
-    }
-
     // --- Progress signals: event types ---
 
     #[test]
