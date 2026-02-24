@@ -253,6 +253,13 @@ struct EnvironmentInfo: Codable {
     let serverOrigin: String?
 }
 
+/// Tool name and brief description for the context audit tools list.
+struct ToolSummaryInfo: Codable, Identifiable {
+    let name: String
+    let description: String
+    var id: String { name }
+}
+
 /// Result from context.getDetailedSnapshot RPC method
 struct DetailedContextSnapshotResult: Codable {
     let currentTokens: Int
@@ -265,7 +272,7 @@ struct DetailedContextSnapshotResult: Codable {
     let systemPromptContent: String
     /// Raw tool clarification content if applicable (for debugging)
     let toolClarificationContent: String?
-    let toolsContent: [String]
+    let toolsContent: [ToolSummaryInfo]
     /// Skills explicitly added to this session's context
     let addedSkills: [AddedSkillInfo]
     /// Rules files loaded for this session (immutable, cannot be removed)

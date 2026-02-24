@@ -4,7 +4,7 @@ import SwiftUI
 
 @available(iOS 26.0, *)
 struct ToolsSection: View {
-    let toolsContent: [String]
+    let toolsContent: [ToolSummaryInfo]
     let tokens: Int
     @State private var isExpanded = false
 
@@ -44,7 +44,7 @@ struct ToolsSection: View {
 
             if isExpanded {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(toolsContent.enumerated()), id: \.offset) { _, tool in
+                    ForEach(toolsContent) { tool in
                         ToolItemRow(tool: tool)
                     }
                 }
@@ -61,21 +61,51 @@ struct ToolsSection: View {
 
 @available(iOS 26.0, *)
 struct ToolItemRow: View {
-    let tool: String
+    let tool: ToolSummaryInfo
+    @State private var isExpanded = false
+
+    private var hasDescription: Bool {
+        !tool.description.isEmpty
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "wrench.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronSlate)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "wrench.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronSlate)
 
-            Text(tool)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(.tronSlate)
+                Text(tool.name)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronSlate)
 
-            Spacer()
+                Spacer()
+
+                if hasDescription {
+                    Image(systemName: "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                        .foregroundStyle(.tronTextDisabled)
+                        .rotationEffect(.degrees(isExpanded ? -180 : 0))
+                        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isExpanded)
+                }
+            }
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onTapGesture {
+                guard hasDescription else { return }
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }
+
+            if isExpanded {
+                Text(tool.description)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronTextSecondary)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+            }
         }
-        .padding(8)
         .sectionFill(.tronSlate, cornerRadius: 6, subtle: true)
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }

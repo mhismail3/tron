@@ -9,7 +9,7 @@ use tron_core::messages::Message;
 use super::token_estimator::estimate_message_tokens;
 use super::types::{
     ContextSnapshot, DetailedContextSnapshot, DetailedMessageInfo, ThresholdLevel, TokenBreakdown,
-    ToolCallInfo,
+    ToolCallInfo, ToolSummary,
 };
 
 // =============================================================================
@@ -40,8 +40,8 @@ pub trait SnapshotDeps: Send + Sync {
     fn get_system_prompt(&self) -> String;
     /// Tool clarification text (Codex mode).
     fn get_tool_clarification(&self) -> Option<String>;
-    /// Tool names for the detailed snapshot.
-    fn get_tool_names(&self) -> Vec<String>;
+    /// Tool summaries for the detailed snapshot.
+    fn get_tool_summaries(&self) -> Vec<ToolSummary>;
 }
 
 // =============================================================================
@@ -106,7 +106,7 @@ impl<D: SnapshotDeps> ContextSnapshotBuilder<D> {
             messages: detailed_messages,
             system_prompt_content: self.deps.get_system_prompt(),
             tool_clarification_content: self.deps.get_tool_clarification(),
-            tools_content: self.deps.get_tool_names(),
+            tools_content: self.deps.get_tool_summaries(),
         }
     }
 }
@@ -284,8 +284,11 @@ mod tests {
         fn get_tool_clarification(&self) -> Option<String> {
             None
         }
-        fn get_tool_names(&self) -> Vec<String> {
-            vec!["bash".into(), "read".into()]
+        fn get_tool_summaries(&self) -> Vec<ToolSummary> {
+            vec![
+                ToolSummary { name: "bash".into(), description: "Execute a shell command.".into() },
+                ToolSummary { name: "read".into(), description: "Read file contents.".into() },
+            ]
         }
     }
 
@@ -340,7 +343,9 @@ mod tests {
             "You are a helpful assistant."
         );
         assert!(detailed.tool_clarification_content.is_none());
-        assert_eq!(detailed.tools_content, vec!["bash", "read"]);
+        assert_eq!(detailed.tools_content.len(), 2);
+        assert_eq!(detailed.tools_content[0].name, "bash");
+        assert_eq!(detailed.tools_content[1].name, "read");
     }
 
     #[test]

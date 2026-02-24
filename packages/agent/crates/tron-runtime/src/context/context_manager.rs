@@ -22,7 +22,7 @@ use super::token_estimator;
 use super::types::{
     CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
     DetailedContextSnapshot, ExportedState, PreTurnValidation, ProcessedToolResult,
-    SessionMemoryEntry,
+    SessionMemoryEntry, ToolSummary,
 };
 
 // =============================================================================
@@ -604,12 +604,15 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
     fn get_tool_clarification(&self) -> Option<String> {
         None
     }
-    fn get_tool_names(&self) -> Vec<String> {
+    fn get_tool_summaries(&self) -> Vec<ToolSummary> {
         self.manager
             .config
             .tools
             .iter()
-            .map(|t| t.name.clone())
+            .map(|t| ToolSummary {
+                name: t.name.clone(),
+                description: tron_core::text::first_sentence(&t.description).to_owned(),
+            })
             .collect()
     }
 }

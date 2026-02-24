@@ -54,6 +54,30 @@ pub fn truncate_with_suffix(s: &str, max_bytes: usize, suffix: &str) -> String {
     format!("{prefix}{suffix}")
 }
 
+/// Extract the first sentence from a description.
+///
+/// Returns everything up to and including the first `.` that is followed
+/// by a space, newline, or end-of-string. Falls back to the first line
+/// (up to `\n`), then to the full string.
+pub fn first_sentence(s: &str) -> &str {
+    for (i, _) in s.match_indices('.') {
+        // Skip periods that are part of an ellipsis ("..." — preceded by '.')
+        if i > 0 && s.as_bytes()[i - 1] == b'.' {
+            continue;
+        }
+        let after = i + 1;
+        if after >= s.len() {
+            return &s[..after]; // period at end of string
+        }
+        let next = s.as_bytes()[after];
+        if next == b' ' || next == b'\n' {
+            return &s[..after];
+        }
+    }
+    // No sentence boundary found — return first line
+    s.split('\n').next().unwrap_or(s)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,5 +209,60 @@ mod tests {
     fn suffix_one_over() {
         // "abcd" is 4 bytes, max=3, suffix="." → body_budget=2
         assert_eq!(truncate_with_suffix("abcd", 3, "."), "ab.");
+    }
+
+    // ── first_sentence ────────────────────────────────────────────────────
+
+    #[test]
+    fn first_sentence_normal() {
+        assert_eq!(first_sentence("Execute a command. More details here."), "Execute a command.");
+    }
+
+    #[test]
+    fn first_sentence_period_at_end() {
+        assert_eq!(first_sentence("Execute a command."), "Execute a command.");
+    }
+
+    #[test]
+    fn first_sentence_newline_after_period() {
+        assert_eq!(first_sentence("Search the web.\n\nMore info."), "Search the web.");
+    }
+
+    #[test]
+    fn first_sentence_no_period() {
+        assert_eq!(first_sentence("No period here"), "No period here");
+    }
+
+    #[test]
+    fn first_sentence_no_period_multiline() {
+        assert_eq!(first_sentence("First line\nSecond line"), "First line");
+    }
+
+    #[test]
+    fn first_sentence_empty() {
+        assert_eq!(first_sentence(""), "");
+    }
+
+    #[test]
+    fn first_sentence_url_dots() {
+        assert_eq!(
+            first_sentence("Fetch from api.example.com for data. More info."),
+            "Fetch from api.example.com for data."
+        );
+    }
+
+    #[test]
+    fn first_sentence_abbreviation_mid_word() {
+        assert_eq!(first_sentence("Uses v2.0 protocol. Details."), "Uses v2.0 protocol.");
+    }
+
+    #[test]
+    fn first_sentence_ellipsis() {
+        assert_eq!(first_sentence("Wait... then proceed. Done."), "Wait... then proceed.");
+    }
+
+    #[test]
+    fn first_sentence_multibyte() {
+        assert_eq!(first_sentence("Héllo wörld. More."), "Héllo wörld.");
     }
 }

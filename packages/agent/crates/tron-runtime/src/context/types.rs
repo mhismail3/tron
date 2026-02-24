@@ -223,8 +223,17 @@ pub struct DetailedContextSnapshot {
     /// Tool clarification content (for Codex providers).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_clarification_content: Option<String>,
-    /// Tool descriptions.
-    pub tools_content: Vec<String>,
+    /// Tool summaries (name + first-sentence description).
+    pub tools_content: Vec<ToolSummary>,
+}
+
+/// Tool name and brief description for the detailed snapshot.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolSummary {
+    /// Tool name (unique identifier).
+    pub name: String,
+    /// Brief description (first sentence of the tool's full description).
+    pub description: String,
 }
 
 // =============================================================================
@@ -542,6 +551,30 @@ mod tests {
             serde_json::to_string(&RulesLevel::Directory).unwrap(),
             "\"directory\""
         );
+    }
+
+    #[test]
+    fn tool_summary_serde_roundtrip() {
+        let summary = ToolSummary {
+            name: "bash".into(),
+            description: "Execute a shell command.".into(),
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["name"], "bash");
+        assert_eq!(json["description"], "Execute a shell command.");
+        let back: ToolSummary = serde_json::from_value(json).unwrap();
+        assert_eq!(back.name, "bash");
+        assert_eq!(back.description, "Execute a shell command.");
+    }
+
+    #[test]
+    fn tool_summary_empty_description() {
+        let summary = ToolSummary {
+            name: "stub".into(),
+            description: "".into(),
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["description"], "");
     }
 
     #[test]
