@@ -1,6 +1,6 @@
 //! JSON configuration file management.
 //!
-//! The canonical job definitions live in `~/.tron/artifacts/cron/jobs.json`.
+//! The canonical job definitions live in `~/.tron/artifacts/automations.json`.
 //! This module handles loading, saving (atomic writes), validation,
 //! and file change detection.
 
@@ -17,8 +17,8 @@ use crate::types::{CronConfig, CronJob, Payload, Schedule};
 /// Load the cron config from a JSON file.
 ///
 /// Returns `Ok(empty config)` if the file doesn't exist yet.
-/// On parse failure, attempts recovery from `.bak` backup file.
-pub fn load_config(path: &Path) -> Result<CronConfig, CronError> {
+/// On parse failure, attempts recovery from the backup file.
+pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronError> {
     if !path.exists() {
         return Ok(CronConfig::default());
     }
@@ -29,18 +29,17 @@ pub fn load_config(path: &Path) -> Result<CronConfig, CronError> {
     match serde_json::from_str::<CronConfig>(&content) {
         Ok(config) => Ok(config),
         Err(primary_err) => {
-            // Primary file corrupt — try .bak recovery
-            let bak = path.with_extension("json.bak");
-            if bak.exists() {
+            // Primary file corrupt — try backup recovery
+            if backup_path.exists() {
                 tracing::warn!(
                     error = %primary_err,
-                    "jobs.json corrupt, attempting recovery from backup"
+                    "automations.json corrupt, attempting recovery from backup"
                 );
-                if let Ok(bak_content) = std::fs::read_to_string(&bak) {
+                if let Ok(bak_content) = std::fs::read_to_string(backup_path) {
                     if let Ok(config) = serde_json::from_str::<CronConfig>(&bak_content) {
                         tracing::info!("recovered {} jobs from backup", config.jobs.len());
                         // Restore the primary file from backup
-                        if let Err(e) = std::fs::copy(&bak, path) {
+                        if let Err(e) = std::fs::copy(backup_path, path) {
                             tracing::warn!(error = %e, "failed to restore backup to primary");
                         }
                         return Ok(config);
@@ -55,7 +54,7 @@ pub fn load_config(path: &Path) -> Result<CronConfig, CronError> {
 /// Atomically write config to a JSON file.
 ///
 /// Strategy: write .tmp → sync_all → backup existing → atomic rename.
-pub fn save_config(path: &Path, config: &CronConfig) -> Result<(), CronError> {
+pub fn save_config(path: &Path, backup_path: &Path, config: &CronConfig) -> Result<(), CronError> {
     // Reject symlinks
     if path.exists() {
         let meta = std::fs::symlink_metadata(path)?;
@@ -77,10 +76,12 @@ pub fn save_config(path: &Path, config: &CronConfig) -> Result<(), CronError> {
     file.write_all(content.as_bytes())?;
     file.sync_all()?;
 
-    // Backup existing file
+    // Backup existing file to deployment directory
     if path.exists() {
-        let bak = path.with_extension("json.bak");
-        let _ = std::fs::rename(path, &bak);
+        if let Some(parent) = backup_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let _ = std::fs::rename(path, backup_path);
     }
 
     // Atomic rename
@@ -244,13 +245,14 @@ mod tests {
     #[test]
     fn load_valid_config() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
         let config = CronConfig {
             version: 1,
             jobs: vec![make_valid_job()],
         };
-        save_config(&path, &config).unwrap();
-        let loaded = load_config(&path).unwrap();
+        save_config(&path, &bak, &config).unwrap();
+        let loaded = load_config(&path, &bak).unwrap();
         assert_eq!(loaded.version, 1);
         assert_eq!(loaded.jobs.len(), 1);
     }
@@ -258,9 +260,10 @@ mod tests {
     #[test]
     fn load_empty_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
         std::fs::write(&path, r#"{"version":1,"jobs":[]}"#).unwrap();
-        let config = load_config(&path).unwrap();
+        let config = load_config(&path, &bak).unwrap();
         assert!(config.jobs.is_empty());
     }
 
@@ -268,28 +271,31 @@ mod tests {
     fn load_missing_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.json");
-        let config = load_config(&path).unwrap();
+        let bak = dir.path().join("nonexistent.json.bak");
+        let config = load_config(&path, &bak).unwrap();
         assert!(config.jobs.is_empty());
     }
 
     #[test]
     fn load_corrupt_json() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
         std::fs::write(&path, "not valid json {{{").unwrap();
-        assert!(load_config(&path).is_err());
+        assert!(load_config(&path, &bak).is_err());
     }
 
     #[test]
     fn load_unknown_fields_ignored() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
         std::fs::write(
             &path,
             r#"{"version":1,"jobs":[],"futureField":"ignored"}"#,
         )
         .unwrap();
-        let config = load_config(&path).unwrap();
+        let config = load_config(&path, &bak).unwrap();
         assert!(config.jobs.is_empty());
     }
 
@@ -297,8 +303,9 @@ mod tests {
     fn save_atomic_creates_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("new.json");
+        let bak = dir.path().join("new.json.bak");
         assert!(!path.exists());
-        save_config(&path, &CronConfig::default()).unwrap();
+        save_config(&path, &bak, &CronConfig::default()).unwrap();
         assert!(path.exists());
     }
 
@@ -307,19 +314,19 @@ mod tests {
         // If writing to tmp fails, original is preserved
         // (hard to simulate, so we test the backup mechanism instead)
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
 
         let config1 = CronConfig {
             version: 1,
             jobs: vec![make_valid_job()],
         };
-        save_config(&path, &config1).unwrap();
+        save_config(&path, &bak, &config1).unwrap();
 
         let config2 = CronConfig::default();
-        save_config(&path, &config2).unwrap();
+        save_config(&path, &bak, &config2).unwrap();
 
         // Backup should exist
-        let bak = path.with_extension("json.bak");
         assert!(bak.exists());
         let backup: CronConfig = serde_json::from_str(&std::fs::read_to_string(&bak).unwrap()).unwrap();
         assert_eq!(backup.jobs.len(), 1);
@@ -337,7 +344,8 @@ mod tests {
         let link = dir.path().join("link.json");
         symlink(&target, &link).unwrap();
 
-        let result = save_config(&link, &CronConfig::default());
+        let bak = dir.path().join("link.json.bak");
+        let result = save_config(&link, &bak, &CronConfig::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("symlink"));
     }
@@ -481,8 +489,8 @@ mod tests {
     #[test]
     fn load_corrupt_recovers_from_backup() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
-        let bak = dir.path().join("jobs.json.bak");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
 
         // Write a valid backup
         let config = CronConfig {
@@ -496,7 +504,7 @@ mod tests {
         std::fs::write(&path, "{{corrupt json!!!").unwrap();
 
         // Should recover from backup
-        let loaded = load_config(&path).unwrap();
+        let loaded = load_config(&path, &bak).unwrap();
         assert_eq!(loaded.jobs.len(), 1);
 
         // Primary file should be restored
@@ -507,23 +515,24 @@ mod tests {
     #[test]
     fn load_corrupt_with_corrupt_backup_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
-        let bak = dir.path().join("jobs.json.bak");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
 
         // Both corrupt
         std::fs::write(&path, "corrupt primary").unwrap();
         std::fs::write(&bak, "corrupt backup").unwrap();
 
-        assert!(load_config(&path).is_err());
+        assert!(load_config(&path, &bak).is_err());
     }
 
     #[test]
     fn load_corrupt_without_backup_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("jobs.json");
+        let path = dir.path().join("automations.json");
+        let bak = dir.path().join("automations.json.bak");
 
         std::fs::write(&path, "corrupt json no backup").unwrap();
 
-        assert!(load_config(&path).is_err());
+        assert!(load_config(&path, &bak).is_err());
     }
 }

@@ -296,7 +296,7 @@ pub struct CronRun {
     /// Execution duration in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
-    /// First 4KB of output. Full output in `~/.tron/artifacts/cron/outputs/{run_id}.log`.
+    /// Captured output (up to 1MB from pipe read).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
     /// Whether the output was truncated.

@@ -276,13 +276,13 @@ impl MethodHandler for CreateHandler {
         }
 
         let mut config =
-            tron_cron::config::load_config(sched.config_path()).map_err(|e| RpcError::Internal {
+            tron_cron::config::load_config(sched.config_path(), sched.backup_path()).map_err(|e| RpcError::Internal {
                 message: e.to_string(),
             })?;
 
         config.jobs.push(job.clone());
 
-        tron_cron::config::save_config(sched.config_path(), &config).map_err(|e| {
+        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(|e| {
             RpcError::Internal {
                 message: e.to_string(),
             }
@@ -334,7 +334,7 @@ impl MethodHandler for UpdateHandler {
         let _guard = sched.config_lock().lock().await;
 
         let mut config =
-            tron_cron::config::load_config(sched.config_path()).map_err(|e| RpcError::Internal {
+            tron_cron::config::load_config(sched.config_path(), sched.backup_path()).map_err(|e| RpcError::Internal {
                 message: e.to_string(),
             })?;
 
@@ -433,7 +433,7 @@ impl MethodHandler for UpdateHandler {
         let updated_job = job.clone();
 
         // Save and sync
-        tron_cron::config::save_config(sched.config_path(), &config).map_err(|e| {
+        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(|e| {
             RpcError::Internal {
                 message: e.to_string(),
             }
@@ -480,7 +480,7 @@ impl MethodHandler for DeleteHandler {
         let _guard = sched.config_lock().lock().await;
 
         let mut config =
-            tron_cron::config::load_config(sched.config_path()).map_err(|e| RpcError::Internal {
+            tron_cron::config::load_config(sched.config_path(), sched.backup_path()).map_err(|e| RpcError::Internal {
                 message: e.to_string(),
             })?;
 
@@ -493,7 +493,7 @@ impl MethodHandler for DeleteHandler {
             });
         }
 
-        tron_cron::config::save_config(sched.config_path(), &config).map_err(|e| {
+        tron_cron::config::save_config(sched.config_path(), sched.backup_path(), &config).map_err(|e| {
             RpcError::Internal {
                 message: e.to_string(),
             }
@@ -707,7 +707,8 @@ mod tests {
         }
 
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("jobs.json");
+        let config_path = dir.path().join("automations.json");
+        let backup_path = dir.path().join("automations.json.bak");
 
         let cancel = tokio_util::sync::CancellationToken::new();
         let deps = tron_cron::ExecutorDeps {
@@ -717,7 +718,6 @@ mod tests {
             event_injector: None,
             http_client: reqwest::Client::new(),
             pool: pool.clone(),
-            output_dir: dir.path().join("outputs"),
         };
 
         let scheduler = std::sync::Arc::new(tron_cron::CronScheduler::new(
@@ -725,6 +725,7 @@ mod tests {
             std::sync::Arc::new(tron_cron::SystemClock),
             deps,
             config_path,
+            backup_path,
             cancel,
         ));
 

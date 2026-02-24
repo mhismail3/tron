@@ -65,10 +65,11 @@ PROD_PORT=9847
 DEV_PORT=9846
 
 # File paths
-PROD_LOG_FILE="$TRON_HOME/artifacts/server.log"
-DEV_LOG_FILE="$TRON_HOME/artifacts/dev.log"
-DEV_PID_FILE="$TRON_HOME/artifacts/dev.pid"
-DEPLOYED_COMMIT_FILE="$TRON_HOME/artifacts/deployed-commit"
+DEPLOY_DIR="$TRON_HOME/artifacts/deployment"
+PROD_LOG_FILE="$DEPLOY_DIR/server.log"
+DEV_LOG_FILE="$DEPLOY_DIR/dev.log"
+DEV_PID_FILE="$DEPLOY_DIR/dev.pid"
+DEPLOYED_COMMIT_FILE="$DEPLOY_DIR/deployed-commit"
 DEPLOY_LOCK_FILE="$TRON_HOME/deploy.lock"
 
 # OAuth
@@ -119,7 +120,7 @@ confirm_action() {
 }
 
 ensure_tron_home() {
-    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,artifacts/canvases}
+    mkdir -p "$TRON_HOME"/{database,mods,notes,skills,artifacts/canvases,artifacts/deployment}
     mkdir -p "$TRON_HOME"/mods/apns
 }
 
@@ -740,7 +741,7 @@ write_deployment_result() {
         error_msg="\"$error_msg\""
     fi
 
-    cat > "$TRON_HOME/artifacts/last-deployment.json" << RESULT
+    cat > "$DEPLOY_DIR/last-deployment.json" << RESULT
 {
   "status": "$status",
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -803,7 +804,8 @@ cmd_deploy() {
     # Backup current binary
     if [ -f "$INSTALLED_BINARY" ]; then
         print_status "Backing up current binary..."
-        cp "$INSTALLED_BINARY" "${INSTALLED_BINARY}.bak"
+        mkdir -p "$DEPLOY_DIR"
+        cp "$INSTALLED_BINARY" "$DEPLOY_DIR/tron.bak"
     fi
 
     # Stop service
@@ -839,7 +841,7 @@ cmd_deploy() {
     if $healthy; then
         print_success "Service healthy"
         write_deployment_result "success"
-        rm -f "${INSTALLED_BINARY}.bak"
+        rm -f "$DEPLOY_DIR/tron.bak"
         echo ""
         print_success "Deploy complete!"
         echo ""
@@ -851,8 +853,8 @@ cmd_deploy() {
     launchctl unload "$PLIST_PATH" 2>/dev/null || true
     sleep 1
 
-    if [ -f "${INSTALLED_BINARY}.bak" ]; then
-        mv "${INSTALLED_BINARY}.bak" "$INSTALLED_BINARY"
+    if [ -f "$DEPLOY_DIR/tron.bak" ]; then
+        mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
         echo "$previous_commit" > "$DEPLOYED_COMMIT_FILE"
         launchctl load "$PLIST_PATH"
         write_deployment_result "rolled_back" "Health check failed after 5 attempts"
@@ -874,7 +876,7 @@ cmd_install() {
 
     # Ensure directories exist
     mkdir -p "$BIN_DIR"
-    mkdir -p "$TRON_HOME/artifacts"
+    mkdir -p "$TRON_HOME/artifacts/deployment"
     mkdir -p "$HOME/Library/LaunchAgents"
 
     # Build if needed
@@ -946,7 +948,7 @@ cmd_rollback() {
 
     print_header "Rolling Back to Previous Binary"
 
-    if [ ! -f "${INSTALLED_BINARY}.bak" ]; then
+    if [ ! -f "$DEPLOY_DIR/tron.bak" ]; then
         print_error "No backup found. Cannot rollback."
         echo "  A backup is only available immediately after a deploy."
         exit 1
@@ -966,7 +968,7 @@ cmd_rollback() {
 
     # Restore backup
     print_status "Restoring backup..."
-    mv "${INSTALLED_BINARY}.bak" "$INSTALLED_BINARY"
+    mv "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
 
     # Start service
     launchctl load "$PLIST_PATH"
@@ -1222,7 +1224,7 @@ cmd_uninstall() {
     rm -f "$BIN_DIR/tron"
 
     print_status "Removing installed binary..."
-    rm -f "$INSTALLED_BINARY" "${INSTALLED_BINARY}.bak"
+    rm -f "$INSTALLED_BINARY" "$DEPLOY_DIR/tron.bak"
 
     echo ""
     print_success "Service uninstalled"

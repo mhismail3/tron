@@ -91,7 +91,7 @@ pub enum DeployError {
 
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
-/// Read the deployed commit from `artifacts/deployed-commit`.
+/// Read the deployed commit from `artifacts/deployment/deployed-commit`.
 pub fn read_deployed_commit(artifacts_dir: &Path) -> String {
     std::fs::read_to_string(artifacts_dir.join("deployed-commit"))
         .map(|s| s.trim().to_string())
@@ -137,6 +137,8 @@ pub fn complete_sentinel(artifacts_dir: &Path) -> io::Result<Option<RestartSenti
 }
 
 /// Write `last-deployment.json` compatible with `scripts/tron` format.
+///
+/// `artifacts_dir` should be `~/.tron/artifacts/deployment/`.
 pub fn write_last_deployment(artifacts_dir: &Path, sentinel: &RestartSentinel) -> io::Result<()> {
     let json = json!({
         "status": sentinel.status,
@@ -179,9 +181,12 @@ pub fn git_head_commit(repo_dir: &Path) -> Option<String> {
 }
 
 /// Atomically copy a binary: backup existing → write temp → set executable → rename.
+///
+/// `backup_dir` specifies where to write the backup (`tron.bak`).
 pub async fn atomic_binary_install(
     source: &Path,
     target: &Path,
+    backup_dir: &Path,
 ) -> Result<Option<PathBuf>, DeployError> {
     if !source.exists() {
         return Err(DeployError::SourceNotFound {
@@ -189,9 +194,12 @@ pub async fn atomic_binary_install(
         });
     }
 
-    // Backup existing binary
+    // Backup existing binary into the deployment directory
     let backup = if target.exists() {
-        let bak = target.with_extension("bak");
+        tokio::fs::create_dir_all(backup_dir)
+            .await
+            .map_err(DeployError::BackupFailed)?;
+        let bak = backup_dir.join("tron.bak");
         let _ = tokio::fs::copy(target, &bak)
             .await
             .map_err(DeployError::BackupFailed)?;
@@ -226,11 +234,11 @@ pub async fn atomic_binary_install(
 /// GET /deploy/status
 pub async fn status_handler(State(state): State<AppState>) -> Json<DeployStatusResponse> {
     let tron_home = tron_settings::tron_home_dir();
-    let artifacts = tron_home.join("artifacts");
+    let deploy_dir = tron_settings::deploy_dir();
     let binary_path = tron_home.join("tron");
 
-    let deployed_commit = read_deployed_commit(&artifacts);
-    let sentinel = read_sentinel(&artifacts);
+    let deployed_commit = read_deployed_commit(&deploy_dir);
+    let sentinel = read_sentinel(&deploy_dir);
     let binary_exists = binary_path.exists();
     let binary_modified = if binary_exists {
         tokio::fs::metadata(&binary_path)
@@ -278,7 +286,7 @@ pub async fn restart_handler(
     }
 
     let tron_home = tron_settings::tron_home_dir();
-    let artifacts = tron_home.join("artifacts");
+    let deploy_dir = tron_settings::deploy_dir();
     let installed_binary = tron_home.join("tron");
 
     // Resolve source binary
@@ -310,17 +318,17 @@ pub async fn restart_handler(
     }
 
     // Read commits
-    let previous_commit = read_deployed_commit(&artifacts);
+    let previous_commit = read_deployed_commit(&deploy_dir);
     let new_commit = workspace_root
         .as_deref()
         .and_then(|w| git_head_commit(w))
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Ensure artifacts dir exists
-    let _ = tokio::fs::create_dir_all(&artifacts).await;
+    // Ensure deployment dir exists
+    let _ = tokio::fs::create_dir_all(&deploy_dir).await;
 
     // Atomic binary install (backup + copy)
-    let _ = atomic_binary_install(&source, &installed_binary)
+    let _ = atomic_binary_install(&source, &installed_binary, &deploy_dir)
         .await
         .map_err(|e| {
             state
@@ -333,7 +341,7 @@ pub async fn restart_handler(
         })?;
 
     // Write deployed commit
-    let commit_path = artifacts.join("deployed-commit");
+    let commit_path = deploy_dir.join("deployed-commit");
     let _ = tokio::fs::write(&commit_path, &new_commit).await;
 
     // Write sentinel
@@ -345,7 +353,7 @@ pub async fn restart_handler(
         status: "restarting".to_string(),
         completed_at: None,
     };
-    if let Err(e) = write_sentinel(&artifacts, &sentinel) {
+    if let Err(e) = write_sentinel(&deploy_dir, &sentinel) {
         warn!(error = %e, "failed to write restart sentinel (non-fatal)");
     }
 
@@ -709,9 +717,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("source");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
         std::fs::write(&src, b"binary content here").unwrap();
 
-        atomic_binary_install(&src, &tgt).await.unwrap();
+        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
         assert_eq!(std::fs::read(&tgt).unwrap(), b"binary content here");
     }
@@ -721,9 +730,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("source");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
         std::fs::write(&src, b"#!/bin/sh\necho hi").unwrap();
 
-        atomic_binary_install(&src, &tgt).await.unwrap();
+        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
         let mode = std::fs::metadata(&tgt).unwrap().permissions().mode();
         assert_eq!(mode & 0o755, 0o755);
@@ -734,13 +744,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("source");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
         std::fs::write(&src, b"new binary").unwrap();
         std::fs::write(&tgt, b"old binary").unwrap();
 
-        let backup = atomic_binary_install(&src, &tgt).await.unwrap();
+        let backup = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
         assert!(backup.is_some());
         let bak_path = backup.unwrap();
+        assert_eq!(bak_path, bak_dir.join("tron.bak"));
         assert_eq!(std::fs::read(&bak_path).unwrap(), b"old binary");
         assert_eq!(std::fs::read(&tgt).unwrap(), b"new binary");
     }
@@ -750,9 +762,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("source");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
         std::fs::write(&src, b"new binary").unwrap();
 
-        let backup = atomic_binary_install(&src, &tgt).await.unwrap();
+        let backup = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
         assert!(backup.is_none());
     }
 
@@ -761,8 +774,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("nonexistent");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
 
-        let err = atomic_binary_install(&src, &tgt).await.unwrap_err();
+        let err = atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap_err();
         assert!(matches!(err, DeployError::SourceNotFound { .. }));
     }
 
@@ -771,11 +785,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("source");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
         let stale_tmp = dir.path().join("target.tmp");
         std::fs::write(&src, b"new binary").unwrap();
         std::fs::write(&stale_tmp, b"stale leftover").unwrap();
 
-        atomic_binary_install(&src, &tgt).await.unwrap();
+        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
         assert_eq!(std::fs::read(&tgt).unwrap(), b"new binary");
         // .tmp should be gone (renamed to target)
@@ -787,11 +802,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("source");
         let tgt = dir.path().join("target");
+        let bak_dir = dir.path().join("deployment");
         // Write a large-ish binary payload
         let data: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
         std::fs::write(&src, &data).unwrap();
 
-        atomic_binary_install(&src, &tgt).await.unwrap();
+        atomic_binary_install(&src, &tgt, &bak_dir).await.unwrap();
 
         assert_eq!(std::fs::read(&tgt).unwrap(), data);
     }

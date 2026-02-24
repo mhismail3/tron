@@ -621,8 +621,9 @@ async fn main() -> Result<()> {
     let cron_cancel = tokio_util::sync::CancellationToken::new();
     let cron_config_path = tron_settings::tron_home_dir()
         .join("artifacts")
-        .join("cron")
-        .join("jobs.json");
+        .join("automations.json");
+    let cron_backup_path = tron_settings::deploy_dir().join("automations.json.bak");
+
     let cron_agent_executor: Option<Arc<dyn tron_cron::AgentTurnExecutor>> =
         agent_deps.as_ref().map(|deps| {
             Arc::new(providers::CronAgentTurnExecutor::new(
@@ -647,16 +648,13 @@ async fn main() -> Result<()> {
         )) as Arc<dyn tron_cron::SystemEventInjector>),
         http_client: tool_config.http_client.clone(),
         pool: task_pool.clone(),
-        output_dir: tron_settings::tron_home_dir()
-            .join("artifacts")
-            .join("cron")
-            .join("outputs"),
     };
     let cron_scheduler = Arc::new(tron_cron::CronScheduler::new(
         task_pool.clone(),
         Arc::new(tron_cron::SystemClock),
         cron_deps,
         cron_config_path,
+        cron_backup_path,
         cron_cancel.clone(),
     ));
 
@@ -736,15 +734,15 @@ async fn main() -> Result<()> {
 
     // Post-deploy sentinel processing
     {
-        let artifacts = tron_settings::tron_home_dir().join("artifacts");
-        match tron_server::deploy::complete_sentinel(&artifacts) {
+        let deploy_dir = tron_settings::deploy_dir();
+        match tron_server::deploy::complete_sentinel(&deploy_dir) {
             Ok(Some(sentinel)) => {
                 tracing::info!(
                     commit = sentinel.commit.as_str(),
                     previous = sentinel.previous_commit.as_str(),
                     "post-deploy restart completed successfully"
                 );
-                if let Err(e) = tron_server::deploy::write_last_deployment(&artifacts, &sentinel) {
+                if let Err(e) = tron_server::deploy::write_last_deployment(&deploy_dir, &sentinel) {
                     tracing::warn!(error = %e, "failed to write last-deployment.json");
                 }
             }

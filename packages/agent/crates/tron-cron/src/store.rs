@@ -380,17 +380,6 @@ pub fn update_delivery_status(
     Ok(())
 }
 
-/// Check if a run exists.
-pub fn run_exists(pool: &ConnectionPool, run_id: &str) -> Result<bool, CronError> {
-    let conn = pool.get()?;
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM cron_runs WHERE id = ?1)",
-        params![run_id],
-        |row| row.get(0),
-    )?;
-    Ok(exists)
-}
-
 /// Get all jobs with a `running_since` value (for stuck detection).
 pub fn get_stuck_candidates(pool: &ConnectionPool) -> Result<Vec<(String, DateTime<Utc>, u64)>, CronError> {
     let conn = pool.get()?;

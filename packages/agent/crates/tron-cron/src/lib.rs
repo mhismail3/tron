@@ -4,7 +4,7 @@
 //!
 //! ## Architecture
 //!
-//! - **Config file** (`~/.tron/artifacts/cron/jobs.json`): Canonical job definitions
+//! - **Config file** (`~/.tron/artifacts/automations.json`): Canonical job definitions
 //! - **SQLite** (`tron.db`): Runtime state (next_run_at, failures, runs)
 //! - **Scheduler**: Timer-based loop that fires due jobs
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)

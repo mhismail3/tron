@@ -37,7 +37,7 @@ pub struct CronScheduler {
     jobs: parking_lot::RwLock<HashMap<String, CronJob>>,
     /// Runtime state per job (synced from SQLite).
     runtime: parking_lot::RwLock<HashMap<String, JobRuntimeState>>,
-    /// Serializes all access to `jobs.json`.
+    /// Serializes all access to `automations.json`.
     config_lock: tokio::sync::Mutex<()>,
     /// Wakes scheduler when config file changes.
     config_notify: Arc<tokio::sync::Notify>,
@@ -49,8 +49,10 @@ pub struct CronScheduler {
     execution_semaphore: Arc<tokio::sync::Semaphore>,
     /// Executor dependencies.
     deps: Arc<ExecutorDeps>,
-    /// Path to `jobs.json`.
+    /// Path to `automations.json`.
     config_path: PathBuf,
+    /// Path to `automations.json.bak` (in deployment directory).
+    backup_path: PathBuf,
 }
 
 impl CronScheduler {
@@ -60,6 +62,7 @@ impl CronScheduler {
         clock: Arc<dyn Clock>,
         deps: ExecutorDeps,
         config_path: PathBuf,
+        backup_path: PathBuf,
         cancel: CancellationToken,
     ) -> Self {
         Self {
@@ -74,6 +77,7 @@ impl CronScheduler {
             execution_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_EXECUTION_LIMIT)),
             deps: Arc::new(deps),
             config_path,
+            backup_path,
         }
     }
 
@@ -98,6 +102,11 @@ impl CronScheduler {
     /// Get the config file path.
     pub fn config_path(&self) -> &std::path::Path {
         &self.config_path
+    }
+
+    /// Get the path to the backup config file.
+    pub fn backup_path(&self) -> &std::path::Path {
+        &self.backup_path
     }
 
     /// Get the connection pool.
@@ -172,12 +181,10 @@ impl CronScheduler {
         if let Some(parent) = self.config_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::create_dir_all(&self.deps.output_dir)?;
-
         let _guard = self.config_lock.lock().await;
 
         // Load config (with SQLite fallback if file is corrupt)
-        let config = match config::load_config(&self.config_path) {
+        let config = match config::load_config(&self.config_path, &self.backup_path) {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(
@@ -401,7 +408,6 @@ impl CronScheduler {
                         self.detect_stuck_jobs().ok();
                         let cutoff = now - chrono::Duration::days(7);
                         store::gc_old_runs(&self.pool, cutoff, 100).ok();
-                        self.gc_output_files();
                         last_maintenance = now;
                     }
 
@@ -454,7 +460,7 @@ impl CronScheduler {
     /// Reload config from disk and sync to memory + SQLite.
     async fn reload_config(&self) -> Result<(), CronError> {
         let _guard = self.config_lock.lock().await;
-        let config = config::load_config(&self.config_path)?;
+        let config = config::load_config(&self.config_path, &self.backup_path)?;
         let (added, updated, removed) = store::sync_from_config(&self.pool, &config.jobs)?;
         tracing::info!(added, updated, removed, "config reloaded");
 
@@ -529,20 +535,6 @@ impl CronScheduler {
         Ok(())
     }
 
-    /// Clean up orphaned output files.
-    fn gc_output_files(&self) {
-        let entries = match std::fs::read_dir(&self.deps.output_dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let run_id = name.to_string_lossy().trim_end_matches(".log").to_string();
-            if let Ok(false) = store::run_exists(&self.pool, &run_id) {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    }
 }
 
 /// Execute a single job (runs in a spawned task).
@@ -606,7 +598,7 @@ mod tests {
     use crate::clock::FakeClock;
     use crate::types::*;
 
-    fn setup() -> (ConnectionPool, Arc<FakeClock>, PathBuf, CancellationToken, tempfile::TempDir) {
+    fn setup() -> (ConnectionPool, Arc<FakeClock>, PathBuf, PathBuf, CancellationToken, tempfile::TempDir) {
         let pool =
             tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
         {
@@ -620,9 +612,10 @@ mod tests {
                 .to_utc(),
         ));
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("jobs.json");
+        let config_path = dir.path().join("automations.json");
+        let backup_path = dir.path().join("automations.json.bak");
         let cancel = CancellationToken::new();
-        (pool, clock, config_path, cancel, dir)
+        (pool, clock, config_path, backup_path, cancel, dir)
     }
 
     fn make_deps(pool: &ConnectionPool) -> ExecutorDeps {
@@ -633,19 +626,19 @@ mod tests {
             event_injector: None,
             http_client: reqwest::Client::new(),
             pool: pool.clone(),
-            output_dir: std::env::temp_dir().join("tron-cron-test"),
         }
     }
 
     #[tokio::test]
     async fn scheduler_starts_and_stops() {
-        let (pool, clock, config_path, cancel, _dir) = setup();
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
         let deps = make_deps(&pool);
         let scheduler = Arc::new(CronScheduler::new(
             pool,
             clock,
             deps,
             config_path,
+            backup_path,
             cancel.clone(),
         ));
 
@@ -661,7 +654,7 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_loads_config_on_startup() {
-        let (pool, clock, config_path, cancel, _dir) = setup();
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
 
         // Write a config file
         let job = CronJob {
@@ -693,7 +686,7 @@ mod tests {
             version: 1,
             jobs: vec![job],
         };
-        config::save_config(&config_path, &config).unwrap();
+        config::save_config(&config_path, &backup_path, &config).unwrap();
 
         let deps = make_deps(&pool);
         let scheduler = Arc::new(CronScheduler::new(
@@ -701,6 +694,7 @@ mod tests {
             clock,
             deps,
             config_path,
+            backup_path,
             cancel.clone(),
         ));
 
@@ -718,13 +712,14 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_reschedule_notify_wakes() {
-        let (pool, clock, config_path, cancel, _dir) = setup();
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
         let deps = make_deps(&pool);
         let scheduler = Arc::new(CronScheduler::new(
             pool,
             clock,
             deps,
             config_path,
+            backup_path,
             cancel.clone(),
         ));
 

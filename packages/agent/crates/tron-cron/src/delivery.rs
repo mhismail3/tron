@@ -192,7 +192,6 @@ mod tests {
             event_injector: None,
             http_client: reqwest::Client::new(),
             pool,
-            output_dir: std::env::temp_dir(),
         }
     }
 

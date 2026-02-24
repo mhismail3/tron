@@ -3,7 +3,6 @@
 //! Uses callback traits for dependency injection — the binary crate provides
 //! real implementations, tests use mocks.
 
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,8 +80,6 @@ pub struct ExecutorDeps {
     pub http_client: reqwest::Client,
     /// Database connection pool.
     pub pool: ConnectionPool,
-    /// Directory for full output files (`~/.tron/artifacts/cron/outputs/`).
-    pub output_dir: PathBuf,
 }
 
 /// Execute a job payload and return the result.
@@ -101,8 +98,6 @@ pub async fn execute_payload(
                 command,
                 working_directory.as_deref(),
                 *timeout_secs,
-                &deps.output_dir,
-                &job.id,
                 cancel,
             )
             .await
@@ -214,8 +209,8 @@ pub async fn execute_with_retries(
                     started_at,
                     completed_at: Some(now),
                     duration_ms: Some(duration),
-                    output: Some(truncate_output(&output.stdout, 4096)),
-                    output_truncated: output.truncated || output.stdout.len() > 4096,
+                    output: Some(output.stdout),
+                    output_truncated: output.truncated,
                     error: None,
                     exit_code: output.exit_code,
                     attempt,
@@ -285,8 +280,6 @@ async fn execute_shell(
     command: &str,
     working_dir: Option<&str>,
     timeout_secs: u64,
-    output_dir: &std::path::Path,
-    run_id: &str,
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
     let dir = working_dir
@@ -331,11 +324,6 @@ async fn execute_shell(
                         timed_out: false,
                         session_id: None,
                     };
-
-                    // Write full output to file if truncated
-                    if output.truncated {
-                        write_output_file(output_dir, run_id, &output.stdout, &output.stderr);
-                    }
 
                     // Non-zero exit code is a failure — but SIGPIPE (141) is expected
                     // when we truncated output (the reader closed, so writes to the pipe fail).
@@ -470,13 +458,6 @@ async fn read_bounded(
     Ok((String::from_utf8_lossy(&buf).into_owned(), truncated))
 }
 
-fn write_output_file(dir: &std::path::Path, run_id: &str, stdout: &str, stderr: &str) {
-    let _ = std::fs::create_dir_all(dir);
-    let path = dir.join(format!("{run_id}.log"));
-    let content = format!("=== STDOUT ===\n{stdout}\n=== STDERR ===\n{stderr}");
-    let _ = std::fs::write(path, content);
-}
-
 fn truncate_output(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -563,7 +544,6 @@ mod tests {
             event_injector: None,
             http_client: reqwest::Client::new(),
             pool,
-            output_dir: std::env::temp_dir().join("tron-cron-test-outputs"),
         }
     }
 
@@ -573,8 +553,6 @@ mod tests {
             "echo hello",
             Some("/tmp"),
             10,
-            &std::env::temp_dir(),
-            "test_run",
             CancellationToken::new(),
         )
         .await
@@ -588,8 +566,6 @@ mod tests {
             "exit 42",
             Some("/tmp"),
             10,
-            &std::env::temp_dir(),
-            "test_run",
             CancellationToken::new(),
         )
         .await;
@@ -603,8 +579,6 @@ mod tests {
             "sleep 60",
             Some("/tmp"),
             1,
-            &std::env::temp_dir(),
-            "test_run",
             CancellationToken::new(),
         )
         .await;
@@ -621,8 +595,6 @@ mod tests {
                 "sleep 60",
                 Some("/tmp"),
                 300,
-                &std::env::temp_dir(),
-                "test_run",
                 cancel2,
             )
             .await
@@ -642,8 +614,6 @@ mod tests {
             "pwd",
             Some(dir.path().to_str().unwrap()),
             10,
-            &std::env::temp_dir(),
-            "test_run",
             CancellationToken::new(),
         )
         .await
@@ -691,8 +661,6 @@ mod tests {
             "echo err >&2",
             Some("/tmp"),
             10,
-            &std::env::temp_dir(),
-            "test_run",
             CancellationToken::new(),
         )
         .await
@@ -707,8 +675,6 @@ mod tests {
             "dd if=/dev/zero bs=1024 count=2048 2>/dev/null | tr '\\0' 'A'",
             Some("/tmp"),
             30,
-            &std::env::temp_dir(),
-            "test_bounded",
             CancellationToken::new(),
         )
         .await

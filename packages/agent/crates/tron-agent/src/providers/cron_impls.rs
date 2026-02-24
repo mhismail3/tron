@@ -623,12 +623,12 @@ impl CronDelegateImpl {
             )));
         }
 
-        let mut config = tron_cron::config::load_config(self.scheduler.config_path())
+        let mut config = tron_cron::config::load_config(self.scheduler.config_path(), self.scheduler.backup_path())
             .map_err(|e| Self::err(e.to_string()))?;
 
         config.jobs.push(job.clone());
 
-        tron_cron::config::save_config(self.scheduler.config_path(), &config)
+        tron_cron::config::save_config(self.scheduler.config_path(), self.scheduler.backup_path(), &config)
             .map_err(|e| Self::err(e.to_string()))?;
 
         tron_cron::store::upsert_job(self.scheduler.pool(), &job)
@@ -664,7 +664,7 @@ impl CronDelegateImpl {
 
         let _guard = self.scheduler.config_lock().lock().await;
 
-        let mut config = tron_cron::config::load_config(self.scheduler.config_path())
+        let mut config = tron_cron::config::load_config(self.scheduler.config_path(), self.scheduler.backup_path())
             .map_err(|e| Self::err(e.to_string()))?;
 
         let job = config
@@ -735,7 +735,7 @@ impl CronDelegateImpl {
 
         let updated_job = job.clone();
 
-        tron_cron::config::save_config(self.scheduler.config_path(), &config)
+        tron_cron::config::save_config(self.scheduler.config_path(), self.scheduler.backup_path(), &config)
             .map_err(|e| Self::err(e.to_string()))?;
 
         tron_cron::store::upsert_job(self.scheduler.pool(), &updated_job)
@@ -768,7 +768,7 @@ impl CronDelegateImpl {
 
         let _guard = self.scheduler.config_lock().lock().await;
 
-        let mut config = tron_cron::config::load_config(self.scheduler.config_path())
+        let mut config = tron_cron::config::load_config(self.scheduler.config_path(), self.scheduler.backup_path())
             .map_err(|e| Self::err(e.to_string()))?;
 
         let before_len = config.jobs.len();
@@ -777,7 +777,7 @@ impl CronDelegateImpl {
             return Err(Self::not_found(format!("Job not found: {job_id}")));
         }
 
-        tron_cron::config::save_config(self.scheduler.config_path(), &config)
+        tron_cron::config::save_config(self.scheduler.config_path(), self.scheduler.backup_path(), &config)
             .map_err(|e| Self::err(e.to_string()))?;
 
         let _ = tron_cron::store::delete_job(self.scheduler.pool(), &job_id)
