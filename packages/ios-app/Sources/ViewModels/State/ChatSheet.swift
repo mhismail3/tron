@@ -64,6 +64,9 @@ enum ChatSheet: Identifiable, Equatable {
     // Model picker
     case modelPicker
 
+    // Source changes
+    case sourceChanges
+
     var id: String {
         switch self {
         case .safari(let url):
@@ -102,6 +105,8 @@ enum ChatSheet: Identifiable, Equatable {
             return "providerError"
         case .modelPicker:
             return "modelPicker"
+        case .sourceChanges:
+            return "sourceChanges"
         }
     }
 
@@ -144,6 +149,8 @@ enum ChatSheet: Identifiable, Equatable {
         case (.providerErrorDetail(let data1), .providerErrorDetail(let data2)):
             return data1 == data2
         case (.modelPicker, .modelPicker):
+            return true
+        case (.sourceChanges, .sourceChanges):
             return true
         default:
             return false

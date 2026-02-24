@@ -146,4 +146,9 @@ final class SheetCoordinator {
     func showModelPicker() {
         present(.modelPicker)
     }
+
+    /// Show source changes sheet
+    func showSourceChanges() {
+        present(.sourceChanges)
+    }
 }

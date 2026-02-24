@@ -74,6 +74,14 @@ extension ChatView {
                             Label("Tasks (\(viewModel.taskState.incompleteCount))", systemImage: "checklist")
                         }
                     }
+                    Button { NotificationCenter.default.post(name: .chatMenuAction, object: "changes") } label: {
+                        Label {
+                            Text("Source Control")
+                        } icon: {
+                            Image("IconGit")
+                                .renderingMode(.template)
+                        }
+                    }
                     Divider()
                     Button { NotificationCenter.default.post(name: .chatMenuAction, object: "settings") } label: {
                         Label("Settings", systemImage: "gearshape")

@@ -207,6 +207,23 @@ final class MiscClient {
         return result.worktrees
     }
 
+    // MARK: - Diff Methods
+
+    /// Get diff of all uncommitted changes for a session's working directory
+    func getWorkingDirectoryDiff(sessionId: String) async throws -> WorktreeGetDiffResult {
+        guard let transport else { throw RPCClientError.connectionNotEstablished }
+        let ws = try transport.requireConnection()
+        let params = WorktreeGetDiffParams(sessionId: sessionId)
+        return try await ws.send(method: "worktree.getDiff", params: params)
+    }
+
+    /// Get diff for current session
+    func getWorkingDirectoryDiff() async throws -> WorktreeGetDiffResult {
+        guard let transport else { throw RPCClientError.noActiveSession }
+        let (_, sessionId) = try transport.requireSession()
+        return try await getWorkingDirectoryDiff(sessionId: sessionId)
+    }
+
     // MARK: - Skill Methods
 
     /// List available skills

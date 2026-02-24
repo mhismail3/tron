@@ -110,6 +110,9 @@ struct ChatSheetContent: View {
                     NotificationCenter.default.post(name: .modelPickerAction, object: model)
                 }
             )
+
+        case .sourceChanges:
+            SourceChangesSheet(rpcClient: rpcClient, sessionId: sessionId)
         }
     }
 

@@ -205,6 +205,7 @@ struct ChatView: View {
             case "context": sheetCoordinator.showContextAudit()
             case "tasks": sheetCoordinator.showTaskList()
             case "settings": sheetCoordinator.showSettings()
+            case "changes": sheetCoordinator.showSourceChanges()
             default: break
             }
         }
