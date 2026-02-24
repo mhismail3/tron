@@ -7,45 +7,49 @@ struct MemoryDashboardDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    metadataHeader
-                        .padding(.horizontal)
+            GeometryReader { geometry in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 16) {
+                        metadataHeader
+                            .padding(.horizontal)
 
-                    if entry.input != nil || !entry.actions.isEmpty {
-                        summarySection
+                        if entry.input != nil || !entry.actions.isEmpty {
+                            summarySection
+                                .padding(.horizontal)
+                        }
+
+                        if !entry.decisions.isEmpty {
+                            decisionsSection
+                                .padding(.horizontal)
+                        }
+
+                        if !entry.lessons.isEmpty {
+                            lessonsSection
+                                .padding(.horizontal)
+                        }
+
+                        if !entry.insights.isEmpty {
+                            insightsSection
+                                .padding(.horizontal)
+                        }
+
+                        if !entry.files.isEmpty {
+                            filesSection
+                                .padding(.horizontal)
+                        }
+
+                        if !entry.tags.isEmpty {
+                            tagsSection
+                                .padding(.horizontal)
+                        }
+
+                        rawEntrySection
                             .padding(.horizontal)
                     }
-
-                    if !entry.decisions.isEmpty {
-                        decisionsSection
-                            .padding(.horizontal)
-                    }
-
-                    if !entry.lessons.isEmpty {
-                        lessonsSection
-                            .padding(.horizontal)
-                    }
-
-                    if !entry.insights.isEmpty {
-                        insightsSection
-                            .padding(.horizontal)
-                    }
-
-                    if !entry.files.isEmpty {
-                        filesSection
-                            .padding(.horizontal)
-                    }
-
-                    if !entry.tags.isEmpty {
-                        tagsSection
-                            .padding(.horizontal)
-                    }
-
-                    rawEntrySection
-                        .padding(.horizontal)
+                    .padding(.vertical)
+                    .frame(width: geometry.size.width)
                 }
-                .padding(.vertical)
+                .frame(width: geometry.size.width)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)

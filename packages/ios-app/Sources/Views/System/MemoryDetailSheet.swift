@@ -18,23 +18,27 @@ struct MemoryDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    if isLoading {
-                        loadingView
-                            .padding(.horizontal)
-                    } else if let error = loadError {
-                        errorView(error)
-                            .padding(.horizontal)
-                    } else if let payload = ledgerPayload {
-                        ledgerContent(payload)
-                    } else {
-                        // Fallback — just show title
-                        fallbackView
-                            .padding(.horizontal)
+            GeometryReader { geometry in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 16) {
+                        if isLoading {
+                            loadingView
+                                .padding(.horizontal)
+                        } else if let error = loadError {
+                            errorView(error)
+                                .padding(.horizontal)
+                        } else if let payload = ledgerPayload {
+                            ledgerContent(payload)
+                        } else {
+                            // Fallback — just show title
+                            fallbackView
+                                .padding(.horizontal)
+                        }
                     }
+                    .padding(.vertical)
+                    .frame(width: geometry.size.width)
                 }
-                .padding(.vertical)
+                .frame(width: geometry.size.width)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
