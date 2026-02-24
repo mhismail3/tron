@@ -818,6 +818,10 @@ cmd_deploy() {
     cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
     chmod +x "$INSTALLED_BINARY"
 
+    # Regenerate plist so paths (e.g. log file) stay current
+    print_status "Updating launchd plist..."
+    create_launchd_plist
+
     # Record new commit
     local new_commit
     new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
