@@ -29,7 +29,7 @@ struct AutomationsDashboardView: View {
         ZStack(alignment: .bottomTrailing) {
             if isLoading && jobs.isEmpty {
                 ProgressView()
-                    .tint(.tronAmber)
+                    .tint(.tronCoral)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = errorMessage {
                 errorView(error)
@@ -42,10 +42,10 @@ struct AutomationsDashboardView: View {
             // Floating create button
             Image(systemName: "plus")
                 .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
-                .foregroundStyle(.tronAmber)
+                .foregroundStyle(.tronCoral)
                 .frame(width: 56, height: 56)
                 .contentShape(Circle())
-                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.25)).interactive(), in: .circle)
+                .glassEffect(.regular.tint(Color.tronCoral.opacity(0.25)).interactive(), in: .circle)
                 .onTapGesture { showCreateSheet = true }
                 .padding(.trailing, 20)
                 .padding(.bottom, 24)
@@ -69,19 +69,19 @@ struct AutomationsDashboardView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 28)
                         .offset(y: 1)
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronCoral)
                 }
             }
             ToolbarItem(placement: .principal) {
                 Text("Automations")
                     .font(TronTypography.mono(size: 20, weight: .bold))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronCoral)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronCoral)
                 }
             }
         }
@@ -153,7 +153,7 @@ struct AutomationsDashboardView: View {
                         jobRow(job)
                     }
                 } header: {
-                    sectionHeader("Active", count: activeJobs.count, color: .tronAmber)
+                    sectionHeader("Active", count: activeJobs.count, color: .tronCoral)
                 }
             }
 
@@ -178,7 +178,7 @@ struct AutomationsDashboardView: View {
             .overlay {
                 if actionInProgress == job.id {
                     ProgressView()
-                        .tint(.tronAmber)
+                        .tint(.tronCoral)
                 }
             }
             .onTapGesture { selectedJob = job }
@@ -204,7 +204,7 @@ struct AutomationsDashboardView: View {
                 } label: {
                     Image(systemName: "play.circle.fill")
                 }
-                .tint(.tronAmber)
+                .tint(.tronCoral)
             }
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -214,10 +214,10 @@ struct AutomationsDashboardView: View {
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
         HStack {
             Text(title)
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(color)
             Text("(\(count))")
-                .font(TronTypography.codeSM)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(color.opacity(0.6))
             Spacer()
         }
@@ -302,7 +302,7 @@ struct AutomationsDashboardView: View {
             Button("Retry") {
                 Task { await loadJobs() }
             }
-            .foregroundStyle(.tronAmber)
+            .foregroundStyle(.tronCoral)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

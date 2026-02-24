@@ -12,21 +12,21 @@ struct AutomationRow: View {
             HStack(spacing: 8) {
                 Image(systemName: job.payload.icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronCoral)
 
                 Text(job.name)
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronAmber)
+                    .foregroundStyle(.tronCoral)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(job.payload.typeLabel)
                     .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                    .foregroundStyle(.tronAmber.opacity(0.7))
+                    .foregroundStyle(.tronCoral.opacity(0.7))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.tronAmber.opacity(0.15))
+                    .background(Color.tronCoral.opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             }
 
@@ -89,10 +89,10 @@ struct AutomationRow: View {
                     ForEach(job.tags.prefix(3), id: \.self) { tag in
                         Text(tag)
                             .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                            .foregroundStyle(.tronAmber.opacity(0.6))
+                            .foregroundStyle(.tronCoral.opacity(0.6))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)
-                            .background(Color.tronAmber.opacity(0.1))
+                            .background(Color.tronCoral.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                     }
                     if job.tags.count > 3 {
@@ -106,7 +106,7 @@ struct AutomationRow: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
         .glassEffect(
-            .regular.tint(Color.tronAmber.opacity(0.15)).interactive(),
+            .regular.tint(Color.tronCoral.opacity(0.15)).interactive(),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -119,11 +119,11 @@ struct AutomationRow: View {
             HStack(spacing: 3) {
                 ProgressView()
                     .controlSize(.mini)
-                    .tint(.tronAmber)
+                    .tint(.tronCoral)
                 Text("Running")
                     .font(TronTypography.codeSM)
             }
-            .foregroundStyle(.tronAmber)
+            .foregroundStyle(.tronCoral)
         } else if !job.enabled {
             Text("Paused")
                 .font(TronTypography.codeSM)

@@ -29,7 +29,7 @@ struct AutomationRunDetailSheet: View {
                                 .foregroundStyle(.tronTextMuted)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(Color.tronAmber.opacity(0.1))
+                                .background(Color.tronCoral.opacity(0.1))
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                     }
@@ -63,7 +63,7 @@ struct AutomationRunDetailSheet: View {
                             HStack {
                                 Text("Output")
                                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-                                    .foregroundStyle(.tronAmber)
+                                    .foregroundStyle(.tronCoral)
                                 if run.outputTruncated {
                                     Text("(truncated)")
                                         .font(TronTypography.codeCaption)
@@ -106,7 +106,7 @@ struct AutomationRunDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronCoral)
                 }
             }
         }
@@ -127,7 +127,7 @@ struct AutomationRunDetailSheet: View {
                 .foregroundStyle(.red)
         case "running":
             ProgressView()
-                .tint(.tronAmber)
+                .tint(.tronCoral)
         case "timedOut":
             Image(systemName: "clock.badge.exclamationmark")
                 .font(.title)
@@ -147,7 +147,7 @@ struct AutomationRunDetailSheet: View {
         switch run.status {
         case "completed": return .green
         case "failed": return .red
-        case "running": return .tronAmber
+        case "running": return .tronCoral
         case "timedOut": return .orange
         case "skipped": return .tronTextMuted
         default: return .tronTextSecondary

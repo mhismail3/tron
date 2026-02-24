@@ -19,6 +19,7 @@ enum ToolKind: Sendable, Equatable {
     case queryAgent
     case taskManager
     case notifyApp
+    case manageAutomations
     case other(String)
 
     init(toolName: String) {
@@ -39,6 +40,7 @@ enum ToolKind: Sendable, Equatable {
         case "queryagent":        self = .queryAgent
         case "taskmanager":       self = .taskManager
         case "notifyapp":         self = .notifyApp
+        case "manageautomations": self = .manageAutomations
         default:                  self = .other(toolName)
         }
     }

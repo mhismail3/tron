@@ -35,6 +35,7 @@ struct ToolUseData: Equatable {
         case "task": return "Spawning agent"
         case "webfetch": return "Fetching URL"
         case "websearch": return "Searching web"
+        case "manageautomations": return "Managing automation"
         default: return toolName
         }
     }

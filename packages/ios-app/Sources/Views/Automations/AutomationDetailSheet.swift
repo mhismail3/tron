@@ -31,7 +31,7 @@ struct AutomationDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronCoral)
                 }
             }
         }
@@ -81,17 +81,17 @@ struct AutomationDetailSheet: View {
                     ForEach(job.tags, id: \.self) { tag in
                         Text(tag)
                             .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronAmber.opacity(0.8))
+                            .foregroundStyle(.tronCoral.opacity(0.8))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.tronAmber.opacity(0.1))
+                            .background(Color.tronCoral.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                 }
             }
         }
         .padding()
-        .background(Color.tronAmber.opacity(0.05))
+        .background(Color.tronCoral.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -114,11 +114,11 @@ struct AutomationDetailSheet: View {
                             icon: "exclamationmark.triangle", color: .red)
                 }
                 if state.runningSince != nil {
-                    infoRow("Status", value: "Currently running", icon: "play.circle.fill", color: .tronAmber)
+                    infoRow("Status", value: "Currently running", icon: "play.circle.fill", color: .tronCoral)
                 }
             }
             .padding()
-            .background(Color.tronAmber.opacity(0.05))
+            .background(Color.tronCoral.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -132,7 +132,7 @@ struct AutomationDetailSheet: View {
                     .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
             }
             .buttonStyle(.bordered)
-            .tint(.tronAmber)
+            .tint(.tronCoral)
 
             Button(action: onToggleEnabled) {
                 Label(job.enabled ? "Pause" : "Enable",
@@ -161,7 +161,7 @@ struct AutomationDetailSheet: View {
 
             if isLoadingRuns {
                 ProgressView()
-                    .tint(.tronAmber)
+                    .tint(.tronCoral)
                     .frame(maxWidth: .infinity, alignment: .center)
             } else if recentRuns.isEmpty {
                 Text("No runs yet")
@@ -207,7 +207,7 @@ struct AutomationDetailSheet: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
-        .background(Color.tronAmber.opacity(0.05))
+        .background(Color.tronCoral.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -216,7 +216,7 @@ struct AutomationDetailSheet: View {
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
             .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .bold))
-            .foregroundStyle(.tronAmber)
+            .foregroundStyle(.tronCoral)
     }
 
     private func infoRow(_ label: String, value: String, icon: String, color: Color = .tronTextSecondary) -> some View {
@@ -263,7 +263,7 @@ struct AutomationDetailSheet: View {
         case "running":
             ProgressView()
                 .controlSize(.mini)
-                .tint(.tronAmber)
+                .tint(.tronCoral)
         case "timedOut":
             Image(systemName: "clock.badge.exclamationmark")
                 .foregroundStyle(.orange)
@@ -280,7 +280,7 @@ struct AutomationDetailSheet: View {
         switch status {
         case "completed": return .green
         case "failed": return .red
-        case "running": return .tronAmber
+        case "running": return .tronCoral
         case "timedOut": return .orange
         case "skipped": return .tronTextMuted
         default: return .tronTextSecondary

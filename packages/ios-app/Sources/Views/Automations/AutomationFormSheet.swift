@@ -54,24 +54,24 @@ struct AutomationFormSheet: View {
                 ToolbarItem(placement: .principal) {
                     Text("New Automation")
                         .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                        .foregroundStyle(.tronAmber)
+                        .foregroundStyle(.tronCoral)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { onCancel() } label: {
                         Image(systemName: "xmark")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronAmber)
+                            .foregroundStyle(.tronCoral)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if isSaving {
                         ProgressView()
-                            .tint(.tronAmber)
+                            .tint(.tronCoral)
                     } else {
                         Button { createJob() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(name.isEmpty || !isPayloadValid ? .tronTextDisabled : .tronAmber)
+                                .foregroundStyle(name.isEmpty || !isPayloadValid ? .tronTextDisabled : .tronCoral)
                         }
                         .disabled(name.isEmpty || !isPayloadValid)
                     }
@@ -101,7 +101,7 @@ struct AutomationFormSheet: View {
         } header: {
             Text("Basics")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronAmber)
+                .foregroundStyle(.tronCoral)
         }
     }
 
@@ -132,7 +132,7 @@ struct AutomationFormSheet: View {
         } header: {
             Text("Schedule")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronAmber)
+                .foregroundStyle(.tronCoral)
         }
     }
 
@@ -171,7 +171,7 @@ struct AutomationFormSheet: View {
         } header: {
             Text("Payload")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronAmber)
+                .foregroundStyle(.tronCoral)
         }
     }
 
@@ -196,7 +196,7 @@ struct AutomationFormSheet: View {
         } header: {
             Text("Advanced")
                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronAmber)
+                .foregroundStyle(.tronCoral)
         }
     }
 

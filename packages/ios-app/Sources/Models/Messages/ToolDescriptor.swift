@@ -37,7 +37,8 @@ enum ToolRegistry {
         "browsetheweb", "openurl",
         "webfetch", "websearch",
         "task",
-        "remember"
+        "remember",
+        "manageautomations"
     ]
 
     /// Special tools with dedicated non-chip UI.
@@ -290,6 +291,16 @@ enum ToolRegistry {
             summaryExtractor: { args in
                 let action = ToolArgumentParser.string("action", from: args) ?? ""
                 return action.isEmpty ? "" : action
+            },
+            viewerFactory: nil
+        ),
+        "manageautomations": ToolDescriptor(
+            icon: "clock.badge.checkmark",
+            iconColor: .tronCoral,
+            displayName: "Automation",
+            completedDisplayName: "Automated",
+            summaryExtractor: { args in
+                ToolArgumentParser.action(from: args)
             },
             viewerFactory: nil
         ),

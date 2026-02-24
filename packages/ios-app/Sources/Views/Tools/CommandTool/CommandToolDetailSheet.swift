@@ -208,6 +208,8 @@ struct CommandToolDetailSheet: View {
             return extractQuery(from: data.arguments)
         case "task":
             return extractTaskDetails(from: data.arguments)
+        case "manageautomations":
+            return extractAutomationDetails(from: data.arguments)
         default:
             return data.arguments
         }
@@ -449,6 +451,26 @@ struct CommandToolDetailSheet: View {
             details += "Prompt: \(unescapeJSON(String(promptMatch.1)))"
         }
         return details.isEmpty ? data.arguments : details
+    }
+
+    private func extractAutomationDetails(from args: String) -> String {
+        var details = ""
+        if let action = args.firstMatch(of: /"action"\s*:\s*"([^"]+)"/) {
+            details += "Action: \(String(action.1))\n"
+        }
+        if let jobId = args.firstMatch(of: /"jobId"\s*:\s*"([^"]+)"/) {
+            details += "Job ID: \(String(jobId.1))\n"
+        }
+        if let name = args.firstMatch(of: /"name"\s*:\s*"((?:[^"\\]|\\.)*)"/) {
+            details += "Name: \(unescapeJSON(String(name.1)))\n"
+        }
+        if let schedType = args.firstMatch(of: /"schedule"\s*:\s*\{[^}]*"type"\s*:\s*"([^"]+)"/) {
+            details += "Schedule: \(String(schedType.1))\n"
+        }
+        if let payloadType = args.firstMatch(of: /"payload"\s*:\s*\{[^}]*"type"\s*:\s*"([^"]+)"/) {
+            details += "Payload: \(String(payloadType.1))\n"
+        }
+        return details.isEmpty ? data.arguments : details.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

@@ -258,9 +258,52 @@ struct ToolRegistryTests {
 
     // MARK: - Tool Set Tests
 
+    @Test("ManageAutomations tool has correct icon and display name")
+    func testManageAutomationsDescriptor() {
+        let d = ToolRegistry.descriptor(for: "manageautomations")
+        #expect(d.icon == "clock.badge.checkmark")
+        #expect(d.displayName == "Automation")
+        #expect(d.completedDisplayName == "Automated")
+    }
+
+    @Test("ManageAutomations summary extracts action")
+    func testManageAutomationsSummary() {
+        let d = ToolRegistry.descriptor(for: "manageautomations")
+        let summary = d.summaryExtractor("{\"action\": \"create\", \"name\": \"Daily Backup\"}")
+        #expect(summary == "create")
+    }
+
+    @Test("ManageAutomations summary extracts action with jobId")
+    func testManageAutomationsSummaryWithJobId() {
+        let d = ToolRegistry.descriptor(for: "manageautomations")
+        let summary = d.summaryExtractor("{\"action\": \"trigger\", \"jobId\": \"cron_123\"}")
+        #expect(summary == "trigger")
+    }
+
+    @Test("ManageAutomations summary handles missing action")
+    func testManageAutomationsSummaryMissing() {
+        let d = ToolRegistry.descriptor(for: "manageautomations")
+        let summary = d.summaryExtractor("{}")
+        #expect(summary == "")
+    }
+
+    @Test("ManageAutomations is case-insensitive")
+    func testManageAutomationsCaseInsensitive() {
+        let d1 = ToolRegistry.descriptor(for: "ManageAutomations")
+        let d2 = ToolRegistry.descriptor(for: "MANAGEAUTOMATIONS")
+        #expect(d1.displayName == "Automation")
+        #expect(d2.displayName == "Automation")
+    }
+
+    @Test("ManageAutomations has nil viewer factory")
+    func testManageAutomationsNilFactory() {
+        let d = ToolRegistry.descriptor(for: "manageautomations")
+        #expect(d.viewerFactory == nil)
+    }
+
     @Test("commandToolNames contains all expected tools")
     func testCommandToolNames() {
-        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "openurl", "webfetch", "websearch", "task", "remember"]
+        let expected: Set<String> = ["read", "write", "edit", "bash", "search", "glob", "find", "browsetheweb", "openurl", "webfetch", "websearch", "task", "remember", "manageautomations"]
         #expect(ToolRegistry.commandToolNames == expected)
     }
 

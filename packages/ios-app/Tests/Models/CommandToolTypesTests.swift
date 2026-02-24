@@ -268,6 +268,7 @@ struct CommandToolTypesTests {
         #expect(commandTools.contains("webfetch"))
         #expect(commandTools.contains("websearch"))
         #expect(commandTools.contains("task"))
+        #expect(commandTools.contains("manageautomations"))
     }
 
     @Test("Registry isCommandTool returns true for command tools")
@@ -276,6 +277,7 @@ struct CommandToolTypesTests {
         #expect(CommandToolRegistry.isCommandTool("bash"))
         #expect(CommandToolRegistry.isCommandTool("search"))
         #expect(CommandToolRegistry.isCommandTool("edit"))
+        #expect(CommandToolRegistry.isCommandTool("manageautomations"))
     }
 
     @Test("Registry isCommandTool returns false for special tools")
@@ -333,6 +335,24 @@ struct CommandToolTypesTests {
         #expect(chipData.icon == "terminal")
         #expect(chipData.summary == "git status --short")
         #expect(chipData.status == .running)
+    }
+
+    @Test("Factory creates chip data from ToolUseData for ManageAutomations tool")
+    func testFactoryCreatesManageAutomationsChipData() {
+        let toolUse = ToolUseData(
+            toolName: "ManageAutomations",
+            toolCallId: "call_cron_1",
+            arguments: "{\"action\": \"create\", \"name\": \"Daily Backup\"}",
+            status: .success,
+            result: "{\"job\": {\"id\": \"cron_123\"}}",
+            durationMs: 50
+        )
+        let chipData = CommandToolChipData(from: toolUse)
+        #expect(chipData.normalizedName == "manageautomations")
+        #expect(chipData.displayName == "Automation")
+        #expect(chipData.icon == "clock.badge.checkmark")
+        #expect(chipData.summary == "create")
+        #expect(chipData.status == .success)
     }
 
     @Test("Factory preserves display name for completed tools")
