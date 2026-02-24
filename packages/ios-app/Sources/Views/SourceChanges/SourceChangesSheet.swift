@@ -206,7 +206,7 @@ struct SourceChangesSheet: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     if isExpanded {
                         expandedFiles.remove(file.path)
                     } else {
@@ -260,9 +260,10 @@ struct SourceChangesSheet: View {
                 expandedDiffView(file: file, langColor: langColor)
                     .padding(.horizontal)
                     .padding(.bottom, 10)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
             }
         }
+        .clipped()
     }
 
     // MARK: - Status Icon
