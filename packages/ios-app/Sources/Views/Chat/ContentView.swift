@@ -470,21 +470,15 @@ struct ContentView: View {
         }
     }
 
-    /// Creates a quick session using the current session's workspace (or most recent, or configured default)
+    /// Creates a quick session using the configured workspace setting (or current/most recent session as fallback)
     private func createQuickSession() {
-        // Use current session's workspace, fall back to most recent, then configured default
-        let workspace: String = {
-            if let currentId = selectedSessionId,
-               let current = eventStoreManager.sessions.first(where: { $0.id == currentId }),
-               !current.workingDirectory.isEmpty {
-                return current.workingDirectory
-            }
-            if let mostRecent = eventStoreManager.sortedSessions.first,
-               !mostRecent.workingDirectory.isEmpty {
-                return mostRecent.workingDirectory
-            }
-            return quickSessionWorkspace
-        }()
+        let workspace = resolveQuickSessionWorkspace(
+            setting: quickSessionWorkspace,
+            defaultWorkspace: AppConstants.defaultWorkspace,
+            selectedSessionId: selectedSessionId,
+            sessions: eventStoreManager.sessions,
+            sortedSessions: eventStoreManager.sortedSessions
+        )
 
         Task {
             do {
@@ -508,6 +502,37 @@ struct ContentView: View {
             }
         }
     }
+}
+
+// MARK: - Quick Session Workspace Resolution
+
+/// Resolves which workspace to use for a quick session.
+///
+/// Priority: explicit setting > current session > most recent session > default workspace.
+/// The setting is considered "explicit" when non-empty and different from the default workspace.
+func resolveQuickSessionWorkspace(
+    setting: String,
+    defaultWorkspace: String,
+    selectedSessionId: String?,
+    sessions: [CachedSession],
+    sortedSessions: [CachedSession]
+) -> String {
+    // Setting takes priority — that's the whole point of the setting
+    if !setting.isEmpty, setting != defaultWorkspace {
+        return setting
+    }
+    // Fall back to current session
+    if let currentId = selectedSessionId,
+       let current = sessions.first(where: { $0.id == currentId }),
+       !current.workingDirectory.isEmpty {
+        return current.workingDirectory
+    }
+    // Fall back to most recent session
+    if let mostRecent = sortedSessions.first,
+       !mostRecent.workingDirectory.isEmpty {
+        return mostRecent.workingDirectory
+    }
+    return defaultWorkspace
 }
 
 // MARK: - Welcome Page
