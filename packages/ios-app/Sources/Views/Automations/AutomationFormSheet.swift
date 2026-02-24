@@ -57,15 +57,24 @@ struct AutomationFormSheet: View {
                         .foregroundStyle(.tronAmber)
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { onCancel() }
-                        .font(TronTypography.subheadline)
-                        .foregroundStyle(.tronAmber)
+                    Button { onCancel() } label: {
+                        Image(systemName: "xmark")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                            .foregroundStyle(.tronAmber)
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Create") { createJob() }
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                        .foregroundStyle(.tronAmber)
-                        .disabled(isSaving || name.isEmpty || !isPayloadValid)
+                    if isSaving {
+                        ProgressView()
+                            .tint(.tronAmber)
+                    } else {
+                        Button { createJob() } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(name.isEmpty || !isPayloadValid ? .tronTextDisabled : .tronAmber)
+                        }
+                        .disabled(name.isEmpty || !isPayloadValid)
+                    }
                 }
             }
             .alert("Error", isPresented: Binding(
@@ -91,7 +100,7 @@ struct AutomationFormSheet: View {
                 .font(TronTypography.body)
         } header: {
             Text("Basics")
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronAmber)
         }
     }
@@ -122,7 +131,7 @@ struct AutomationFormSheet: View {
             }
         } header: {
             Text("Schedule")
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronAmber)
         }
     }
@@ -161,7 +170,7 @@ struct AutomationFormSheet: View {
             }
         } header: {
             Text("Payload")
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronAmber)
         }
     }
@@ -186,7 +195,7 @@ struct AutomationFormSheet: View {
                 .font(TronTypography.body)
         } header: {
             Text("Advanced")
-                .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .semibold))
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(.tronAmber)
         }
     }
