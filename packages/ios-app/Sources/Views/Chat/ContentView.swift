@@ -130,6 +130,8 @@ struct ContentView: View {
             compactMemoryDashboard
         } else if horizontalSizeClass == .compact && navigationMode == .sandboxes {
             compactSandboxesDashboard
+        } else if horizontalSizeClass == .compact && navigationMode == .automations {
+            compactAutomationsDashboard
         } else {
             splitViewContent
         }
@@ -180,6 +182,19 @@ struct ContentView: View {
     private var compactSandboxesDashboard: some View {
         NavigationStack {
             SandboxesDashboardView(
+                rpcClient: rpcClient,
+                onSettings: { showSettings = true },
+                onNavigationModeChange: { mode in
+                    navigationMode = mode
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var compactAutomationsDashboard: some View {
+        NavigationStack {
+            AutomationsDashboardView(
                 rpcClient: rpcClient,
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
@@ -245,6 +260,14 @@ struct ContentView: View {
                 )
             } else if navigationMode == .sandboxes {
                 SandboxesDashboardView(
+                    rpcClient: rpcClient,
+                    onSettings: { showSettings = true },
+                    onNavigationModeChange: { mode in
+                        navigationMode = mode
+                    }
+                )
+            } else if navigationMode == .automations {
+                AutomationsDashboardView(
                     rpcClient: rpcClient,
                     onSettings: { showSettings = true },
                     onNavigationModeChange: { mode in

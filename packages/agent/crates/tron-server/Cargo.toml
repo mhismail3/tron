@@ -18,6 +18,7 @@ doctest = false
 
 [dependencies]
 tron-core.workspace = true
+tron-cron.workspace = true
 tron-events = { path = "../tron-events" }
 tron-settings = { path = "../tron-settings" }
 tron-llm = { path = "../tron-llm" }

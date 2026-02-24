@@ -5,6 +5,7 @@ members = [
     "crates/tron-events",
     "crates/tron-settings",
     "crates/tron-embeddings",
+    "crates/tron-cron",
     "crates/tron-llm",
     "crates/tron-runtime",
     "crates/tron-tools",
@@ -20,6 +21,7 @@ default-members = [
     "crates/tron-events",
     "crates/tron-settings",
     "crates/tron-embeddings",
+    "crates/tron-cron",
     "crates/tron-llm",
     "crates/tron-runtime",
     "crates/tron-tools",
@@ -72,6 +74,7 @@ anyhow = "1"
 # IDs and time
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 
 # OAuth / JWT
 jsonwebtoken = "9"
@@ -135,6 +138,7 @@ tron-runtime = { path = "crates/tron-runtime" }
 tron-tools = { path = "crates/tron-tools" }
 tron-skills = { path = "crates/tron-skills" }
 tron-transcription = { path = "crates/tron-transcription" }
+tron-cron = { path = "crates/tron-cron" }
 tron-server = { path = "crates/tron-server" }
 
 [workspace.lints.rust]

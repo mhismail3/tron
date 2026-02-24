@@ -326,6 +326,8 @@ async fn main() -> Result<()> {
         let _ = tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
         tron_runtime::tasks::migrations::run_migrations(&conn)
             .context("Failed to run task migrations")?;
+        tron_cron::migrations::run_migrations(&conn)
+            .context("Failed to run cron migrations")?;
     }
 
     // Load settings early (needed for log level before logging init)
@@ -503,6 +505,10 @@ async fn main() -> Result<()> {
         .await
         .is_ok();
 
+    // Deferred cron scheduler reference for tool factory (set after CronScheduler creation)
+    let cron_scheduler_cell: Arc<std::sync::OnceLock<Arc<tron_cron::CronScheduler>>> =
+        Arc::new(std::sync::OnceLock::new());
+
     let (agent_deps, shared_subagent_manager) = if startup_auth_ok {
         tracing::info!(
             provider = settings.server.default_provider.as_str(),
@@ -524,6 +530,7 @@ async fn main() -> Result<()> {
         let config = tool_config.clone();
         let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = subagent_manager.clone();
         let sm_for_summarizer = subagent_manager.clone();
+        let cron_cell_for_closure = cron_scheduler_cell.clone();
         let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
             let mut registry = create_tool_registry(&config);
             registry.register(Arc::new(
@@ -547,6 +554,15 @@ async fn main() -> Result<()> {
             registry.register(Arc::new(
                 tron_tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
             ));
+
+            // ManageAutomations (cron scheduler set via OnceLock after creation)
+            if let Some(sched) = cron_cell_for_closure.get() {
+                let delegate: Arc<dyn tron_tools::traits::CronDelegate> =
+                    Arc::new(providers::CronDelegateImpl::new(sched.clone()));
+                registry.register(Arc::new(
+                    tron_tools::ui::manage_automations::ManageAutomationsTool::new(delegate),
+                ));
+            }
 
             registry
         });
@@ -601,6 +617,52 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Cron scheduler
+    let cron_cancel = tokio_util::sync::CancellationToken::new();
+    let cron_config_path = tron_settings::tron_home_dir()
+        .join("artifacts")
+        .join("cron")
+        .join("jobs.json");
+    let cron_agent_executor: Option<Arc<dyn tron_cron::AgentTurnExecutor>> =
+        agent_deps.as_ref().map(|deps| {
+            Arc::new(providers::CronAgentTurnExecutor::new(
+                event_store.clone(),
+                session_manager.clone(),
+                deps.provider_factory.clone(),
+                deps.tool_factory.clone(),
+                origin.clone(),
+            )) as Arc<dyn tron_cron::AgentTurnExecutor>
+        });
+    let cron_deps = tron_cron::ExecutorDeps {
+        agent_executor: cron_agent_executor,
+        broadcaster: std::sync::OnceLock::new(), // set after TronServer creation
+        push_notifier: tool_config.apns_service.as_ref().map(|apns| {
+            Arc::new(providers::CronPushNotifier::new(
+                apns.clone(),
+                task_pool.clone(),
+            )) as Arc<dyn tron_cron::PushNotifier>
+        }),
+        event_injector: Some(Arc::new(providers::CronSystemEventInjector::new(
+            event_store.clone(),
+        )) as Arc<dyn tron_cron::SystemEventInjector>),
+        http_client: tool_config.http_client.clone(),
+        pool: task_pool.clone(),
+        output_dir: tron_settings::tron_home_dir()
+            .join("artifacts")
+            .join("cron")
+            .join("outputs"),
+    };
+    let cron_scheduler = Arc::new(tron_cron::CronScheduler::new(
+        task_pool.clone(),
+        Arc::new(tron_cron::SystemClock),
+        cron_deps,
+        cron_config_path,
+        cron_cancel.clone(),
+    ));
+
+    // Wire cron scheduler into tool factory (breaks circular dep via OnceLock)
+    let _ = cron_scheduler_cell.set(cron_scheduler.clone());
+
     // RPC context
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
@@ -618,6 +680,7 @@ async fn main() -> Result<()> {
         health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
         shutdown_coordinator: None, // set by TronServer after creation
         origin: origin.clone(),
+        cron_scheduler: Some(cron_scheduler.clone()),
     };
 
     // Method registry
@@ -648,6 +711,24 @@ async fn main() -> Result<()> {
         orchestrator.turn_accumulators().clone(),
     );
     let bridge_handle = tokio::spawn(bridge.run());
+
+    // Wire cron broadcaster (needs BroadcastManager from server)
+    cron_scheduler.set_broadcaster(Arc::new(providers::CronEventBroadcaster::new(
+        server.broadcast().clone(),
+    )));
+
+    // Forward server shutdown to cron scheduler
+    {
+        let cron_cancel = cron_cancel.clone();
+        let shutdown_token = server.shutdown().token();
+        let _ = tokio::spawn(async move {
+            shutdown_token.cancelled().await;
+            cron_cancel.cancel();
+        });
+    }
+
+    // Start cron scheduler (scheduler loop + config file watcher)
+    let (cron_sched_handle, cron_watcher_handle) = cron_scheduler.clone().start();
 
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
 
@@ -680,7 +761,12 @@ async fn main() -> Result<()> {
     tracing::info!("Shutting down...");
 
     // Collect tracked task handles for coordinated shutdown
-    let shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![server_handle, bridge_handle];
+    let shutdown_handles: Vec<tokio::task::JoinHandle<()>> = vec![
+        server_handle,
+        bridge_handle,
+        cron_sched_handle,
+        cron_watcher_handle,
+    ];
 
     // Graceful shutdown with 30s timeout
     server
@@ -1033,6 +1119,7 @@ mod tests {
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1217,6 +1304,7 @@ mod tests {
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
         };
 
         let mut registry = MethodRegistry::new();

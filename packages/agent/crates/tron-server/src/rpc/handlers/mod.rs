@@ -26,6 +26,7 @@ pub mod browser;
 pub mod canvas;
 pub mod communication;
 pub mod context;
+pub mod cron;
 pub mod device;
 pub mod events;
 pub mod filesystem;
@@ -236,6 +237,16 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("sandbox.startContainer", sandbox::StartContainerHandler);
     registry.register("sandbox.stopContainer", sandbox::StopContainerHandler);
     registry.register("sandbox.killContainer", sandbox::KillContainerHandler);
+
+    // Cron
+    registry.register("cron.list", cron::ListHandler);
+    registry.register("cron.get", cron::GetHandler);
+    registry.register("cron.create", cron::CreateHandler);
+    registry.register("cron.update", cron::UpdateHandler);
+    registry.register("cron.delete", cron::DeleteHandler);
+    registry.register("cron.run", cron::RunHandler);
+    registry.register("cron.status", cron::StatusHandler);
+    registry.register("cron.getRuns", cron::GetRunsHandler);
 }
 
 /// Extract a required parameter from the params object.
@@ -404,6 +415,7 @@ pub(crate) mod test_helpers {
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
         }
     }
 
@@ -436,6 +448,7 @@ pub(crate) mod test_helpers {
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
         }
     }
 }
@@ -461,8 +474,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            102,
-            "expected 102 methods, got {}",
+            110,
+            "expected 110 methods, got {}",
             reg.methods().len()
         );
     }

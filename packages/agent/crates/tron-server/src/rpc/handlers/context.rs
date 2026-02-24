@@ -1519,6 +1519,7 @@ mod tests {
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
+            cron_scheduler: None,
         };
         let sid = mgr
             .create_session("claude-opus-4-6", "/tmp", Some("origin-test"))

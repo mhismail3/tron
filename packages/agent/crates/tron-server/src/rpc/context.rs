@@ -64,6 +64,8 @@ pub struct RpcContext {
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     /// Server origin (e.g. `"localhost:9847"`).
     pub origin: String,
+    /// Cron scheduler (None = cron not available).
+    pub cron_scheduler: Option<std::sync::Arc<tron_cron::CronScheduler>>,
 }
 
 #[cfg(test)]

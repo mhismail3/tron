@@ -5,9 +5,14 @@
 //! defines the traits).
 
 pub mod apns_delegate;
+pub mod cron_impls;
 pub mod sqlite_event_store;
 pub mod sqlite_task_manager;
 
 pub use apns_delegate::ApnsNotifyDelegate;
+pub use cron_impls::{
+    CronAgentTurnExecutor, CronDelegateImpl, CronEventBroadcaster, CronPushNotifier,
+    CronSystemEventInjector,
+};
 pub use sqlite_event_store::SqliteEventStoreQuery;
 pub use sqlite_task_manager::SqliteTaskManagerDelegate;

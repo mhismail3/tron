@@ -65,6 +65,10 @@ final class RPCClient: RPCTransport {
     @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)
 
+    /// Cron scheduling operations client (automations)
+    @ObservationIgnored
+    lazy var cron: CronClient = CronClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.
