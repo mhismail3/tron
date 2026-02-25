@@ -8,7 +8,6 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct WriteToolDetailSheet: View {
     let data: CommandToolChipData
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
@@ -50,44 +49,14 @@ struct WriteToolDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                contentBody
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        UIPasteboard.general.string = filePath
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.tronPink.opacity(0.6))
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tronPink)
-                        Text("Write")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronPink)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronPink)
-                }
-            }
+        ToolDetailSheetContainer(
+            toolName: "Write",
+            iconName: "square.and.pencil",
+            accent: .tronPink,
+            copyContent: filePath
+        ) {
+            contentBody
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronPink)
     }
 
     // MARK: - Content Body

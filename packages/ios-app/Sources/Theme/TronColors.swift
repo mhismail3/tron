@@ -17,18 +17,6 @@ extension Color {
 
     // MARK: - Accent Colors (adaptive: deeper in light mode)
 
-    /// Primary accent - refined emerald
-    static let tronPrimary = Color(lightHex: "#059669", darkHex: "#10B981")
-
-    /// Light accent for hover/highlights
-    static let tronPrimaryLight = Color(lightHex: "#10B981", darkHex: "#34D399")
-
-    /// Bright accent for emphasis
-    static let tronPrimaryBright = Color(lightHex: "#34D399", darkHex: "#6EE7B7")
-
-    /// Vivid accent for interactive elements
-    static let tronPrimaryVivid = Color(lightHex: "#059669", darkHex: "#10B981")
-
     /// Emerald - assistant accent
     static let tronEmerald = Color(lightHex: "#059669", darkHex: "#10B981")
 
@@ -37,9 +25,6 @@ extension Color {
 
     /// Mint - user accent
     static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
-
-    /// Sage - subtle accents
-    static let tronSage = Color(lightHex: "#34D399", darkHex: "#6EE7B7")
 
     // MARK: - Semantic Colors (adaptive: deeper in light mode)
 
@@ -58,25 +43,13 @@ extension Color {
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
     static let tronRose = Color(lightHex: "#D4245F", darkHex: "#E62B6C")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
-    static let tronPinkLight = Color(lightHex: "#EC4899", darkHex: "#F472B6")
 
     // Warm colors (Tokens theme) - Earthy/muted palette
     static let tronAmberLight = Color(lightHex: "#B45309", darkHex: "#D97706")
-    static let tronOrange = Color(lightHex: "#9A3412", darkHex: "#C2410C")
-    static let tronRed = Color(lightHex: "#92400E", darkHex: "#B45309")
-    static let tronBronze = Color(lightHex: "#451A03", darkHex: "#78350F")
-
-    // Earthy accent colors (adaptive: deeper in light mode)
-    static let tronTerracotta = Color(lightHex: "#7C2D12", darkHex: "#9A3412")
-    static let tronClay = Color(lightHex: "#854D0E", darkHex: "#A16207")
-    static let tronSienna = Color(lightHex: "#92400E", darkHex: "#B45309")
 
     // Cool neutral (Compact/Window theme)
     static let tronSlate = Color(hex: "#64748B")
     static let tronSlateDark = Color(lightHex: "#CBD5E1", darkHex: "#334155")
-
-    // Neutral gray
-    static let tronGray = Color(hex: "#6B7280")
 
     // MARK: - Special Colors
 
@@ -411,23 +384,9 @@ struct TintedColors {
 // MARK: - Gradient Definitions
 
 extension LinearGradient {
-    /// Primary gradient for buttons and accents
-    static let tronPrimaryGradient = LinearGradient(
-        colors: [Color(hex: "#34D399"), Color(hex: "#10B981")],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-
     /// Emerald gradient for assistant elements
     static let tronEmeraldGradient = LinearGradient(
         colors: [Color(hex: "#34D399"), Color(hex: "#10B981")],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
-    /// Background gradient (adaptive)
-    static let tronBackgroundGradient = LinearGradient(
-        colors: [Color.tronBackground, Color(lightHex: "#E8E2D6", darkHex: "#000000")],
         startPoint: .top,
         endPoint: .bottom
     )
@@ -441,29 +400,6 @@ extension Animation {
 
     /// Fast Tron UI animation
     static let tronFast = Animation.spring(response: 0.25, dampingFraction: 0.85)
-
-    /// Slow Tron UI animation for emphasis
-    static let tronSlow = Animation.spring(response: 0.5, dampingFraction: 0.75)
-
-    // MARK: - Specialized Animations
-
-    /// Pill morph animation (context -> model -> reasoning)
-    static let tronPillMorph = Animation.spring(response: 0.32, dampingFraction: 0.86)
-
-    /// Model pill appearance animation
-    static let tronModelPill = Animation.spring(response: 0.42, dampingFraction: 0.82)
-
-    /// Reasoning pill appearance animation
-    static let tronReasoningPill = Animation.spring(response: 0.4, dampingFraction: 0.8)
-
-    /// Tool call appearance animation
-    static let tronToolAppear = Animation.spring(response: 0.35, dampingFraction: 0.8)
-
-    /// Message cascade animation
-    static let tronCascade = Animation.spring(response: 0.3, dampingFraction: 0.85)
-
-    /// Token pill animation
-    static let tronTokenPill = Animation.spring(response: 0.3, dampingFraction: 0.9)
 }
 
 // MARK: - Animation Timing Constants
@@ -505,15 +441,10 @@ enum TronAnimationTiming {
 // MARK: - ShapeStyle Extension for foregroundStyle compatibility
 
 extension ShapeStyle where Self == Color {
-    // Primary Greens
-    static var tronPrimary: Color { .tronPrimary }
-    static var tronPrimaryLight: Color { .tronPrimaryLight }
-    static var tronPrimaryBright: Color { .tronPrimaryBright }
-    static var tronPrimaryVivid: Color { .tronPrimaryVivid }
+    // Accent Greens
     static var tronEmerald: Color { .tronEmerald }
     static var tronEmeraldDark: Color { .tronEmeraldDark }
     static var tronMint: Color { .tronMint }
-    static var tronSage: Color { .tronSage }
 
     // Semantic Colors
     static var tronSuccess: Color { .tronSuccess }
@@ -531,25 +462,13 @@ extension ShapeStyle where Self == Color {
     static var tronCoral: Color { .tronCoral }
     static var tronRose: Color { .tronRose }
     static var tronPink: Color { .tronPink }
-    static var tronPinkLight: Color { .tronPinkLight }
 
     // Warm colors (Tokens theme)
     static var tronAmberLight: Color { .tronAmberLight }
-    static var tronOrange: Color { .tronOrange }
-    static var tronRed: Color { .tronRed }
-    static var tronBronze: Color { .tronBronze }
-
-    // Earthy accent colors
-    static var tronTerracotta: Color { .tronTerracotta }
-    static var tronClay: Color { .tronClay }
-    static var tronSienna: Color { .tronSienna }
 
     // Cool neutral (Compact/Window theme)
     static var tronSlate: Color { .tronSlate }
     static var tronSlateDark: Color { .tronSlateDark }
-
-    // Neutral gray
-    static var tronGray: Color { .tronGray }
 
     // Backgrounds
     static var tronBackground: Color { .tronBackground }

@@ -20,7 +20,7 @@ enum ContentExtractor {
         var lastToolCount: Int?
 
         // Find the last user message
-        if let lastUserEvent = events.last(where: { $0.type == "message.user" }) {
+        if let lastUserEvent = events.last(where: { $0.type == PersistedEventType.messageUser.rawValue }) {
             let prompt = extractText(from: lastUserEvent.payload["content"]?.value)
             if !prompt.isEmpty {
                 lastUserPrompt = prompt
@@ -28,7 +28,7 @@ enum ContentExtractor {
         }
 
         // Find the last assistant message and count tools
-        if let lastAssistantEvent = events.last(where: { $0.type == "message.assistant" }) {
+        if let lastAssistantEvent = events.last(where: { $0.type == PersistedEventType.messageAssistant.rawValue }) {
             if let content = lastAssistantEvent.payload["content"]?.value {
                 lastAssistantResponse = extractText(from: content)
                 let toolCount = extractToolCount(from: content)
@@ -66,7 +66,7 @@ enum ContentExtractor {
             var texts: [String] = []
             for element in blocks {
                 if let block = element as? [String: Any],
-                   let type = block["type"] as? String, type == "text",
+                   let type = block["type"] as? String, type == ContentBlockType.text.rawValue,
                    let text = block["text"] as? String {
                     texts.append(text)
                 }
@@ -81,7 +81,7 @@ enum ContentExtractor {
     private static func extractTextFromBlocks(_ blocks: [[String: Any]]) -> String {
         var texts: [String] = []
         for block in blocks {
-            if let type = block["type"] as? String, type == "text",
+            if let type = block["type"] as? String, type == ContentBlockType.text.rawValue,
                let text = block["text"] as? String {
                 texts.append(text)
             }
@@ -102,14 +102,14 @@ enum ContentExtractor {
 
         // Array of content blocks
         if let blocks = content as? [[String: Any]] {
-            return blocks.filter { ($0["type"] as? String) == "tool_use" }.count
+            return blocks.filter { ($0["type"] as? String) == ContentBlockType.toolUse.rawValue }.count
         }
 
         // Array of Any
         if let blocks = content as? [Any] {
             return blocks.filter { element in
                 if let block = element as? [String: Any] {
-                    return (block["type"] as? String) == "tool_use"
+                    return (block["type"] as? String) == ContentBlockType.toolUse.rawValue
                 }
                 return false
             }.count
@@ -129,7 +129,7 @@ enum ContentExtractor {
         if let contentArray = content as? [[String: Any]] {
             return contentArray.contains { block in
                 let blockType = block["type"] as? String
-                return blockType == "tool_use" || blockType == "tool_result"
+                return blockType == ContentBlockType.toolUse.rawValue || blockType == ContentBlockType.toolResult.rawValue
             }
         }
 
@@ -138,7 +138,7 @@ enum ContentExtractor {
             for element in anyArray {
                 if let dict = element as? [String: Any],
                    let type = dict["type"] as? String,
-                   type == "tool_use" || type == "tool_result" {
+                   type == ContentBlockType.toolUse.rawValue || type == ContentBlockType.toolResult.rawValue {
                     return true
                 }
             }

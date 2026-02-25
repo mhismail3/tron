@@ -8,7 +8,6 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct WebFetchToolDetailSheet: View {
     let data: CommandToolChipData
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
@@ -36,44 +35,14 @@ struct WebFetchToolDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                contentBody
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        UIPasteboard.general.string = url
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.tronInfo.opacity(0.6))
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.down.doc")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tronInfo)
-                        Text("Web Fetch")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronInfo)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronInfo)
-                }
-            }
+        ToolDetailSheetContainer(
+            toolName: "Web Fetch",
+            iconName: "arrow.down.doc",
+            accent: .tronInfo,
+            copyContent: url
+        ) {
+            contentBody
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronInfo)
     }
 
     // MARK: - Content Body

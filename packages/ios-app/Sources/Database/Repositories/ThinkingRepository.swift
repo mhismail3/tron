@@ -55,7 +55,7 @@ final class ThinkingRepository {
                 // Find thinking block in content array
                 for (blockIndex, block) in contentArray.enumerated() {
                     guard let blockType = block["type"] as? String,
-                          blockType == "thinking",
+                          blockType == ContentBlockType.thinking.rawValue,
                           let thinkingText = block["thinking"] as? String,
                           !thinkingText.isEmpty else {
                         continue
@@ -112,7 +112,7 @@ final class ThinkingRepository {
         }
 
         // Handle message.assistant events with thinking in content blocks
-        if event.type == "message.assistant" {
+        if event.type == PersistedEventType.messageAssistant.rawValue {
             guard let contentArray = event.payload["content"]?.value as? [[String: Any]] else {
                 return nil
             }
@@ -121,7 +121,7 @@ final class ThinkingRepository {
             var thinkingIndex = 0
             for block in contentArray {
                 guard let blockType = block["type"] as? String,
-                      blockType == "thinking",
+                      blockType == ContentBlockType.thinking.rawValue,
                       let thinkingText = block["thinking"] as? String else {
                     continue
                 }
@@ -135,7 +135,7 @@ final class ThinkingRepository {
         }
 
         // Legacy: stream.thinking_complete events
-        if event.type == "stream.thinking_complete" {
+        if event.type == PersistedEventType.streamThinkingComplete.rawValue {
             return event.payload.string("content")
         }
 

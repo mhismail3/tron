@@ -69,15 +69,15 @@ enum InterleavedContentProcessor {
 
             // If AskUserQuestion was already processed, skip subsequent text blocks
             // (the question UI replaces the text response)
-            if sawAskUserQuestion && blockType == "text" {
+            if sawAskUserQuestion && blockType == ContentBlockType.text.rawValue {
                 continue
             }
 
-            if blockType == "thinking" {
+            if blockType == ContentBlockType.thinking.rawValue {
                 if let message = processThinkingBlock(block, timestamp: timestamp) {
                     messages.append(message)
                 }
-            } else if blockType == "text" {
+            } else if blockType == ContentBlockType.text.rawValue {
                 if let message = processTextBlock(
                     block,
                     timestamp: timestamp,
@@ -85,7 +85,7 @@ enum InterleavedContentProcessor {
                 ) {
                     messages.append(message)
                 }
-            } else if blockType == "tool_use", let toolUseId = block["id"] as? String {
+            } else if blockType == ContentBlockType.toolUse.rawValue, let toolUseId = block["id"] as? String {
                 let toolCall = toolCalls[toolUseId]
                 let result = toolResults[toolUseId]
                 let toolName = toolCall?.name ?? (block["name"] as? String) ?? "Unknown"

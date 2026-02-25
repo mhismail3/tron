@@ -63,7 +63,7 @@ enum TronIcon: String, CaseIterable {
         case .toolSuccess: return .tronSuccess
         case .toolError: return .tronError
         case .toolPending: return .tronTextMuted
-        case .thinking: return .tronPrimaryVivid
+        case .thinking: return .tronEmerald
         case .streaming: return .tronEmerald
         case .ready: return .tronSuccess
         case .processing: return .tronMint
@@ -236,7 +236,7 @@ struct ThinkingIndicator: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            PulsingIcon(icon: .thinking, size: 16, color: .tronPrimaryVivid)
+            PulsingIcon(icon: .thinking, size: 16, color: .tronEmerald)
 
             Text("Thinking" + String(repeating: ".", count: dots))
                 .font(.subheadline)

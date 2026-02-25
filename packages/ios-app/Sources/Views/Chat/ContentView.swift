@@ -18,13 +18,11 @@ struct ContentView: View {
     @Binding var deepLinkSessionId: String?
     @Binding var deepLinkScrollTarget: ScrollTarget?
 
+    @State private var coordinator: ContentViewCoordinator?
     @State private var selectedSessionId: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
-    // Deleted workspace handling - tracks which sessions have deleted workspaces
-    @State private var workspaceDeletedForSession: [String: Bool] = [:]
-    @State private var isValidatingWorkspace = false
 
     // Voice notes recording
     @State private var showVoiceNotesRecording = false
@@ -49,6 +47,16 @@ struct ContentView: View {
                 voiceNotesRecordingSheet
             }
             .onAppear {
+                // Initialize coordinator on first appear
+                if coordinator == nil {
+                    coordinator = ContentViewCoordinator(
+                        rpcClient: rpcClient,
+                        eventStoreManager: eventStoreManager,
+                        quickSessionWorkspaceSetting: quickSessionWorkspace,
+                        defaultModel: defaultModel
+                    )
+                }
+
                 // Restore last active session
                 if let activeId = eventStoreManager.activeSessionId,
                    eventStoreManager.sessionExists(activeId) {
@@ -70,50 +78,35 @@ struct ContentView: View {
                 eventStoreManager.stopDashboardPolling()
             }
             .onChange(of: rpcClient.connectionState) { oldState, newState in
-                // When connection is established, refresh session list from server
                 if newState.isConnected && !oldState.isConnected {
-                    eventStoreManager.startDashboardPolling()
-
-                    // Fetch session list from server so all devices see the same sessions
-                    Task {
-                        await eventStoreManager.refreshSessionList()
-                    }
-
-                    // Re-validate current session's workspace now that we're connected
-                    if let sessionId = selectedSessionId,
-                       let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) {
-                        let manager = eventStoreManager
-                        let workingDir = session.workingDirectory
-                        Task {
-                            isValidatingWorkspace = true
-                            if let pathExists = await manager.validateWorkspacePath(workingDir) {
-                                workspaceDeletedForSession[sessionId] = !pathExists
-                            }
-                            isValidatingWorkspace = false
-                        }
-                    }
+                    coordinator?.handleConnectionEstablished(selectedSessionId: selectedSessionId)
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
-                // Server changed - clear workspace deleted states since they may be invalid
-                workspaceDeletedForSession = [:]
-                // Refresh sessions once the new connection establishes.
-                // refreshSessionList() is a no-op if not yet connected.
-                Task {
-                    await eventStoreManager.refreshSessionList()
-                }
+                coordinator?.handleServerSettingsChanged()
             }
             .onReceive(NotificationCenter.default.publisher(for: .navigationModeAction)) { notification in
-                // Handle navigation mode change from ChatView toolbar (iPad)
+                // Handle navigation mode change from ChatView toolbar (iPad) or deep links
                 if let mode = notification.object as? NavigationMode {
                     navigationMode = mode
                 }
             }
-            .onChange(of: selectedSessionId) { oldValue, newValue in
-                handleSessionSelection(newValue)
+            .onReceive(NotificationCenter.default.publisher(for: .showSettingsAction)) { _ in
+                showSettings = true
+            }
+            .onChange(of: selectedSessionId) { _, newValue in
+                coordinator?.handleSessionSelection(newValue)
             }
             .onChange(of: deepLinkSessionId) { _, newSessionId in
-                handleDeepLink(sessionId: newSessionId)
+                coordinator?.handleDeepLink(
+                    sessionId: newSessionId,
+                    scrollTarget: deepLinkScrollTarget
+                ) { sessionId, scrollTarget in
+                    selectedSessionId = sessionId
+                    currentScrollTarget = scrollTarget
+                    deepLinkScrollTarget = nil
+                }
+                deepLinkSessionId = nil
             }
     }
 
@@ -349,57 +342,6 @@ struct ContentView: View {
 
     // MARK: - Event Handlers
 
-    private func handleSessionSelection(_ newValue: String?) {
-        guard let id = newValue else { return }
-
-        guard let session = eventStoreManager.sessions.first(where: { $0.id == id }) else {
-            eventStoreManager.setActiveSession(id)
-            return
-        }
-
-        eventStoreManager.setActiveSession(id)
-
-        // Capture the manager before Task to avoid EnvironmentObject issues
-        let manager = eventStoreManager
-        let workingDir = session.workingDirectory
-        Task {
-            isValidatingWorkspace = true
-            if let pathExists = await manager.validateWorkspacePath(workingDir) {
-                workspaceDeletedForSession[id] = !pathExists
-            }
-            isValidatingWorkspace = false
-        }
-    }
-
-    private func handleDeepLink(sessionId: String?) {
-        guard let sessionId = sessionId else { return }
-
-        defer { deepLinkSessionId = nil }
-
-        if eventStoreManager.sessionExists(sessionId) {
-            selectedSessionId = sessionId
-            currentScrollTarget = deepLinkScrollTarget
-            deepLinkScrollTarget = nil
-        } else {
-            // Session not cached locally - sync from server first
-            // Capture the manager before Task to avoid EnvironmentObject issues
-            let manager = eventStoreManager
-            let scrollTarget = deepLinkScrollTarget
-            Task {
-                do {
-                    try await manager.syncSessionEvents(sessionId: sessionId)
-                    await MainActor.run {
-                        selectedSessionId = sessionId
-                        currentScrollTarget = scrollTarget
-                        deepLinkScrollTarget = nil
-                    }
-                } catch {
-                    TronLogger.shared.error("Failed to sync session for deep link: \(error)", category: .notification)
-                }
-            }
-        }
-    }
-
     private var selectSessionPrompt: some View {
         // Match WelcomePage structure for consistent UI when sessions exist but none selected
         NavigationStack {
@@ -462,7 +404,7 @@ struct ContentView: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 skillStore: skillStore,
-                workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
+                workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
             )
@@ -472,7 +414,7 @@ struct ContentView: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 skillStore: skillStore,
-                workspaceDeleted: workspaceDeletedForSession[sessionId] ?? false,
+                workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget
             )
             .id(sessionId)
@@ -480,49 +422,14 @@ struct ContentView: View {
     }
 
     private func deleteSession(_ sessionId: String) {
-        Task {
-            do {
-                try await eventStoreManager.deleteSession(sessionId)
-            } catch {
-                logger.error("Failed to delete session: \(error)", category: .session)
-            }
-
-            if selectedSessionId == sessionId {
-                selectedSessionId = eventStoreManager.sessions.first?.id
-            }
+        coordinator?.deleteSession(sessionId, isSelected: selectedSessionId == sessionId) { nextId in
+            selectedSessionId = nextId
         }
     }
 
-    /// Creates a quick session using the configured workspace setting (or current/most recent session as fallback)
     private func createQuickSession() {
-        let workspace = resolveQuickSessionWorkspace(
-            setting: quickSessionWorkspace,
-            defaultWorkspace: AppConstants.defaultWorkspace,
-            selectedSessionId: selectedSessionId,
-            sessions: eventStoreManager.sessions,
-            sortedSessions: eventStoreManager.sortedSessions
-        )
-
-        Task {
-            do {
-                let result = try await rpcClient.session.create(
-                    workingDirectory: workspace,
-                    model: defaultModel
-                )
-
-                try eventStoreManager.cacheNewSession(
-                    sessionId: result.sessionId,
-                    workspaceId: workspace,
-                    model: result.model,
-                    workingDirectory: workspace
-                )
-
-                await MainActor.run {
-                    selectedSessionId = result.sessionId
-                }
-            } catch {
-                logger.error("Failed to create quick session: \(error)", category: .session)
-            }
+        coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
+            selectedSessionId = newId
         }
     }
 }

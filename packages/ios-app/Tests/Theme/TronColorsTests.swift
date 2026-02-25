@@ -59,7 +59,6 @@ struct TronColorsTests {
     @Test func darkModeColorsUnchanged() {
         // Core accent colors
         #expect(darkHex(of: .tronEmerald) == "#10B981")
-        #expect(darkHex(of: .tronPrimary) == "#10B981")
         #expect(darkHex(of: .tronMint) == "#34D399")
 
         // Backgrounds

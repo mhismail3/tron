@@ -8,7 +8,6 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct RememberToolDetailSheet: View {
     let data: CommandToolChipData
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
@@ -38,44 +37,14 @@ struct RememberToolDetailSheet: View {
     private let accentColor = Color.purple
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                contentBody
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        UIPasteboard.general.string = data.result ?? ""
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.purple.opacity(0.6))
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "brain.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(accentColor)
-                        Text("Remember")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.purple)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.purple)
-                }
-            }
+        ToolDetailSheetContainer(
+            toolName: "Remember",
+            iconName: "brain.fill",
+            accent: .purple,
+            copyContent: data.result ?? ""
+        ) {
+            contentBody
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.purple)
     }
 
     // MARK: - Content Body

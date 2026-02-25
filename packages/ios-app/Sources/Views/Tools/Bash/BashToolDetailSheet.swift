@@ -8,7 +8,6 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct BashToolDetailSheet: View {
     let data: CommandToolChipData
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @State private var showAllLines = false
 
@@ -83,44 +82,14 @@ struct BashToolDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                contentBody
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        UIPasteboard.general.string = command
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.tronEmerald.opacity(0.6))
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tronEmerald)
-                        Text("Bash")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
-                }
-            }
+        ToolDetailSheetContainer(
+            toolName: "Bash",
+            iconName: "terminal",
+            accent: .tronEmerald,
+            copyContent: command
+        ) {
+            contentBody
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
     }
 
     // MARK: - Content Body

@@ -127,7 +127,7 @@ extension ChatViewModel {
             case .text(let text):
                 guard !text.isEmpty else { continue }
                 let isLastText = index == lastTextIndex
-                let allToolsDone = toolCalls.allSatisfy { $0.status == "completed" || $0.status == "error" }
+                let allToolsDone = toolCalls.allSatisfy { $0.status == ToolCallStatus.completed.rawValue || $0.status == ToolCallStatus.error.rawValue }
 
                 if isLastText && !allToolsDone {
                     // Last text block with running tools → streaming
@@ -162,7 +162,7 @@ extension ChatViewModel {
         for (index, toolCall) in toolCalls.enumerated() {
             if index < textSegments.count && !textSegments[index].isEmpty {
                 let segmentText = textSegments[index]
-                if toolCall.status == "completed" || toolCall.status == "error" {
+                if toolCall.status == ToolCallStatus.completed.rawValue || toolCall.status == ToolCallStatus.error.rawValue {
                     let textMessage = ChatMessage(role: .assistant, content: .text(segmentText))
                     messages.append(textMessage)
                     if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = textMessage.id }
@@ -228,7 +228,7 @@ extension ChatViewModel {
             toolName: toolCall.toolName,
             toolCallId: toolCall.toolCallId,
             arguments: argsString,
-            status: toolCall.status == "running" ? .running : (toolCall.isError == true ? .error : .success),
+            status: toolCall.status == ToolCallStatus.running.rawValue ? .running : (toolCall.isError == true ? .error : .success),
             result: toolCall.result,
             durationMs: nil
         )
@@ -244,7 +244,7 @@ extension ChatViewModel {
         currentToolMessages[messageId] = toolMessage
 
         // If tool call is already completed, update with result
-        if toolCall.status == "completed" || toolCall.status == "error" {
+        if toolCall.status == ToolCallStatus.completed.rawValue || toolCall.status == ToolCallStatus.error.rawValue {
             var durationMs: Int? = nil
             if let completedAt = toolCall.completedAt {
                 let formatter = ISO8601DateFormatter()

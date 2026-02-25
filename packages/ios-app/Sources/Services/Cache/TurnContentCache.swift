@@ -109,18 +109,18 @@ final class TurnContentCache {
         var enrichedCount = 0
 
         // Build a lookup of cached assistant messages with tool blocks
-        let cachedAssistantMessages = cachedMessages.filter { ($0["role"] as? String) == "assistant" }
+        let cachedAssistantMessages = cachedMessages.filter { ($0["role"] as? String) == MessageRole.assistant.rawValue }
 
         // Find message.assistant events that might need enrichment
         for (idx, event) in enrichedEvents.enumerated() {
-            guard event.type == "message.assistant" else { continue }
+            guard event.type == PersistedEventType.messageAssistant.rawValue else { continue }
 
             let hasToolBlocks = checkForToolBlocks(in: event.payload)
 
             if !hasToolBlocks {
                 if let richContent = cachedAssistantMessages.last,
                    let contentBlocks = richContent["content"] as? [[String: Any]],
-                   contentBlocks.contains(where: { ($0["type"] as? String) == "tool_use" }) {
+                   contentBlocks.contains(where: { ($0["type"] as? String) == ContentBlockType.toolUse.rawValue }) {
 
                     var enrichedPayload = event.payload
                     enrichedPayload["content"] = AnyCodable(contentBlocks)
@@ -160,7 +160,7 @@ final class TurnContentCache {
         if let blocks = content as? [[String: Any]] {
             return blocks.contains { block in
                 let type = block["type"] as? String
-                return type == "tool_use" || type == "tool_result"
+                return type == ContentBlockType.toolUse.rawValue || type == ContentBlockType.toolResult.rawValue
             }
         }
 
@@ -168,7 +168,7 @@ final class TurnContentCache {
             return blocks.contains { element in
                 if let block = element as? [String: Any] {
                     let type = block["type"] as? String
-                    return type == "tool_use" || type == "tool_result"
+                    return type == ContentBlockType.toolUse.rawValue || type == ContentBlockType.toolResult.rawValue
                 }
                 return false
             }

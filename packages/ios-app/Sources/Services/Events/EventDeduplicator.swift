@@ -51,7 +51,7 @@ final class EventDeduplicator {
         var keyToEvents: [String: [SessionEvent]] = [:]
 
         for event in events {
-            if event.type == "message.user" || event.type == "message.assistant" {
+            if event.type == PersistedEventType.messageUser.rawValue || event.type == PersistedEventType.messageAssistant.rawValue {
                 let contentStr = ContentExtractor.extractTextForMatching(from: event.payload)
                 let key = "\(event.type):\(String(contentStr.prefix(100)))"
 

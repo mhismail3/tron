@@ -92,10 +92,10 @@ struct TronMobileApp: App {
                     deepLinkScrollTarget = scrollTo
                     TronLogger.shared.info("Deep linking to session: \(sessionId), scrollTo: \(String(describing: scrollTo))", category: .notification)
                 case .settings:
-                    // TODO: Navigate to settings
+                    NotificationCenter.default.post(name: .showSettingsAction, object: nil)
                     TronLogger.shared.info("Deep link to settings", category: .notification)
                 case .voiceNotes:
-                    // TODO: Navigate to voice notes
+                    NotificationCenter.default.post(name: .navigationModeAction, object: NavigationMode.voiceNotes)
                     TronLogger.shared.info("Deep link to voice notes", category: .notification)
                 }
             }

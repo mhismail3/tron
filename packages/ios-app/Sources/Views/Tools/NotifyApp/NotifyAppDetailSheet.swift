@@ -7,38 +7,15 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct NotifyAppDetailSheet: View {
     let data: NotifyAppChipData
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                contentView
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bell.badge.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tronEmerald)
-                        Text("Notification")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronEmerald)
-                }
-            }
+        ToolDetailSheetContainer(
+            toolName: "Notification",
+            iconName: "bell.badge.fill",
+            accent: .tronEmerald
+        ) {
+            contentView
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronEmerald)
     }
 
     // MARK: - Content View

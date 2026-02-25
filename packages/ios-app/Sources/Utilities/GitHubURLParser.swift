@@ -13,11 +13,9 @@ enum GitHubURLParser {
         let normalizedURL: String
     }
 
-    /// GitHub URL pattern - supports various formats
-    /// - https://github.com/owner/repo
-    /// - https://github.com/owner/repo.git
-    /// - github.com/owner/repo
-    /// - www.github.com/owner/repo
+    /// GitHub URL pattern - supports various formats:
+    /// `https://github.com/owner/repo`, `github.com/owner/repo.git`, etc.
+    /// Safety: pattern is a compile-time constant; NSRegularExpression only throws on invalid patterns.
     private static let urlPattern = try! NSRegularExpression(
         pattern: #"^(?:https?://)?(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?$"#,
         options: [.caseInsensitive]

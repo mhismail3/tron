@@ -23,6 +23,8 @@ struct SafariView: UIViewControllerRepresentable {
     }
 }
 
+private let previewURL = URL(string: "https://apple.com")!
+
 #Preview {
-    SafariView(url: URL(string: "https://apple.com")!)
+    SafariView(url: previewURL)
 }

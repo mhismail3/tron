@@ -11,12 +11,14 @@ import SwiftUI
 struct TaskDetailSheet: View {
     let chipData: TaskManagerChipData
 
-    @Environment(\.dismiss) private var dismiss
-
     private let accentColor: Color = .tronSlate
 
     var body: some View {
-        NavigationStack {
+        ToolDetailSheetContainer(
+            toolName: "Task Manager",
+            iconName: "checklist",
+            accent: .tronSlate
+        ) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     actionHeaderSection(chipData)
@@ -25,31 +27,7 @@ struct TaskDetailSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checklist")
-                            .font(.system(size: 14))
-                            .foregroundStyle(accentColor)
-                        Text("Task Manager")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(accentColor)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(accentColor)
-                }
-            }
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(accentColor)
     }
 
     // MARK: - Content Routing

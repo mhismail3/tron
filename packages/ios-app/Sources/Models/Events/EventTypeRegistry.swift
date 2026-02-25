@@ -216,9 +216,21 @@ enum PersistedEventType: String, CaseIterable {
 enum ContentBlockType: String {
     case text = "text"
     case image = "image"
+    case document = "document"
     case toolUse = "tool_use"
     case toolResult = "tool_result"
     case thinking = "thinking"
+}
+
+// =============================================================================
+// MARK: - Tool Call Status (from server ToolCallEvent)
+// =============================================================================
+
+/// Status of a tool call execution.
+enum ToolCallStatus: String {
+    case running = "running"
+    case completed = "completed"
+    case error = "error"
 }
 
 // =============================================================================

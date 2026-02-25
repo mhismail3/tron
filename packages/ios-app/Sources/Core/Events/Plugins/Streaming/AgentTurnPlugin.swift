@@ -133,7 +133,7 @@ enum AgentTurnPlugin: DispatchableEventPlugin {
 
         /// Extract all tool uses from assistant messages.
         var toolUses: [(id: String, name: String, input: [String: AnyCodable])] {
-            messages.filter { $0.role == "assistant" }.flatMap { msg -> [(id: String, name: String, input: [String: AnyCodable])] in
+            messages.filter { $0.role == MessageRole.assistant.rawValue }.flatMap { msg -> [(id: String, name: String, input: [String: AnyCodable])] in
                 msg.content.allBlocks.compactMap { block in
                     if case .toolUse(let id, let name, let input) = block {
                         return (id, name, input)
@@ -145,7 +145,7 @@ enum AgentTurnPlugin: DispatchableEventPlugin {
 
         /// Extract all tool results from user messages.
         var toolResults: [(toolUseId: String, content: String, isError: Bool)] {
-            messages.filter { $0.role == "user" }.flatMap { msg -> [(toolUseId: String, content: String, isError: Bool)] in
+            messages.filter { $0.role == MessageRole.user.rawValue }.flatMap { msg -> [(toolUseId: String, content: String, isError: Bool)] in
                 msg.content.allBlocks.compactMap { block in
                     if case .toolResult(let toolUseId, let content, let isError) = block {
                         return (toolUseId, content, isError)

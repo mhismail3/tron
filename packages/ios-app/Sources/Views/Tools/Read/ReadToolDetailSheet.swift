@@ -8,7 +8,6 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct ReadToolDetailSheet: View {
     let data: CommandToolChipData
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
@@ -34,44 +33,14 @@ struct ReadToolDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                contentBody
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        UIPasteboard.general.string = filePath
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.tronSlate.opacity(0.6))
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tronSlate)
-                        Text("Read")
-                            .font(TronTypography.mono(size: TronTypography.sizeTitle, weight: .semibold))
-                            .foregroundStyle(.tronSlate)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                    .foregroundStyle(.tronSlate)
-                }
-            }
+        ToolDetailSheetContainer(
+            toolName: "Read",
+            iconName: "doc.text",
+            accent: .tronSlate,
+            copyContent: filePath
+        ) {
+            contentBody
         }
-        .adaptivePresentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(.tronSlate)
     }
 
     // MARK: - Content Body

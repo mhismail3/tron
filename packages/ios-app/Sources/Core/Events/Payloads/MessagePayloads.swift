@@ -32,8 +32,8 @@ struct UserMessagePayload {
             self.isToolResultContext = false
         } else if let contentBlocks = payload["content"]?.value as? [[String: Any]] {
             // Check if this is a tool_result context message (no text, only tool_results)
-            let textBlocks = contentBlocks.filter { ($0["type"] as? String) == "text" }
-            let toolResultBlocks = contentBlocks.filter { ($0["type"] as? String) == "tool_result" }
+            let textBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.text.rawValue }
+            let toolResultBlocks = contentBlocks.filter { ($0["type"] as? String) == ContentBlockType.toolResult.rawValue }
 
             if textBlocks.isEmpty && !toolResultBlocks.isEmpty {
                 // This is a tool_result context message - not for display
@@ -43,7 +43,7 @@ struct UserMessagePayload {
             } else {
                 // Extract text from content blocks
                 let texts = contentBlocks.compactMap { block -> String? in
-                    guard block["type"] as? String == "text" else { return nil }
+                    guard block["type"] as? String == ContentBlockType.text.rawValue else { return nil }
                     return block["text"] as? String
                 }
                 self.content = texts.joined(separator: "\n")
@@ -54,7 +54,7 @@ struct UserMessagePayload {
             for block in contentBlocks {
                 let blockType = block["type"] as? String
 
-                if blockType == "image" {
+                if blockType == ContentBlockType.image.rawValue {
                     // Image: Server format { type: 'image', data: <base64>, mimeType: <mime> }
                     if let base64Data = block["data"] as? String,
                        let mimeType = block["mimeType"] as? String,
@@ -80,7 +80,7 @@ struct UserMessagePayload {
                             fileName: nil
                         ))
                     }
-                } else if blockType == "document" {
+                } else if blockType == ContentBlockType.document.rawValue {
                     // Document: Server format { type: 'document', data: <base64>, mimeType, fileName }
                     // Includes PDFs, text files (text/*), and JSON files
                     if let base64Data = block["data"] as? String,
@@ -172,7 +172,7 @@ struct AssistantMessagePayload {
     var textContent: String? {
         guard let blocks = contentBlocks else { return nil }
         let texts = blocks.compactMap { block -> String? in
-            guard block["type"] as? String == "text" else { return nil }
+            guard block["type"] as? String == ContentBlockType.text.rawValue else { return nil }
             return block["text"] as? String
         }
         guard !texts.isEmpty else { return nil }
@@ -185,7 +185,7 @@ struct AssistantMessagePayload {
     var thinkingContent: String? {
         guard let blocks = contentBlocks else { return nil }
         let thoughts = blocks.compactMap { block -> String? in
-            guard block["type"] as? String == "thinking" else { return nil }
+            guard block["type"] as? String == ContentBlockType.thinking.rawValue else { return nil }
             return block["thinking"] as? String
         }
         return thoughts.isEmpty ? nil : thoughts.joined(separator: "\n")

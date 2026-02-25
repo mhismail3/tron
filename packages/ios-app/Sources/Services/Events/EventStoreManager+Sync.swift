@@ -140,7 +140,7 @@ extension EventStoreManager {
         // Update counts
         session.eventCount = events.count
         session.messageCount = events.filter {
-            $0.type == "message.user" || $0.type == "message.assistant"
+            $0.type == PersistedEventType.messageUser.rawValue || $0.type == PersistedEventType.messageAssistant.rawValue
         }.count
 
         // Update head/root events

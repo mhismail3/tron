@@ -8,7 +8,7 @@ struct CameraCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onImageCaptured: (UIImage) -> Void
 
-    @StateObject private var cameraModel = CameraModel()
+    @State private var cameraModel = CameraModel()
     @State private var capturedImage: UIImage?
     @State private var showingPreview = false
 
@@ -186,12 +186,13 @@ struct CameraCaptureSheet: View {
 
 // MARK: - Camera Model
 
+@Observable
 @MainActor
-class CameraModel: NSObject, ObservableObject {
-    @Published var isAuthorized = false
-    @Published var permissionDenied = false
-    @Published var isTorchOn = false
-    @Published var hasTorch = false
+class CameraModel: NSObject {
+    var isAuthorized = false
+    var permissionDenied = false
+    var isTorchOn = false
+    var hasTorch = false
 
     let session = AVCaptureSession()
     private var photoOutput = AVCapturePhotoOutput()
