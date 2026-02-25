@@ -239,8 +239,7 @@ final class ChatViewModel: ChatEventContext {
         setupAudioRecorder()
     }
 
-    /// Observation tasks cancelled on deinit.
-    nonisolated(unsafe) private var observationTasks: [Task<Void, Never>] = []
+    private var observationTasks: [Task<Void, Never>] = []
 
     private func setupBindings() {
         observationTasks.append(observeConnectionState())
@@ -435,8 +434,12 @@ final class ChatViewModel: ChatEventContext {
     }
 
     deinit {
-        eventTask?.cancel()
-        for task in observationTasks { task.cancel() }
+        // MainActor classes always deinit on the main actor.
+        // assumeIsolated lets the compiler see we can safely access isolated state.
+        MainActor.assumeIsolated {
+            eventTask?.cancel()
+            for task in observationTasks { task.cancel() }
+        }
     }
 
     /// Unified event handler - dispatches ParsedEventV2 to specific handlers

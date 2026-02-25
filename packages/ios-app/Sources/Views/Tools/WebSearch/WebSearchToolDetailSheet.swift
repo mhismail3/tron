@@ -279,30 +279,11 @@ struct WebSearchToolDetailSheet: View {
     // MARK: - Error Section
 
     private func searchErrorSection(_ errorMessage: String) -> some View {
-        let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
-        let errorInfo = WebSearchDetailParser.classifyError(errorMessage)
-
-        return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: errorInfo.icon)
-                        .font(.system(size: 20))
-                        .foregroundStyle(.tronError)
-
-                    Text(errorInfo.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronError)
-                }
-
-                if let code = errorInfo.code {
-                    ToolInfoPill(icon: "exclamationmark.triangle", label: code, color: .tronError)
-                }
-
-                Text(errorInfo.suggestion)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.subtle)
-            }
-        }
+        ToolClassifiedErrorSection(
+            errorMessage: errorMessage,
+            classification: WebSearchDetailParser.classifyError(errorMessage),
+            colorScheme: colorScheme
+        )
     }
 
     // MARK: - Running Section
@@ -409,32 +390,32 @@ enum WebSearchDetailParser {
         return result
     }
 
-    static func classifyError(_ message: String) -> (icon: String, title: String, code: String?, suggestion: String) {
+    static func classifyError(_ message: String) -> ErrorClassification {
         let lower = message.lowercased()
 
         if lower.contains("rate limit") || lower.contains("429") {
-            return ("clock.badge.exclamationmark", "Rate Limited", "429",
-                    "Too many search requests. Try again in a moment.")
+            return ErrorClassification(icon: "clock.badge.exclamationmark", title: "Rate Limited", code: "429",
+                    suggestion: "Too many search requests. Try again in a moment.")
         }
         if lower.contains("api key") || lower.contains("authentication") || lower.contains("401") {
-            return ("key.fill", "API Key Error", "401",
-                    "The search API key is invalid or expired.")
+            return ErrorClassification(icon: "key.fill", title: "API Key Error", code: "401",
+                    suggestion: "The search API key is invalid or expired.")
         }
         if lower.contains("quota") || lower.contains("exceeded") {
-            return ("chart.bar.xaxis", "Quota Exceeded", nil,
-                    "The monthly search quota has been reached.")
+            return ErrorClassification(icon: "chart.bar.xaxis", title: "Quota Exceeded", code: nil,
+                    suggestion: "The monthly search quota has been reached.")
         }
         if lower.contains("timeout") || lower.contains("timed out") {
-            return ("clock.arrow.circlepath", "Search Timed Out", nil,
-                    "The search took too long to respond. Try again.")
+            return ErrorClassification(icon: "clock.arrow.circlepath", title: "Search Timed Out", code: nil,
+                    suggestion: "The search took too long to respond. Try again.")
         }
         if lower.contains("invalid") && lower.contains("query") {
-            return ("exclamationmark.triangle.fill", "Invalid Query", nil,
-                    "The search query is invalid or too long.")
+            return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Invalid Query", code: nil,
+                    suggestion: "The search query is invalid or too long.")
         }
 
-        return ("exclamationmark.triangle.fill", "Search Failed", nil,
-                "An error occurred while searching the web.")
+        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Search Failed", code: nil,
+                suggestion: "An error occurred while searching the web.")
     }
 }
 

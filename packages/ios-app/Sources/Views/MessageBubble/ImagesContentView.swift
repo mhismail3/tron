@@ -8,17 +8,12 @@ struct ImagesContentView: View {
     var body: some View {
         HStack(spacing: 8) {
             ForEach(images) { image in
-                if let uiImage = UIImage(data: image.data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 72, height: 72)
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .stroke(Color.tronBorder.opacity(0.5), lineWidth: 0.5)
-                        )
-                }
+                DecodedImageView(data: image.data, size: CGSize(width: 72, height: 72))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .stroke(Color.tronBorder.opacity(0.5), lineWidth: 0.5)
+                    )
             }
         }
         .padding(4)
@@ -47,12 +42,8 @@ struct AttachmentThumbnail: View {
 
     var body: some View {
         Group {
-            if attachment.isImage, let uiImage = UIImage(data: attachment.data) {
-                // Image thumbnail
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 56, height: 56)
+            if attachment.isImage {
+                DecodedImageView(data: attachment.data, size: CGSize(width: 56, height: 56))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)

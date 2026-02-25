@@ -44,14 +44,10 @@ struct AttachmentBubble: View {
     @ViewBuilder
     private var thumbnailView: some View {
         Group {
-            if attachment.isImage, let uiImage = UIImage(data: attachment.data) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 28, height: 28)
+            if attachment.isImage {
+                DecodedImageView(data: attachment.data, size: CGSize(width: 28, height: 28))
                     .clipShape(RoundedRectangle(cornerRadius: 5))
             } else {
-                // Icon for non-image attachments
                 iconView
             }
         }

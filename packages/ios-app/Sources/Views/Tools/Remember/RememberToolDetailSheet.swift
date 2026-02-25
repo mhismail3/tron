@@ -591,30 +591,11 @@ struct RememberToolDetailSheet: View {
     // MARK: - Error Section
 
     private func errorSection(_ errorMessage: String) -> some View {
-        let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
-        let errorInfo = RememberDetailParser.classifyError(errorMessage)
-
-        return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: errorInfo.icon)
-                        .font(.system(size: 20))
-                        .foregroundStyle(.tronError)
-
-                    Text(errorInfo.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronError)
-                }
-
-                if let code = errorInfo.code {
-                    ToolInfoPill(icon: "exclamationmark.triangle", label: code, color: .tronError)
-                }
-
-                Text(errorInfo.suggestion)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.subtle)
-            }
-        }
+        ToolClassifiedErrorSection(
+            errorMessage: errorMessage,
+            classification: RememberDetailParser.classifyError(errorMessage),
+            colorScheme: colorScheme
+        )
     }
 
     // MARK: - Running Section
@@ -895,28 +876,28 @@ enum RememberDetailParser {
         result.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "no results found"
     }
 
-    static func classifyError(_ message: String) -> (icon: String, title: String, code: String?, suggestion: String) {
+    static func classifyError(_ message: String) -> ErrorClassification {
         let lower = message.lowercased()
 
         if lower.contains("invalid action") {
-            return ("exclamationmark.triangle.fill", "Invalid Action", "INVALID_ACTION",
-                    "The action is not recognized. Valid actions: recall, search, sessions, session, events, messages, tools, logs, stats, schema, read_blob.")
+            return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Invalid Action", code: "INVALID_ACTION",
+                    suggestion: "The action is not recognized. Valid actions: recall, search, sessions, session, events, messages, tools, logs, stats, schema, read_blob.")
         }
         if lower.contains("missing required") || lower.contains("missing") && lower.contains("session_id") {
-            return ("questionmark.circle", "Missing Parameter", "MISSING_PARAM",
-                    "A required parameter was not provided. Check the action's required parameters.")
+            return ErrorClassification(icon: "questionmark.circle", title: "Missing Parameter", code: "MISSING_PARAM",
+                    suggestion: "A required parameter was not provided. Check the action's required parameters.")
         }
         if lower.contains("not found") {
-            return ("magnifyingglass", "Not Found", nil,
-                    "The requested resource was not found in the database.")
+            return ErrorClassification(icon: "magnifyingglass", title: "Not Found", code: nil,
+                    suggestion: "The requested resource was not found in the database.")
         }
         if lower.contains("not available") {
-            return ("xmark.circle", "Not Available", nil,
-                    "This feature is not available in the current backend.")
+            return ErrorClassification(icon: "xmark.circle", title: "Not Available", code: nil,
+                    suggestion: "This feature is not available in the current backend.")
         }
 
-        return ("exclamationmark.triangle.fill", "Query Failed", nil,
-                "An error occurred while querying the database.")
+        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Query Failed", code: nil,
+                suggestion: "An error occurred while querying the database.")
     }
 
     // MARK: - Helpers

@@ -112,13 +112,12 @@ struct SessionHistoryView: View {
             headEventId: headEventId,
             onFork: onFork
         )
-        .onAppear {
-            // Scroll to HEAD
+        .task {
+            // Scroll to HEAD after layout settles
             if let head = headEventId {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    withAnimation {
-                        proxy.scrollTo(head, anchor: .center)
-                    }
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation {
+                    proxy.scrollTo(head, anchor: .center)
                 }
             }
         }
@@ -141,12 +140,11 @@ struct SessionHistoryView: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             if let head = headEventId {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    withAnimation {
-                        proxy.scrollTo(head, anchor: .center)
-                    }
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation {
+                    proxy.scrollTo(head, anchor: .center)
                 }
             }
         }

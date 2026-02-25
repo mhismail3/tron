@@ -228,35 +228,19 @@ struct OpenURLToolDetailSheet: View {
     // MARK: - Error Section
 
     private func errorSection(_ errorMessage: String) -> some View {
-        let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
-        let errorInfo = OpenURLDetailParser.classifyError(errorMessage)
+        let classification = OpenURLDetailParser.classifyError(errorMessage)
 
-        return ToolDetailSection(title: "Error", accent: .tronError, tint: errorTint) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: errorInfo.icon)
-                        .font(.system(size: 20))
-                        .foregroundStyle(.tronError)
-
-                    Text(errorInfo.title)
-                        .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(.tronError)
-                }
-
-                if !url.isEmpty {
-                    Text(url)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(errorTint.secondary)
-                        .textSelection(.enabled)
-                }
-
-                if let code = errorInfo.code {
-                    ToolInfoPill(icon: "exclamationmark.triangle", label: code, color: .tronError)
-                }
-
-                Text(errorInfo.suggestion)
-                    .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                    .foregroundStyle(errorTint.subtle)
+        return ToolClassifiedErrorSection(
+            errorMessage: errorMessage,
+            classification: classification,
+            colorScheme: colorScheme
+        ) {
+            if !url.isEmpty {
+                let errorTint = TintedColors(accent: .tronError, colorScheme: colorScheme)
+                Text(url)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(errorTint.secondary)
+                    .textSelection(.enabled)
             }
         }
     }
@@ -296,28 +280,28 @@ enum OpenURLDetailParser {
                lower.contains("failed") || lower.contains("missing required")
     }
 
-    static func classifyError(_ message: String) -> (icon: String, title: String, code: String?, suggestion: String) {
+    static func classifyError(_ message: String) -> ErrorClassification {
         let lower = message.lowercased()
 
         if lower.contains("invalid url format") {
-            return ("link.badge.plus", "Invalid URL", "INVALID_FORMAT",
-                    "The URL format is not valid. Check for typos or missing components.")
+            return ErrorClassification(icon: "link.badge.plus", title: "Invalid URL", code: "INVALID_FORMAT",
+                    suggestion: "The URL format is not valid. Check for typos or missing components.")
         }
         if lower.contains("invalid url scheme") || lower.contains("invalid scheme") {
-            return ("lock.slash", "Invalid Scheme", "INVALID_SCHEME",
-                    "Only http:// and https:// URLs are supported.")
+            return ErrorClassification(icon: "lock.slash", title: "Invalid Scheme", code: "INVALID_SCHEME",
+                    suggestion: "Only http:// and https:// URLs are supported.")
         }
         if lower.contains("missing required") || lower.contains("missing") && lower.contains("url") {
-            return ("questionmark.circle", "Missing URL", "MISSING_PARAM",
-                    "No URL was provided. The url parameter is required.")
+            return ErrorClassification(icon: "questionmark.circle", title: "Missing URL", code: "MISSING_PARAM",
+                    suggestion: "No URL was provided. The url parameter is required.")
         }
         if lower.contains("failed to open") {
-            return ("xmark.circle", "Failed to Open", nil,
-                    "The URL could not be opened. The browser may not be available.")
+            return ErrorClassification(icon: "xmark.circle", title: "Failed to Open", code: nil,
+                    suggestion: "The URL could not be opened. The browser may not be available.")
         }
 
-        return ("exclamationmark.triangle.fill", "Open Failed", nil,
-                "An error occurred while trying to open the URL.")
+        return ErrorClassification(icon: "exclamationmark.triangle.fill", title: "Open Failed", code: nil,
+                suggestion: "An error occurred while trying to open the URL.")
     }
 }
 

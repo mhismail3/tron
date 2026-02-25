@@ -94,6 +94,12 @@ final class RPCClient: RPCTransport {
         self.serverURL = serverURL
     }
 
+    deinit {
+        MainActor.assumeIsolated {
+            observationTask?.cancel()
+        }
+    }
+
     // MARK: - Async Event Stream API
 
     /// Get an async stream of all events.
@@ -154,6 +160,8 @@ final class RPCClient: RPCTransport {
 
     func disconnect() async {
         logger.info("Disconnecting from server", category: .rpc)
+        observationTask?.cancel()
+        observationTask = nil
         currentSessionId = nil
         webSocket?.disconnect()
         webSocket = nil
@@ -161,17 +169,24 @@ final class RPCClient: RPCTransport {
         connectionState = .disconnected
     }
 
-    /// Observe WebSocketService.connectionState using Swift Observation
+    @ObservationIgnored
+    private var observationTask: Task<Void, Never>?
+
+    /// Continuation-based observation loop that mirrors WebSocketService.connectionState.
+    /// Cancelled in disconnect() — no recursive re-registration needed.
     private func startConnectionStateObservation() {
-        withObservationTracking {
-            // Access the property to register for tracking
-            _ = webSocket?.connectionState
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self, let ws = self.webSocket else { return }
+        observationTask?.cancel()
+        observationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await withCheckedContinuation { cont in
+                    withObservationTracking {
+                        _ = self?.webSocket?.connectionState
+                    } onChange: {
+                        cont.resume()
+                    }
+                }
+                guard !Task.isCancelled, let self, let ws = self.webSocket else { return }
                 self.connectionState = ws.connectionState
-                // Re-register for the next change
-                self.startConnectionStateObservation()
             }
         }
     }
@@ -200,6 +215,8 @@ final class RPCClient: RPCTransport {
         logger.info("Force reconnecting...", category: .rpc)
 
         // Clean up existing connection
+        observationTask?.cancel()
+        observationTask = nil
         webSocket?.disconnect()
         webSocket = nil
         connectionState = .disconnected
