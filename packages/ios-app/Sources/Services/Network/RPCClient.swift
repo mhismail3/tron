@@ -156,6 +156,10 @@ final class RPCClient: RPCTransport {
         }
 
         await ws.connect()
+
+        // Sync state immediately — the observation task may not have run yet,
+        // so it can miss the .connecting → .connected transition.
+        connectionState = ws.connectionState
     }
 
     func disconnect() async {
@@ -174,19 +178,24 @@ final class RPCClient: RPCTransport {
 
     /// Continuation-based observation loop that mirrors WebSocketService.connectionState.
     /// Cancelled in disconnect() — no recursive re-registration needed.
+    /// Syncs state at the TOP of each iteration so the initial state is never missed.
     private func startConnectionStateObservation() {
         observationTask?.cancel()
         observationTask = Task { [weak self] in
             while !Task.isCancelled {
+                // Sync current state FIRST, then register for next change.
+                // This prevents missing the initial .connecting → .connected transition
+                // when ws.connect() completes before this Task starts executing.
+                guard !Task.isCancelled, let self, let ws = self.webSocket else { return }
+                self.connectionState = ws.connectionState
+
                 await withCheckedContinuation { cont in
                     withObservationTracking {
-                        _ = self?.webSocket?.connectionState
+                        _ = ws.connectionState
                     } onChange: {
                         cont.resume()
                     }
                 }
-                guard !Task.isCancelled, let self, let ws = self.webSocket else { return }
-                self.connectionState = ws.connectionState
             }
         }
     }

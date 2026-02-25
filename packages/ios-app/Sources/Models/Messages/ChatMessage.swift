@@ -77,9 +77,7 @@ struct ChatMessage: Identifiable, Equatable {
     }
 
     var formattedTimestamp: String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: timestamp)
+        DateParser.formatTime(timestamp)
     }
 
     // MARK: - Formatted Metadata Helpers

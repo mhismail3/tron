@@ -221,8 +221,7 @@ struct AutomationFormSheet: View {
             case "cron":
                 return .cron(expression: cronExpression, timezone: cronTimezone)
             case "oneShot":
-                let formatter = ISO8601DateFormatter()
-                return .oneShot(at: formatter.string(from: oneShotDate))
+                return .oneShot(at: DateParser.toISO8601(oneShotDate))
             default:
                 return .every(intervalSecs: intervalMinutes * 60, anchor: nil)
             }

@@ -67,7 +67,7 @@ final class SessionSynchronizer {
                 let newSyncState = SyncState(
                     key: sessionId,
                     lastSyncedEventId: lastEvent.id,
-                    lastSyncTimestamp: ISO8601DateFormatter().string(from: Date()),
+                    lastSyncTimestamp: DateParser.now,
                     pendingEventIds: []
                 )
                 try eventDB.sync.update(newSyncState)

@@ -86,13 +86,6 @@ struct ContainerRow: View {
     // MARK: - Helpers
 
     private func relativeDate(_ timestamp: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: timestamp) ?? ISO8601DateFormatter().date(from: timestamp) else {
-            return timestamp
-        }
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .abbreviated
-        return relative.localizedString(for: date, relativeTo: Date())
+        DateParser.relativeAbbreviated(timestamp)
     }
 }

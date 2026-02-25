@@ -193,14 +193,7 @@ struct AreaListResult: Decodable {
 /// Format as short relative time (e.g., "1m", "5h", "2d")
 /// Uses static calculation to avoid constant re-renders
 func formatShortRelativeTime(_ isoString: String) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    var date = formatter.date(from: isoString)
-    if date == nil {
-        formatter.formatOptions = [.withInternetDateTime]
-        date = formatter.date(from: isoString)
-    }
-    guard let date else { return "" }
+    guard let date = DateParser.parse(isoString) else { return "" }
 
     let now = Date()
     let seconds = Int(now.timeIntervalSince(date))

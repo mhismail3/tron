@@ -3,52 +3,34 @@ import Foundation
 // MARK: - Date Extensions
 
 extension Date {
-    /// Returns a relative time string (e.g., "2 hours ago")
+    /// Returns a relative time string (e.g., "2 hr. ago")
     var relativeTime: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: self, relativeTo: Date())
+        DateParser.relativeAbbreviated(self)
     }
 
     /// Returns a formatted time string (e.g., "2:30 PM")
     var timeString: String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: self)
+        DateParser.formatTime(self)
     }
 
     /// Returns a formatted date string (e.g., "Jan 15, 2025")
     var dateString: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        return formatter.string(from: self)
+        DateParser.formatDate(self)
     }
 
     /// Returns a formatted date and time string
     var dateTimeString: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: self)
+        DateParser.formatDateTime(self)
     }
 
     /// Returns an ISO8601 formatted string
     var iso8601String: String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: self)
+        DateParser.toISO8601(self)
     }
 
     /// Creates a date from an ISO8601 string
     static func fromISO8601(_ string: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: string) {
-            return date
-        }
-        // Try without fractional seconds
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: string)
+        DateParser.parse(string)
     }
 
     /// Returns true if the date is today
@@ -74,9 +56,7 @@ extension Date {
         } else if isYesterday {
             return "Yesterday, \(timeString)"
         } else if isWithinLastWeek {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "EEEE, h:mm a"  // e.g., "Tuesday, 2:30 PM"
-            return formatter.string(from: self)
+            return DateParser.formatDayOfWeekTime(self)
         } else {
             return dateTimeString
         }

@@ -93,11 +93,8 @@ struct ThinkingCompletePayload: Codable {
         self.characterCount = payload.int("characterCount") ?? 0
         self.model = payload.string("model")
 
-        // Parse timestamp from ISO8601 string
         if let timestampStr = payload.string("timestamp") {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            self.timestamp = formatter.date(from: timestampStr) ?? Date()
+            self.timestamp = DateParser.parseOrNow(timestampStr)
         } else {
             self.timestamp = Date()
         }
@@ -118,15 +115,12 @@ struct ThinkingCompletePayload: Codable {
 
     /// Convert to dictionary for DB persistence
     func toDictionary() -> [String: Any] {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
         var dict: [String: Any] = [
             "turnNumber": turnNumber,
             "content": content,
             "preview": preview,
             "characterCount": characterCount,
-            "timestamp": formatter.string(from: timestamp)
+            "timestamp": DateParser.toISO8601(timestamp)
         ]
         if let model = model {
             dict["model"] = model

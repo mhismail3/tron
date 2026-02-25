@@ -94,7 +94,7 @@ final class AskUserQuestionCoordinator {
         let result = AskUserQuestionResult(
             answers: answers,
             complete: true,
-            submittedAt: ISO8601DateFormatter().string(from: Date())
+            submittedAt: DateParser.now
         )
 
         context.logInfo("Submitting AskUserQuestion answers as prompt for toolCallId=\(data.toolCallId)")

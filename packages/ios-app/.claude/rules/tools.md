@@ -18,6 +18,8 @@ Use these from `Views/Tools/Shared/`:
 - **`ToolDetailSheetContainer`** — NavigationStack + toolbar boilerplate
 - **`ToolDetailSection`** — Glass section with title header
 - **`ToolStatusBadge`** / **`ToolDurationBadge`** / **`ToolInfoPill`** — Status pills
+- **`ToolRunningSpinner`** — Shared spinner for "running" state (title, accent, tint, actionText)
+- **`ToolStatusRow`** — Horizontal scroll of status/duration badges + `@ViewBuilder` additional pills
 - **`ToolClassifiedErrorSection`** — Error display using `ErrorClassification` struct
 - **`ToolErrorView`** — File-write-specific structured error display
 
@@ -32,7 +34,8 @@ For tools that need structured error display:
 
 - Every sheet uses `ToolDetailSheetContainer` for consistent outer chrome
 - Use `ToolClassifiedErrorSection` instead of hand-rolling error display VStacks
-- Status rows use `ToolStatusBadge` + optional `ToolDurationBadge` + `ToolInfoPill` pills
+- Use `ToolStatusRow` for status rows (wraps ToolStatusBadge + ToolDurationBadge + additional pills)
+- Use `ToolRunningSpinner` for running-state spinners instead of hand-rolling ProgressView + Text
 - Keep detail sheets under 500 LOC; extract nested subviews for large sheets
 
 ---

@@ -119,29 +119,19 @@ struct GlobToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if !parsedFiles.isEmpty {
+                let fileCount = parsedFiles.filter { !$0.isDirectory }.count
+                let dirCount = parsedFiles.filter { $0.isDirectory }.count
+                if fileCount > 0 {
+                    ToolInfoPill(icon: "doc", label: "\(fileCount) files", color: .cyan)
                 }
-
-                if !parsedFiles.isEmpty {
-                    let fileCount = parsedFiles.filter { !$0.isDirectory }.count
-                    let dirCount = parsedFiles.filter { $0.isDirectory }.count
-
-                    if fileCount > 0 {
-                        ToolInfoPill(icon: "doc", label: "\(fileCount) files", color: .cyan)
-                    }
-                    if dirCount > 0 {
-                        ToolInfoPill(icon: "folder", label: "\(dirCount) dirs", color: .cyan)
-                    }
+                if dirCount > 0 {
+                    ToolInfoPill(icon: "folder", label: "\(dirCount) dirs", color: .cyan)
                 }
-
-                if isTruncated || isLimitReached {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+            }
+            if isTruncated || isLimitReached {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -287,25 +277,10 @@ struct GlobToolDetailSheet: View {
             if !streaming.isEmpty {
                 streamingResultsSection(streaming)
             } else {
-                searchingSpinner
+                ToolRunningSpinner(title: "Results", accent: .cyan, tint: tint, actionText: "Searching files...")
             }
         } else {
-            searchingSpinner
-        }
-    }
-
-    private var searchingSpinner: some View {
-        ToolDetailSection(title: "Results", accent: .cyan, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.cyan)
-                    .scaleEffect(1.1)
-                Text("Searching files...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            ToolRunningSpinner(title: "Results", accent: .cyan, tint: tint, actionText: "Searching files...")
         }
     }
 

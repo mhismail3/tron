@@ -191,15 +191,7 @@ struct OpenURLToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-            }
-        }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs)
     }
 
     // MARK: - Result Section
@@ -248,18 +240,7 @@ struct OpenURLToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Result", accent: .blue, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.blue)
-                    .scaleEffect(1.1)
-                Text("Opening URL...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolRunningSpinner(title: "Result", accent: .blue, tint: tint, actionText: "Opening URL...")
     }
 }
 

@@ -168,15 +168,7 @@ struct AutomationRunDetailSheet: View {
     }
 
     private func formatDate(_ isoString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString) ?? ISO8601DateFormatter().date(from: isoString) else {
-            return isoString
-        }
-        let display = DateFormatter()
-        display.dateStyle = .short
-        display.timeStyle = .medium
-        return display.string(from: date)
+        DateParser.shortDateTime(isoString)
     }
 
     private func formatDuration(_ ms: Int) -> String {

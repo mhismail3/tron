@@ -165,6 +165,65 @@ struct ToolInfoPill: View {
     }
 }
 
+// MARK: - Running Spinner
+
+/// Shared spinner for tool detail sheets in "running" state.
+/// Eliminates the duplicated ProgressView + label pattern across 10 tool sheets.
+@available(iOS 26.0, *)
+struct ToolRunningSpinner: View {
+    let title: String
+    let accent: Color
+    let tint: TintedColors
+    let actionText: String
+
+    var body: some View {
+        ToolDetailSection(title: title, accent: accent, tint: tint) {
+            VStack(spacing: 10) {
+                ProgressView()
+                    .tint(accent)
+                    .scaleEffect(1.1)
+                Text(actionText)
+                    .font(TronTypography.mono(size: TronTypography.sizeBody))
+                    .foregroundStyle(tint.subtle)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+        }
+    }
+}
+
+// MARK: - Status Row
+
+/// Shared status row with horizontal scroll of pills: status badge + optional duration + additional pills.
+/// Eliminates the duplicated ScrollView + HStack + badges pattern across 10 tool sheets.
+@available(iOS 26.0, *)
+struct ToolStatusRow<AdditionalPills: View>: View {
+    let status: CommandToolStatus
+    let durationMs: Int?
+    @ViewBuilder let additionalPills: () -> AdditionalPills
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ToolStatusBadge(status: status)
+                if let ms = durationMs {
+                    ToolDurationBadge(durationMs: ms)
+                }
+                additionalPills()
+            }
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+extension ToolStatusRow where AdditionalPills == EmptyView {
+    init(status: CommandToolStatus, durationMs: Int?) {
+        self.status = status
+        self.durationMs = durationMs
+        self.additionalPills = { EmptyView() }
+    }
+}
+
 // MARK: - Error View
 
 // MARK: - File Display Helpers

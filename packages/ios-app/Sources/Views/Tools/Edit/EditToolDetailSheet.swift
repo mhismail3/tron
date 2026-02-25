@@ -154,25 +154,15 @@ struct EditToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-
-                if diffStats.added > 0 {
-                    ToolInfoPill(icon: "plus", label: "\(diffStats.added) added", color: .tronSuccess)
-                }
-
-                if diffStats.removed > 0 {
-                    ToolInfoPill(icon: "minus", label: "\(diffStats.removed) removed", color: .tronError)
-                }
-
-                if isReplaceAll {
-                    ToolInfoPill(icon: "arrow.2.squarepath", label: "Replace All", color: .tronBlue)
-                }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if diffStats.added > 0 {
+                ToolInfoPill(icon: "plus", label: "\(diffStats.added) added", color: .tronSuccess)
+            }
+            if diffStats.removed > 0 {
+                ToolInfoPill(icon: "minus", label: "\(diffStats.removed) removed", color: .tronError)
+            }
+            if isReplaceAll {
+                ToolInfoPill(icon: "arrow.2.squarepath", label: "Replace All", color: .tronBlue)
             }
         }
     }
@@ -354,18 +344,7 @@ struct EditToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Status", accent: .orange, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.orange)
-                    .scaleEffect(1.1)
-                Text("Editing file...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolRunningSpinner(title: "Status", accent: .orange, tint: tint, actionText: "Editing file...")
     }
 }
 

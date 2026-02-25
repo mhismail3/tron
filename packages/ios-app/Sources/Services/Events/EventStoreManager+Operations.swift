@@ -11,7 +11,7 @@ extension EventStoreManager {
         model: String,
         workingDirectory: String
     ) throws {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = DateParser.now
 
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = rpcClient.serverOrigin
@@ -246,7 +246,7 @@ extension EventStoreManager {
         // Create the cached session entry
         // Get source session info from local DB if available, otherwise use fork result
         let sourceSession = try? eventDB.sessions.get(sessionId)
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = DateParser.now
         // Use worktree path from fork result (preferred) or fallback to source session
         let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
         let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent

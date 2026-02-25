@@ -66,7 +66,7 @@ enum SessionCreatedPlugin: EventPlugin {
             cacheReadTokens: event.data?.cacheReadTokens ?? 0,
             cacheCreationTokens: event.data?.cacheCreationTokens ?? 0,
             cost: event.data?.cost ?? 0,
-            lastActivity: event.data?.lastActivity ?? event.timestamp ?? ISO8601DateFormatter().string(from: Date()),
+            lastActivity: event.data?.lastActivity ?? event.timestamp ?? DateParser.now,
             isActive: event.data?.isActive ?? true,
             parentSessionId: event.data?.parentSessionId
         )

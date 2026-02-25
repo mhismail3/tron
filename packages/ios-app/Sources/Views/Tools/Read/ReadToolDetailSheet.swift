@@ -123,28 +123,18 @@ struct ReadToolDetailSheet: View {
     // MARK: - B. Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if let result = data.result ?? data.streamingOutput {
+                let lines = ContentLineParser.parse(result)
+                if !lines.isEmpty {
+                    ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(lines.count) lines")
                 }
-
-                if let result = data.result ?? data.streamingOutput {
-                    let lines = ContentLineParser.parse(result)
-                    if !lines.isEmpty {
-                        ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(lines.count) lines")
-                    }
-                }
-
-                if let rangeText = lineRangeText {
-                    ToolInfoPill(icon: "arrow.left.and.right", label: rangeText, color: .tronBlue)
-                }
-
-                if isTruncated {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+            }
+            if let rangeText = lineRangeText {
+                ToolInfoPill(icon: "arrow.left.and.right", label: rangeText, color: .tronBlue)
+            }
+            if isTruncated {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -256,18 +246,7 @@ struct ReadToolDetailSheet: View {
         if let output = data.streamingOutput, !output.isEmpty {
             contentSection(output)
         } else {
-            ToolDetailSection(title: "Content", accent: .tronSlate, tint: tint) {
-                VStack(spacing: 10) {
-                    ProgressView()
-                        .tint(.tronSlate)
-                        .scaleEffect(1.1)
-                    Text("Reading file...")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
-                        .foregroundStyle(tint.subtle)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-            }
+            ToolRunningSpinner(title: "Content", accent: .tronSlate, tint: tint, actionText: "Reading file...")
         }
     }
 

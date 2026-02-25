@@ -35,16 +35,6 @@ enum EventSorter {
     /// - Parameter isoString: ISO 8601 timestamp string
     /// - Returns: Parsed Date, or current date if parsing fails
     static func parseTimestamp(_ isoString: String) -> Date {
-        // Try with fractional seconds first (server events)
-        let formatterWithFractions = ISO8601DateFormatter()
-        formatterWithFractions.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatterWithFractions.date(from: isoString) {
-            return date
-        }
-
-        // Fallback to standard format without fractional seconds (test data)
-        let formatterStandard = ISO8601DateFormatter()
-        formatterStandard.formatOptions = [.withInternetDateTime]
-        return formatterStandard.date(from: isoString) ?? Date()
+        DateParser.parseOrNow(isoString)
     }
 }

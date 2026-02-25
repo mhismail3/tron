@@ -74,7 +74,7 @@ final class ThinkingRepository {
                         preview: preview,
                         characterCount: thinkingText.count,
                         model: event.payload["model"]?.value as? String,
-                        timestamp: ISO8601DateFormatter().date(from: event.timestamp) ?? Date()
+                        timestamp: DateParser.parseOrNow(event.timestamp)
                     )
                     blocks.append(thinkingBlock)
                 }

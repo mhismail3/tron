@@ -143,21 +143,12 @@ struct WebFetchToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-
-                if parsed.isCached {
-                    ToolInfoPill(icon: "arrow.triangle.2.circlepath", label: "Cached", color: .tronEmerald)
-                }
-
-                if isTruncated {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if parsed.isCached {
+                ToolInfoPill(icon: "arrow.triangle.2.circlepath", label: "Cached", color: .tronEmerald)
+            }
+            if isTruncated {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -241,25 +232,10 @@ struct WebFetchToolDetailSheet: View {
             if !streamParsed.answer.isEmpty {
                 streamingAnswerSection(streamParsed.answer)
             } else {
-                fetchingSpinner
+                ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
             }
         } else {
-            fetchingSpinner
-        }
-    }
-
-    private var fetchingSpinner: some View {
-        ToolDetailSection(title: "Answer", accent: .tronInfo, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.tronInfo)
-                    .scaleEffect(1.1)
-                Text("Fetching page...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            ToolRunningSpinner(title: "Answer", accent: .tronInfo, tint: tint, actionText: "Fetching page...")
         }
     }
 

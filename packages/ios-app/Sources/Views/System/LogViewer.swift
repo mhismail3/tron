@@ -230,13 +230,10 @@ struct LogViewer: View {
     }
 
     private func copyLogsToClipboard() {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-
         let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
 
         let logText = allLogs.map { entry in
-            let timestamp = formatter.string(from: entry.0)
+            let timestamp = DateParser.formatLogTimestamp(entry.0)
             let category = entry.1.rawValue
             let level = String(describing: entry.2).uppercased()
             let message = entry.3
@@ -264,14 +261,11 @@ struct LogViewer: View {
         Task {
             defer { isExporting = false }
 
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm:ss.SSS"
-
             // Get ALL logs (not just filtered) for complete export
             let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
 
             let logText = allLogs.map { entry in
-                let timestamp = formatter.string(from: entry.0)
+                let timestamp = DateParser.formatLogTimestamp(entry.0)
                 let category = entry.1.rawValue
                 let level = String(describing: entry.2).uppercased()
                 let message = entry.3
@@ -404,9 +398,7 @@ struct LogRow: View {
     }
 
     private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter.string(from: date)
+        DateParser.formatLogTimestamp(date)
     }
 }
 

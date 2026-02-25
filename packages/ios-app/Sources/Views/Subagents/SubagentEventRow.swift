@@ -104,8 +104,6 @@ struct SubagentEventRow: View {
     }
 
     private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: date)
+        DateParser.formatHMS(date)
     }
 }

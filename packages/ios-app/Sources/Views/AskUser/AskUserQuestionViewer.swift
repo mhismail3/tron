@@ -215,7 +215,7 @@ struct AskUserQuestionToolViewer: View {
                 result: AskUserQuestionResult(
                     answers: [AskUserQuestionAnswer(questionId: "q1", selectedValues: ["A"], otherValue: nil)],
                     complete: true,
-                    submittedAt: ISO8601DateFormatter().string(from: Date())
+                    submittedAt: DateParser.now
                 )
             ),
             onTap: { }

@@ -154,25 +154,15 @@ struct SearchToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-
-                if totalMatchCount > 0 {
-                    ToolInfoPill(icon: "text.line.first.and.arrowtriangle.forward", label: "\(totalMatchCount) matches", color: .purple)
-                }
-
-                if parsedResults.count > 1 {
-                    ToolInfoPill(icon: "doc.on.doc", label: "\(parsedResults.count) files", color: .purple)
-                }
-
-                if isTruncated || isLimitReached {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if totalMatchCount > 0 {
+                ToolInfoPill(icon: "text.line.first.and.arrowtriangle.forward", label: "\(totalMatchCount) matches", color: .purple)
+            }
+            if parsedResults.count > 1 {
+                ToolInfoPill(icon: "doc.on.doc", label: "\(parsedResults.count) files", color: .purple)
+            }
+            if isTruncated || isLimitReached {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -436,25 +426,10 @@ struct SearchToolDetailSheet: View {
             if !streaming.isEmpty {
                 streamingMatchesSection(streaming)
             } else {
-                searchingSpinner
+                ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
             }
         } else {
-            searchingSpinner
-        }
-    }
-
-    private var searchingSpinner: some View {
-        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.purple)
-                    .scaleEffect(1.1)
-                Text("Searching...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            ToolRunningSpinner(title: "Results", accent: .purple, tint: tint, actionText: "Searching...")
         }
     }
 

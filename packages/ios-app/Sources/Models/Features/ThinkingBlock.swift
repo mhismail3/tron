@@ -42,9 +42,7 @@ struct ThinkingBlock: Identifiable {
 
     /// Formatted timestamp for display
     var formattedTimestamp: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: timestamp, relativeTo: Date())
+        DateParser.relativeAbbreviated(timestamp)
     }
 
     /// Short model name for display

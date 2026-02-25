@@ -246,13 +246,10 @@ extension ChatViewModel {
         // If tool call is already completed, update with result
         if toolCall.status == ToolCallStatus.completed.rawValue || toolCall.status == ToolCallStatus.error.rawValue {
             var durationMs: Int? = nil
-            if let completedAt = toolCall.completedAt {
-                let formatter = ISO8601DateFormatter()
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let startDate = formatter.date(from: toolCall.startedAt),
-                   let endDate = formatter.date(from: completedAt) {
-                    durationMs = Int(endDate.timeIntervalSince(startDate) * 1000)
-                }
+            if let completedAt = toolCall.completedAt,
+               let startDate = DateParser.parse(toolCall.startedAt),
+               let endDate = DateParser.parse(completedAt) {
+                durationMs = Int(endDate.timeIntervalSince(startDate) * 1000)
             }
 
             let resultData = ToolResultData(

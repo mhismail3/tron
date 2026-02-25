@@ -192,24 +192,15 @@ struct RememberToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if let result = data.result, !RememberDetailParser.isError(result), !RememberDetailParser.isNoResults(result) {
+                let count = entryCount(result)
+                if count > 0 {
+                    ToolInfoPill(icon: "text.line.first.and.arrowtriangle.forward", label: "\(count) \(count == 1 ? "entry" : "entries")", color: accentColor)
                 }
-
-                if let result = data.result, !RememberDetailParser.isError(result), !RememberDetailParser.isNoResults(result) {
-                    let count = entryCount(result)
-                    if count > 0 {
-                        ToolInfoPill(icon: "text.line.first.and.arrowtriangle.forward", label: "\(count) \(count == 1 ? "entry" : "entries")", color: accentColor)
-                    }
-                }
-
-                if data.isResultTruncated || (data.result?.contains("[Output truncated") == true) {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+            }
+            if data.isResultTruncated || (data.result?.contains("[Output truncated") == true) {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -601,18 +592,12 @@ struct RememberToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Results", accent: .purple, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(accentColor)
-                    .scaleEffect(1.1)
-                Text(category == .memorySearch ? "Searching memory..." : "Querying database...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolRunningSpinner(
+            title: "Results",
+            accent: .purple,
+            tint: tint,
+            actionText: category == .memorySearch ? "Searching memory..." : "Querying database..."
+        )
     }
 }
 
@@ -843,23 +828,7 @@ enum RememberDetailParser {
     // MARK: - Date Formatting
 
     static func formatDate(_ isoDate: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: isoDate) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .short
-            return display.string(from: date)
-        }
-        // Try without fractional seconds
-        formatter.formatOptions = [.withInternetDateTime]
-        if let date = formatter.date(from: isoDate) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .short
-            return display.string(from: date)
-        }
-        return isoDate
+        DateParser.mediumDateTime(isoDate)
     }
 
     // MARK: - Error Detection

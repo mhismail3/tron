@@ -67,14 +67,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     }
 
     var formattedDate: String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: createdAt) {
-            let relativeFormatter = RelativeDateTimeFormatter()
-            relativeFormatter.unitsStyle = .abbreviated
-            return relativeFormatter.localizedString(for: date, relativeTo: Date())
-        }
-        return createdAt
+        DateParser.relativeAbbreviated(createdAt)
     }
 
     /// Total input tokens sent to model (uncached + cache read)

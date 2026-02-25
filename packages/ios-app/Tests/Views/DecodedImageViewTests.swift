@@ -51,4 +51,19 @@ struct DecodedImageViewTests {
             #expect(maxDimension <= 56 * scale + 1)
         }
     }
+
+    @Test("Cache returns image on second decode of same data")
+    func testCacheHit() async {
+        let pngData = Self.makeTestPNG(width: 80, height: 80)
+        let size = CGSize(width: 40, height: 40)
+
+        let first = await DecodedImageView.decodeImage(pngData, fitting: size, scale: 2.0)
+        #expect(first != nil)
+
+        let second = await DecodedImageView.decodeImage(pngData, fitting: size, scale: 2.0)
+        #expect(second != nil)
+
+        // Both should be the same cached instance
+        #expect(first === second)
+    }
 }

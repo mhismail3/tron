@@ -145,21 +145,12 @@ struct WebSearchToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-
-                if let total = parsed.totalResults, total > 0 {
-                    ToolInfoPill(icon: "text.line.first.and.arrowtriangle.forward", label: "\(total) results", color: .tronInfo)
-                }
-
-                if isTruncated {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if let total = parsed.totalResults, total > 0 {
+                ToolInfoPill(icon: "text.line.first.and.arrowtriangle.forward", label: "\(total) results", color: .tronInfo)
+            }
+            if isTruncated {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -295,25 +286,10 @@ struct WebSearchToolDetailSheet: View {
             if !streaming.results.isEmpty {
                 streamingResultsSection(streaming)
             } else {
-                searchingSpinner
+                ToolRunningSpinner(title: "Results", accent: .tronInfo, tint: tint, actionText: "Searching the web...")
             }
         } else {
-            searchingSpinner
-        }
-    }
-
-    private var searchingSpinner: some View {
-        ToolDetailSection(title: "Results", accent: .tronInfo, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.tronInfo)
-                    .scaleEffect(1.1)
-                Text("Searching the web...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+            ToolRunningSpinner(title: "Results", accent: .tronInfo, tint: tint, actionText: "Searching the web...")
         }
     }
 

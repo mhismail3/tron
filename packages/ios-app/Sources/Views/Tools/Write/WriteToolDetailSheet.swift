@@ -140,21 +140,12 @@ struct WriteToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-
-                if lineCount > 0 {
-                    ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(lineCount) lines")
-                }
-
-                if byteCount > 0 {
-                    ToolInfoPill(icon: "doc.plaintext", label: FileDisplayHelpers.formattedSize(byteCount))
-                }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if lineCount > 0 {
+                ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(lineCount) lines")
+            }
+            if byteCount > 0 {
+                ToolInfoPill(icon: "doc.plaintext", label: FileDisplayHelpers.formattedSize(byteCount))
             }
         }
     }
@@ -257,18 +248,7 @@ struct WriteToolDetailSheet: View {
     // MARK: - Running Section
 
     private var runningSection: some View {
-        ToolDetailSection(title: "Status", accent: .tronPink, tint: tint) {
-            VStack(spacing: 10) {
-                ProgressView()
-                    .tint(.tronPink)
-                    .scaleEffect(1.1)
-                Text("Writing file...")
-                    .font(TronTypography.mono(size: TronTypography.sizeBody))
-                    .foregroundStyle(tint.subtle)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
-        }
+        ToolRunningSpinner(title: "Status", accent: .tronPink, tint: tint, actionText: "Writing file...")
     }
 }
 

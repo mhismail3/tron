@@ -171,25 +171,15 @@ struct BashToolDetailSheet: View {
     // MARK: - Status Row
 
     private var statusRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ToolStatusBadge(status: data.status)
-
-                if let ms = data.durationMs {
-                    ToolDurationBadge(durationMs: ms)
-                }
-
-                if let code = exitCode, code != 0 {
-                    ToolInfoPill(icon: "xmark.circle", label: "Exit \(code)", color: .tronError)
-                }
-
-                if outputLineCount > 0 {
-                    ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(outputLineCount) lines")
-                }
-
-                if isTruncated {
-                    ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
-                }
+        ToolStatusRow(status: data.status, durationMs: data.durationMs) {
+            if let code = exitCode, code != 0 {
+                ToolInfoPill(icon: "xmark.circle", label: "Exit \(code)", color: .tronError)
+            }
+            if outputLineCount > 0 {
+                ToolInfoPill(icon: "text.line.last.and.arrowtriangle.forward", label: "\(outputLineCount) lines")
+            }
+            if isTruncated {
+                ToolInfoPill(icon: "scissors", label: "Truncated", color: .tronAmber)
             }
         }
     }
@@ -359,18 +349,7 @@ struct BashToolDetailSheet: View {
         if let output = data.streamingOutput, !output.isEmpty {
             streamingOutputSection(output)
         } else {
-            ToolDetailSection(title: "Output", accent: .tronEmerald, tint: tint) {
-                VStack(spacing: 10) {
-                    ProgressView()
-                        .tint(.tronEmerald)
-                        .scaleEffect(1.1)
-                    Text("Running command...")
-                        .font(TronTypography.mono(size: TronTypography.sizeBody))
-                        .foregroundStyle(tint.subtle)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-            }
+            ToolRunningSpinner(title: "Output", accent: .tronEmerald, tint: tint, actionText: "Running command...")
         }
     }
 

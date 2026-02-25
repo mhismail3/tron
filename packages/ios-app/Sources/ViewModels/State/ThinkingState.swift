@@ -134,7 +134,7 @@ final class ThinkingState {
             sessionId: sessionId,
             workspaceId: session.workspaceId,
             type: "stream.thinking_complete",
-            timestamp: ISO8601DateFormatter().string(from: Date()),
+            timestamp: DateParser.now,
             sequence: 0,  // Will be determined by insert order
             payload: payload.toDictionary().mapValues { AnyCodable($0) }
         )
