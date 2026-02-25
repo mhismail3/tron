@@ -112,7 +112,7 @@ enum CronScheduleDTO: Codable, Hashable {
     var summary: String {
         switch self {
         case .cron(let expression, let timezone):
-            return "\(expression) (\(timezone))"
+            return Self.describeCron(expression, timezone: timezone)
         case .every(let intervalSecs, _):
             if intervalSecs >= 86400 {
                 let days = intervalSecs / 86400
@@ -128,6 +128,101 @@ enum CronScheduleDTO: Codable, Hashable {
         case .oneShot(let at):
             return "Once at \(at)"
         }
+    }
+
+    /// Convert a 5-field cron expression + IANA timezone to human-readable text.
+    private static func describeCron(_ expression: String, timezone: String) -> String {
+        let fields = expression.split(separator: " ").map(String.init)
+        guard fields.count == 5 else { return "\(expression) (\(timezone))" }
+
+        let (min, hour, dom, mon, dow) = (fields[0], fields[1], fields[2], fields[3], fields[4])
+        let tz = shortTimezone(timezone)
+        let time = formatTime(hour: hour, minute: min)
+
+        // "0 9 * * *" → "Daily at 9:00 AM (PT)"
+        if dom == "*" && mon == "*" && dow == "*", let time {
+            return "Daily at \(time) (\(tz))"
+        }
+
+        // "0 9 * * 1-5" or "0 9 * * MON-FRI" → "Weekdays at 9:00 AM (PT)"
+        if dom == "*" && mon == "*" && isWeekdays(dow), let time {
+            return "Weekdays at \(time) (\(tz))"
+        }
+
+        // "0 9 * * 0,6" or "0 9 * * SAT,SUN" → "Weekends at 9:00 AM (PT)"
+        if dom == "*" && mon == "*" && isWeekends(dow), let time {
+            return "Weekends at \(time) (\(tz))"
+        }
+
+        // "0 9 * * 1" → "Mon at 9:00 AM (PT)"
+        if dom == "*" && mon == "*", let dayName = singleDayName(dow), let time {
+            return "\(dayName) at \(time) (\(tz))"
+        }
+
+        // "0 9 1 * *" → "1st of each month at 9:00 AM (PT)"
+        if mon == "*" && dow == "*", let dayNum = Int(dom), let time {
+            return "\(ordinal(dayNum)) of each month at \(time) (\(tz))"
+        }
+
+        // Fallback
+        return "\(expression) (\(tz))"
+    }
+
+    private static func formatTime(hour: String, minute: String) -> String? {
+        guard let h = Int(hour), let m = Int(minute), (0...23).contains(h), (0...59).contains(m) else {
+            return nil
+        }
+        let period = h < 12 ? "AM" : "PM"
+        let h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h)
+        return m == 0 ? "\(h12) \(period)" : "\(h12):\(String(format: "%02d", m)) \(period)"
+    }
+
+    private static func shortTimezone(_ iana: String) -> String {
+        let map: [String: String] = [
+            "America/New_York": "ET", "America/Chicago": "CT",
+            "America/Denver": "MT", "America/Los_Angeles": "PT",
+            "America/Phoenix": "MST", "Pacific/Honolulu": "HST",
+            "America/Anchorage": "AKT", "Europe/London": "GMT",
+            "Europe/Paris": "CET", "Europe/Berlin": "CET",
+            "Asia/Tokyo": "JST", "Asia/Shanghai": "CST",
+            "Asia/Kolkata": "IST", "Australia/Sydney": "AEST",
+        ]
+        return map[iana] ?? iana.components(separatedBy: "/").last ?? iana
+    }
+
+    private static func isWeekdays(_ dow: String) -> Bool {
+        ["1-5", "MON-FRI", "mon-fri"].contains(dow)
+    }
+
+    private static func isWeekends(_ dow: String) -> Bool {
+        let normalized = dow.uppercased().split(separator: ",").sorted()
+        return normalized == ["0", "6"] || normalized == ["SAT", "SUN"] || normalized == ["6", "7"]
+    }
+
+    private static let dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    private static let dayAbbrevMap: [String: String] = [
+        "SUN": "Sun", "MON": "Mon", "TUE": "Tue", "WED": "Wed",
+        "THU": "Thu", "FRI": "Fri", "SAT": "Sat",
+    ]
+
+    private static func singleDayName(_ dow: String) -> String? {
+        if let num = Int(dow), (0...6).contains(num) { return dayNames[num] }
+        return dayAbbrevMap[dow.uppercased()]
+    }
+
+    private static func ordinal(_ n: Int) -> String {
+        let suffix: String
+        switch n % 100 {
+        case 11, 12, 13: suffix = "th"
+        default:
+            switch n % 10 {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
+        }
+        return "\(n)\(suffix)"
     }
 }
 
