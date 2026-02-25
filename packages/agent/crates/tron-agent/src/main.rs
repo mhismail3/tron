@@ -649,6 +649,7 @@ async fn main() -> Result<()> {
         http_client: tool_config.http_client.clone(),
         pool: task_pool.clone(),
     };
+    let is_production = args.port == 9847;
     let cron_scheduler = Arc::new(tron_cron::CronScheduler::new(
         task_pool.clone(),
         Arc::new(tron_cron::SystemClock),
@@ -656,6 +657,7 @@ async fn main() -> Result<()> {
         cron_config_path,
         cron_backup_path,
         cron_cancel.clone(),
+        is_production,
     ));
 
     // Wire cron scheduler into tool factory (breaks circular dep via OnceLock)

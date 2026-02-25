@@ -242,7 +242,7 @@ impl SessionManager {
             #[allow(clippy::cast_possible_wrap)]
             limit: filter.limit.map(|l| l as i64),
             offset: None,
-            origin: None,
+            origin: self.origin.as_deref(),
         };
         self.event_store
             .list_sessions(&opts)

@@ -152,6 +152,7 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
+            prod_only: false,
             tags: vec![],
             workspace_id: None,
             created_at: Utc::now(),

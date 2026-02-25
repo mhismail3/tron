@@ -30,9 +30,9 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
         "INSERT INTO cron_jobs (
             id, name, description, enabled, schedule_json, payload_json,
             delivery_json, overlap_policy, misfire_policy, max_retries,
-            auto_disable_after, stuck_timeout_secs, tags, workspace_id,
+            auto_disable_after, stuck_timeout_secs, prod_only, tags, workspace_id,
             created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             description = excluded.description,
@@ -45,6 +45,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
             max_retries = excluded.max_retries,
             auto_disable_after = excluded.auto_disable_after,
             stuck_timeout_secs = excluded.stuck_timeout_secs,
+            prod_only = excluded.prod_only,
             tags = excluded.tags,
             workspace_id = excluded.workspace_id,
             updated_at = excluded.updated_at",
@@ -61,6 +62,7 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
             job.max_retries,
             job.auto_disable_after,
             job.stuck_timeout_secs,
+            job.prod_only,
             tags_json,
             job.workspace_id,
             job.created_at.to_rfc3339(),
@@ -76,7 +78,7 @@ pub fn get_job(pool: &ConnectionPool, job_id: &str) -> Result<Option<CronJob>, C
     let mut stmt = conn.prepare(
         "SELECT id, name, description, enabled, schedule_json, payload_json,
                 delivery_json, overlap_policy, misfire_policy, max_retries,
-                auto_disable_after, stuck_timeout_secs, tags, workspace_id,
+                auto_disable_after, stuck_timeout_secs, prod_only, tags, workspace_id,
                 created_at, updated_at
          FROM cron_jobs WHERE id = ?1",
     )?;
@@ -105,7 +107,7 @@ pub fn list_all_jobs(pool: &ConnectionPool) -> Result<Vec<CronJob>, CronError> {
     let mut stmt = conn.prepare(
         "SELECT id, name, description, enabled, schedule_json, payload_json,
                 delivery_json, overlap_policy, misfire_policy, max_retries,
-                auto_disable_after, stuck_timeout_secs, tags, workspace_id,
+                auto_disable_after, stuck_timeout_secs, prod_only, tags, workspace_id,
                 created_at, updated_at
          FROM cron_jobs",
     )?;
@@ -473,9 +475,9 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let delivery_json: String = row.get(6)?;
     let overlap_str: String = row.get(7)?;
     let misfire_str: String = row.get(8)?;
-    let tags_json: String = row.get(12)?;
-    let created_str: String = row.get(14)?;
-    let updated_str: String = row.get(15)?;
+    let tags_json: String = row.get(13)?;
+    let created_str: String = row.get(15)?;
+    let updated_str: String = row.get(16)?;
 
     Ok(CronJob {
         id: row.get(0)?,
@@ -503,8 +505,9 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         max_retries: row.get(9)?,
         auto_disable_after: row.get(10)?,
         stuck_timeout_secs: row.get(11)?,
+        prod_only: row.get(12)?,
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
-        workspace_id: row.get(13)?,
+        workspace_id: row.get(14)?,
         created_at: DateTime::parse_from_rfc3339(&created_str)
             .map(|t| t.to_utc())
             .unwrap_or_else(|_| Utc::now()),
@@ -611,6 +614,7 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
+            prod_only: false,
             tags: vec!["test".into()],
             workspace_id: None,
             created_at: Utc::now(),
@@ -862,6 +866,23 @@ mod tests {
         let (_, _, removed) = sync_from_config(&pool, &jobs[..1]).unwrap();
         assert_eq!(removed, 1);
         assert!(get_job(&pool, "cron_2").unwrap().is_none());
+    }
+
+    #[test]
+    fn prod_only_roundtrips() {
+        let pool = setup_pool();
+        let mut job = make_job("cron_prod", "Prod Only Job");
+        job.prod_only = true;
+        upsert_job(&pool, &job).unwrap();
+
+        let loaded = get_job(&pool, "cron_prod").unwrap().unwrap();
+        assert!(loaded.prod_only);
+
+        // Update to false
+        job.prod_only = false;
+        upsert_job(&pool, &job).unwrap();
+        let loaded = get_job(&pool, "cron_prod").unwrap().unwrap();
+        assert!(!loaded.prod_only);
     }
 
     #[test]

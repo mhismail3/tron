@@ -12,6 +12,14 @@ use crate::errors::CronError;
 /// Idempotent — safe to call multiple times (uses `IF NOT EXISTS`).
 pub fn run_migrations(conn: &Connection) -> Result<(), CronError> {
     conn.execute_batch(CRON_SCHEMA)?;
+
+    // v2: add prod_only column (SQLite has no ADD COLUMN IF NOT EXISTS)
+    match conn.execute_batch("ALTER TABLE cron_jobs ADD COLUMN prod_only INTEGER NOT NULL DEFAULT 0") {
+        Ok(()) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => return Err(e.into()),
+    }
+
     Ok(())
 }
 

@@ -53,10 +53,15 @@ pub struct CronScheduler {
     config_path: PathBuf,
     /// Path to `automations.json.bak` (in deployment directory).
     backup_path: PathBuf,
+    /// Whether this instance is the production server (port 9847).
+    is_production: bool,
 }
 
 impl CronScheduler {
     /// Create a new scheduler.
+    ///
+    /// `is_production` controls whether `prod_only` jobs are eligible to run.
+    /// Pass `true` for the production instance (port 9847), `false` otherwise.
     pub fn new(
         pool: ConnectionPool,
         clock: Arc<dyn Clock>,
@@ -64,6 +69,7 @@ impl CronScheduler {
         config_path: PathBuf,
         backup_path: PathBuf,
         cancel: CancellationToken,
+        is_production: bool,
     ) -> Self {
         Self {
             pool,
@@ -78,6 +84,7 @@ impl CronScheduler {
             deps: Arc::new(deps),
             config_path,
             backup_path,
+            is_production,
         }
     }
 
@@ -321,18 +328,19 @@ impl CronScheduler {
                     let now = self.clock.now_utc();
                     let grace = chrono::Duration::milliseconds(50);
 
-                    // Collect due jobs
-                    let due_jobs: Vec<CronJob> = {
+                    // Collect due jobs with their exact scheduled_at times
+                    let due_jobs: Vec<(CronJob, DateTime<Utc>)> = {
                         let jobs = self.jobs.read();
                         let runtime = self.runtime.read();
                         jobs.values()
                             .filter(|j| j.enabled)
-                            .filter(|j| {
+                            .filter(|j| !j.prod_only || self.is_production)
+                            .filter_map(|j| {
                                 runtime.get(&j.id)
                                     .and_then(|s| s.next_run_at)
-                                    .is_some_and(|next| next <= now + grace)
+                                    .filter(|next| *next <= now + grace)
+                                    .map(|scheduled_at| (j.clone(), scheduled_at))
                             })
-                            .cloned()
                             .collect()
                     };
 
@@ -341,13 +349,13 @@ impl CronScheduler {
                     // to prevent thundering herd.
                     let mut due_jobs = due_jobs;
                     if due_jobs.len() > 5 {
-                        due_jobs.sort_by_cached_key(|j| {
+                        due_jobs.sort_by_cached_key(|(j, _)| {
                             let hash: [u8; 32] = Sha256::digest(j.id.as_bytes()).into();
                             hash
                         });
                     }
 
-                    for (i, job) in due_jobs.iter().enumerate() {
+                    for (i, (job, scheduled_at)) in due_jobs.iter().enumerate() {
                         if i > 0 && due_jobs.len() > 5 {
                             tokio::time::sleep(Duration::from_millis(100)).await;
                         }
@@ -357,7 +365,7 @@ impl CronScheduler {
                                 if running > 0 {
                                     tracing::debug!(job_id = %job.id, "skipping overlapping execution");
                                     // Still update next_run_at
-                                    if let Some(next) = compute_next_run(&job.schedule, now) {
+                                    if let Some(next) = compute_next_run(&job.schedule, *scheduled_at) {
                                         let _ = store::update_next_run_at(&self.pool, &job.id, Some(next));
                                         self.runtime.write().entry(job.id.clone()).and_modify(|s| s.next_run_at = Some(next));
                                     }
@@ -380,7 +388,7 @@ impl CronScheduler {
                         let is_oneshot = matches!(job.schedule, crate::types::Schedule::OneShot { .. });
 
                         // Update next_run_at immediately (before spawn)
-                        let next = compute_next_run(&job.schedule, now);
+                        let next = compute_next_run(&job.schedule, *scheduled_at);
                         let _ = store::update_next_run_at(&self.pool, &job_id, next);
                         self.runtime.write().entry(job_id.clone()).and_modify(|s| s.next_run_at = next);
 
@@ -473,18 +481,34 @@ impl CronScheduler {
         jobs.retain(|id, _| config_ids.contains(id));
 
         // Add/update jobs from config
+        let now = self.clock.now_utc();
         for job in config.jobs {
-            let now = self.clock.now_utc();
             if job.enabled {
-                let next = compute_next_run(&job.schedule, now);
-                let _ = store::update_next_run_at(&self.pool, &job.id, next);
-                self.runtime.write().entry(job.id.clone()).or_insert(JobRuntimeState {
-                    job_id: job.id.clone(),
-                    next_run_at: next,
-                    last_run_at: None,
-                    consecutive_failures: 0,
-                    running_since: None,
-                }).next_run_at = next;
+                let schedule_changed = jobs
+                    .get(&job.id)
+                    .map_or(true, |old| old.schedule != job.schedule);
+                let has_runtime = self
+                    .runtime
+                    .read()
+                    .get(&job.id)
+                    .and_then(|s| s.next_run_at)
+                    .is_some();
+
+                if schedule_changed || !has_runtime {
+                    let next = compute_next_run(&job.schedule, now);
+                    let _ = store::update_next_run_at(&self.pool, &job.id, next);
+                    self.runtime
+                        .write()
+                        .entry(job.id.clone())
+                        .and_modify(|s| s.next_run_at = next)
+                        .or_insert(JobRuntimeState {
+                            job_id: job.id.clone(),
+                            next_run_at: next,
+                            last_run_at: None,
+                            consecutive_failures: 0,
+                            running_since: None,
+                        });
+                }
             }
             jobs.insert(job.id.clone(), job);
         }
@@ -640,6 +664,7 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
+            true,
         ));
 
         let (h1, h2) = scheduler.start();
@@ -677,6 +702,7 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
+            prod_only: false,
             tags: vec![],
             workspace_id: None,
             created_at: Utc::now(),
@@ -696,6 +722,7 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
+            true,
         ));
 
         let sched_ref = scheduler.clone();
@@ -704,6 +731,256 @@ mod tests {
 
         assert_eq!(sched_ref.job_count(), 1);
         assert!(sched_ref.next_wakeup().is_some());
+
+        cancel.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
+    }
+
+    #[tokio::test]
+    async fn scheduler_does_not_double_fire() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+
+        // Set clock to 1ms before 13:00 UTC
+        clock.set(
+            DateTime::parse_from_rfc3339("2026-02-23T12:59:59.999Z")
+                .unwrap()
+                .to_utc(),
+        );
+
+        let job = CronJob {
+            id: "cron_daily".into(),
+            name: "Daily 1pm".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Cron {
+                expression: "0 13 * * *".into(),
+                timezone: "UTC".into(),
+            },
+            payload: Payload::ShellCommand {
+                command: "echo fired".into(),
+                working_directory: None,
+                timeout_secs: 10,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::Allow,
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            prod_only: false,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let config = CronConfig {
+            version: 1,
+            jobs: vec![job],
+        };
+        config::save_config(&config_path, &backup_path, &config).unwrap();
+
+        let deps = make_deps(&pool);
+        let scheduler = Arc::new(CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path,
+            backup_path,
+            cancel.clone(),
+            true,
+        ));
+
+        let notify = scheduler.reschedule_notify();
+        let (h1, h2) = scheduler.clone().start();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Advance to exactly 13:00 and wake the scheduler
+        clock.set(
+            DateTime::parse_from_rfc3339("2026-02-23T13:00:00Z")
+                .unwrap()
+                .to_utc(),
+        );
+        notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Wake again to give it a chance to double-fire
+        notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Verify: exactly 1 run, and next_run_at is tomorrow
+        let (_runs, total) = store::get_runs(&pool, Some("cron_daily"), None, 10, 0).unwrap();
+        assert_eq!(total, 1, "expected exactly 1 run, got {total}");
+
+        let state = scheduler.get_runtime_state("cron_daily").unwrap();
+        let next = state.next_run_at.expect("next_run_at should be set");
+        let tomorrow_1pm = DateTime::parse_from_rfc3339("2026-02-24T13:00:00Z")
+            .unwrap()
+            .to_utc();
+        assert_eq!(next, tomorrow_1pm, "next_run_at should be tomorrow at 13:00");
+
+        cancel.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
+    }
+
+    #[tokio::test]
+    async fn reload_config_preserves_next_run_at() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+
+        let job = CronJob {
+            id: "cron_preserve".into(),
+            name: "Preserve Test".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Cron {
+                expression: "0 9 * * *".into(),
+                timezone: "UTC".into(),
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            prod_only: false,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let config = CronConfig {
+            version: 1,
+            jobs: vec![job],
+        };
+        config::save_config(&config_path, &backup_path, &config).unwrap();
+
+        let deps = make_deps(&pool);
+        let scheduler = Arc::new(CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path.clone(),
+            backup_path.clone(),
+            cancel.clone(),
+            true,
+        ));
+
+        let (h1, h2) = scheduler.clone().start();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Capture next_run_at after startup
+        let before = scheduler
+            .get_runtime_state("cron_preserve")
+            .unwrap()
+            .next_run_at
+            .expect("should have next_run_at");
+
+        // Trigger config reload (same content — no schedule change)
+        scheduler.config_notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let after = scheduler
+            .get_runtime_state("cron_preserve")
+            .unwrap()
+            .next_run_at
+            .expect("should still have next_run_at");
+
+        assert_eq!(before, after, "next_run_at should be preserved on reload with no schedule change");
+
+        cancel.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
+    }
+
+    #[tokio::test]
+    async fn reload_config_recomputes_on_schedule_change() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+
+        let job = CronJob {
+            id: "cron_change".into(),
+            name: "Change Test".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Cron {
+                expression: "0 9 * * *".into(),
+                timezone: "UTC".into(),
+            },
+            payload: Payload::ShellCommand {
+                command: "echo hi".into(),
+                working_directory: None,
+                timeout_secs: 300,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            prod_only: false,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let config = CronConfig {
+            version: 1,
+            jobs: vec![job.clone()],
+        };
+        config::save_config(&config_path, &backup_path, &config).unwrap();
+
+        let deps = make_deps(&pool);
+        let scheduler = Arc::new(CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path.clone(),
+            backup_path.clone(),
+            cancel.clone(),
+            true,
+        ));
+
+        let (h1, h2) = scheduler.clone().start();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let before = scheduler
+            .get_runtime_state("cron_change")
+            .unwrap()
+            .next_run_at
+            .expect("should have next_run_at");
+
+        // Change schedule from 9 AM to 10 AM
+        let mut updated_job = job;
+        updated_job.schedule = Schedule::Cron {
+            expression: "0 10 * * *".into(),
+            timezone: "UTC".into(),
+        };
+        let new_config = CronConfig {
+            version: 1,
+            jobs: vec![updated_job],
+        };
+        config::save_config(&config_path, &backup_path, &new_config).unwrap();
+
+        scheduler.config_notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let after = scheduler
+            .get_runtime_state("cron_change")
+            .unwrap()
+            .next_run_at
+            .expect("should still have next_run_at");
+
+        assert_ne!(before, after, "next_run_at should change when schedule changes");
+        // Clock is at 12:00, so next 10 AM should be tomorrow
+        let tomorrow_10am = DateTime::parse_from_rfc3339("2026-02-24T10:00:00Z")
+            .unwrap()
+            .to_utc();
+        assert_eq!(after, tomorrow_10am);
 
         cancel.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
@@ -721,6 +998,7 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
+            true,
         ));
 
         let notify = scheduler.reschedule_notify();
@@ -730,6 +1008,80 @@ mod tests {
         // This should not deadlock — the scheduler should wake up
         notify.notify_one();
         tokio::time::sleep(Duration::from_millis(100)).await;
+
+        cancel.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
+    }
+
+    #[tokio::test]
+    async fn scheduler_skips_prod_only_on_non_prod() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+
+        // Set clock so the job is immediately due
+        clock.set(
+            DateTime::parse_from_rfc3339("2026-02-23T13:00:00Z")
+                .unwrap()
+                .to_utc(),
+        );
+
+        let job = CronJob {
+            id: "cron_prod_only".into(),
+            name: "Prod Only Job".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every {
+                interval_secs: 60,
+                anchor: None,
+            },
+            payload: Payload::ShellCommand {
+                command: "echo prod".into(),
+                working_directory: None,
+                timeout_secs: 10,
+            },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::Allow,
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            prod_only: true,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let config = CronConfig {
+            version: 1,
+            jobs: vec![job],
+        };
+        config::save_config(&config_path, &backup_path, &config).unwrap();
+
+        // Create scheduler with is_production = false
+        let deps = make_deps(&pool);
+        let scheduler = Arc::new(CronScheduler::new(
+            pool.clone(),
+            clock.clone(),
+            deps,
+            config_path,
+            backup_path,
+            cancel.clone(),
+            false,
+        ));
+
+        let notify = scheduler.reschedule_notify();
+        let (h1, h2) = scheduler.clone().start();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Wake the scheduler multiple times
+        notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // No runs should have been created
+        let (_runs, total) = store::get_runs(&pool, Some("cron_prod_only"), None, 10, 0).unwrap();
+        assert_eq!(total, 0, "prod_only job should not fire on non-prod instance");
 
         cancel.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;

@@ -490,6 +490,48 @@ mod tests {
     // ── Misfire tests (pure schedule computation) ──
 
     #[test]
+    fn cron_next_run_from_slightly_before_boundary() {
+        // Documents the boundary behavior: compute_next_run uses next_after which
+        // advances by one minute. When `now` is 1ms before the boundary, the
+        // truncated minute is 08:59 → next minute 09:00 → matches → returns same day.
+        // When `now` IS the boundary (09:00:00), next minute is 09:01 → no match → tomorrow.
+        let schedule = Schedule::Cron {
+            expression: "0 9 * * *".into(),
+            timezone: "UTC".into(),
+        };
+
+        // 1ms before boundary: returns same-day 09:00 (the "about to fire" time)
+        let before = utc("2026-02-25T08:59:59.999Z");
+        let result = compute_next_run(&schedule, before).unwrap();
+        assert_eq!(result, utc("2026-02-25T09:00:00Z"));
+
+        // Exact boundary: returns TOMORROW 09:00 (correctly advances past it)
+        let exact = utc("2026-02-25T09:00:00Z");
+        let result = compute_next_run(&schedule, exact).unwrap();
+        assert_eq!(result, utc("2026-02-26T09:00:00Z"));
+    }
+
+    #[test]
+    fn every_next_run_from_slightly_before_boundary() {
+        // Same boundary behavior for Every schedules: slightly-before returns
+        // the current boundary, exact boundary returns the next one.
+        let schedule = Schedule::Every {
+            interval_secs: 86400,
+            anchor: Some(utc("2026-02-24T09:00:00Z")),
+        };
+
+        // 1ms before: elapsed < 86400s, so periods = 0+1 = 1 → same boundary
+        let before = utc("2026-02-25T08:59:59.999Z");
+        let result = compute_next_run(&schedule, before).unwrap();
+        assert_eq!(result, utc("2026-02-25T09:00:00Z"));
+
+        // Exact: elapsed = 86400s, periods = 1+1 = 2 → next day
+        let exact = utc("2026-02-25T09:00:00Z");
+        let result = compute_next_run(&schedule, exact).unwrap();
+        assert_eq!(result, utc("2026-02-26T09:00:00Z"));
+    }
+
+    #[test]
     fn misfire_skip_computes_future() {
         let s = Schedule::Cron {
             expression: "0 9 * * *".into(),

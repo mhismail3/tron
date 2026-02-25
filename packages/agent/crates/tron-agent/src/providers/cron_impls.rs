@@ -592,6 +592,10 @@ impl CronDelegateImpl {
                 .get("stuckTimeoutSecs")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(7200),
+            prod_only: params
+                .get("prodOnly")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             tags: params
                 .get("tags")
                 .and_then(|v| v.as_array())
@@ -717,6 +721,9 @@ impl CronDelegateImpl {
         }
         if let Some(v) = params.get("stuckTimeoutSecs").and_then(|v| v.as_u64()) {
             job.stuck_timeout_secs = v;
+        }
+        if let Some(v) = params.get("prodOnly").and_then(|v| v.as_bool()) {
+            job.prod_only = v;
         }
         if let Some(tags) = params.get("tags").and_then(|v| v.as_array()) {
             job.tags = tags
