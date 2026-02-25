@@ -185,7 +185,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
         let cm = prepared.context_manager;
         let detailed = cm.get_detailed_snapshot();
 
-        // Build messages array matching iOS DetailedMessageInfo shape
+        // Build messages array matching DetailedMessageInfo wire format
         let messages: Vec<Value> = detailed
             .messages
             .iter()
@@ -222,7 +222,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             })
             .collect();
 
-        // Build addedSkills matching iOS AddedSkillInfo shape:
+        // Build addedSkills matching AddedSkillInfo wire format:
         // { name, source, addedVia, eventId, tokens }
         // Skills are event-sourced: skill.added / skill.removed events in this session.
         let added_skills: Vec<Value> = {
@@ -297,7 +297,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             composed_parts.join("\n\n")
         };
 
-        // Build rules matching iOS LoadedRules shape: { files, totalFiles, tokens }
+        // Build rules matching LoadedRules wire format: { files, totalFiles, tokens }
         let rules_info: Option<Value> = {
             let wd_path = Path::new(&session.working_directory);
             let mut files: Vec<Value> = artifacts
@@ -362,7 +362,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             }
         };
 
-        // Build memory matching iOS LoadedMemory shape: { count, tokens, entries }
+        // Build memory matching LoadedMemory wire format: { count, tokens, entries }
         let memory_info: Option<Value> = artifacts.memory.as_ref().and_then(|memory| {
             if memory.entries.is_empty() {
                 return None;
@@ -384,7 +384,7 @@ impl MethodHandler for GetDetailedSnapshotHandler {
             }))
         });
 
-        // Build sessionMemories matching iOS LoadedMemory shape
+        // Build sessionMemories matching LoadedMemory wire format
         let session_memories: Option<Value> = {
             let mems = cm.get_session_memories();
             if mems.is_empty() {
@@ -505,7 +505,7 @@ impl MethodHandler for ConfirmCompactionHandler {
                 message: format!("Compaction failed: {e}"),
             })?;
 
-        // Persist compact.boundary so iOS can reconstruct the pill on resume
+        // Persist compact.boundary so clients can reconstruct the pill on resume
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &session_id,
             event_type: tron_events::EventType::CompactBoundary,
@@ -628,7 +628,7 @@ impl MethodHandler for CompactHandler {
                 message: format!("Compaction failed: {e}"),
             })?;
 
-        // Persist compact.boundary so iOS can reconstruct the pill on resume
+        // Persist compact.boundary so clients can reconstruct the pill on resume
         let _ = ctx.event_store.append(&tron_events::AppendOptions {
             session_id: &session_id,
             event_type: tron_events::EventType::CompactBoundary,
@@ -690,7 +690,7 @@ mod tests {
     // ── GetSnapshotHandler ──
 
     #[tokio::test]
-    async fn get_snapshot_returns_ios_shape() {
+    async fn get_snapshot_returns_wire_format() {
         let (ctx, sid) = ctx_with_session();
         let result = GetSnapshotHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -789,7 +789,7 @@ mod tests {
     // ── GetDetailedSnapshotHandler ──
 
     #[tokio::test]
-    async fn get_detailed_snapshot_returns_ios_shape() {
+    async fn get_detailed_snapshot_returns_wire_format() {
         let (ctx, sid) = ctx_with_session();
         let result = GetDetailedSnapshotHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_detailed_snapshot_all_ios_fields() {
+    async fn get_detailed_snapshot_all_wire_format_fields() {
         let (ctx, sid) = ctx_with_session();
         let result = GetDetailedSnapshotHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)

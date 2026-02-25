@@ -2,7 +2,7 @@
 //!
 //! JSON-RPC 2.0 protocol layer, method registry, and handlers.
 //!
-//! Implements the full RPC surface that iOS connects to:
+//! Implements the full RPC surface that clients connect to:
 //! - Session: create, resume, list, delete, fork, getHead, getState
 //! - Agent: prompt, abort, getState
 //! - Model: list, switch

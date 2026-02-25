@@ -10,7 +10,7 @@ use crate::rpc::errors::{self, RpcError};
 use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
 
-/// Shape skill for the iOS wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
+/// Shape skill for the wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
 fn skill_to_wire(skill: &tron_skills::types::SkillMetadata) -> Value {
     serde_json::json!({
         "name": skill.name,
@@ -61,7 +61,7 @@ impl MethodHandler for GetSkillHandler {
             message: format!("Skill '{name}' not found"),
         })?;
 
-        // iOS expects { skill: SkillMetadata, found: bool } wrapper
+        // Wire format: { skill: SkillMetadata, found: bool } wrapper
         Ok(serde_json::json!({
             "skill": skill_to_wire(skill),
             "found": true,
@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_skills_ios_field_names() {
+    async fn refresh_skills_wire_format_field_names() {
         let ctx = make_test_context();
         let result = RefreshSkillsHandler.handle(None, &ctx).await.unwrap();
         assert!(result.get("success").is_some());
@@ -285,7 +285,7 @@ mod tests {
             .await
             .unwrap();
 
-        // iOS expects { skill: {...}, found: true }
+        // Wire format: { skill: {...}, found: true }
         assert_eq!(result["found"], true);
         assert!(result["skill"].is_object());
         assert_eq!(result["skill"]["name"], "my-skill");

@@ -1,4 +1,4 @@
-//! RPC wire-format types matching the iOS WebSocket protocol.
+//! RPC wire-format types for the WebSocket protocol.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -398,7 +398,7 @@ final class MiscClient {
 
     // MARK: - Logs Methods
 
-    /// Export logs to server filesystem at $HOME/.tron/artifacts/ios-logs/
+    /// Export logs to server filesystem at $HOME/.tron/artifacts/client-logs/
     func exportLogs(content: String, filename: String? = nil) async throws -> LogsExportResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()

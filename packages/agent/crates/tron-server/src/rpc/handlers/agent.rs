@@ -16,8 +16,8 @@ use crate::rpc::registry::MethodHandler;
 
 /// Extract skill/spell names from a JSON array.
 ///
-/// iOS sends objects `[{name: "skill-name", source: "global"}]` while
-/// desktop may send plain strings `["skill-name"]`. This handles both.
+/// Clients may send objects `[{name: "skill-name", source: "global"}]` or
+/// plain strings `["skill-name"]`. This handles both.
 fn extract_skills(value: Option<&Value>) -> Vec<String> {
     value
         .and_then(|v| v.as_array())
@@ -41,11 +41,11 @@ fn extract_skills(value: Option<&Value>) -> Vec<String> {
 /// Build the JSON payload for a `message.user` event.
 ///
 /// When the prompt includes images, attachments, skills, or spells, the payload
-/// is enriched so that session resume can reconstruct iOS chips and the LLM can
-/// see previously-sent images in reconstructed history.
+/// is enriched so that session resume can reconstruct client UI chips and the
+/// LLM can see previously-sent images in reconstructed history.
 ///
-/// Format matches `UserContent` serde (`content.rs`), the iOS parser
-/// (`MessagePayloads.swift`), and the reconstruction pipeline
+/// Format matches `UserContent` serde (`content.rs`) and the reconstruction
+/// pipeline
 /// (`reconstruct.rs` + `session_reconstructor.rs`).
 fn build_user_event_payload(
     prompt: &str,
@@ -478,7 +478,7 @@ impl MethodHandler for PromptHandler {
             crate::rpc::validation::MAX_PROMPT_LENGTH,
         )?;
 
-        // Extract optional extra params (iOS sends these)
+        // Extract optional extra params
         let reasoning_level = params
             .as_ref()
             .and_then(|p| p.get("reasoningLevel"))
@@ -706,7 +706,7 @@ impl MethodHandler for PromptHandler {
 
                 // 5. Load workspace memory from ledger entries
                 // (rules.loaded / memory.loaded events are emitted optimistically
-                // at session.create time so iOS shows pills immediately)
+                // at session.create time so clients show loading indicators immediately)
                 let memory = {
                     let auto_inject = &settings.context.memory.auto_inject;
 
@@ -932,7 +932,7 @@ impl MethodHandler for PromptHandler {
                     }
                 };
 
-                // Build RunContext with iOS params
+                // Build RunContext with client params
                 let run_context = RunContext {
                     reasoning_level: reasoning_level_clone
                         .and_then(|s| tron_runtime::types::ReasoningLevel::from_str_loose(&s)),
@@ -1022,7 +1022,7 @@ impl MethodHandler for PromptHandler {
                     let _ = persister.flush().await;
                 }
 
-                // 8b. Emit agent.error if the run failed (iOS ErrorPlugin listens for this)
+                // 8b. Emit agent.error if the run failed
                 if let Some(ref error_msg) = result.error {
                     let parsed = tron_core::errors::parse::parse_error(error_msg);
                     let _ = broadcast.emit(tron_core::events::TronEvent::Error {
@@ -1104,7 +1104,7 @@ impl MethodHandler for PromptHandler {
                 // 10. Invalidate cached session so next resume reconstructs from events
                 session_manager.invalidate_session(&session_id_clone);
 
-                // 11. Emit session_updated — iOS uses this to refresh the stat line
+                // 11. Emit session_updated so clients can refresh the session stat line
                 if let Ok(Some(updated_session)) = session_manager.get_session(&session_id_clone) {
                     // Get message previews for last_user_prompt / last_assistant_response
                     let preview = event_store
@@ -1755,7 +1755,7 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap();
-        // iOS expects "input"/"output" not "inputTokens"/"outputTokens"
+        // Wire format uses "input"/"output" not "inputTokens"/"outputTokens"
         assert!(result["tokenUsage"].get("input").is_some());
         assert!(result["tokenUsage"].get("output").is_some());
         assert!(result["tokenUsage"].get("inputTokens").is_none());
@@ -1895,7 +1895,7 @@ mod tests {
         assert_eq!(result["acknowledged"], true);
     }
 
-    // ── Phase 3: iOS prompt parameters with agent execution ──
+    // ── Phase 3: prompt parameters with agent execution ──
 
     #[tokio::test]
     async fn prompt_with_images_creates_multimodal_message() {
@@ -2372,7 +2372,7 @@ mod tests {
             event_types.push(event.event_type().to_owned());
         }
 
-        // agent_end MUST come before agent_ready (iOS dependency)
+        // agent_end MUST come before agent_ready (client ordering dependency)
         let end_pos = event_types.iter().position(|t| t == "agent_end");
         let ready_pos = event_types.iter().position(|t| t == "agent_ready");
         assert!(end_pos.is_some(), "agent_end must exist in {event_types:?}");
@@ -3722,7 +3722,7 @@ mod tests {
 
     #[test]
     fn payload_media_type_key_variant() {
-        // iOS sends `mediaType`, verify it works
+        // Clients may send `mediaType`, verify it works
         let images = vec![json!({"data": "d", "mediaType": "image/webp"})];
         let payload = build_user_event_payload("pic", Some(&images), None, None, None);
         let content = payload["content"].as_array().unwrap();

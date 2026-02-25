@@ -1,7 +1,7 @@
 //! Communication handlers: send, receive, subscribe, unsubscribe.
 //!
-//! These are placeholder handlers — the TypeScript server also has stubs for
-//! communication features. iOS doesn't use these endpoints.
+//! These are placeholder handlers — stubs for communication features.
+//! No clients currently use these endpoints.
 
 use async_trait::async_trait;
 use serde_json::Value;

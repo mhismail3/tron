@@ -198,8 +198,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn register_response_matches_ios_decodable() {
-        // iOS expects: struct DeviceTokenRegisterResult { id: String, created: Bool }
+    async fn register_response_matches_wire_format() {
+        // Wire format: { id: String, created: Bool }
         let ctx = make_test_context();
         let result = RegisterTokenHandler
             .handle(Some(json!({"deviceToken": "f".repeat(64)})), &ctx)
@@ -245,8 +245,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unregister_response_matches_ios_decodable() {
-        // iOS expects: struct DeviceTokenUnregisterResult { success: Bool }
+    async fn unregister_response_matches_wire_format() {
+        // Wire format: { success: Bool }
         let ctx = make_test_context();
         let result = UnregisterTokenHandler
             .handle(Some(json!({"deviceToken": "x"})), &ctx)

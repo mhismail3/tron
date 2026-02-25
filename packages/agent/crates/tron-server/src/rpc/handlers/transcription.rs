@@ -17,7 +17,7 @@ const MAX_AUDIO_SIZE: usize = 50 * 1024 * 1024;
 
 /// Typed response for the transcribe.audio RPC method.
 ///
-/// Serializes to camelCase JSON matching the iOS `TranscribeAudioResult` contract.
+/// Serializes to camelCase JSON matching the `TranscribeAudioResult` wire format.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TranscribeResponse {
@@ -69,8 +69,8 @@ fn filename_for_mime(mime_type: &str) -> String {
 
 /// Strip data URI prefix from base64-encoded audio.
 ///
-/// iOS sends `data:audio/m4a;base64,AAAA...` — this extracts the raw base64
-/// portion after the `;base64,` marker. Plain base64 passes through unchanged.
+/// Clients may send `data:audio/m4a;base64,AAAA...` — this extracts the raw
+/// base64 portion after the `;base64,` marker. Plain base64 passes through unchanged.
 pub fn normalize_base64(input: &str) -> &str {
     match input.find(";base64,") {
         Some(idx) => &input[idx + 8..],
@@ -169,7 +169,7 @@ pub async fn transcribe_audio(
     }
 }
 
-/// Full transcription helper returning the complete response expected by iOS.
+/// Full transcription helper returning the complete wire format response.
 ///
 /// Returns a [`TranscribeResponse`] with all fields: text, rawText, language,
 /// durationSeconds, processingTimeMs, model, device, computeType, cleanupMode.
@@ -219,7 +219,7 @@ async fn transcribe_audio_full(
         Ok(result) => {
             #[allow(clippy::cast_possible_truncation)]
             let elapsed_ms = start.elapsed().as_millis() as u64;
-            // Sidecar returns snake_case — map to camelCase for iOS
+            // Sidecar returns snake_case — map to camelCase for wire format
             let text = result
                 .get("text")
                 .and_then(Value::as_str)
@@ -294,7 +294,7 @@ impl MethodHandler for TranscribeAudioHandler {
                 message: "Missing required parameter: audioBase64".into(),
             })?;
 
-        // Strip data URI prefix if present (iOS sends "data:audio/m4a;base64,...")
+        // Strip data URI prefix if present (clients may send "data:audio/m4a;base64,...")
         let audio_base64 = normalize_base64(audio_base64);
 
         // Decode and validate size
@@ -460,13 +460,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transcribe_handler_returns_full_ios_response() {
+    async fn transcribe_handler_returns_full_wire_format_response() {
         let ctx = make_test_context();
         let result = TranscribeAudioHandler
             .handle(Some(json!({"audioBase64": "SGVsbG8="})), &ctx)
             .await
             .unwrap();
-        // Must have all fields expected by iOS TranscribeAudioResult
+        // Must have all fields matching TranscribeAudioResult wire format
         assert!(result.get("text").is_some());
         assert!(result.get("rawText").is_some());
         assert!(result.get("language").is_some());

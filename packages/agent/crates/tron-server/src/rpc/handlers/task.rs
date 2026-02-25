@@ -686,10 +686,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_tasks_ios_field_names() {
+    async fn list_tasks_wire_format_field_names() {
         let ctx = make_test_context_with_tasks();
         let result = ListTasksHandler.handle(None, &ctx).await.unwrap();
-        // iOS TaskListResult expects {tasks: [RpcTask], total: Int}
+        // Wire format: {tasks: [RpcTask], total: Int}
         assert!(result.get("tasks").is_some());
         assert!(result.get("total").is_some());
         assert!(result["total"].is_number());

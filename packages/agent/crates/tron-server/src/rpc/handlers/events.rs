@@ -145,7 +145,7 @@ impl MethodHandler for GetHistoryHandler {
 
         let has_more = limit.is_some_and(|l| i64::try_from(events.len()).unwrap_or(0) >= l);
 
-        // Include oldestEventId for iOS pagination
+        // Include oldestEventId for cursor-based pagination
         let oldest_event_id = events.first().map(|e| e.id.clone());
 
         let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
@@ -168,7 +168,7 @@ impl MethodHandler for GetSinceHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
-        // Resolve cursor: prefer afterEventId (iOS), fall back to afterSequence (internal)
+        // Resolve cursor: prefer afterEventId, fall back to afterSequence
         // Default -1 so `sequence > -1` returns ALL events including session.start (seq 0)
         let after_sequence = if let Some(event_id) = params
             .as_ref()
@@ -210,7 +210,7 @@ impl MethodHandler for GetSinceHandler {
 
         let wire_events: Vec<Value> = events.iter().map(event_row_to_wire).collect();
 
-        // Include nextCursor for iOS incremental sync
+        // Include nextCursor for incremental sync
         let next_cursor = events.last().map(|e| e.id.clone());
 
         Ok(serde_json::json!({

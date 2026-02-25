@@ -402,7 +402,7 @@ fn spawn_embed_memory_with_deps(
 // RPC Handlers
 // =============================================================================
 
-/// Transform an event row into the DTO shape expected by iOS `LedgerEntryDTO`.
+/// Transform an event row into the `LedgerEntryDTO` wire format.
 fn event_to_ledger_dto(event: &tron_events::sqlite::row_types::EventRow) -> Value {
     let payload: Value = serde_json::from_str(&event.payload).unwrap_or_default();
     serde_json::json!({
@@ -585,7 +585,7 @@ impl MethodHandler for UpdateLedgerHandler {
         }
         let session_id = &session_id_owned;
 
-        // Emit memory_updating immediately (iOS shows spinner pill)
+        // Emit memory_updating immediately so clients can show a spinner
         let _ = ctx
             .orchestrator
             .broadcast()
@@ -657,7 +657,7 @@ impl MethodHandler for UpdateLedgerHandler {
     }
 }
 
-/// Transform an event row into the DTO shape expected by iOS `MemoryEntry`.
+/// Transform an event row into the `MemoryEntry` wire format.
 fn event_to_search_dto(event: &tron_events::sqlite::row_types::EventRow) -> Value {
     let payload: Value = serde_json::from_str(&event.payload).unwrap_or_default();
     let content = payload
@@ -1362,7 +1362,7 @@ mod tests {
             "Add OAuth2 authentication flow"
         );
         assert!(h["createdAt"].as_str().is_some());
-        // Should NOT have "timestamp" — iOS expects "createdAt"
+        // Should NOT have "timestamp" — wire format uses "createdAt"
         assert!(h.get("timestamp").is_none());
         let lessons = h["lessons"].as_array().unwrap();
         assert_eq!(lessons.len(), 1);

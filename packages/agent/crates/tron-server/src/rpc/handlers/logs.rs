@@ -9,16 +9,16 @@ use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
 
-/// Resolve the iOS logs directory path.
-fn ios_logs_dir() -> std::path::PathBuf {
+/// Resolve the client logs directory path.
+fn client_logs_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     std::path::PathBuf::from(home)
         .join(".tron")
         .join("artifacts")
-        .join("ios-logs")
+        .join("client-logs")
 }
 
-/// Export iOS logs to server filesystem.
+/// Export client logs to server filesystem.
 pub struct ExportLogsHandler;
 
 #[async_trait]
@@ -27,11 +27,11 @@ impl MethodHandler for ExportLogsHandler {
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let content = require_string_param(params.as_ref(), "content")?;
 
-        let logs_dir = ios_logs_dir();
+        let logs_dir = client_logs_dir();
 
         let _ = std::fs::create_dir_all(&logs_dir);
 
-        let filename = format!("ios-log-{}.txt", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+        let filename = format!("client-log-{}.txt", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
         let path = logs_dir.join(&filename);
 
         let bytes_written = content.len();
@@ -54,12 +54,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn ios_logs_dir_uses_artifacts_path() {
-        let dir = ios_logs_dir();
+    fn client_logs_dir_uses_artifacts_path() {
+        let dir = client_logs_dir();
         let path = dir.to_string_lossy();
         assert!(
-            path.ends_with(".tron/artifacts/ios-logs"),
-            "expected path ending in .tron/artifacts/ios-logs, got: {path}"
+            path.ends_with(".tron/artifacts/client-logs"),
+            "expected path ending in .tron/artifacts/client-logs, got: {path}"
         );
     }
 
@@ -77,8 +77,8 @@ mod tests {
         // Verify file was actually written
         let path = result["path"].as_str().unwrap();
         assert!(
-            path.contains("artifacts/ios-logs/"),
-            "path should use artifacts/ios-logs, got: {path}"
+            path.contains("artifacts/client-logs/"),
+            "path should use artifacts/client-logs, got: {path}"
         );
         let content = std::fs::read_to_string(path).unwrap();
         assert_eq!(content, "test log data");

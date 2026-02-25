@@ -45,7 +45,7 @@ impl MethodHandler for SaveHandler {
         let filename = format!("{}-voice-note.md", now.format("%Y-%m-%d-%H%M%S"));
         let filepath = format!("{dir}/{filename}");
 
-        // Strip data URI prefix if present (iOS sends "data:audio/m4a;base64,...")
+        // Strip data URI prefix if present (clients may send "data:audio/m4a;base64,...")
         let audio_base64 = normalize_base64(&audio_base64);
 
         // Decode audio
@@ -212,7 +212,7 @@ mod tests {
 
     #[tokio::test]
     async fn save_voice_note_with_data_uri_prefix() {
-        // iOS sends: "data:audio/m4a;base64,SGVsbG8gV29ybGQ="
+        // Handles data URI prefix: "data:audio/m4a;base64,SGVsbG8gV29ybGQ="
         let ctx = make_test_context();
         let result = SaveHandler
             .handle(

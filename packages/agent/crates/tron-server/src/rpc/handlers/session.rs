@@ -46,8 +46,8 @@ impl MethodHandler for CreateSessionHandler {
                 working_directory: working_dir.clone(),
             });
 
-        // Optimistically discover rules and memory so iOS can display pills
-        // immediately when a session opens (content is loaded later at prompt time).
+        // Optimistically discover rules and memory so clients can display loading
+        // indicators immediately (content is loaded later at prompt time).
         let event_store = ctx.event_store.clone();
         let broadcast = ctx.orchestrator.broadcast().clone();
         let session_id_for_task = session_id.clone();
@@ -83,8 +83,8 @@ impl MethodHandler for CreateSessionHandler {
 
 /// Discover rules files and memory, then persist + broadcast notification events.
 ///
-/// This runs at session.create time so iOS can show "Loaded N rules" / "Loaded memory"
-/// pills immediately. The actual content is loaded later when the first prompt is sent.
+/// This runs at session.create time so clients can show "Loaded N rules" / "Loaded memory"
+/// indicators immediately. The actual content is loaded later when the first prompt is sent.
 fn emit_optimistic_context_events(
     event_store: &std::sync::Arc<tron_events::EventStore>,
     broadcast: &std::sync::Arc<EventEmitter>,
@@ -514,7 +514,7 @@ impl MethodHandler for GetHistoryHandler {
                     msg["toolUse"] = serde_json::json!({ "name": tool_name });
                 }
                 // Hoist toolCallId and isError from content to message level
-                // for tool.result messages (iOS expects them at top level)
+                // for tool.result messages (wire format expects them at top level)
                 if e.event_type == "tool.result" {
                     if let Some(tc_id) = content.get("toolCallId") {
                         msg["toolCallId"] = tc_id.clone();

@@ -289,7 +289,7 @@ mod tests {
             "auto_inject should default to true"
         );
 
-        // Simulate iOS toggling auto-inject off via settings.update RPC
+        // Simulate client toggling auto-inject off via settings.update RPC
         let _ = UpdateSettingsHandler
             .handle(
                 Some(json!({

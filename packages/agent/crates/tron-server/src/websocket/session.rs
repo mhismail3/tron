@@ -58,7 +58,7 @@ pub async fn run_ws_session(
     // Register with broadcast manager
     broadcast.add(connection.clone()).await;
 
-    // Send connection.established event (iOS expects this type string)
+    // Send connection.established event
     let connected_msg = serde_json::json!({
         "type": "connection.established",
         "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -125,7 +125,7 @@ pub async fn run_ws_session(
 
     // Process incoming messages
     while let Some(Ok(msg)) = ws_rx.next().await {
-        // Extract text from either Text or Binary frames (iOS sends binary).
+        // Extract text from either Text or Binary frames (some clients send binary).
         // Borrow from `msg` instead of allocating — the borrow outlives `handle_message`.
         let text: Option<&str> = match &msg {
             Message::Text(t) => Some(t.as_str()),

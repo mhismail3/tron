@@ -737,7 +737,7 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             set_opt(&mut data, "error", error);
             Some(data)
         }
-        // Events with no additional data (empty object so iOS can decode `data: {}`)
+        // Events with no additional data (empty object so clients can decode `data: {}`)
         TronEvent::AgentStart { .. }
         | TronEvent::AgentReady { .. }
         | TronEvent::ThinkingStart { .. }
@@ -1241,7 +1241,7 @@ mod tests {
         let rpc = tron_event_to_rpc(&event);
         assert_eq!(rpc.event_type, "agent.tool_end");
         let data = rpc.data.unwrap();
-        // iOS REQUIRED field: success (non-optional Bool)
+        // Required field: success (non-optional Bool)
         assert_eq!(data["success"], true);
         assert_eq!(data["toolCallId"], "tc_1");
         assert_eq!(data["toolName"], "bash");
@@ -1316,7 +1316,7 @@ mod tests {
         };
         let rpc = tron_event_to_rpc(&event);
         let data = rpc.data.unwrap();
-        // Even without result, success must be present (iOS requires it)
+        // Even without result, success must be present (required by wire format)
         assert_eq!(data["success"], true);
         assert_eq!(data["duration"], 1500);
         assert!(data.get("durationMs").is_none());

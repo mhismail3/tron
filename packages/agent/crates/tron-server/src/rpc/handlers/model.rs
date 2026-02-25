@@ -762,7 +762,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_models_has_ios_metadata() {
+    async fn list_models_has_client_metadata() {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
