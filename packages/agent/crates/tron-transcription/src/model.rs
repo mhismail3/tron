@@ -60,10 +60,10 @@ impl ModelPaths {
     }
 }
 
-/// Default model cache directory under ~/.tron/mods/transcribe/onnx/.
+/// Default model cache directory under ~/.tron/mods/models/parakeet-tdt-0.6b-v3/.
 pub fn default_model_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(format!("{home}/.tron/mods/transcribe/onnx"))
+    PathBuf::from(format!("{home}/.tron/mods/models/parakeet-tdt-0.6b-v3"))
 }
 
 /// Check if all required model files exist locally.
@@ -207,7 +207,7 @@ mod tests {
     fn default_model_dir_under_tron() {
         let dir = default_model_dir();
         let s = dir.to_string_lossy();
-        assert!(s.contains(".tron/mods/transcribe/onnx"), "Got: {s}");
+        assert!(s.contains(".tron/mods/models/parakeet-tdt-0.6b-v3"), "Got: {s}");
     }
 
     #[test]
