@@ -53,8 +53,8 @@ struct NotificationListSheet: View {
                 }
             }
         }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .adaptivePresentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
         .task {
             await notificationStore.refresh()
             // Auto-open matching notification for deep link
