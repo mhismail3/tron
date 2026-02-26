@@ -67,6 +67,17 @@ async fn deliver_apns(
     title: Option<&str>,
     deps: &ExecutorDeps,
 ) -> Result<(), crate::errors::CronError> {
+    // Agent turns handle their own notifications via NotifyApp.
+    // Automatic APNS delivery only serves as a failure fallback for agent turns.
+    // Non-agent payloads (shell commands, webhooks) use APNS delivery normally.
+    if run.session_id.is_some() && run.status == crate::types::RunStatus::Completed {
+        tracing::debug!(
+            job_id = %job.id,
+            "skipping automatic APNS for successful agent turn"
+        );
+        return Ok(());
+    }
+
     let notifier = deps
         .push_notifier
         .as_ref()
@@ -130,6 +141,52 @@ mod tests {
     use super::*;
     use crate::types::*;
     use chrono::Utc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    struct MockPushNotifier {
+        called: AtomicBool,
+    }
+
+    impl MockPushNotifier {
+        fn new() -> Self {
+            Self {
+                called: AtomicBool::new(false),
+            }
+        }
+        fn was_called(&self) -> bool {
+            self.called.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::executor::PushNotifier for MockPushNotifier {
+        async fn notify(
+            &self,
+            _title: &str,
+            _body: &str,
+        ) -> Result<(), crate::errors::CronError> {
+            self.called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn make_deps_with_notifier(notifier: Arc<MockPushNotifier>) -> ExecutorDeps {
+        let pool =
+            tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            crate::migrations::run_migrations(&conn).unwrap();
+        }
+        ExecutorDeps {
+            agent_executor: None,
+            broadcaster: std::sync::OnceLock::new(),
+            push_notifier: Some(notifier),
+            event_injector: None,
+            http_client: reqwest::Client::new(),
+            pool,
+        }
+    }
 
     fn make_job() -> CronJob {
         CronJob {
@@ -222,5 +279,117 @@ mod tests {
         let deps = make_deps();
         // No push notifier — should log warning, not panic
         deliver(&job, &make_run(), &deps).await;
+    }
+
+    #[tokio::test]
+    async fn apns_skipped_for_successful_agent_turn() {
+        let notifier = Arc::new(MockPushNotifier::new());
+        let deps = make_deps_with_notifier(notifier.clone());
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Apns { title: None }];
+        let mut run = make_run();
+        run.session_id = Some("sess_agent".into());
+        run.status = RunStatus::Completed;
+
+        deliver(&job, &run, &deps).await;
+
+        assert!(
+            !notifier.was_called(),
+            "APNS should be skipped for successful agent turns"
+        );
+    }
+
+    #[tokio::test]
+    async fn apns_sent_for_failed_agent_turn() {
+        let notifier = Arc::new(MockPushNotifier::new());
+        let deps = make_deps_with_notifier(notifier.clone());
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Apns { title: None }];
+        let mut run = make_run();
+        run.session_id = Some("sess_agent".into());
+        run.status = RunStatus::Failed;
+        run.error = Some("model overloaded".into());
+
+        deliver(&job, &run, &deps).await;
+
+        assert!(
+            notifier.was_called(),
+            "APNS should be sent for failed agent turns"
+        );
+    }
+
+    #[tokio::test]
+    async fn apns_sent_for_timed_out_agent_turn() {
+        let notifier = Arc::new(MockPushNotifier::new());
+        let deps = make_deps_with_notifier(notifier.clone());
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Apns { title: None }];
+        let mut run = make_run();
+        run.session_id = Some("sess_agent".into());
+        run.status = RunStatus::TimedOut;
+        run.error = Some("exceeded timeout".into());
+
+        deliver(&job, &run, &deps).await;
+
+        assert!(
+            notifier.was_called(),
+            "APNS should be sent for timed out agent turns"
+        );
+    }
+
+    #[tokio::test]
+    async fn apns_sent_for_cancelled_agent_turn() {
+        let notifier = Arc::new(MockPushNotifier::new());
+        let deps = make_deps_with_notifier(notifier.clone());
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Apns { title: None }];
+        let mut run = make_run();
+        run.session_id = Some("sess_agent".into());
+        run.status = RunStatus::Cancelled;
+        run.error = Some("shutdown".into());
+
+        deliver(&job, &run, &deps).await;
+
+        assert!(
+            notifier.was_called(),
+            "APNS should be sent for cancelled agent turns"
+        );
+    }
+
+    #[tokio::test]
+    async fn apns_sent_for_non_agent_completed_run() {
+        let notifier = Arc::new(MockPushNotifier::new());
+        let deps = make_deps_with_notifier(notifier.clone());
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Apns { title: None }];
+        let run = make_run(); // session_id = None, status = Completed
+
+        deliver(&job, &run, &deps).await;
+
+        assert!(
+            notifier.was_called(),
+            "APNS should be sent for non-agent payloads"
+        );
+    }
+
+    #[tokio::test]
+    async fn apns_uses_custom_title_for_failed_agent_turn() {
+        let notifier = Arc::new(MockPushNotifier::new());
+        let deps = make_deps_with_notifier(notifier.clone());
+        let mut job = make_job();
+        job.delivery = vec![Delivery::Apns {
+            title: Some("Custom Alert".into()),
+        }];
+        let mut run = make_run();
+        run.session_id = Some("sess_agent".into());
+        run.status = RunStatus::Failed;
+        run.error = Some("agent error".into());
+
+        deliver(&job, &run, &deps).await;
+
+        assert!(
+            notifier.was_called(),
+            "APNS should be sent for failed turns even with custom title"
+        );
     }
 }
