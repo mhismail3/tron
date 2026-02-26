@@ -204,14 +204,14 @@ impl TranscriptionEngine {
         debug!("mel features: {:?}, len={}", features.shape(), features_len);
 
         // Step 3: Encoder
-        let (encoder_out, _enc_len) = {
+        let (encoder_out, enc_len) = {
             let mut encoder = self
                 .encoder
                 .lock()
                 .inference("encoder lock")?;
             decoder::run_encoder(&mut encoder, &features, features_len)?
         };
-        debug!("encoder output: {:?}", encoder_out.shape());
+        debug!("encoder output: {:?}, enc_len={}", encoder_out.shape(), enc_len);
 
         // Step 4: TDT greedy decode
         let text = {
@@ -221,6 +221,7 @@ impl TranscriptionEngine {
                 .inference("decoder lock")?;
             decoder::greedy_decode(
                 &encoder_out,
+                enc_len,
                 &mut decoder_joint,
                 &self.vocab,
                 self.blank_idx,

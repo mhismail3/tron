@@ -19,6 +19,13 @@ const LSTM_STATE_DIM: usize = 640;
 /// Safety multiplier — decode loop terminates after `time_steps * MAX_STEPS_MULTIPLIER` iterations.
 const MAX_STEPS_MULTIPLIER: usize = 5;
 
+/// Max same-frame iterations before forcing advancement.
+///
+/// TDT allows duration=0 (emit token, stay on frame) and the LSTM state evolves
+/// even on blank predictions, so the model may need multiple passes per frame.
+/// This limit prevents degenerate loops while allowing normal multi-token emission.
+const MAX_SAME_FRAME: usize = 5;
+
 /// Greedy TDT decoding: walk encoder output frame-by-frame using the `decoder_joint` network.
 ///
 /// The `decoder_joint` model takes encoder frames + previous token + LSTM states,
@@ -31,11 +38,12 @@ const MAX_STEPS_MULTIPLIER: usize = 5;
 )]
 pub fn greedy_decode(
     encoder_out: &Array2<f32>,
+    enc_len: i64,
     decoder_joint: &mut Session,
     vocab: &[String],
     blank_idx: usize,
 ) -> Result<String, TranscriptionError> {
-    let time_steps = encoder_out.shape()[0];
+    let time_steps = (enc_len as usize).min(encoder_out.shape()[0]);
     let hidden_dim = encoder_out.shape()[1]; // 1024
 
     let mut step: usize = 0;
@@ -49,6 +57,7 @@ pub fn greedy_decode(
 
     let max_steps = time_steps * MAX_STEPS_MULTIPLIER;
     let mut total_steps = 0;
+    let mut same_frame_count: usize = 0;
 
     while step < time_steps {
         total_steps += 1;
@@ -128,9 +137,17 @@ pub fn greedy_decode(
 
         let prev_step = step;
         step += advance;
-        // Anti-stuck: if duration predicted 0, advance by 1
+        // TDT duration=0 is valid: "emit token, stay on frame" or "LSTM processing
+        // pass before emitting." Only force-advance after MAX_SAME_FRAME consecutive
+        // no-advance iterations to prevent degenerate loops.
         if step == prev_step {
-            step += 1;
+            same_frame_count += 1;
+            if same_frame_count >= MAX_SAME_FRAME {
+                step += 1;
+                same_frame_count = 0;
+            }
+        } else {
+            same_frame_count = 0;
         }
     }
 
