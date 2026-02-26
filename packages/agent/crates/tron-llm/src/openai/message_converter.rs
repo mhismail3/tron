@@ -52,17 +52,50 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
 }
 
 /// Convert Tron tools to Responses API format.
+///
+/// Normalizes schemas to satisfy OpenAI's stricter validation
+/// (e.g., arrays must have `items`).
 #[must_use]
 pub fn convert_tools(tools: &[Tool]) -> Vec<ResponsesTool> {
     tools
         .iter()
-        .map(|t| ResponsesTool {
-            tool_type: "function".into(),
-            name: t.name.clone(),
-            description: t.description.clone(),
-            parameters: serde_json::to_value(&t.parameters).unwrap_or_default(),
+        .map(|t| {
+            let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
+            let params = normalize_schema_for_openai(&schema);
+            ResponsesTool {
+                tool_type: "function".into(),
+                name: t.name.clone(),
+                description: t.description.clone(),
+                parameters: params,
+            }
         })
         .collect()
+}
+
+/// Normalize a JSON schema for the OpenAI API.
+///
+/// OpenAI requires `"items"` on every `"type": "array"` schema.
+/// This recursively walks the schema and adds `"items": {}` where missing.
+pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(map) => {
+            let mut patched = serde_json::Map::new();
+            for (key, value) in map {
+                let _ = patched.insert(key.clone(), normalize_schema_for_openai(value));
+            }
+            // If this object is an array type without `items`, add a permissive default.
+            if patched.get("type").and_then(|v| v.as_str()) == Some("array")
+                && !patched.contains_key("items")
+            {
+                let _ = patched.insert("items".into(), serde_json::json!({}));
+            }
+            serde_json::Value::Object(patched)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(normalize_schema_for_openai).collect())
+        }
+        other => other.clone(),
+    }
 }
 
 /// Generate a tool clarification message for the first turn.
@@ -710,5 +743,43 @@ mod tests {
         assert!(result.contains("Bash Tool Capabilities"));
         assert!(result.contains("Network access"));
         assert!(result.contains("curl"));
+    }
+
+    // ── normalize_schema_for_openai ──────────────────────────────────
+
+    #[test]
+    fn normalize_adds_items_to_bare_array() {
+        let schema = json!({"type": "array", "description": "tags"});
+        let result = normalize_schema_for_openai(&schema);
+        assert_eq!(result["items"], json!({}));
+        assert_eq!(result["description"], "tags");
+    }
+
+    #[test]
+    fn normalize_preserves_existing_items() {
+        let schema = json!({"type": "array", "items": {"type": "string"}});
+        let result = normalize_schema_for_openai(&schema);
+        assert_eq!(result["items"], json!({"type": "string"}));
+    }
+
+    #[test]
+    fn normalize_recurses_into_properties() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "tags": {"type": "array", "description": "list of tags"},
+                "name": {"type": "string"}
+            }
+        });
+        let result = normalize_schema_for_openai(&schema);
+        assert_eq!(result["properties"]["tags"]["items"], json!({}));
+        assert_eq!(result["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn normalize_leaves_non_array_types_unchanged() {
+        let schema = json!({"type": "object", "properties": {"x": {"type": "number"}}});
+        let result = normalize_schema_for_openai(&schema);
+        assert_eq!(result, schema);
     }
 }

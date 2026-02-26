@@ -116,7 +116,7 @@ delivery, overlapPolicy, misfirePolicy, maxRetries, autoDisableAfter, tags, work
         .property("enabled", json!({"type": "boolean"}))
         .property("schedule", json!({"type": "object", "description": "Schedule definition (required for create)"}))
         .property("payload", json!({"type": "object", "description": "Payload definition (required for create)"}))
-        .property("delivery", json!({"type": "array", "description": "Delivery targets (silent, webSocket, apns, webhook)"}))
+        .property("delivery", json!({"type": "array", "items": {"type": "object"}, "description": "Delivery targets (silent, webSocket, apns, webhook)"}))
         .property("overlapPolicy", json!({"type": "string", "enum": ["skip", "allow"]}))
         .property("misfirePolicy", json!({"type": "string", "enum": ["skip", "runOnce"]}))
         .property("maxRetries", json!({"type": "number"}))
