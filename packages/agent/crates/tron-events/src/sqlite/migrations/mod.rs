@@ -20,11 +20,18 @@ struct Migration {
 }
 
 /// All migrations in version order.
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "Complete schema — core tables, FTS, indexes, triggers, origin tracking",
-    sql: include_str!("v001_schema.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "Complete schema — core tables, FTS, indexes, triggers, origin tracking",
+        sql: include_str!("v001_schema.sql"),
+    },
+    Migration {
+        version: 2,
+        description: "Add source column to sessions (cron filtering)",
+        sql: include_str!("v002_session_source.sql"),
+    },
+];
 
 /// Run all pending migrations on the given connection.
 ///
@@ -161,7 +168,7 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 1);
+        assert_eq!(applied, 2);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -219,7 +226,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first, 1);
+        assert_eq!(first, 2);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second, 0);
@@ -236,12 +243,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 1);
+        assert_eq!(current_version(&conn).unwrap(), 2);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 1);
+        assert_eq!(latest_version(), 2);
     }
 
     #[test]
@@ -292,6 +299,7 @@ mod tests {
             "idx_events_latency",
             "idx_events_session_sequence_unique",
             "idx_sessions_origin",
+            "idx_sessions_source",
             "idx_logs_origin",
         ];
         for idx in &expected {
@@ -417,6 +425,7 @@ mod tests {
             "spawn_type",
             "spawn_task",
             "origin",
+            "source",
         ];
         for col in &expected {
             assert!(
@@ -669,6 +678,123 @@ mod tests {
             [],
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn sessions_source_column_exists() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let columns: Vec<String> = conn
+            .prepare("PRAGMA table_info(sessions)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(
+            columns.contains(&"source".to_string()),
+            "sessions table missing source column"
+        );
+    }
+
+    #[test]
+    fn v002_backfills_cron_sessions() {
+        let conn = open_memory();
+        // Apply v001 only
+        ensure_version_table(&conn).unwrap();
+        apply_migration(&conn, &MIGRATIONS[0]).unwrap();
+
+        // Insert a workspace + cron session before v002
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at, title)
+             VALUES ('sess_cron', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'Cron: daily backup')",
+            [],
+        )
+        .unwrap();
+
+        // Apply v002
+        apply_migration(&conn, &MIGRATIONS[1]).unwrap();
+
+        let source: Option<String> = conn
+            .query_row(
+                "SELECT source FROM sessions WHERE id = 'sess_cron'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source.as_deref(), Some("cron"));
+    }
+
+    #[test]
+    fn v002_does_not_backfill_non_cron_sessions() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        apply_migration(&conn, &MIGRATIONS[0]).unwrap();
+
+        conn.execute(
+            "INSERT INTO workspaces (id, path, created_at, last_activity_at)
+             VALUES ('ws_1', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sessions (id, workspace_id, latest_model, working_directory, created_at, last_activity_at, title)
+             VALUES ('sess_user', 'ws_1', 'claude-3', '/tmp', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', 'My regular session')",
+            [],
+        )
+        .unwrap();
+
+        apply_migration(&conn, &MIGRATIONS[1]).unwrap();
+
+        let source: Option<String> = conn
+            .query_row(
+                "SELECT source FROM sessions WHERE id = 'sess_user'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(source.is_none());
+    }
+
+    #[test]
+    fn v002_backfill_is_idempotent() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // Running full migrations (which includes v002) on a fresh DB is fine.
+        // Verify no panic and version is correct.
+        assert_eq!(current_version(&conn).unwrap(), 2);
+
+        // Running again skips both migrations.
+        let applied = run_migrations(&conn).unwrap();
+        assert_eq!(applied, 0);
+    }
+
+    #[test]
+    fn v002_source_index_exists() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_%'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(
+            indexes.contains(&"idx_sessions_source".to_string()),
+            "missing index: idx_sessions_source"
+        );
     }
 
     #[test]

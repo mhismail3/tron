@@ -234,6 +234,7 @@ impl EventStore {
                     spawn_type: None,
                     spawn_task: None,
                     origin,
+                    source: None,
                 },
             )?;
 
@@ -448,6 +449,7 @@ impl EventStore {
                     spawn_type: None,
                     spawn_task: None,
                     origin: source_session.origin.as_deref(),
+                    source: None,
                 },
             )?;
 
@@ -846,6 +848,18 @@ impl EventStore {
     ) -> Result<HashMap<String, MessagePreview>> {
         let conn = self.conn()?;
         SessionRepo::get_message_previews(&conn, session_ids)
+    }
+
+    /// Update session source (e.g. "cron" for scheduled sessions).
+    pub fn update_source(&self, session_id: &str, source: &str) -> Result<bool> {
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            let changed = conn.execute(
+                "UPDATE sessions SET source = ?1 WHERE id = ?2",
+                rusqlite::params![source, session_id],
+            )?;
+            Ok(changed > 0)
+        })
     }
 
     /// Update session spawn info (links child to parent session).
@@ -2024,6 +2038,44 @@ mod tests {
             .get_events_by_session(&cr.session.id, &ListEventsOptions::default())
             .unwrap();
         assert!(events.is_empty());
+    }
+
+    // ── Source tracking ────────────────────────────────────────────────
+
+    #[test]
+    fn update_source_sets_source() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", Some("Cron: test"), None, None)
+            .unwrap();
+
+        let updated = store.update_source(&cr.session.id, "cron").unwrap();
+        assert!(updated);
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.source.as_deref(), Some("cron"));
+    }
+
+    #[test]
+    fn update_source_nonexistent_session() {
+        let store = setup();
+        let updated = store.update_source("sess_nonexistent", "cron").unwrap();
+        assert!(!updated);
+    }
+
+    #[test]
+    fn update_source_is_idempotent() {
+        let store = setup();
+        let cr = store
+            .create_session("claude-opus-4-6", "/tmp/project", None, None, None)
+            .unwrap();
+
+        store.update_source(&cr.session.id, "cron").unwrap();
+        let updated = store.update_source(&cr.session.id, "cron").unwrap();
+        assert!(updated);
+
+        let session = store.get_session(&cr.session.id).unwrap().unwrap();
+        assert_eq!(session.source.as_deref(), Some("cron"));
     }
 
     // ── Blob storage ──────────────────────────────────────────────────

@@ -209,6 +209,7 @@ impl MethodHandler for ListSessionsHandler {
         let filter = tron_runtime::SessionFilter {
             include_archived,
             exclude_subagents: true,
+            user_only: true,
             limit,
             ..Default::default()
         };

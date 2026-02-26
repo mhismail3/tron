@@ -144,6 +144,8 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             .create_session(model, &workspace_path, Some(&title))
             .map_err(|e| CronError::Execution(format!("create session: {e}")))?;
 
+        let _ = self.event_store.update_source(&session_id, "cron");
+
         // Ensure session is always cleaned up, even on error/panic
         let _session_guard = SessionGuard {
             session_manager: self.session_manager.clone(),

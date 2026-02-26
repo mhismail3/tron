@@ -61,6 +61,8 @@ pub struct SessionRow {
     pub spawn_task: Option<String>,
     /// Server origin (e.g. "localhost:9847").
     pub origin: Option<String>,
+    /// Session source (e.g. "cron"). NULL for user-created sessions.
+    pub source: Option<String>,
 }
 
 /// Raw event row from the `events` table.

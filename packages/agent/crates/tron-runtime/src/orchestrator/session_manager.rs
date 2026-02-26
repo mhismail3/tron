@@ -39,6 +39,8 @@ pub struct SessionFilter {
     pub include_archived: bool,
     /// Exclude subagent sessions (`spawning_session_id` IS NULL).
     pub exclude_subagents: bool,
+    /// Show only user-created sessions (exclude cron, etc.).
+    pub user_only: bool,
     /// Maximum number of results.
     pub limit: Option<usize>,
 }
@@ -243,6 +245,7 @@ impl SessionManager {
             limit: filter.limit.map(|l| l as i64),
             offset: None,
             origin: self.origin.as_deref(),
+            user_only: if filter.user_only { Some(true) } else { None },
         };
         self.event_store
             .list_sessions(&opts)
@@ -458,5 +461,47 @@ mod tests {
         let sid = mgr.create_session("test-model", "/tmp", Some("no origin")).unwrap();
         let session = mgr.get_session(&sid).unwrap().unwrap();
         assert!(session.origin.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_sessions_user_only() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let _ = mgr.create_session("test-model", "/tmp", Some("user session")).unwrap();
+        let cron_sid = mgr.create_session("test-model", "/tmp", Some("Cron: daily")).unwrap();
+        store.update_source(&cron_sid, "cron").unwrap();
+
+        let filtered = mgr
+            .list_sessions(&SessionFilter {
+                user_only: true,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_ne!(filtered[0].id, cron_sid);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_default_shows_all() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let _ = mgr.create_session("test-model", "/tmp", Some("user session")).unwrap();
+        let cron_sid = mgr.create_session("test-model", "/tmp", Some("Cron: daily")).unwrap();
+        store.update_source(&cron_sid, "cron").unwrap();
+
+        let all = mgr.list_sessions(&SessionFilter::default()).unwrap();
+        assert_eq!(all.len(), 2);
     }
 }

@@ -239,6 +239,7 @@ impl EventStoreQuery for SqliteEventStoreQuery {
             limit: Some(i64::from(limit)),
             offset: Some(i64::from(offset)),
             origin: None,
+            user_only: None,
         };
         let rows = self.store.list_sessions(&opts).map_err(tool_err)?;
         Ok(rows
