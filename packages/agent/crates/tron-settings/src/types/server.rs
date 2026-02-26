@@ -63,47 +63,17 @@ impl Default for ServerSettings {
     }
 }
 
-/// Transcription cleanup mode.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CleanupMode {
-    /// No cleanup.
-    None,
-    /// Basic text normalization.
-    #[default]
-    Basic,
-    /// LLM-powered cleanup.
-    Llm,
-}
-
 /// Audio transcription settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TranscriptionSettings {
     /// Whether transcription is enabled.
     pub enabled: bool,
-    /// Whether to auto-manage the transcription sidecar process.
-    pub manage_sidecar: bool,
-    /// Base URL of the transcription service.
-    pub base_url: String,
-    /// Request timeout in milliseconds.
-    pub timeout_ms: u64,
-    /// Post-transcription cleanup mode.
-    pub cleanup_mode: CleanupMode,
-    /// Maximum audio file size in bytes.
-    pub max_bytes: u64,
 }
 
 impl Default for TranscriptionSettings {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            manage_sidecar: true,
-            base_url: "http://127.0.0.1:8787".to_string(),
-            timeout_ms: 180_000,
-            cleanup_mode: CleanupMode::Basic,
-            max_bytes: 26_214_400,
-        }
+        Self { enabled: true }
     }
 }
 
@@ -287,23 +257,6 @@ mod tests {
     fn transcription_defaults() {
         let t = TranscriptionSettings::default();
         assert!(t.enabled);
-        assert!(t.manage_sidecar);
-        assert_eq!(t.cleanup_mode, CleanupMode::Basic);
-        assert_eq!(t.max_bytes, 26_214_400);
-    }
-
-    #[test]
-    fn cleanup_mode_serde() {
-        for (mode, expected) in [
-            (CleanupMode::None, "\"none\""),
-            (CleanupMode::Basic, "\"basic\""),
-            (CleanupMode::Llm, "\"llm\""),
-        ] {
-            let json = serde_json::to_string(&mode).unwrap();
-            assert_eq!(json, expected);
-            let back: CleanupMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(back, mode);
-        }
     }
 
     #[test]

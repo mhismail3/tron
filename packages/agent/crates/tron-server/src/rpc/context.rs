@@ -1,7 +1,7 @@
 //! RPC dependency-injection context.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
@@ -52,8 +52,8 @@ pub struct RpcContext {
     pub server_start_time: Instant,
     /// Browser service for CDP-based browser automation (None = browser not available).
     pub browser_service: Option<Arc<tron_tools::cdp::service::BrowserService>>,
-    /// Native transcription engine (None = sidecar fallback).
-    pub transcription_engine: Option<Arc<TranscriptionEngine>>,
+    /// Native transcription engine (lazily loaded via `OnceLock`).
+    pub transcription_engine: Arc<OnceLock<Arc<TranscriptionEngine>>>,
     /// Embedding controller for vector search (None = embeddings not loaded).
     pub embedding_controller: Option<Arc<tokio::sync::Mutex<EmbeddingController>>>,
     /// Subagent manager for spawning subsessions (None = fallback to keyword summarizer).

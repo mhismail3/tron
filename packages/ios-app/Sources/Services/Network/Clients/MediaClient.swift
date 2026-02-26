@@ -15,10 +15,7 @@ final class MediaClient {
     func transcribeAudio(
         audioData: Data,
         mimeType: String = "audio/m4a",
-        fileName: String? = nil,
-        transcriptionModelId: String? = nil,
-        cleanupMode: String? = nil,
-        language: String? = nil
+        fileName: String? = nil
     ) async throws -> TranscribeAudioResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
@@ -31,12 +28,7 @@ final class MediaClient {
             sessionId: transport.currentSessionId,
             audioBase64: audioBase64,
             mimeType: mimeType,
-            fileName: fileName,
-            transcriptionModelId: transcriptionModelId,
-            cleanupMode: cleanupMode,
-            language: language,
-            prompt: nil,
-            task: nil
+            fileName: fileName
         )
 
         return try await ws.send(
@@ -62,8 +54,7 @@ final class MediaClient {
     func saveVoiceNote(
         audioData: Data,
         mimeType: String = "audio/m4a",
-        fileName: String? = nil,
-        transcriptionModelId: String? = nil
+        fileName: String? = nil
     ) async throws -> VoiceNotesSaveResult {
         guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
@@ -76,8 +67,7 @@ final class MediaClient {
         let params = VoiceNotesSaveParams(
             audioBase64: audioBase64,
             mimeType: mimeType,
-            fileName: fileName,
-            transcriptionModelId: transcriptionModelId
+            fileName: fileName
         )
 
         return try await ws.send(

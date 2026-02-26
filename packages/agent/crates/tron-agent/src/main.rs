@@ -586,36 +586,49 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
-    // Native transcription engine (load if model files are cached)
-    let transcription_engine = {
-        #[cfg(feature = "transcription")]
-        {
-            let model_dir = tron_transcription::model::default_model_dir();
-            if tron_transcription::model::is_model_cached(&model_dir) {
-                tracing::info!("transcription model cached — loading native engine");
-                match tron_transcription::TranscriptionEngine::new(model_dir).await {
-                    Ok(engine) => {
-                        tracing::info!("native transcription engine ready");
-                        Some(engine)
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "failed to load transcription engine, using sidecar fallback");
-                        None
-                    }
+    // Native transcription engine (OnceLock — load if cached, else background download)
+    let transcription_engine = Arc::new(std::sync::OnceLock::new());
+    #[cfg(feature = "transcription")]
+    {
+        let model_dir = tron_transcription::model::default_model_dir();
+        if tron_transcription::model::is_model_cached(&model_dir) {
+            tracing::info!("transcription model cached — loading native engine");
+            match tron_transcription::TranscriptionEngine::new(model_dir).await {
+                Ok(engine) => {
+                    let _ = transcription_engine.set(engine);
+                    tracing::info!("native transcription engine ready");
                 }
-            } else {
-                tracing::info!(
-                    "transcription model not cached — sidecar fallback (call transcribe.downloadModel to enable native)"
-                );
-                None
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to load transcription engine");
+                }
             }
+        } else {
+            tracing::info!("transcription model not cached — downloading in background");
+            let cell = Arc::clone(&transcription_engine);
+            let _ = tokio::spawn(async move {
+                match tron_transcription::model::ensure_model(&model_dir).await {
+                    Ok(()) => {
+                        match tron_transcription::TranscriptionEngine::new(model_dir).await {
+                            Ok(engine) => {
+                                let _ = cell.set(engine);
+                                tracing::info!(
+                                    "native transcription engine ready (background download)"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "engine load failed after download")
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "transcription model download failed"),
+                }
+            });
         }
-        #[cfg(not(feature = "transcription"))]
-        {
-            tracing::info!("transcription feature disabled");
-            None
-        }
-    };
+    }
+    #[cfg(not(feature = "transcription"))]
+    {
+        tracing::info!("transcription feature disabled");
+    }
 
     // Cron scheduler
     let cron_cancel = tokio_util::sync::CancellationToken::new();
@@ -1113,7 +1126,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_service: None,
-            transcription_engine: None,
+            transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),
@@ -1298,7 +1311,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_service: None,
-            transcription_engine: None,
+            transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),

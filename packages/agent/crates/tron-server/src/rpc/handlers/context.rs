@@ -1513,7 +1513,7 @@ mod tests {
             agent_deps: None,
             server_start_time: std::time::Instant::now(),
             browser_service: None,
-            transcription_engine: None,
+            transcription_engine: Arc::new(std::sync::OnceLock::new()),
             embedding_controller: None,
             subagent_manager: None,
             health_tracker: Arc::new(tron_llm::ProviderHealthTracker::new()),

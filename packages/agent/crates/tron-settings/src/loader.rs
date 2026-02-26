@@ -133,23 +133,6 @@ pub fn apply_env_overrides(settings: &mut TronSettings) {
     if let Some(v) = read_env_bool("TRON_TRANSCRIBE_ENABLED") {
         settings.server.transcription.enabled = v;
     }
-    if let Some(v) = read_env_bool("TRON_TRANSCRIBE_MANAGE_SIDECAR") {
-        settings.server.transcription.manage_sidecar = v;
-    }
-    if let Some(v) = read_env_string("TRON_TRANSCRIBE_URL") {
-        settings.server.transcription.base_url = v;
-    }
-    if let Some(v) = read_env_u64("TRON_TRANSCRIBE_TIMEOUT_MS", 1000, 3_600_000) {
-        settings.server.transcription.timeout_ms = v;
-    }
-    if let Some(v) = read_env_u64("TRON_TRANSCRIBE_MAX_BYTES", 1024, 1_073_741_824) {
-        settings.server.transcription.max_bytes = v;
-    }
-    if let Some(v) = read_env_string("TRON_TRANSCRIBE_CLEANUP_MODE") {
-        if let Ok(mode) = serde_json::from_value(Value::String(v)) {
-            settings.server.transcription.cleanup_mode = mode;
-        }
-    }
 
     // ── API settings ────────────────────────────────────────────────
     if let Some(v) = read_env_string("ANTHROPIC_CLIENT_ID") {

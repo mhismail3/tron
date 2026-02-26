@@ -33,11 +33,6 @@ impl MethodHandler for SaveHandler {
             .and_then(|p| p.get("mimeType"))
             .and_then(Value::as_str)
             .unwrap_or("audio/wav");
-        let file_name = params
-            .as_ref()
-            .and_then(|p| p.get("fileName"))
-            .and_then(Value::as_str);
-
         let dir = notes_dir();
         let _ = std::fs::create_dir_all(&dir);
 
@@ -55,8 +50,8 @@ impl MethodHandler for SaveHandler {
                 message: format!("Invalid base64 audio data: {e}"),
             })?;
 
-        // Transcribe via native engine → sidecar → stub fallback
-        let result = transcribe_audio(ctx, &audio_bytes, mime_type, file_name).await;
+        // Transcribe via native ONNX engine (stub fallback if unavailable)
+        let result = transcribe_audio(ctx, &audio_bytes, mime_type).await;
 
         // Write markdown with frontmatter
         let content = format!(

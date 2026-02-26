@@ -103,7 +103,6 @@ struct VoiceNotesSaveParams: Encodable {
     let audioBase64: String
     let mimeType: String?
     let fileName: String?
-    let transcriptionModelId: String?
 }
 
 struct VoiceNotesSaveResult: Decodable {
@@ -176,11 +175,6 @@ struct TranscribeAudioParams: Encodable {
     let audioBase64: String
     let mimeType: String?
     let fileName: String?
-    let transcriptionModelId: String?
-    let cleanupMode: String?
-    let language: String?
-    let prompt: String?
-    let task: String?
 }
 
 struct TranscribeAudioResult: Decodable {
@@ -197,11 +191,14 @@ struct TranscribeAudioResult: Decodable {
 
 struct TranscriptionModelInfo: Decodable, Identifiable {
     let id: String
-    let label: String
-    let description: String?
+    let name: String
+    let size: String
+    let language: String
+    let `default`: Bool
+    let cached: Bool
+    let engineLoaded: Bool
 }
 
 struct TranscribeListModelsResult: Decodable {
     let models: [TranscriptionModelInfo]
-    let defaultModelId: String?
 }
