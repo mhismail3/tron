@@ -5,6 +5,8 @@ struct AutomationsDashboardView: View {
     let rpcClient: RPCClient
     let onSettings: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
+    var notificationUnreadCount: Int = 0
+    var onNotificationBell: (() -> Void)? = nil
 
     @State private var jobs: [CronJobDTO] = []
     @State private var runtimeStates: [String: CronRuntimeStateDTO] = [:]
@@ -78,11 +80,22 @@ struct AutomationsDashboardView: View {
                     .foregroundStyle(.tronCoral)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronCoral)
+                HStack(spacing: 16) {
+                    if notificationUnreadCount > 0 {
+                        NotificationBellButton(
+                            unreadCount: notificationUnreadCount,
+                            accent: .tronCoral,
+                            action: { onNotificationBell?() }
+                        )
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronCoral)
+                    }
                 }
+                .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)
             }
         }
         .sheet(item: $selectedJob) { job in

@@ -64,6 +64,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Event store manager - updated when RPC client changes
     private(set) var eventStoreManager: EventStoreManager
 
+    /// Notification inbox store - refreshed from server
+    private(set) var notificationStore: NotificationStore
+
     // MARK: - Repositories
 
     /// Model repository for model operations with caching
@@ -137,6 +140,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Initialize event store manager
         eventStoreManager = EventStoreManager(eventDB: db, rpcClient: client)
 
+        // Initialize notification store
+        notificationStore = NotificationStore(rpcClient: client)
+
         // Initialize repositories
         modelRepository = DefaultModelRepository(modelClient: client.model)
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
@@ -202,6 +208,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Update event store manager with new client
         eventStoreManager.updateRPCClient(newClient)
+
+        // Recreate notification store with new client
+        notificationStore = NotificationStore(rpcClient: newClient)
 
         // Recreate repositories with new client
         modelRepository = DefaultModelRepository(modelClient: newClient.model)

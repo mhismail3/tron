@@ -13,10 +13,12 @@ struct ContentView: View {
     private var skillStore: SkillStore { dependencies.skillStore }
     private var defaultModel: String { dependencies.defaultModel }
     private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
+    private var notificationStore: NotificationStore { dependencies.notificationStore }
 
     // Deep link navigation from TronMobileApp
     @Binding var deepLinkSessionId: String?
     @Binding var deepLinkScrollTarget: ScrollTarget?
+    @Binding var deepLinkNotificationToolCallId: String?
 
     @State private var coordinator: ContentViewCoordinator?
     @State private var selectedSessionId: String?
@@ -32,6 +34,10 @@ struct ContentView: View {
 
     // Scroll target for deep link navigation (passed to ChatView)
     @State private var currentScrollTarget: ScrollTarget?
+
+    // Notification inbox
+    @State private var showNotificationSheet = false
+    @State private var notificationAutoOpenToolCallId: String?
 
     var body: some View {
         mainContent
@@ -70,6 +76,7 @@ struct ContentView: View {
                 if rpcClient.connectionState.isConnected {
                     Task {
                         await eventStoreManager.refreshSessionList()
+                        await notificationStore.refresh()
                     }
                 }
             }
@@ -80,6 +87,7 @@ struct ContentView: View {
             .onChange(of: rpcClient.connectionState) { oldState, newState in
                 if newState.isConnected && !oldState.isConnected {
                     coordinator?.handleConnectionEstablished(selectedSessionId: selectedSessionId)
+                    Task { await notificationStore.refresh() }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
@@ -93,6 +101,25 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .showSettingsAction)) { _ in
                 showSettings = true
+            }
+            .onChange(of: deepLinkNotificationToolCallId) { _, newToolCallId in
+                guard let toolCallId = newToolCallId else { return }
+                notificationAutoOpenToolCallId = toolCallId
+                showNotificationSheet = true
+                deepLinkNotificationToolCallId = nil
+            }
+            .sheet(isPresented: $showNotificationSheet, onDismiss: {
+                notificationAutoOpenToolCallId = nil
+            }) {
+                NotificationListSheet(
+                    notificationStore: notificationStore,
+                    autoOpenToolCallId: notificationAutoOpenToolCallId,
+                    onGoToSession: { sessionId in
+                        showNotificationSheet = false
+                        navigationMode = .agents
+                        selectedSessionId = sessionId
+                    }
+                )
             }
             .onChange(of: selectedSessionId) { _, newValue in
                 coordinator?.handleSessionSelection(newValue)
@@ -139,7 +166,9 @@ struct ContentView: View {
             onSettings: { showSettings = true },
             onNavigationModeChange: { mode in
                 navigationMode = mode
-            }
+            },
+            notificationUnreadCount: notificationStore.unreadCount,
+            onNotificationBell: { showNotificationSheet = true }
         )
     }
 
@@ -152,7 +181,9 @@ struct ContentView: View {
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
-                }
+                },
+                notificationUnreadCount: notificationStore.unreadCount,
+                onNotificationBell: { showNotificationSheet = true }
             )
         }
     }
@@ -166,7 +197,9 @@ struct ContentView: View {
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
-                }
+                },
+                notificationUnreadCount: notificationStore.unreadCount,
+                onNotificationBell: { showNotificationSheet = true }
             )
         }
     }
@@ -179,7 +212,9 @@ struct ContentView: View {
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
-                }
+                },
+                notificationUnreadCount: notificationStore.unreadCount,
+                onNotificationBell: { showNotificationSheet = true }
             )
         }
     }
@@ -192,7 +227,9 @@ struct ContentView: View {
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
-                }
+                },
+                notificationUnreadCount: notificationStore.unreadCount,
+                onNotificationBell: { showNotificationSheet = true }
             )
         }
     }
@@ -240,7 +277,9 @@ struct ContentView: View {
                     onVoiceNote: { showVoiceNotesRecording = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    }
+                    },
+                    notificationUnreadCount: notificationStore.unreadCount,
+                    onNotificationBell: { showNotificationSheet = true }
                 )
             } else if navigationMode == .memory {
                 MemoryDashboardView(
@@ -249,7 +288,9 @@ struct ContentView: View {
                     onSettings: { showSettings = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    }
+                    },
+                    notificationUnreadCount: notificationStore.unreadCount,
+                    onNotificationBell: { showNotificationSheet = true }
                 )
             } else if navigationMode == .sandboxes {
                 SandboxesDashboardView(
@@ -257,7 +298,9 @@ struct ContentView: View {
                     onSettings: { showSettings = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    }
+                    },
+                    notificationUnreadCount: notificationStore.unreadCount,
+                    onNotificationBell: { showNotificationSheet = true }
                 )
             } else if navigationMode == .automations {
                 AutomationsDashboardView(
@@ -265,7 +308,9 @@ struct ContentView: View {
                     onSettings: { showSettings = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    }
+                    },
+                    notificationUnreadCount: notificationStore.unreadCount,
+                    onNotificationBell: { showNotificationSheet = true }
                 )
             } else {
                 VoiceNotesListView(
@@ -274,7 +319,9 @@ struct ContentView: View {
                     onSettings: { showSettings = true },
                     onNavigationModeChange: { mode in
                         navigationMode = mode
-                    }
+                    },
+                    notificationUnreadCount: notificationStore.unreadCount,
+                    onNotificationBell: { showNotificationSheet = true }
                 )
             }
         }
@@ -297,7 +344,9 @@ struct ContentView: View {
                 onSettings: { showSettings = true },
                 onNavigationModeChange: { mode in
                     navigationMode = mode
-                }
+                },
+                notificationUnreadCount: notificationStore.unreadCount,
+                onNotificationBell: { showNotificationSheet = true }
             )
         } else {
             selectSessionPrompt
@@ -478,6 +527,8 @@ struct WelcomePage: View {
     let onVoiceNote: () -> Void
     let onSettings: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
+    var notificationUnreadCount: Int = 0
+    var onNotificationBell: (() -> Void)? = nil
 
     var body: some View {
         NavigationStack {
@@ -546,11 +597,22 @@ struct WelcomePage: View {
                         .foregroundStyle(.tronEmerald)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
+                    HStack(spacing: 16) {
+                        if notificationUnreadCount > 0 {
+                            NotificationBellButton(
+                                unreadCount: notificationUnreadCount,
+                                accent: .tronEmerald,
+                                action: { onNotificationBell?() }
+                            )
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                        }
+                        Button(action: onSettings) {
+                            Image(systemName: "gearshape")
+                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                        }
                     }
+                    .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)
                 }
             }
         }

@@ -22,6 +22,8 @@ enum NavigationIntent: Equatable {
     case settings
     /// Navigate to voice notes
     case voiceNotes
+    /// Open the notification inbox, optionally auto-opening a specific notification
+    case notification(toolCallId: String)
 }
 
 // MARK: - Deep Link Router
@@ -48,14 +50,18 @@ final class DeepLinkRouter {
     /// Handle notification payload from AppDelegate
     /// - Parameter notificationPayload: The userInfo dictionary from the notification
     func handle(notificationPayload: [AnyHashable: Any]) {
+        // If toolCallId is present, open the notification inbox with that notification
+        if let toolCallId = notificationPayload["toolCallId"] as? String {
+            pendingIntent = .notification(toolCallId: toolCallId)
+            TronLogger.shared.info("Deep link intent set: notification toolCallId=\(toolCallId)", category: .notification)
+            return
+        }
+
         guard let sessionId = notificationPayload["sessionId"] as? String else {
             TronLogger.shared.warning("Deep link notification missing sessionId", category: .notification)
             return
         }
 
-        // NOTE: Scroll-to-tool functionality is disabled for now due to complexity.
-        // When a notification is tapped, we just open the session normally.
-        // The toolCallId and eventId are ignored.
         pendingIntent = .session(id: sessionId, scrollTo: nil)
         TronLogger.shared.info("Deep link intent set: session=\(sessionId)", category: .notification)
     }

@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage("serverHost") private var serverHost = AppConstants.defaultHost
     @AppStorage("serverPort") private var serverPort = ""
     @AppStorage("confirmArchive") private var confirmArchive = true
+    @AppStorage("autoMarkNotificationsRead") private var autoMarkRead = true
 
     // Convenience accessors
     private var rpcClient: RPCClient { dependencies.rpcClient }
@@ -126,6 +127,8 @@ struct SettingsView: View {
                 if #available(iOS 26.0, *) {
                     AppearanceSection()
                 }
+
+                NotificationsSection(autoMarkRead: $autoMarkRead)
 
                 DataSection(
                     confirmArchive: $confirmArchive,

@@ -70,7 +70,7 @@ impl TronTool for NotifyAppTool {
     async fn execute(
         &self,
         params: Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Result<TronToolResult, ToolError> {
         let title = match validate_required_string(&params, "title", "notification title") {
             Ok(t) => t,
@@ -89,7 +89,22 @@ impl TronTool for NotifyAppTool {
         #[allow(clippy::cast_possible_truncation)]
         let badge = get_optional_u64(&params, "badge").map(|b| b as u32);
         let sheet_content = params.get("sheetContent").cloned();
-        let data = params.get("data").cloned();
+
+        // Auto-inject session context into data payload so every push
+        // notification carries reliable session/tool-call IDs regardless
+        // of what the LLM passes in the data field.
+        let data = {
+            let mut obj = params
+                .get("data")
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            obj.insert("sessionId".into(), Value::String(ctx.session_id.clone()));
+            obj.insert(
+                "toolCallId".into(),
+                Value::String(ctx.tool_call_id.clone()),
+            );
+            Some(Value::Object(obj))
+        };
 
         let notification = Notification {
             title: title.clone(),
@@ -138,8 +153,11 @@ mod tests {
     use crate::testutil::{extract_text, make_ctx};
     use crate::traits::NotifyResult;
 
+    use std::sync::Mutex;
+
     struct MockNotify {
         result: NotifyResult,
+        last_notification: Mutex<Option<Notification>>,
     }
 
     impl MockNotify {
@@ -149,7 +167,12 @@ mod tests {
                     success: true,
                     message: None,
                 },
+                last_notification: Mutex::new(None),
             }
+        }
+
+        fn last_notification(&self) -> Option<Notification> {
+            self.last_notification.lock().unwrap().clone()
         }
     }
 
@@ -157,8 +180,9 @@ mod tests {
     impl NotifyDelegate for MockNotify {
         async fn send_notification(
             &self,
-            _notification: &Notification,
+            notification: &Notification,
         ) -> Result<NotifyResult, ToolError> {
+            *self.last_notification.lock().unwrap() = Some(notification.clone());
             Ok(self.result.clone())
         }
         async fn open_url_in_app(&self, _url: &str) -> Result<(), ToolError> {
@@ -252,5 +276,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.is_error, Some(true));
+    }
+
+    #[tokio::test]
+    async fn session_id_injected_into_notification_data() {
+        let mock = Arc::new(MockNotify::success());
+        let tool = NotifyAppTool::new(mock.clone());
+        let ctx = make_ctx();
+        tool.execute(json!({"title": "t", "body": "b"}), &ctx)
+            .await
+            .unwrap();
+        let notif = mock.last_notification().unwrap();
+        let data = notif.data.unwrap();
+        assert_eq!(data["sessionId"], ctx.session_id);
+    }
+
+    #[tokio::test]
+    async fn tool_call_id_injected_into_notification_data() {
+        let mock = Arc::new(MockNotify::success());
+        let tool = NotifyAppTool::new(mock.clone());
+        let ctx = make_ctx();
+        tool.execute(json!({"title": "t", "body": "b"}), &ctx)
+            .await
+            .unwrap();
+        let notif = mock.last_notification().unwrap();
+        let data = notif.data.unwrap();
+        assert_eq!(data["toolCallId"], ctx.tool_call_id);
+    }
+
+    #[tokio::test]
+    async fn existing_data_preserved_with_injected_fields() {
+        let mock = Arc::new(MockNotify::success());
+        let tool = NotifyAppTool::new(mock.clone());
+        let ctx = make_ctx();
+        tool.execute(
+            json!({"title": "t", "body": "b", "data": {"custom": "value"}}),
+            &ctx,
+        )
+        .await
+        .unwrap();
+        let notif = mock.last_notification().unwrap();
+        let data = notif.data.unwrap();
+        assert_eq!(data["custom"], "value");
+        assert_eq!(data["sessionId"], ctx.session_id);
+        assert_eq!(data["toolCallId"], ctx.tool_call_id);
+    }
+
+    #[tokio::test]
+    async fn no_data_creates_new_map_with_injected_fields() {
+        let mock = Arc::new(MockNotify::success());
+        let tool = NotifyAppTool::new(mock.clone());
+        let ctx = make_ctx();
+        tool.execute(json!({"title": "t", "body": "b"}), &ctx)
+            .await
+            .unwrap();
+        let notif = mock.last_notification().unwrap();
+        let data = notif.data.unwrap();
+        let obj = data.as_object().unwrap();
+        assert_eq!(obj.len(), 2);
+        assert!(obj.contains_key("sessionId"));
+        assert!(obj.contains_key("toolCallId"));
     }
 }

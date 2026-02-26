@@ -7,6 +7,8 @@ struct VoiceNotesListView: View {
     let onVoiceNote: () -> Void
     let onSettings: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
+    var notificationUnreadCount: Int = 0
+    var onNotificationBell: (() -> Void)? = nil
 
     @State private var notes: [VoiceNoteMetadata] = []
     @State private var isLoading = true
@@ -76,11 +78,22 @@ struct VoiceNotesListView: View {
                     .foregroundStyle(.tronTeal)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronTeal)
+                HStack(spacing: 16) {
+                    if notificationUnreadCount > 0 {
+                        NotificationBellButton(
+                            unreadCount: notificationUnreadCount,
+                            accent: .tronTeal,
+                            action: { onNotificationBell?() }
+                        )
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronTeal)
+                    }
                 }
+                .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)
             }
         }
         .sheet(item: $selectedNote) { note in

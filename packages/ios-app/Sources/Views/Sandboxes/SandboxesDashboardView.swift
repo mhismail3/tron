@@ -5,6 +5,8 @@ struct SandboxesDashboardView: View {
     let rpcClient: RPCClient
     let onSettings: () -> Void
     var onNavigationModeChange: ((NavigationMode) -> Void)?
+    var notificationUnreadCount: Int = 0
+    var onNotificationBell: (() -> Void)? = nil
 
     @State private var containers: [ContainerDTO] = []
     @State private var tailscaleIp: String?
@@ -80,11 +82,22 @@ struct SandboxesDashboardView: View {
                     .foregroundStyle(.tronIndigo)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronIndigo)
+                HStack(spacing: 16) {
+                    if notificationUnreadCount > 0 {
+                        NotificationBellButton(
+                            unreadCount: notificationUnreadCount,
+                            accent: .tronIndigo,
+                            action: { onNotificationBell?() }
+                        )
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                    Button(action: onSettings) {
+                        Image(systemName: "gearshape")
+                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                            .foregroundStyle(.tronIndigo)
+                    }
                 }
+                .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)
             }
         }
         .sheet(item: $selectedContainer) { container in

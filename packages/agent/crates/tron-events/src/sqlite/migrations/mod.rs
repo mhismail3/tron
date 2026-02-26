@@ -31,6 +31,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Add source column to sessions (cron filtering)",
         sql: include_str!("v002_session_source.sql"),
     },
+    Migration {
+        version: 3,
+        description: "Notification read state tracking",
+        sql: include_str!("v003_notification_read_state.sql"),
+    },
 ];
 
 /// Run all pending migrations on the given connection.
@@ -168,7 +173,7 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 2);
+        assert_eq!(applied, 3);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -186,6 +191,7 @@ mod tests {
             "device_tokens",
             "events",
             "logs",
+            "notification_read_state",
             "projects",
             "schema_version",
             "sessions",
@@ -226,7 +232,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first, 2);
+        assert_eq!(first, 3);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second, 0);
@@ -243,12 +249,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 2);
+        assert_eq!(current_version(&conn).unwrap(), 3);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 2);
+        assert_eq!(latest_version(), 3);
     }
 
     #[test]
@@ -771,7 +777,7 @@ mod tests {
 
         // Running full migrations (which includes v002) on a fresh DB is fine.
         // Verify no panic and version is correct.
-        assert_eq!(current_version(&conn).unwrap(), 2);
+        assert_eq!(current_version(&conn).unwrap(), 3);
 
         // Running again skips both migrations.
         let applied = run_migrations(&conn).unwrap();
@@ -831,5 +837,94 @@ mod tests {
         );
 
         assert!(duplicate.is_err());
+    }
+
+    #[test]
+    fn v003_notification_read_state_table_exists() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(
+            tables.contains(&"notification_read_state".to_string()),
+            "missing table: notification_read_state"
+        );
+    }
+
+    #[test]
+    fn v003_notification_read_state_insert_and_query() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let (event_id, read_at): (String, String) = conn
+            .query_row(
+                "SELECT event_id, read_at FROM notification_read_state WHERE event_id = 'evt_1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(event_id, "evt_1");
+        assert_eq!(read_at, "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn v003_notification_read_state_duplicate_is_rejected() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let duplicate = conn.execute(
+            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-02T00:00:00Z')",
+            [],
+        );
+        assert!(duplicate.is_err());
+    }
+
+    #[test]
+    fn v003_insert_or_ignore_is_idempotent() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // INSERT OR IGNORE should not fail
+        conn.execute(
+            "INSERT OR IGNORE INTO notification_read_state (event_id, read_at) VALUES ('evt_1', '2026-01-02T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        // Original read_at should be preserved
+        let read_at: String = conn
+            .query_row(
+                "SELECT read_at FROM notification_read_state WHERE event_id = 'evt_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(read_at, "2026-01-01T00:00:00Z");
     }
 }

@@ -18,8 +18,8 @@
 //! ## `register_platform` — Platform-specific
 //!
 //! `browser` (stream), `canvas`, `worktree` (git), `transcription`,
-//! `device` (push tokens), `plan`, `communication`, `voice_notes`,
-//! `git`, `sandbox`
+//! `device` (push tokens), `notifications` (inbox), `plan`,
+//! `communication`, `voice_notes`, `git`, `sandbox`
 
 pub mod agent;
 pub mod browser;
@@ -35,6 +35,7 @@ pub mod logs;
 pub mod memory;
 pub mod message;
 pub mod model;
+pub mod notifications;
 pub mod plan;
 pub mod sandbox;
 pub mod search;
@@ -237,6 +238,14 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("sandbox.startContainer", sandbox::StartContainerHandler);
     registry.register("sandbox.stopContainer", sandbox::StopContainerHandler);
     registry.register("sandbox.killContainer", sandbox::KillContainerHandler);
+
+    // Notifications
+    registry.register("notifications.list", notifications::ListHandler);
+    registry.register("notifications.markRead", notifications::MarkReadHandler);
+    registry.register(
+        "notifications.markAllRead",
+        notifications::MarkAllReadHandler,
+    );
 
     // Cron
     registry.register("cron.list", cron::ListHandler);
@@ -474,8 +483,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            110,
-            "expected 110 methods, got {}",
+            113,
+            "expected 113 methods, got {}",
             reg.methods().len()
         );
     }
