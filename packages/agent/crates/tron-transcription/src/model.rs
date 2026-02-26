@@ -129,11 +129,19 @@ fn download_model_files(model_dir: &Path) -> Result<(), TranscriptionError> {
     Ok(())
 }
 
-/// Load vocabulary from vocab.txt (one token per line).
+/// Load vocabulary from vocab.txt (format: `token index` per line, e.g. `hello 42`).
 #[cfg(feature = "ort")]
 pub fn load_vocab(vocab_path: &Path) -> Result<Vec<String>, TranscriptionError> {
     let content = std::fs::read_to_string(vocab_path).model("read vocab.txt")?;
-    Ok(content.lines().map(String::from).collect())
+    Ok(content
+        .lines()
+        .map(|line| {
+            // Strip trailing " <index>" suffix — vocab lines are "token index"
+            line.rsplit_once(' ')
+                .map_or(line, |(token, _)| token)
+                .to_string()
+        })
+        .collect())
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ort::session::Session;
+use ort::value::Tensor;
 use tracing::{debug, info};
 
 use crate::audio;
@@ -75,7 +76,7 @@ impl TranscriptionEngine {
         debug!("loaded decoder_joint");
 
         let vocab = model::load_vocab(&paths.vocab)?;
-        let blank_idx = vocab.len(); // Blank token is at index == vocab_size
+        let blank_idx = vocab.len() - 1; // <blk> is the last vocab entry
 
         info!(
             "transcription engine ready: vocab_size={}, blank_idx={}",
@@ -83,13 +84,74 @@ impl TranscriptionEngine {
             blank_idx
         );
 
-        Ok(Self {
+        let engine = Self {
             preprocessor: Mutex::new(preprocessor),
             encoder: Mutex::new(encoder),
             decoder_joint: Mutex::new(decoder_joint),
             vocab,
             blank_idx,
-        })
+        };
+
+        Self::warmup(&engine)?;
+
+        Ok(engine)
+    }
+
+    /// Run dummy inference through each session to trigger ONNX Runtime JIT compilation.
+    /// Eliminates 100-300ms latency on the first real transcription.
+    fn warmup(engine: &Self) -> Result<(), TranscriptionError> {
+        info!("warming up transcription sessions...");
+
+        // Preprocessor: 1 second of silence at 16kHz
+        {
+            let wf = Tensor::from_array(([1i64, 16000i64], vec![0.0f32; 16000]))
+                .inference("warmup waveform")?;
+            let wf_len = Tensor::from_array(([1i64], vec![16000i64]))
+                .inference("warmup wf_len")?;
+            let mut pp = engine.preprocessor.lock().inference("warmup pp lock")?;
+            let _ = pp
+                .run(ort::inputs!["waveforms" => wf, "waveforms_lens" => wf_len])
+                .inference("warmup preprocessor")?;
+        }
+
+        // Encoder: dummy mel features [1, 128, 100]
+        {
+            let feat = Tensor::from_array(([1i64, 128i64, 100i64], vec![0.0f32; 12800]))
+                .inference("warmup features")?;
+            let feat_len = Tensor::from_array(([1i64], vec![100i64]))
+                .inference("warmup feat_len")?;
+            let mut enc = engine.encoder.lock().inference("warmup enc lock")?;
+            let _ = enc
+                .run(ort::inputs!["audio_signal" => feat, "length" => feat_len])
+                .inference("warmup encoder")?;
+        }
+
+        // Decoder: single frame [1, 1024, 1], states [2, 1, 640]
+        {
+            let enc_out = Tensor::from_array(([1i64, 1024i64, 1i64], vec![0.0f32; 1024]))
+                .inference("warmup enc_out")?;
+            let target = Tensor::from_array(([1i64, 1i64], vec![0i32]))
+                .inference("warmup target")?;
+            let target_len = Tensor::from_array(([1i64], vec![1i32]))
+                .inference("warmup target_len")?;
+            let s1 = Tensor::from_array(([2i64, 1i64, 640i64], vec![0.0f32; 1280]))
+                .inference("warmup s1")?;
+            let s2 = Tensor::from_array(([2i64, 1i64, 640i64], vec![0.0f32; 1280]))
+                .inference("warmup s2")?;
+            let mut dec = engine.decoder_joint.lock().inference("warmup dec lock")?;
+            let _ = dec
+                .run(ort::inputs![
+                    "encoder_outputs" => enc_out,
+                    "targets" => target,
+                    "target_length" => target_len,
+                    "input_states_1" => s1,
+                    "input_states_2" => s2,
+                ])
+                .inference("warmup decoder")?;
+        }
+
+        info!("transcription sessions warmed up");
+        Ok(())
     }
 
     /// Transcribe raw audio bytes.

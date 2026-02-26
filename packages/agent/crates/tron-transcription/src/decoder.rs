@@ -43,8 +43,9 @@ pub fn greedy_decode(
     let mut prev_token = blank_idx;
 
     // Pre-allocate reusable LSTM state buffers (avoids per-iteration allocation)
-    let mut state1_data = vec![0.0f32; LSTM_STATE_DIM];
-    let mut state2_data = vec![0.0f32; LSTM_STATE_DIM];
+    // Shape: [2, 1, 640] — 2 LSTM layers, batch=1, hidden=640
+    let mut state1_data = vec![0.0f32; 2 * LSTM_STATE_DIM];
+    let mut state2_data = vec![0.0f32; 2 * LSTM_STATE_DIM];
 
     let max_steps = time_steps * MAX_STEPS_MULTIPLIER;
     let mut total_steps = 0;
@@ -56,23 +57,23 @@ pub fn greedy_decode(
             break;
         }
 
-        // Encoder frame: [1, 1, hidden_dim]
+        // Encoder frame: [1, hidden_dim, 1] (channels-first: batch, features, time)
         let frame: Vec<f32> = encoder_out.row(step).to_vec();
-        let encoder_input = Tensor::from_array(([1i64, 1, hidden_dim as i64], frame))
+        let encoder_input = Tensor::from_array(([1i64, hidden_dim as i64, 1i64], frame))
             .inference("encoder frame tensor")?;
 
-        // Target token: [1, 1]
-        let target = Tensor::from_array(([1i64, 1], vec![prev_token as i64]))
+        // Target token: [1, 1] (int32)
+        let target = Tensor::from_array(([1i64, 1i64], vec![prev_token as i32]))
             .inference("target tensor")?;
         let target_length =
-            Tensor::from_array(([1i64], vec![1i64])).inference("target_length tensor")?;
+            Tensor::from_array(([1i64], vec![1i32])).inference("target_length tensor")?;
 
-        // LSTM states: [1, 1, 640]
+        // LSTM states: [2, 1, 640] (2 layers, batch=1, hidden=640)
         let s1 =
-            Tensor::from_array(([1i64, 1, LSTM_STATE_DIM as i64], state1_data.clone()))
+            Tensor::from_array(([2i64, 1i64, LSTM_STATE_DIM as i64], state1_data.clone()))
                 .inference("state1 tensor")?;
         let s2 =
-            Tensor::from_array(([1i64, 1, LSTM_STATE_DIM as i64], state2_data.clone()))
+            Tensor::from_array(([2i64, 1i64, LSTM_STATE_DIM as i64], state2_data.clone()))
                 .inference("state2 tensor")?;
 
         let outputs = decoder_joint
@@ -164,7 +165,7 @@ fn argmax(slice: &[f32]) -> usize {
 /// Run the encoder model on mel features.
 ///
 /// Input: mel features `[1, 128, T]` from preprocessor
-/// Output: encoder output `[T', hidden_dim]` (squeezed from `[1, T', hidden_dim]`)
+/// Output: encoder output `[T', 1024]` (transposed from channels-first `[1, 1024, T']`)
 #[allow(
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
@@ -199,12 +200,20 @@ pub fn run_encoder(
         .inference("extract encoded_lengths")?;
     let enc_len = enc_len_data[0];
 
-    // Squeeze batch dim: [1, T', H] → [T', H]
-    let t_prime = enc_shape[1] as usize;
-    let hidden = enc_shape[2] as usize;
+    // Encoder output is channels-first: [1, 1024, T']
+    if enc_shape.len() != 3 || enc_shape[1] != 1024 {
+        return Err(TranscriptionError::Inference(format!(
+            "unexpected encoder output shape: {enc_shape:?} (expected [batch, 1024, T'])"
+        )));
+    }
+    let hidden = enc_shape[1] as usize; // 1024
+    let t_prime = enc_shape[2] as usize; // T'
 
-    let out = Array2::from_shape_vec((t_prime, hidden), enc_data.to_vec())
-        .inference("reshape encoder")?;
+    // Data is [1024, T'] in C order → reshape then transpose to [T', 1024] for row-per-frame
+    let out = Array2::from_shape_vec((hidden, t_prime), enc_data.to_vec())
+        .inference("reshape encoder")?
+        .t()
+        .to_owned();
 
     Ok((out, enc_len))
 }
