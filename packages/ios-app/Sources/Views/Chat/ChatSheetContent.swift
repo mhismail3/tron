@@ -17,6 +17,10 @@ struct ChatSheetContent: View {
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
 
+    private var sheetReadOnly: Bool {
+        SheetReadOnlyPolicy.isReadOnly(workspaceDeleted: workspaceDeleted, agentPhase: viewModel.agentPhase)
+    }
+
     var body: some View {
         sheetContent
     }
@@ -39,7 +43,7 @@ struct ChatSheetContent: View {
                 rpcClient: rpcClient,
                 sessionId: sessionId,
                 skillStore: skillStore,
-                readOnly: workspaceDeleted
+                readOnly: sheetReadOnly
             )
 
         case .sessionHistory:
@@ -106,6 +110,7 @@ struct ChatSheetContent: View {
             ModelPickerSheet(
                 models: viewModel.modelPickerState.cachedModels,
                 currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
+                readOnly: sheetReadOnly,
                 onSelect: { model in
                     NotificationCenter.default.post(name: .modelPickerAction, object: model)
                 }

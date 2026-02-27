@@ -35,6 +35,12 @@ final class AgentPhaseTests: XCTestCase {
         XCTAssertFalse(AgentPhase.postProcessing.isIdle)
     }
 
+    func testIsActiveFalseOnlyWhenIdle() {
+        XCTAssertFalse(AgentPhase.idle.isActive)
+        XCTAssertTrue(AgentPhase.processing.isActive)
+        XCTAssertTrue(AgentPhase.postProcessing.isActive)
+    }
+
     // MARK: - Equatable Tests
 
     func testEquatable() {

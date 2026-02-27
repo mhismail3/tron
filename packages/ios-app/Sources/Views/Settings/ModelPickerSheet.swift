@@ -8,6 +8,7 @@ import SwiftUI
 struct ModelPickerSheet: View {
     let models: [ModelInfo]
     let currentModelId: String
+    var readOnly: Bool = false
     let onSelect: (ModelInfo) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -26,6 +27,7 @@ struct ModelPickerSheet: View {
                         ProviderSection(
                             provider: provider,
                             currentModelId: currentModelId,
+                            readOnly: readOnly,
                             expandedFamilies: $expandedFamilies,
                             expandedDetails: $expandedDetails,
                             onSelect: { model in
@@ -67,6 +69,7 @@ struct ModelPickerSheet: View {
 private struct ProviderSection: View {
     let provider: ProviderGroup
     let currentModelId: String
+    let readOnly: Bool
     @Binding var expandedFamilies: Set<String>
     @Binding var expandedDetails: Set<String>
     let onSelect: (ModelInfo) -> Void
@@ -94,6 +97,7 @@ private struct ProviderSection: View {
                         family: family,
                         providerColor: provider.color,
                         currentModelId: currentModelId,
+                        readOnly: readOnly,
                         isExpanded: expandedFamilies.contains(family.id),
                         expandedDetails: $expandedDetails,
                         onToggle: {
@@ -124,6 +128,7 @@ private struct FamilySection: View {
     let family: FamilyGroup
     let providerColor: Color
     let currentModelId: String
+    let readOnly: Bool
     let isExpanded: Bool
     @Binding var expandedDetails: Set<String>
     let onToggle: () -> Void
@@ -171,6 +176,7 @@ private struct FamilySection: View {
                             model: model,
                             providerColor: providerColor,
                             isSelected: model.id == currentModelId,
+                            readOnly: readOnly,
                             isDetailExpanded: expandedDetails.contains(model.id),
                             onToggleDetail: {
                                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -202,6 +208,7 @@ private struct ModelCard: View {
     let model: ModelInfo
     let providerColor: Color
     let isSelected: Bool
+    let readOnly: Bool
     let isDetailExpanded: Bool
     let onToggleDetail: () -> Void
     let onSelect: () -> Void
@@ -212,7 +219,11 @@ private struct ModelCard: View {
             HStack(spacing: 10) {
                 // Selection circle
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? providerColor : .tronTextMuted)
+                    .foregroundStyle(
+                        readOnly
+                            ? .tronTextMuted.opacity(0.5)
+                            : (isSelected ? providerColor : .tronTextMuted)
+                    )
                     .font(TronTypography.sans(size: TronTypography.sizeXL))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -277,7 +288,7 @@ private struct ModelCard: View {
             }
             .padding(10)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .onTapGesture { onSelect() }
+            .onTapGesture { if !readOnly { onSelect() } }
 
             // Expanded details
             if isDetailExpanded {
