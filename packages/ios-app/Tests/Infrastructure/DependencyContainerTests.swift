@@ -226,4 +226,5 @@ final class DependencyContainerTests: XCTestCase {
         let container = DependencyContainer()
         XCTAssertFalse(container.isInitialized)
     }
+
 }

@@ -14,10 +14,6 @@ final class AppConstantsTests: XCTestCase {
                        "Should end with /Workspace, got: \(AppConstants.defaultWorkspace)")
     }
 
-    func testBetaPort_is9846() {
-        XCTAssertEqual(AppConstants.betaPort, "9846")
-    }
-
     func testProdPort_is9847() {
         XCTAssertEqual(AppConstants.prodPort, "9847")
     }

@@ -3,11 +3,7 @@ import SwiftUI
 // MARK: - Settings View
 
 struct SettingsView: View {
-    #if BETA
-    private static let defaultPort = AppConstants.betaPort
-    #else
     private static let defaultPort = AppConstants.prodPort
-    #endif
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
@@ -37,18 +33,6 @@ struct SettingsView: View {
     // Server-authoritative settings (loaded via RPC, mutated via bindings)
     @State private var settingsState = SettingsState()
 
-    /// Derives environment selection from current port
-    private var selectedEnvironment: String {
-        if !serverPort.isEmpty {
-            switch serverPort {
-            case AppConstants.betaPort: return "beta"
-            case AppConstants.prodPort: return "prod"
-            default: return "prod"
-            }
-        }
-        return "prod"
-    }
-
     /// Effective port to use for connections
     private var effectivePort: String {
         if !serverPort.isEmpty { return serverPort }
@@ -69,21 +53,10 @@ struct SettingsView: View {
                 ServerSettingsSection(
                     serverHost: $serverHost,
                     serverPort: $serverPort,
-                    selectedEnvironment: selectedEnvironment,
                     onHostSubmit: {
                         dependencies.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
                     },
                     onPortChange: { newPort in
-                        dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
-                    },
-                    onEnvironmentChange: { newValue in
-                        let newPort: String
-                        switch newValue {
-                        case "beta": newPort = AppConstants.betaPort
-                        case "prod": newPort = AppConstants.prodPort
-                        default: return
-                        }
-                        serverPort = newPort
                         dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
                     }
                 )

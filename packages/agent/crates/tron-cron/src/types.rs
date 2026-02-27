@@ -216,9 +216,6 @@ pub struct CronJob {
     /// Stuck job timeout in seconds. Default: 7200 (2h).
     #[serde(default = "default_7200")]
     pub stuck_timeout_secs: u64,
-    /// Restrict execution to the production server instance only.
-    #[serde(default)]
-    pub prod_only: bool,
     /// Tags for filtering.
     #[serde(default)]
     pub tags: Vec<String>,
@@ -502,7 +499,6 @@ mod tests {
             max_retries: 2,
             auto_disable_after: 5,
             stuck_timeout_secs: 7200,
-            prod_only: false,
             tags: vec!["test".into()],
             workspace_id: None,
             created_at: now,
@@ -533,7 +529,6 @@ mod tests {
         assert_eq!(job.max_retries, 0);
         assert_eq!(job.auto_disable_after, 0);
         assert_eq!(job.stuck_timeout_secs, 7200);
-        assert!(!job.prod_only);
         assert!(job.tags.is_empty());
     }
 

@@ -53,15 +53,10 @@ pub struct CronScheduler {
     config_path: PathBuf,
     /// Path to `automations.json.bak` (in deployment directory).
     backup_path: PathBuf,
-    /// Whether this instance is the production server (port 9847).
-    is_production: bool,
 }
 
 impl CronScheduler {
     /// Create a new scheduler.
-    ///
-    /// `is_production` controls whether `prod_only` jobs are eligible to run.
-    /// Pass `true` for the production instance (port 9847), `false` otherwise.
     pub fn new(
         pool: ConnectionPool,
         clock: Arc<dyn Clock>,
@@ -69,7 +64,6 @@ impl CronScheduler {
         config_path: PathBuf,
         backup_path: PathBuf,
         cancel: CancellationToken,
-        is_production: bool,
     ) -> Self {
         Self {
             pool,
@@ -84,7 +78,6 @@ impl CronScheduler {
             deps: Arc::new(deps),
             config_path,
             backup_path,
-            is_production,
         }
     }
 
@@ -334,7 +327,6 @@ impl CronScheduler {
                         let runtime = self.runtime.read();
                         jobs.values()
                             .filter(|j| j.enabled)
-                            .filter(|j| !j.prod_only || self.is_production)
                             .filter_map(|j| {
                                 runtime.get(&j.id)
                                     .and_then(|s| s.next_run_at)
@@ -664,7 +656,6 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
-            true,
         ));
 
         let (h1, h2) = scheduler.start();
@@ -702,7 +693,6 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
-            prod_only: false,
             tags: vec![],
             workspace_id: None,
             created_at: Utc::now(),
@@ -722,7 +712,6 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
-            true,
         ));
 
         let sched_ref = scheduler.clone();
@@ -768,7 +757,6 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
-            prod_only: false,
             tags: vec![],
             workspace_id: None,
             created_at: Utc::now(),
@@ -788,7 +776,6 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
-            true,
         ));
 
         let notify = scheduler.reschedule_notify();
@@ -848,7 +835,6 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
-            prod_only: false,
             tags: vec![],
             workspace_id: None,
             created_at: Utc::now(),
@@ -868,7 +854,6 @@ mod tests {
             config_path.clone(),
             backup_path.clone(),
             cancel.clone(),
-            true,
         ));
 
         let (h1, h2) = scheduler.clone().start();
@@ -922,7 +907,6 @@ mod tests {
             max_retries: 0,
             auto_disable_after: 0,
             stuck_timeout_secs: 7200,
-            prod_only: false,
             tags: vec![],
             workspace_id: None,
             created_at: Utc::now(),
@@ -942,7 +926,6 @@ mod tests {
             config_path.clone(),
             backup_path.clone(),
             cancel.clone(),
-            true,
         ));
 
         let (h1, h2) = scheduler.clone().start();
@@ -998,7 +981,6 @@ mod tests {
             config_path,
             backup_path,
             cancel.clone(),
-            true,
         ));
 
         let notify = scheduler.reschedule_notify();
@@ -1014,77 +996,4 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
     }
 
-    #[tokio::test]
-    async fn scheduler_skips_prod_only_on_non_prod() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
-
-        // Set clock so the job is immediately due
-        clock.set(
-            DateTime::parse_from_rfc3339("2026-02-23T13:00:00Z")
-                .unwrap()
-                .to_utc(),
-        );
-
-        let job = CronJob {
-            id: "cron_prod_only".into(),
-            name: "Prod Only Job".into(),
-            description: None,
-            enabled: true,
-            schedule: Schedule::Every {
-                interval_secs: 60,
-                anchor: None,
-            },
-            payload: Payload::ShellCommand {
-                command: "echo prod".into(),
-                working_directory: None,
-                timeout_secs: 10,
-            },
-            delivery: vec![],
-            overlap_policy: OverlapPolicy::Allow,
-            misfire_policy: MisfirePolicy::default(),
-            max_retries: 0,
-            auto_disable_after: 0,
-            stuck_timeout_secs: 7200,
-            prod_only: true,
-            tags: vec![],
-            workspace_id: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-        let config = CronConfig {
-            version: 1,
-            jobs: vec![job],
-        };
-        config::save_config(&config_path, &backup_path, &config).unwrap();
-
-        // Create scheduler with is_production = false
-        let deps = make_deps(&pool);
-        let scheduler = Arc::new(CronScheduler::new(
-            pool.clone(),
-            clock.clone(),
-            deps,
-            config_path,
-            backup_path,
-            cancel.clone(),
-            false,
-        ));
-
-        let notify = scheduler.reschedule_notify();
-        let (h1, h2) = scheduler.clone().start();
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        // Wake the scheduler multiple times
-        notify.notify_one();
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        notify.notify_one();
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        // No runs should have been created
-        let (_runs, total) = store::get_runs(&pool, Some("cron_prod_only"), None, 10, 0).unwrap();
-        assert_eq!(total, 0, "prod_only job should not fire on non-prod instance");
-
-        cancel.cancel();
-        let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
-        let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
-    }
 }

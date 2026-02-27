@@ -13,16 +13,15 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleNotificationWithToolCallId_IgnoresToolCallId() {
-        // Scroll-to-tool functionality is disabled - toolCallId is ignored
+    func testHandleNotificationWithToolCallId_OpensNotification() {
+        // toolCallId takes priority — routes to notification inbox
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
             "toolCallId": "toolu_abc"
         ])
 
-        // Should just open session without scroll target
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
+        XCTAssertEqual(router.pendingIntent, .notification(toolCallId: "toolu_abc"))
     }
 
     func testHandleNotificationWithEventId_IgnoresEventId() {
@@ -37,15 +36,23 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleNotificationWithMissingSessionId() {
+    func testHandleNotificationWithMissingSessionId_ButHasToolCallId() {
+        // toolCallId alone is enough to open the notification inbox
         let router = DeepLinkRouter()
         router.handle(notificationPayload: ["toolCallId": "toolu_abc"])
+
+        XCTAssertEqual(router.pendingIntent, .notification(toolCallId: "toolu_abc"))
+    }
+
+    func testHandleNotificationWithNoIds() {
+        let router = DeepLinkRouter()
+        router.handle(notificationPayload: ["eventId": "evt_xyz"])
 
         XCTAssertNil(router.pendingIntent)
     }
 
-    func testHandleNotificationWithBothIds_IgnoresBoth() {
-        // Scroll-to-tool functionality is disabled - both ids are ignored
+    func testHandleNotificationWithBothIds_ToolCallIdTakesPriority() {
+        // toolCallId takes priority over sessionId and eventId
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
@@ -53,8 +60,7 @@ final class DeepLinkRouterTests: XCTestCase {
             "eventId": "evt_xyz"
         ])
 
-        // Should just open session without scroll target
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
+        XCTAssertEqual(router.pendingIntent, .notification(toolCallId: "toolu_abc"))
     }
 
     // MARK: - URL Scheme Handling

@@ -237,10 +237,6 @@ impl MethodHandler for CreateHandler {
                 .get("stuckTimeoutSecs")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(7200),
-            prod_only: job_param
-                .get("prodOnly")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
             tags: job_param
                 .get("tags")
                 .and_then(|v| v.as_array())
@@ -416,9 +412,6 @@ impl MethodHandler for UpdateHandler {
         }
         if let Some(v) = params.get("stuckTimeoutSecs").and_then(|v| v.as_u64()) {
             job.stuck_timeout_secs = v;
-        }
-        if let Some(v) = params.get("prodOnly").and_then(|v| v.as_bool()) {
-            job.prod_only = v;
         }
         if let Some(tags) = params.get("tags").and_then(|v| v.as_array()) {
             job.tags = tags
@@ -734,7 +727,6 @@ mod tests {
             config_path,
             backup_path,
             cancel,
-            true,
         ));
 
         let mut ctx = make_test_context();
