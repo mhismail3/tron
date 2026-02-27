@@ -376,7 +376,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         },
     );
 
-    // Claude 3.7 (Legacy — February 2025)
+    // Claude 3.7 (Deprecated — removed from model picker, kept for existing sessions)
     let _ = m.insert(
         "claude-3-7-sonnet-20250219",
         ClaudeModelInfo {
@@ -394,7 +394,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
             input_cost_per_million: 3.0,
             output_cost_per_million: 15.0,
             cache_read_cost_per_million: 0.3,
-            description: "Legacy Sonnet with extended thinking",
+            description: "Deprecated — use Sonnet 4 or newer",
             recommended: false,
             legacy: true,
         },

@@ -169,25 +169,7 @@ fn known_models() -> Vec<Value> {
             "releaseDate": "2025-05-14",
             "sortOrder": 7,
         }),
-        serde_json::json!({
-            "id": "claude-3-7-sonnet-20250219",
-            "name": "Sonnet 3.7",
-            "provider": "anthropic",
-            "contextWindow": 200_000,
-            "maxOutput": 64_000,
-            "supportsThinking": true,
-            "supportsImages": true,
-            "inputCostPerMillion": 3.0,
-            "outputCostPerMillion": 15.0,
-            "tier": "sonnet",
-            "family": "Claude 3.7",
-            "description": "Claude 3.7 Sonnet with extended thinking.",
-            "supportsReasoning": false,
-            "recommended": false,
-            "isLegacy": true,
-            "releaseDate": "2025-02-19",
-            "sortOrder": 8,
-        }),
+        // Sonnet 3.7 removed from picker — deprecated by Anthropic.
         serde_json::json!({
             "id": "claude-3-haiku-20240307",
             "name": "Haiku 3",
@@ -218,12 +200,14 @@ fn known_models() -> Vec<Value> {
             "supportsImages": true,
             "inputCostPerMillion": 1.75,
             "outputCostPerMillion": 14.0,
+            "cacheReadCostPerMillion": 0.175,
             "tier": "flagship",
             "family": "GPT-5.3",
-            "description": "GPT-5.3 Codex — fastest and most capable coding model",
+            "description": "Most capable agentic coding model — 400K context, reasoning, vision, and structured outputs.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high", "xhigh"],
             "defaultReasoningLevel": "medium",
+            "knowledgeCutoff": "2025-08-31",
             "recommended": true,
             "isLegacy": false,
             "sortOrder": 0,
@@ -238,9 +222,10 @@ fn known_models() -> Vec<Value> {
             "supportsImages": false,
             "inputCostPerMillion": 1.75,
             "outputCostPerMillion": 14.0,
+            "cacheReadCostPerMillion": 0.175,
             "tier": "standard",
             "family": "GPT-5.3",
-            "description": "GPT-5.3 Codex Spark — fast distilled model optimized for ultra-fast inference",
+            "description": "Fast distilled coding model optimized for ultra-fast inference.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high"],
             "defaultReasoningLevel": "low",
@@ -258,9 +243,10 @@ fn known_models() -> Vec<Value> {
             "supportsImages": true,
             "inputCostPerMillion": 1.75,
             "outputCostPerMillion": 14.0,
+            "cacheReadCostPerMillion": 0.175,
             "tier": "flagship",
             "family": "GPT-5.2",
-            "description": "GPT-5.2 Codex — proven coding model",
+            "description": "GPT-5.2 Codex — proven agentic coding model with 400K context.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high", "xhigh"],
             "defaultReasoningLevel": "medium",
@@ -278,9 +264,10 @@ fn known_models() -> Vec<Value> {
             "supportsImages": true,
             "inputCostPerMillion": 1.25,
             "outputCostPerMillion": 10.0,
+            "cacheReadCostPerMillion": 0.125,
             "tier": "flagship",
             "family": "GPT-5.1",
-            "description": "GPT-5.1 Codex Max — deep reasoning capabilities",
+            "description": "GPT-5.1 Codex Max — deep reasoning capabilities with 400K context.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high", "xhigh"],
             "defaultReasoningLevel": "high",
@@ -298,9 +285,10 @@ fn known_models() -> Vec<Value> {
             "supportsImages": true,
             "inputCostPerMillion": 0.25,
             "outputCostPerMillion": 2.0,
+            "cacheReadCostPerMillion": 0.025,
             "tier": "standard",
             "family": "GPT-5.1",
-            "description": "GPT-5.1 Codex Mini — faster and more efficient",
+            "description": "GPT-5.1 Codex Mini — fast and cost-efficient coding model.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high"],
             "defaultReasoningLevel": "low",
@@ -637,17 +625,13 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-1-20250805"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-20250514"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-20250514"));
-        assert!(
-            models
-                .iter()
-                .any(|m| m["id"] == "claude-3-7-sonnet-20250219")
-        );
+        // Sonnet 3.7 removed from picker (deprecated)
         assert!(models.iter().any(|m| m["id"] == "claude-3-haiku-20240307"));
         let anthropic_count = models
             .iter()
             .filter(|m| m["provider"] == "anthropic")
             .count();
-        assert_eq!(anthropic_count, 10);
+        assert_eq!(anthropic_count, 9);
     }
 
     #[tokio::test]

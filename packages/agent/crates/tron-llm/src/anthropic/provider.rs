@@ -268,6 +268,11 @@ impl AnthropicProvider {
 
         let model_info = get_claude_model(&self.config.model);
 
+        // Model must support thinking (e.g., claude-3-haiku does not).
+        if !model_info.is_some_and(|m| m.supports_thinking) {
+            return None;
+        }
+
         if model_info.is_some_and(|m| m.supports_adaptive_thinking) {
             Some(json!({ "type": "adaptive" }))
         } else {
@@ -834,6 +839,18 @@ mod tests {
         let config = provider.build_thinking_config(&options).unwrap();
         // Default: max_output / 4 = 64000 / 4 = 16000
         assert_eq!(config["budget_tokens"], 16000);
+    }
+
+    #[test]
+    fn thinking_config_none_for_unsupported_model() {
+        let mut cfg = api_key_config();
+        cfg.model = "claude-3-haiku-20240307".into();
+        let provider = AnthropicProvider::new(cfg);
+        let options = ProviderStreamOptions {
+            enable_thinking: Some(true),
+            ..Default::default()
+        };
+        assert!(provider.build_thinking_config(&options).is_none());
     }
 
     // ── Output config (effort) ──────────────────────────────────────────
