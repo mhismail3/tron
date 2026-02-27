@@ -233,12 +233,11 @@ pub async fn atomic_binary_install(
 
 /// GET /deploy/status
 pub async fn status_handler(State(state): State<AppState>) -> Json<DeployStatusResponse> {
-    let tron_home = tron_settings::tron_home_dir();
-    let deploy_dir = tron_settings::deploy_dir();
-    let binary_path = tron_home.join("tron");
+    let binary_path = &state.deploy_binary_path;
+    let deploy_dir = &state.deploy_dir;
 
-    let deployed_commit = read_deployed_commit(&deploy_dir);
-    let sentinel = read_sentinel(&deploy_dir);
+    let deployed_commit = read_deployed_commit(deploy_dir);
+    let sentinel = read_sentinel(deploy_dir);
     let binary_exists = binary_path.exists();
     let binary_modified = if binary_exists {
         tokio::fs::metadata(&binary_path)
@@ -285,9 +284,8 @@ pub async fn restart_handler(
         ));
     }
 
-    let tron_home = tron_settings::tron_home_dir();
-    let deploy_dir = tron_settings::deploy_dir();
-    let installed_binary = tron_home.join("tron");
+    let installed_binary = &state.deploy_binary_path;
+    let deploy_dir = &state.deploy_dir;
 
     // Resolve source binary
     let workspace_root = resolve_workspace_root();
@@ -822,10 +820,6 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    // Restart success tests write to ~/.tron/tron (via tron_home_dir()) and must
-    // not run concurrently with each other.
-    static RESTART_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn make_metrics_handle() -> metrics_exporter_prometheus::PrometheusHandle {
         metrics_exporter_prometheus::PrometheusBuilder::new()
             .build_recorder()
@@ -839,6 +833,13 @@ mod tests {
             MethodRegistry::new(),
             ctx,
             make_metrics_handle(),
+        )
+    }
+
+    fn make_isolated_test_server(deploy_root: &Path) -> TronServer {
+        make_test_server().with_deploy_paths(
+            deploy_root.join("tron"),
+            deploy_root.join("deploy"),
         )
     }
 
@@ -942,13 +943,11 @@ mod tests {
 
     #[tokio::test]
     async fn deploy_restart_returns_ok_with_commits() {
-        let _lock = RESTART_TEST_LOCK.lock().unwrap();
-
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("fake-binary");
         std::fs::write(&src, b"fake tron binary").unwrap();
 
-        let server = make_test_server();
+        let server = make_isolated_test_server(dir.path());
         let app = server.router();
         let req = Request::builder()
             .method("POST")
@@ -976,13 +975,11 @@ mod tests {
 
     #[tokio::test]
     async fn deploy_restart_default_delay() {
-        let _lock = RESTART_TEST_LOCK.lock().unwrap();
-
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("fake-binary");
         std::fs::write(&src, b"fake tron binary").unwrap();
 
-        let server = make_test_server();
+        let server = make_isolated_test_server(dir.path());
         let app = server.router();
         let req = Request::builder()
             .method("POST")
@@ -1006,13 +1003,11 @@ mod tests {
 
     #[tokio::test]
     async fn deploy_restart_custom_delay() {
-        let _lock = RESTART_TEST_LOCK.lock().unwrap();
-
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("fake-binary");
         std::fs::write(&src, b"fake tron binary").unwrap();
 
-        let server = make_test_server();
+        let server = make_isolated_test_server(dir.path());
         let app = server.router();
         let req = Request::builder()
             .method("POST")
@@ -1045,5 +1040,42 @@ mod tests {
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn deploy_restart_does_not_touch_real_binary() {
+        let real_binary = tron_settings::tron_home_dir().join("tron");
+        if !real_binary.exists() {
+            // CI or fresh machine — nothing to protect
+            return;
+        }
+        let before = std::fs::metadata(&real_binary).unwrap();
+        let before_len = before.len();
+        let before_modified = before.modified().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("fake-binary");
+        std::fs::write(&src, b"fake tron binary").unwrap();
+
+        let server = make_isolated_test_server(dir.path());
+        let app = server.router();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/deploy/restart")
+            .header("content-type", "application/json")
+            .body(Body::from(format!(
+                r#"{{"sourceBinary": "{}", "delayMs": 60000}}"#,
+                src.display()
+            )))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let after = std::fs::metadata(&real_binary).unwrap();
+        assert_eq!(after.len(), before_len);
+        assert_eq!(after.modified().unwrap(), before_modified);
+
+        server.shutdown().shutdown();
     }
 }

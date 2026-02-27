@@ -1,6 +1,7 @@
 //! `TronServer` — Axum HTTP + WebSocket server.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
@@ -64,6 +65,10 @@ pub struct AppState {
     pub metrics_handle: Arc<PrometheusHandle>,
     /// Guard preventing double-restart during deploy.
     pub deploy_restart_initiated: Arc<AtomicBool>,
+    /// Path to the installed server binary (e.g. `~/.tron/tron`).
+    pub deploy_binary_path: PathBuf,
+    /// Deployment artifacts directory (e.g. `~/.tron/artifacts/deployment/`).
+    pub deploy_dir: PathBuf,
 }
 
 /// The main Tron server.
@@ -75,6 +80,8 @@ pub struct TronServer {
     rpc_context: Arc<RpcContext>,
     metrics_handle: Arc<PrometheusHandle>,
     deploy_restart_initiated: Arc<AtomicBool>,
+    deploy_binary_path: PathBuf,
+    deploy_dir: PathBuf,
     start_time: Instant,
 }
 
@@ -97,6 +104,8 @@ impl TronServer {
             rpc_context: Arc::new(rpc_context),
             metrics_handle: Arc::new(metrics_handle),
             deploy_restart_initiated: Arc::new(AtomicBool::new(false)),
+            deploy_binary_path: tron_settings::tron_home_dir().join("tron"),
+            deploy_dir: tron_settings::deploy_dir(),
             start_time: Instant::now(),
         }
     }
@@ -112,6 +121,8 @@ impl TronServer {
             config: self.config.clone(),
             metrics_handle: self.metrics_handle.clone(),
             deploy_restart_initiated: self.deploy_restart_initiated.clone(),
+            deploy_binary_path: self.deploy_binary_path.clone(),
+            deploy_dir: self.deploy_dir.clone(),
         };
 
         Router::new()
@@ -190,6 +201,13 @@ impl TronServer {
     /// Get the deploy restart initiated flag.
     pub fn deploy_restart_initiated(&self) -> &Arc<AtomicBool> {
         &self.deploy_restart_initiated
+    }
+
+    /// Override deploy paths (for test isolation).
+    pub fn with_deploy_paths(mut self, binary_path: PathBuf, deploy_dir: PathBuf) -> Self {
+        self.deploy_binary_path = binary_path;
+        self.deploy_dir = deploy_dir;
+        self
     }
 }
 

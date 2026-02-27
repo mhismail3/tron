@@ -179,9 +179,43 @@ get_service_pid() {
     lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true
 }
 
+validate_prod_binary() {
+    [ -f "$INSTALLED_BINARY" ] && file "$INSTALLED_BINARY" 2>/dev/null | grep -q "Mach-O"
+}
+
+ensure_prod_binary() {
+    if validate_prod_binary; then
+        return 0
+    fi
+
+    print_warning "Production binary is missing or corrupt"
+
+    if [ -f "$DEPLOY_DIR/tron.bak" ] && file "$DEPLOY_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
+        print_status "Restoring from backup..."
+        cp "$DEPLOY_DIR/tron.bak" "$INSTALLED_BINARY"
+        chmod +x "$INSTALLED_BINARY"
+        print_success "Restored from backup"
+        return 0
+    fi
+
+    if [ -f "$RELEASE_BINARY" ] && file "$RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O"; then
+        print_status "Restoring from release build..."
+        cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
+        chmod +x "$INSTALLED_BINARY"
+        print_success "Restored from release build"
+        return 0
+    fi
+
+    print_error "No valid binary found. Run: tron deploy"
+    return 1
+}
+
 service_start() {
     if [ ! -f "$PLIST_PATH" ]; then
         print_error "Service not installed. Run: tron install"
+        return 1
+    fi
+    if ! ensure_prod_binary; then
         return 1
     fi
 
@@ -518,13 +552,15 @@ dev_start_foreground() {
     if [ -n "$existing_pid" ]; then
         print_error "Port $PROD_PORT still in use (PID: $existing_pid)"
         print_status "Restarting production service..."
-        launchctl load "$PLIST_PATH" 2>/dev/null || true
+        if ensure_prod_binary; then
+            launchctl load "$PLIST_PATH" 2>/dev/null || true
+        fi
         return 1
     fi
 
     # Restart prod on ANY exit (Ctrl+C, error, normal exit)
     # IMPORTANT: no `exec` — must run as child so EXIT trap fires
-    trap 'echo ""; print_status "Restarting production service..."; launchctl load "$PLIST_PATH" 2>/dev/null || true; print_success "Production service restarted"' EXIT INT TERM
+    trap 'echo ""; print_status "Restarting production service..."; if ensure_prod_binary; then launchctl load "$PLIST_PATH" 2>/dev/null || true; print_success "Production service restarted"; else print_error "Cannot restart: no valid binary. Run: tron deploy"; fi' EXIT INT TERM
 
     echo ""
     echo -e "${CYAN}Starting Tron Dev Server (takeover)${NC}"
@@ -563,8 +599,12 @@ dev_stop() {
         sleep 1
         if ! service_is_running; then
             print_status "Restarting production service..."
-            launchctl load "$PLIST_PATH" 2>/dev/null || true
-            print_success "Production service restarted"
+            if ensure_prod_binary; then
+                launchctl load "$PLIST_PATH" 2>/dev/null || true
+                print_success "Production service restarted"
+            else
+                print_error "Cannot restart: no valid binary. Run: tron deploy"
+            fi
         fi
     else
         print_warning "No dev server running"
