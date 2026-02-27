@@ -33,7 +33,10 @@ pub enum ContentSequenceItem {
     /// Accumulated thinking content.
     Thinking(String),
     /// Reference to a tool call by ID.
-    ToolRef { tool_call_id: String },
+    ToolRef {
+        /// The tool call this item refers to.
+        tool_call_id: String,
+    },
 }
 
 impl ContentSequenceItem {
@@ -55,13 +58,21 @@ impl ContentSequenceItem {
 /// Snapshot of a tool call's progress within the current turn.
 #[derive(Clone, Debug)]
 pub struct AccumulatedToolCall {
+    /// Unique identifier for this tool call.
     pub tool_call_id: String,
+    /// Name of the tool (e.g. "bash", "read").
     pub tool_name: String,
+    /// Parsed arguments, populated when execution starts.
     pub arguments: Option<Value>,
+    /// Lifecycle status: "generating", "running", "completed", or "error".
     pub status: String,
+    /// Tool output text, populated on completion.
     pub result: Option<String>,
+    /// Whether the tool call ended in error.
     pub is_error: bool,
+    /// ISO-8601 timestamp when execution started.
     pub started_at: Option<String>,
+    /// ISO-8601 timestamp when execution finished.
     pub completed_at: Option<String>,
 }
 
@@ -95,13 +106,18 @@ impl AccumulatedToolCall {
 
 /// Accumulates content for a single in-progress turn.
 pub struct TurnAccumulator {
+    /// Concatenated assistant text output so far.
     pub text: String,
+    /// Concatenated thinking/reasoning output so far.
     pub thinking: String,
+    /// All tool calls tracked in this turn.
     pub tool_calls: Vec<AccumulatedToolCall>,
+    /// Ordered sequence of content items (text, thinking, tool refs).
     pub content_sequence: Vec<ContentSequenceItem>,
 }
 
 impl TurnAccumulator {
+    /// Create an empty accumulator.
     pub fn new() -> Self {
         Self {
             text: String::new(),
@@ -209,6 +225,7 @@ pub struct TurnAccumulatorMap {
 }
 
 impl TurnAccumulatorMap {
+    /// Create an empty accumulator map.
     pub fn new() -> Self {
         Self {
             accumulators: Mutex::new(HashMap::new()),
@@ -217,45 +234,54 @@ impl TurnAccumulatorMap {
 
     // ── Per-session mutation methods ──
 
+    /// Reset (or create) the accumulator for a session.
     pub fn handle_turn_start(&self, session_id: &str) {
-        self.accumulators
+        let _ = self
+            .accumulators
             .lock()
             .unwrap()
             .insert(session_id.to_string(), TurnAccumulator::new());
     }
 
+    /// Remove the accumulator when a turn ends.
     pub fn handle_turn_end(&self, session_id: &str) {
-        self.accumulators.lock().unwrap().remove(session_id);
+        let _ = self.accumulators.lock().unwrap().remove(session_id);
     }
 
+    /// Remove the accumulator when the agent ends.
     pub fn handle_agent_end(&self, session_id: &str) {
-        self.accumulators.lock().unwrap().remove(session_id);
+        let _ = self.accumulators.lock().unwrap().remove(session_id);
     }
 
+    /// Append a text delta to the session's accumulator.
     pub fn handle_text_delta(&self, session_id: &str, delta: &str) {
         if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
             acc.append_text(delta);
         }
     }
 
+    /// Append a thinking delta to the session's accumulator.
     pub fn handle_thinking_delta(&self, session_id: &str, delta: &str) {
         if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
             acc.append_thinking(delta);
         }
     }
 
+    /// Record a new tool call in "generating" state.
     pub fn handle_tool_generating(&self, session_id: &str, tool_call_id: &str, tool_name: &str) {
         if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
             acc.add_tool_generating(tool_call_id, tool_name);
         }
     }
 
+    /// Transition a tool call to "running" state.
     pub fn handle_tool_start(&self, session_id: &str, tool_call_id: &str, arguments: Option<&Value>) {
         if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
             acc.update_tool_start(tool_call_id, arguments);
         }
     }
 
+    /// Record tool completion or error.
     pub fn handle_tool_end(
         &self,
         session_id: &str,

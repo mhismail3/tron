@@ -98,8 +98,8 @@ impl TronTool for NotifyAppTool {
                 .get("data")
                 .and_then(|v| v.as_object().cloned())
                 .unwrap_or_default();
-            obj.insert("sessionId".into(), Value::String(ctx.session_id.clone()));
-            obj.insert(
+            let _ = obj.insert("sessionId".into(), Value::String(ctx.session_id.clone()));
+            let _ = obj.insert(
                 "toolCallId".into(),
                 Value::String(ctx.tool_call_id.clone()),
             );
