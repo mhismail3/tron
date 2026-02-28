@@ -130,7 +130,7 @@ struct SessionSidebar: View {
                     .foregroundStyle(.tronEmerald)
             }
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
+                HStack(spacing: 20) {
                     if notificationUnreadCount > 0 {
                         NotificationBellButton(
                             unreadCount: notificationUnreadCount,
@@ -143,6 +143,7 @@ struct SessionSidebar: View {
                         Image(systemName: "gearshape")
                             .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
+                            .padding(.horizontal, 4)
                     }
                 }
                 .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)

@@ -49,7 +49,7 @@ extension ChatView {
     @ToolbarContentBuilder
     var trailingToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 16) {
+            HStack(spacing: 20) {
                 // Browser button - only visible when browser session is active
                 if viewModel.hasBrowserSession {
                     Button {
@@ -90,6 +90,7 @@ extension ChatView {
                     Image(systemName: "gearshape")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 4)
                 }
             }
         }

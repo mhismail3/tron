@@ -24,6 +24,6 @@ struct NotificationBellButton: View {
                         .offset(x: 6, y: -6)
                 }
         }
-        .padding(.trailing, 4)
+        .padding(.horizontal, 4)
     }
 }
