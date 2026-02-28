@@ -22,6 +22,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let supportsImages: Bool?
     let tier: String?
     let isLegacy: Bool?
+    /// Whether this model is deprecated and should not be selectable
+    let isDeprecated: Bool?
+    /// Deprecation date (YYYY-MM-DD) for display
+    let deprecationDate: String?
     /// For models with reasoning capability (e.g., OpenAI Codex)
     let supportsReasoning: Bool?
     /// Available reasoning effort levels (low, medium, high, xhigh)
@@ -55,6 +59,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, provider, contextWindow, maxOutputTokens
         case supportsThinking, supportsImages, tier, isLegacy
+        case isDeprecated, deprecationDate
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
@@ -73,6 +78,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         supportsImages: Bool? = nil,
         tier: String? = nil,
         isLegacy: Bool? = nil,
+        isDeprecated: Bool? = nil,
+        deprecationDate: String? = nil,
         supportsReasoning: Bool? = nil,
         reasoningLevels: [String]? = nil,
         defaultReasoningLevel: String? = nil,
@@ -96,6 +103,8 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.supportsImages = supportsImages
         self.tier = tier
         self.isLegacy = isLegacy
+        self.isDeprecated = isDeprecated
+        self.deprecationDate = deprecationDate
         self.supportsReasoning = supportsReasoning
         self.reasoningLevels = reasoningLevels
         self.defaultReasoningLevel = defaultReasoningLevel
@@ -160,6 +169,11 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     /// Whether this is a latest generation model (server-driven via isLegacy flag)
     var isLatestGeneration: Bool {
         !(isLegacy ?? false)
+    }
+
+    /// Whether this model is deprecated and should not be selectable
+    var isDeprecatedModel: Bool {
+        isDeprecated ?? false
     }
 
     /// Whether this is an Anthropic model

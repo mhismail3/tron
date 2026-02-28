@@ -220,7 +220,7 @@ private struct ModelCard: View {
                 // Selection circle
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(
-                        readOnly
+                        (readOnly || model.isDeprecatedModel)
                             ? .tronTextMuted.opacity(0.5)
                             : (isSelected ? providerColor : .tronTextMuted)
                     )
@@ -231,7 +231,7 @@ private struct ModelCard: View {
                     HStack(spacing: 6) {
                         Text(model.formattedModelName)
                             .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
+                            .foregroundStyle(model.isDeprecatedModel ? .tronTextMuted : .tronTextPrimary)
 
                         if model.recommended == true {
                             Text("Recommended")
@@ -243,7 +243,15 @@ private struct ModelCard: View {
                                 .clipShape(Capsule())
                         }
 
-                        if model.isPreview {
+                        if model.isDeprecatedModel {
+                            Text("Deprecated")
+                                .font(TronTypography.mono(size: TronTypography.sizeXS))
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.red.opacity(0.15))
+                                .clipShape(Capsule())
+                        } else if model.isPreview {
                             Text("Preview")
                                 .font(TronTypography.mono(size: TronTypography.sizeXS))
                                 .foregroundStyle(.orange)
@@ -288,7 +296,7 @@ private struct ModelCard: View {
             }
             .padding(10)
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .onTapGesture { if !readOnly { onSelect() } }
+            .onTapGesture { if !readOnly && !model.isDeprecatedModel { onSelect() } }
 
             // Expanded details
             if isDetailExpanded {
@@ -311,6 +319,13 @@ private struct ModelCard: View {
                         if model.supportsImages == true {
                             capabilityBadge("Vision", icon: "photo", color: providerColor)
                         }
+                    }
+
+                    // Deprecation date
+                    if let depDate = model.deprecationDate {
+                        Text("Deprecated \(depDate)")
+                            .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                            .foregroundStyle(.red.opacity(0.7))
                     }
 
                     // Release date

@@ -60,7 +60,10 @@ pub const GPT_5_1_CODEX_MINI: &str = "gpt-5.1-codex-mini";
 // Google / Gemini
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Gemini 3 Pro (preview).
+/// Gemini 3.1 Pro (preview) — latest Gemini.
+pub const GEMINI_3_1_PRO_PREVIEW: &str = "gemini-3.1-pro-preview";
+
+/// Gemini 3 Pro (preview) — deprecated 2026-03-09.
 pub const GEMINI_3_PRO_PREVIEW: &str = "gemini-3-pro-preview";
 
 /// Gemini 3 Flash (preview).
@@ -147,6 +150,7 @@ pub const ALL_OPENAI_MODEL_IDS: &[&str] = &[
 
 /// All Google model IDs.
 pub const ALL_GOOGLE_MODEL_IDS: &[&str] = &[
+    GEMINI_3_1_PRO_PREVIEW,
     GEMINI_3_PRO_PREVIEW,
     GEMINI_3_FLASH_PREVIEW,
     GEMINI_2_5_PRO,

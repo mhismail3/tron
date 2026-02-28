@@ -169,7 +169,27 @@ fn known_models() -> Vec<Value> {
             "releaseDate": "2025-05-14",
             "sortOrder": 7,
         }),
-        // Sonnet 3.7 removed from picker — deprecated by Anthropic.
+        serde_json::json!({
+            "id": "claude-3-7-sonnet-20250219",
+            "name": "Sonnet 3.7",
+            "provider": "anthropic",
+            "contextWindow": 200_000,
+            "maxOutput": 64_000,
+            "supportsThinking": true,
+            "supportsImages": true,
+            "inputCostPerMillion": 3.0,
+            "outputCostPerMillion": 15.0,
+            "tier": "sonnet",
+            "family": "Claude 3.7",
+            "description": "Claude 3.7 Sonnet — deprecated by Anthropic.",
+            "supportsReasoning": false,
+            "recommended": false,
+            "isLegacy": true,
+            "isDeprecated": true,
+            "deprecationDate": "2025-10-01",
+            "releaseDate": "2025-02-19",
+            "sortOrder": 8,
+        }),
         serde_json::json!({
             "id": "claude-3-haiku-20240307",
             "name": "Haiku 3",
@@ -299,6 +319,26 @@ fn known_models() -> Vec<Value> {
         // ── Google Gemini Models ──
         // Pricing: TS uses inputCostPer1k, we multiply by 1000 for per-million
         serde_json::json!({
+            "id": "gemini-3.1-pro-preview",
+            "name": "Gemini 3.1 Pro",
+            "provider": "google",
+            "contextWindow": 1_048_576,
+            "maxOutput": 65_536,
+            "supportsThinking": true,
+            "supportsImages": true,
+            "inputCostPerMillion": 1.25,
+            "outputCostPerMillion": 10.0,
+            "tier": "pro",
+            "family": "Gemini 3",
+            "description": "Gemini 3.1 Pro (Preview) — optimized for software engineering and agentic workflows.",
+            "isPreview": true,
+            "thinkingLevel": "high",
+            "supportedThinkingLevels": ["low", "medium", "high"],
+            "recommended": true,
+            "isLegacy": false,
+            "sortOrder": 0,
+        }),
+        serde_json::json!({
             "id": "gemini-3-pro-preview",
             "name": "Gemini 3 Pro",
             "provider": "google",
@@ -310,13 +350,15 @@ fn known_models() -> Vec<Value> {
             "outputCostPerMillion": 5.0,
             "tier": "pro",
             "family": "Gemini 3",
-            "description": "Gemini 3 Pro (Preview) — pro tier (preview)",
+            "description": "Gemini 3 Pro (Preview) — deprecated, replaced by Gemini 3.1 Pro.",
             "isPreview": true,
             "thinkingLevel": "high",
             "supportedThinkingLevels": ["low", "medium", "high"],
-            "recommended": true,
+            "recommended": false,
             "isLegacy": false,
-            "sortOrder": 0,
+            "isDeprecated": true,
+            "deprecationDate": "2026-03-09",
+            "sortOrder": 1,
         }),
         serde_json::json!({
             "id": "gemini-3-flash-preview",
@@ -334,7 +376,7 @@ fn known_models() -> Vec<Value> {
             "isPreview": true,
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 1,
+            "sortOrder": 2,
         }),
         serde_json::json!({
             "id": "gemini-2.5-pro",
@@ -353,7 +395,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["low", "medium", "high"],
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 2,
+            "sortOrder": 3,
         }),
         serde_json::json!({
             "id": "gemini-2.5-flash",
@@ -372,7 +414,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["minimal", "low", "medium", "high"],
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 3,
+            "sortOrder": 4,
         }),
         serde_json::json!({
             "id": "gemini-2.5-flash-lite",
@@ -389,7 +431,7 @@ fn known_models() -> Vec<Value> {
             "description": "Gemini 2.5 Flash Lite — flash-lite tier",
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 4,
+            "sortOrder": 5,
         }),
         // ── MiniMax Models ──
         serde_json::json!({
@@ -489,6 +531,12 @@ fn is_model_supported(model_id: &str) -> bool {
     known_models().iter().any(|m| m["id"] == model_id)
 }
 
+fn is_model_deprecated(model_id: &str) -> bool {
+    known_models()
+        .iter()
+        .any(|m| m["id"] == model_id && m["isDeprecated"] == true)
+}
+
 /// List available models.
 pub struct ListModelsHandler;
 
@@ -513,6 +561,12 @@ impl MethodHandler for SwitchModelHandler {
         if !is_model_supported(&model) {
             return Err(RpcError::InvalidParams {
                 message: format!("Unknown model: {model}"),
+            });
+        }
+
+        if is_model_deprecated(&model) {
+            return Err(RpcError::InvalidParams {
+                message: format!("Model '{model}' is deprecated and cannot be selected"),
             });
         }
 
@@ -625,13 +679,17 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-1-20250805"));
         assert!(models.iter().any(|m| m["id"] == "claude-opus-4-20250514"));
         assert!(models.iter().any(|m| m["id"] == "claude-sonnet-4-20250514"));
-        // Sonnet 3.7 removed from picker (deprecated)
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "claude-3-7-sonnet-20250219")
+        );
         assert!(models.iter().any(|m| m["id"] == "claude-3-haiku-20240307"));
         let anthropic_count = models
             .iter()
             .filter(|m| m["provider"] == "anthropic")
             .count();
-        assert_eq!(anthropic_count, 9);
+        assert_eq!(anthropic_count, 10);
     }
 
     #[tokio::test]
@@ -656,13 +714,18 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "gemini-3.1-pro-preview")
+        );
         assert!(models.iter().any(|m| m["id"] == "gemini-3-pro-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-3-flash-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-pro"));
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-flash"));
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-flash-lite"));
         let google_count = models.iter().filter(|m| m["provider"] == "google").count();
-        assert_eq!(google_count, 5);
+        assert_eq!(google_count, 6);
     }
 
     #[tokio::test]
@@ -1024,5 +1087,89 @@ mod tests {
         } else {
             panic!("expected SessionUpdated event");
         }
+    }
+
+    #[tokio::test]
+    async fn switch_model_rejects_deprecated() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None)
+            .unwrap();
+
+        let err = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "gemini-3-pro-preview"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("deprecated"));
+    }
+
+    #[tokio::test]
+    async fn switch_model_rejects_deprecated_sonnet_37() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None)
+            .unwrap();
+
+        let err = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "claude-3-7-sonnet-20250219"})),
+                &ctx,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn list_models_deprecated_fields() {
+        let ctx = make_test_context();
+        let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
+        let models = result["models"].as_array().unwrap();
+
+        // Gemini 3 Pro should be deprecated
+        let gemini3 = models
+            .iter()
+            .find(|m| m["id"] == "gemini-3-pro-preview")
+            .unwrap();
+        assert_eq!(gemini3["isDeprecated"], true);
+        assert_eq!(gemini3["deprecationDate"], "2026-03-09");
+
+        // Gemini 3.1 Pro should NOT be deprecated
+        let gemini31 = models
+            .iter()
+            .find(|m| m["id"] == "gemini-3.1-pro-preview")
+            .unwrap();
+        assert!(gemini31.get("isDeprecated").is_none() || gemini31["isDeprecated"] == false);
+
+        // Sonnet 3.7 should be deprecated
+        let sonnet37 = models
+            .iter()
+            .find(|m| m["id"] == "claude-3-7-sonnet-20250219")
+            .unwrap();
+        assert_eq!(sonnet37["isDeprecated"], true);
+    }
+
+    #[tokio::test]
+    async fn switch_to_gemini_31_succeeds() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp", None)
+            .unwrap();
+
+        let result = SwitchModelHandler
+            .handle(
+                Some(json!({"sessionId": sid, "model": "gemini-3.1-pro-preview"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["newModel"], "gemini-3.1-pro-preview");
     }
 }

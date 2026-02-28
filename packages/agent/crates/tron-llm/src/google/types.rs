@@ -475,6 +475,23 @@ pub struct GeminiModelInfo {
 pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert(
+        "gemini-3.1-pro-preview",
+        GeminiModelInfo {
+            name: "Gemini 3.1 Pro (Preview)",
+            short_name: "Gemini 3.1 Pro",
+            context_window: 1_048_576,
+            max_output: 65_536,
+            supports_tools: true,
+            supports_images: true,
+            supports_thinking: true,
+            tier: "pro",
+            preview: true,
+            default_thinking_level: Some(GeminiThinkingLevel::High),
+            input_cost_per_million: 1.25,
+            output_cost_per_million: 10.0,
+        },
+    );
+    m.insert(
         "gemini-3-pro-preview",
         GeminiModelInfo {
             name: "Gemini 3 Pro (Preview)",
@@ -623,6 +640,7 @@ pub struct GoogleApiSettings {
 #[must_use]
 pub fn map_to_antigravity_model(model: &str) -> &str {
     match model {
+        "gemini-3.1-pro-preview" => "gemini-3.1-pro-high",
         "gemini-3-pro-preview" => "gemini-3-pro-high",
         "gemini-3-flash-preview" => "gemini-3-pro-low",
         _ => model,
@@ -898,6 +916,21 @@ mod tests {
     // ── Model registry ───────────────────────────────────────────────
 
     #[test]
+    fn model_gemini_3_1_pro() {
+        let model = get_gemini_model("gemini-3.1-pro-preview").unwrap();
+        assert_eq!(model.short_name, "Gemini 3.1 Pro");
+        assert_eq!(model.context_window, 1_048_576);
+        assert_eq!(model.max_output, 65_536);
+        assert!(model.supports_thinking);
+        assert_eq!(model.tier, "pro");
+        assert!(model.preview);
+        assert_eq!(
+            model.default_thinking_level,
+            Some(GeminiThinkingLevel::High)
+        );
+    }
+
+    #[test]
     fn model_gemini_3_pro() {
         let model = get_gemini_model("gemini-3-pro-preview").unwrap();
         assert_eq!(model.short_name, "Gemini 3 Pro");
@@ -928,14 +961,16 @@ mod tests {
     #[test]
     fn all_model_ids_has_expected() {
         let ids = all_gemini_model_ids();
+        assert!(ids.contains(&"gemini-3.1-pro-preview"));
         assert!(ids.contains(&"gemini-3-pro-preview"));
         assert!(ids.contains(&"gemini-2.5-pro"));
         assert!(ids.contains(&"gemini-2.5-flash-lite"));
-        assert_eq!(ids.len(), 5);
+        assert_eq!(ids.len(), 6);
     }
 
     #[test]
     fn is_gemini_3_model_check() {
+        assert!(is_gemini_3_model("gemini-3.1-pro-preview"));
         assert!(is_gemini_3_model("gemini-3-pro-preview"));
         assert!(is_gemini_3_model("gemini-3-flash-preview"));
         assert!(!is_gemini_3_model("gemini-2.5-pro"));
@@ -970,6 +1005,10 @@ mod tests {
 
     #[test]
     fn antigravity_model_mapping() {
+        assert_eq!(
+            map_to_antigravity_model("gemini-3.1-pro-preview"),
+            "gemini-3.1-pro-high"
+        );
         assert_eq!(
             map_to_antigravity_model("gemini-3-pro-preview"),
             "gemini-3-pro-high"
