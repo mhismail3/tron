@@ -250,7 +250,7 @@ impl MethodHandler for ListSessionsHandler {
                     "lastTurnInputTokens": s.last_turn_input_tokens,
                     "cacheReadTokens": s.total_cache_read_tokens,
                     "cacheCreationTokens": s.total_cache_creation_tokens,
-                    "cost": 0.0,
+                    "cost": s.total_cost,
                     "parentSessionId": s.parent_session_id,
                     "lastUserPrompt": preview.and_then(|p| p.last_user_prompt.as_deref()),
                     "lastAssistantResponse": preview.and_then(|p| p.last_assistant_response.as_deref()),
@@ -724,15 +724,30 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_cost_field() {
+        use tron_events::sqlite::repositories::session::{IncrementCounters, SessionRepo};
+
         let ctx = make_test_context();
-        let _ = ctx
+        let sid = ctx
             .session_manager
             .create_session("m", "/a", Some("s1"))
             .unwrap();
 
+        // Simulate accumulated cost from turns
+        let conn = ctx.event_store.pool().get().unwrap();
+        let _ = SessionRepo::increment_counters(
+            &conn,
+            &sid,
+            &IncrementCounters {
+                cost: Some(0.42),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        drop(conn);
+
         let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
         let session = &result["sessions"][0];
-        assert!(session["cost"].is_number());
+        assert!((session["cost"].as_f64().unwrap() - 0.42).abs() < f64::EPSILON);
     }
 
     #[tokio::test]
