@@ -130,7 +130,7 @@ impl EventRepo {
             let _ = write!(sql, " OFFSET {offset}");
         }
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(params![session_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -167,7 +167,7 @@ impl EventRepo {
              SELECT {EVENT_COLUMNS}
              FROM ancestors ORDER BY lvl DESC"
         );
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(params![event_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -179,7 +179,7 @@ impl EventRepo {
         let sql = format!(
             "SELECT {EVENT_COLUMNS} FROM events WHERE parent_id = ?1 ORDER BY sequence ASC"
         );
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(params![event_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -203,7 +203,7 @@ impl EventRepo {
              SELECT {EVENT_COLUMNS}
              FROM desc ORDER BY sequence ASC"
         );
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(params![event_id], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -219,7 +219,7 @@ impl EventRepo {
         let sql = format!(
             "SELECT {EVENT_COLUMNS} FROM events WHERE session_id = ?1 AND sequence > ?2 ORDER BY sequence ASC"
         );
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(params![session_id, after_sequence], Self::map_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -334,7 +334,7 @@ impl EventRepo {
             placeholders.join(", ")
         );
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let params: Vec<&dyn rusqlite::types::ToSql> = event_ids
             .iter()
             .map(|s| s as &dyn rusqlite::types::ToSql)
@@ -371,7 +371,7 @@ impl EventRepo {
             let _ = write!(sql, " LIMIT {limit}");
         }
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         params.push(Box::new(session_id.to_string()));
         for t in types {
@@ -412,7 +412,7 @@ impl EventRepo {
             let _ = write!(sql, " OFFSET {offset}");
         }
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         params.push(Box::new(workspace_id.to_string()));
         for t in types {
@@ -443,7 +443,7 @@ impl EventRepo {
             placeholders.join(", ")
         );
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         params.push(Box::new(workspace_id.to_string()));
         for t in types {

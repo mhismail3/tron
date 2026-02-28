@@ -408,7 +408,7 @@ mod tests {
     fn simple_context() -> Context {
         Context {
             system_prompt: Some("You are helpful.".into()),
-            messages: vec![Message::user("hello")],
+            messages: vec![Message::user("hello")].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -707,7 +707,7 @@ mod tests {
                     stop_reason: None,
                     thinking: None,
                 },
-            ],
+            ].into(),
             tools: Some(vec![make_tool("bash")]),
             ..Default::default()
         };

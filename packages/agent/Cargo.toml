@@ -56,7 +56,7 @@ r2d2 = "0.8"
 r2d2_sqlite = "0.25"
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 
 # Logging / Tracing
@@ -115,6 +115,12 @@ base64 = "0.22"
 rand = "0.9"
 percent-encoding = "2"
 
+# Allocator
+mimalloc = { version = "0.1", default-features = false }
+
+# Zero-copy
+bytemuck = { version = "1", features = ["derive"] }
+
 # Concurrency
 parking_lot = "0.12"
 dashmap = "6"
@@ -157,6 +163,6 @@ missing_panics_doc = "allow"
 
 [profile.release]
 lto = "fat"
-opt-level = "s"
+opt-level = 3
 strip = true
 codegen-units = 1

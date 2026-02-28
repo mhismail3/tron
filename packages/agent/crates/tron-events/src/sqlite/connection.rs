@@ -25,6 +25,8 @@ pub struct ConnectionConfig {
     pub busy_timeout_ms: u32,
     /// Cache size in KiB (default: 8192 = 8 MB).
     pub cache_size_kib: i64,
+    /// Memory-mapped I/O size in bytes (default: 256 MB). Set to 0 to disable.
+    pub mmap_size: i64,
 }
 
 impl Default for ConnectionConfig {
@@ -33,6 +35,7 @@ impl Default for ConnectionConfig {
             pool_size: 16,
             busy_timeout_ms: 30_000,
             cache_size_kib: 8192,
+            mmap_size: 268_435_456,
         }
     }
 }
@@ -42,6 +45,7 @@ impl Default for ConnectionConfig {
 struct PragmaCustomizer {
     busy_timeout_ms: u32,
     cache_size_kib: i64,
+    mmap_size: i64,
 }
 
 impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer {
@@ -51,8 +55,11 @@ impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for PragmaCustomizer
              PRAGMA busy_timeout = {};\
              PRAGMA foreign_keys = ON;\
              PRAGMA cache_size = -{};\
-             PRAGMA synchronous = NORMAL;",
-            self.busy_timeout_ms, self.cache_size_kib
+             PRAGMA synchronous = NORMAL;\
+             PRAGMA mmap_size = {};\
+             PRAGMA temp_store = MEMORY;\
+             PRAGMA page_size = 8192;",
+            self.busy_timeout_ms, self.cache_size_kib, self.mmap_size
         ))?;
         Ok(())
     }
@@ -67,6 +74,7 @@ pub fn new_in_memory(config: &ConnectionConfig) -> Result<ConnectionPool> {
         .connection_customizer(Box::new(PragmaCustomizer {
             busy_timeout_ms: config.busy_timeout_ms,
             cache_size_kib: config.cache_size_kib,
+            mmap_size: config.mmap_size,
         }))
         .build(manager)?;
     Ok(pool)
@@ -81,6 +89,7 @@ pub fn new_file(path: &str, config: &ConnectionConfig) -> Result<ConnectionPool>
         .connection_customizer(Box::new(PragmaCustomizer {
             busy_timeout_ms: config.busy_timeout_ms,
             cache_size_kib: config.cache_size_kib,
+            mmap_size: config.mmap_size,
         }))
         .build(manager)?;
     Ok(pool)
@@ -162,6 +171,7 @@ mod tests {
             pool_size: 2,
             busy_timeout_ms: 10000,
             cache_size_kib: 16384,
+            ..Default::default()
         };
         let pool = new_in_memory(&config).unwrap();
         assert_eq!(pool.max_size(), 2);
@@ -173,5 +183,28 @@ mod tests {
         assert_eq!(config.pool_size, 16);
         assert_eq!(config.busy_timeout_ms, 30_000);
         assert_eq!(config.cache_size_kib, 8192);
+        assert_eq!(config.mmap_size, 268_435_456);
+    }
+
+    #[test]
+    fn mmap_enabled_on_file_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mmap_test.db");
+        let config = ConnectionConfig::default();
+        let pool = new_file(path.to_str().unwrap(), &config).unwrap();
+        let conn = pool.get().unwrap();
+        let mmap: i64 = conn
+            .query_row("PRAGMA mmap_size", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert!(mmap > 0, "mmap_size should be > 0 on file-backed DB, got {mmap}");
+    }
+
+    #[test]
+    fn temp_store_is_memory() {
+        let config = ConnectionConfig::default();
+        let pool = new_in_memory(&config).unwrap();
+        let conn = pool.get().unwrap();
+        let temp_store: i32 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0)).unwrap();
+        assert_eq!(temp_store, 2); // 2 = MEMORY
     }
 }

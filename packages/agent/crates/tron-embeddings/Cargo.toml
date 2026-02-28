@@ -17,6 +17,7 @@ ort = ["dep:ort", "dep:tokenizers", "dep:hf-hub", "dep:ndarray"]
 doctest = false
 
 [dependencies]
+bytemuck.workspace = true
 tron-events.workspace = true
 tron-settings.workspace = true
 async-trait.workspace = true

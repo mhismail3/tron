@@ -8,14 +8,25 @@ use crate::normalize::cosine_similarity;
 
 /// Convert an f32 slice to a byte blob for storage.
 pub fn f32_slice_to_blob(v: &[f32]) -> Vec<u8> {
-    v.iter().flat_map(|f| f.to_le_bytes()).collect()
+    bytemuck::cast_slice::<f32, u8>(v).to_vec()
 }
 
 /// Convert a byte blob back to an f32 vector.
 pub fn blob_to_f32_vec(blob: &[u8]) -> Vec<f32> {
-    blob.chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect()
+    bytemuck::cast_slice::<u8, f32>(blob).to_vec()
+}
+
+/// Reinterpret a byte blob as an f32 slice (zero-copy, zero-allocation).
+///
+/// Returns `None` if `blob.len()` is not a multiple of 4.
+pub fn blob_as_f32_slice(blob: &[u8]) -> Option<&[f32]> {
+    if blob.is_empty() {
+        return Some(&[]);
+    }
+    if blob.len() % 4 != 0 {
+        return None;
+    }
+    Some(bytemuck::cast_slice(blob))
 }
 
 /// Options for vector search.
@@ -234,7 +245,7 @@ impl VectorRepository {
             sql.push_str(&conditions.join(" AND "));
         }
 
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = self.conn.prepare_cached(&sql)?;
         let params: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|v| v as &dyn rusqlite::types::ToSql).collect();
 
@@ -270,8 +281,12 @@ impl VectorRepository {
         let mut results: Vec<VectorSearchResult> = rows
             .into_iter()
             .filter_map(|(_id, event_id, workspace_id, chunk_type, chunk_index, blob)| {
-                let embedding = blob_to_f32_vec(&blob);
-                cosine_similarity(query, &embedding).map(|similarity| VectorSearchResult {
+                let embedding = blob_as_f32_slice(&blob)?;
+                let similarity = cosine_similarity(query, embedding)?;
+                if similarity < min_similarity {
+                    return None;
+                }
+                Some(VectorSearchResult {
                     event_id,
                     workspace_id,
                     similarity,
@@ -281,15 +296,14 @@ impl VectorRepository {
             })
             .collect();
 
-        results.retain(|r| r.similarity >= min_similarity);
-        results.sort_by(|a, b| {
+        results.sort_unstable_by(|a, b| {
             b.similarity
                 .partial_cmp(&a.similarity)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Deduplicate by event_id — keep highest-scoring chunk per event
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::with_capacity(results.len().min(limit * 2));
         results.retain(|r| seen.insert(r.event_id.clone()));
 
         results.truncate(limit);
@@ -792,6 +806,35 @@ mod tests {
         let blob = f32_slice_to_blob(&original);
         let recovered = blob_to_f32_vec(&blob);
         assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn blob_as_f32_slice_roundtrip() {
+        let original = vec![1.0_f32, -2.5, 3.125, 0.0];
+        let blob = f32_slice_to_blob(&original);
+        let slice = blob_as_f32_slice(&blob).unwrap();
+        assert_eq!(slice, &original[..]);
+    }
+
+    #[test]
+    fn blob_as_f32_slice_512d() {
+        let original: Vec<f32> = (0..512).map(|i| i as f32 * 0.001).collect();
+        let blob = f32_slice_to_blob(&original);
+        let slice = blob_as_f32_slice(&blob).unwrap();
+        assert_eq!(slice, &original[..]);
+    }
+
+    #[test]
+    fn blob_as_f32_slice_empty() {
+        let blob: Vec<u8> = vec![];
+        let slice = blob_as_f32_slice(&blob).unwrap();
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn blob_as_f32_slice_bad_length_returns_none() {
+        let blob = vec![0u8, 1, 2]; // 3 bytes, not divisible by 4
+        assert!(blob_as_f32_slice(&blob).is_none());
     }
 
     #[test]

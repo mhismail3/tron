@@ -174,7 +174,7 @@ impl MiniMaxProvider {
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
-        let sanitized = sanitize_messages(context.messages.clone());
+        let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
 
         // Strip images — MiniMax doesn't support them

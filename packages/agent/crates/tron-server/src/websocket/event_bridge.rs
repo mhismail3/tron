@@ -62,6 +62,7 @@ impl EventBridge {
                             Ok(event) => self.bridge_browser_event(&event).await,
                             Err(broadcast::error::RecvError::Lagged(n)) => {
                                 tracing::warn!(lagged = n, "browser event bridge lagged");
+                                metrics::counter!("broadcast_lagged_events_total", "source" => "browser_bridge").increment(n);
                             }
                             Err(broadcast::error::RecvError::Closed) => {
                                 tracing::debug!("browser event channel closed, continuing with TronEvent only");
@@ -105,6 +106,7 @@ impl EventBridge {
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 tracing::warn!(lagged = n, "event bridge lagged");
+                metrics::counter!("broadcast_lagged_events_total", "source" => "event_bridge").increment(n);
                 true
             }
             Err(broadcast::error::RecvError::Closed) => {

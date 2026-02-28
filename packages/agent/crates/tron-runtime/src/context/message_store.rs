@@ -12,6 +12,8 @@
 //! lookup is O(1) and trivially correct since add/set/clear keep both vectors
 //! in sync.
 
+use std::sync::Arc;
+
 use tron_core::messages::Message;
 
 use super::token_estimator::estimate_message_tokens;
@@ -32,6 +34,8 @@ pub struct MessageStoreConfig {
 pub struct MessageStore {
     messages: Vec<Message>,
     token_cache: Vec<u32>,
+    /// Cached Arc snapshot. Invalidated on add/set/clear.
+    arc_snapshot: Option<Arc<[Message]>>,
 }
 
 impl MessageStore {
@@ -41,6 +45,7 @@ impl MessageStore {
         Self {
             messages: Vec::new(),
             token_cache: Vec::new(),
+            arc_snapshot: None,
         }
     }
 
@@ -58,6 +63,7 @@ impl MessageStore {
     ///
     /// The token estimate is computed and cached immediately.
     pub fn add(&mut self, message: Message) {
+        self.arc_snapshot = None;
         let tokens = estimate_message_tokens(&message);
         self.messages.push(message);
         self.token_cache.push(tokens);
@@ -67,6 +73,7 @@ impl MessageStore {
     ///
     /// Token cache is rebuilt for the new messages.
     pub fn set(&mut self, messages: Vec<Message>) {
+        self.arc_snapshot = None;
         self.token_cache = messages.iter().map(estimate_message_tokens).collect();
         self.messages = messages;
     }
@@ -85,8 +92,22 @@ impl MessageStore {
 
     /// Clear all messages from the store.
     pub fn clear(&mut self) {
+        self.arc_snapshot = None;
         self.messages.clear();
         self.token_cache.clear();
+    }
+
+    /// Get a shared reference-counted snapshot of messages (amortized zero-copy).
+    ///
+    /// Builds the `Arc<[Message]>` on first call, then returns cached clones
+    /// (atomic refcount increment) until the store is mutated.
+    pub fn as_arc(&mut self) -> Arc<[Message]> {
+        if let Some(ref arc) = self.arc_snapshot {
+            return Arc::clone(arc);
+        }
+        let arc: Arc<[Message]> = Arc::from(self.messages.as_slice());
+        self.arc_snapshot = Some(Arc::clone(&arc));
+        arc
     }
 
     /// Get total token count for all messages.
@@ -131,6 +152,7 @@ impl Default for MessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use tron_core::content::AssistantContent;
     use tron_core::messages::Message;
 
@@ -378,6 +400,67 @@ mod tests {
         assert_eq!(store.len(), 1);
         assert!(store.get_cached_tokens(0).is_some());
         assert!(store.get_cached_tokens(1).is_none());
+    }
+
+    // -- as_arc --
+
+    #[test]
+    fn as_arc_returns_correct_messages() {
+        let mut store = MessageStore::new();
+        store.add(Message::user("Hello"));
+        store.add(Message::assistant("Hi"));
+        let arc = store.as_arc();
+        assert_eq!(arc.len(), 2);
+        assert!(arc[0].is_user());
+        assert!(arc[1].is_assistant());
+    }
+
+    #[test]
+    fn as_arc_cached_returns_same_arc() {
+        let mut store = MessageStore::new();
+        store.add(Message::user("Hello"));
+        let arc1 = store.as_arc();
+        let arc2 = store.as_arc();
+        assert!(Arc::ptr_eq(&arc1, &arc2));
+    }
+
+    #[test]
+    fn as_arc_invalidated_by_add() {
+        let mut store = MessageStore::new();
+        store.add(Message::user("Hello"));
+        let arc1 = store.as_arc();
+        store.add(Message::user("World"));
+        let arc2 = store.as_arc();
+        assert!(!Arc::ptr_eq(&arc1, &arc2));
+        assert_eq!(arc2.len(), 2);
+    }
+
+    #[test]
+    fn as_arc_invalidated_by_set() {
+        let mut store = MessageStore::new();
+        store.add(Message::user("Hello"));
+        let arc1 = store.as_arc();
+        store.set(vec![Message::user("New")]);
+        let arc2 = store.as_arc();
+        assert!(!Arc::ptr_eq(&arc1, &arc2));
+        assert_eq!(arc2.len(), 1);
+    }
+
+    #[test]
+    fn as_arc_invalidated_by_clear() {
+        let mut store = MessageStore::new();
+        store.add(Message::user("Hello"));
+        let _arc1 = store.as_arc();
+        store.clear();
+        let arc2 = store.as_arc();
+        assert!(arc2.is_empty());
+    }
+
+    #[test]
+    fn as_arc_empty_store() {
+        let mut store = MessageStore::new();
+        let arc = store.as_arc();
+        assert!(arc.is_empty());
     }
 
     #[test]

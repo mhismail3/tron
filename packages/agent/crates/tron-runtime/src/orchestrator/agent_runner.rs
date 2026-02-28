@@ -55,7 +55,9 @@ pub async fn run_agent(
                     match event {
                         Ok(e) => { let _ = broadcast_clone.emit(e); }
                         Err(broadcast::error::RecvError::Closed) => break,
-                        Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            metrics::counter!("broadcast_lagged_events_total", "source" => "agent_forward").increment(n);
+                        }
                     }
                 }
                 () = forward_cancel_clone.cancelled() => {

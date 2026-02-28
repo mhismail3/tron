@@ -5,6 +5,8 @@
 //! compaction, tool result processing, model switching, and system
 //! prompt management.
 
+use std::sync::Arc;
+
 use tron_core::events::ActivatedRuleInfo;
 use tron_core::messages::Message;
 
@@ -100,6 +102,11 @@ impl ContextManager {
     #[must_use]
     pub fn get_messages(&self) -> Vec<Message> {
         self.messages.as_slice().to_vec()
+    }
+
+    /// Get a shared `Arc<[Message]>` snapshot (amortized zero-copy for repeated calls).
+    pub fn get_messages_arc(&mut self) -> Arc<[Message]> {
+        self.messages.as_arc()
     }
 
     /// Borrow the message slice (zero-copy).
@@ -537,7 +544,7 @@ impl ContextManager {
     pub fn build_base_context(&self) -> tron_core::messages::Context {
         tron_core::messages::Context {
             system_prompt: Some(self.get_system_prompt().to_owned()),
-            messages: vec![],
+            messages: Arc::default(),
             tools: None,
             working_directory: Some(self.get_working_directory().to_owned()),
             rules_content: self.get_rules_content().map(String::from),

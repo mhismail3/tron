@@ -37,7 +37,8 @@
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
 //! 7. Production DB target is strictly `~/.tron/database/tron.db`
 
-#![deny(unsafe_code)]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod provider_factory;
 mod providers;

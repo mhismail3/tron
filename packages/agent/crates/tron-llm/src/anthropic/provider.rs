@@ -347,7 +347,7 @@ impl AnthropicProvider {
         context: &Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
-        let sanitized = sanitize_messages(context.messages.clone());
+        let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
 
         // Cache cold detection and pruning (OAuth only)

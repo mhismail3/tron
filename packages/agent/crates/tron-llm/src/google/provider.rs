@@ -864,7 +864,7 @@ mod tests {
     fn system_instruction_empty_when_no_context() {
         let context = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -883,7 +883,7 @@ mod tests {
     fn system_instruction_from_prompt() {
         let context = Context {
             system_prompt: Some("You are helpful.".into()),
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -906,7 +906,7 @@ mod tests {
         let provider = GoogleProvider::new(oauth_config());
         let context = Context {
             system_prompt: Some("Be helpful".into()),
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -940,7 +940,7 @@ mod tests {
         let provider = GoogleProvider::new(config);
         let context = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -976,7 +976,7 @@ mod tests {
         let provider = GoogleProvider::new(config);
         let context = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -1001,7 +1001,7 @@ mod tests {
         let provider = GoogleProvider::new(api_key_config());
         let context = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,

@@ -781,7 +781,9 @@ impl SubagentSpawner for SubagentManager {
                                     // own EventPersister (via turn_runner) — not here.
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                    metrics::counter!("broadcast_lagged_events_total", "source" => "subagent_forward").increment(n);
+                                }
                             }
                         }
                         () = forward_cancel_clone.cancelled() => {

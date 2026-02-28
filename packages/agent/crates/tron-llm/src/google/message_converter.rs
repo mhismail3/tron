@@ -56,7 +56,7 @@ pub fn convert_messages(context: &Context) -> Vec<GeminiContent> {
 
     let mut contents = Vec::new();
 
-    for message in messages {
+    for message in messages.iter() {
         match message {
             Message::User { content, .. } => {
                 let parts = convert_user_content(content);
@@ -279,7 +279,7 @@ mod tests {
 
     fn ctx(messages: Vec<Message>) -> Context {
         Context {
-            messages,
+            messages: messages.into(),
             system_prompt: None,
             tools: None,
             working_directory: None,

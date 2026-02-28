@@ -4,6 +4,8 @@
 //! Three roles: user, assistant, and tool result. Each uses distinct
 //! content types appropriate to that role.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -365,8 +367,8 @@ pub struct Context {
     /// System prompt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-    /// Conversation messages.
-    pub messages: Vec<Message>,
+    /// Conversation messages (shared via `Arc` to avoid deep cloning per turn).
+    pub messages: Arc<[Message]>,
     /// Available tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
@@ -435,6 +437,7 @@ pub fn is_api_tool_use_block(block: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use serde_json::json;
 
     // -- ToolCall --
@@ -755,7 +758,7 @@ mod tests {
     fn context_serde_roundtrip() {
         let ctx = Context {
             system_prompt: Some("You are a helpful assistant.".into()),
-            messages: vec![Message::user("hi")],
+            messages: vec![Message::user("hi")].into(),
             tools: None,
             working_directory: Some("/tmp".into()),
             rules_content: None,
@@ -769,6 +772,26 @@ mod tests {
         let json = serde_json::to_string(&ctx).unwrap();
         let back: Context = serde_json::from_str(&json).unwrap();
         assert_eq!(ctx, back);
+    }
+
+    #[test]
+    fn context_messages_deref_to_slice() {
+        let ctx = Context {
+            messages: vec![Message::user("hello")].into(),
+            ..Default::default()
+        };
+        let slice: &[Message] = &ctx.messages;
+        assert_eq!(slice.len(), 1);
+    }
+
+    #[test]
+    fn context_clone_shares_arc() {
+        let ctx = Context {
+            messages: vec![Message::user("hello")].into(),
+            ..Default::default()
+        };
+        let ctx2 = ctx.clone();
+        assert!(Arc::ptr_eq(&ctx.messages, &ctx2.messages));
     }
 
     // -- Provider --

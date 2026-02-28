@@ -176,7 +176,7 @@ mod tests {
     fn make_context() -> Context {
         Context {
             system_prompt: Some("You are a helpful assistant.".into()),
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: Some("/Users/test/project".into()),
             rules_content: Some("Always use Rust.".into()),
@@ -214,7 +214,7 @@ mod tests {
     fn compose_parts_empty_context() {
         let ctx = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -233,7 +233,7 @@ mod tests {
     fn compose_parts_skips_empty_strings() {
         let ctx = Context {
             system_prompt: Some(String::new()),
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: Some(String::new()),
@@ -253,7 +253,7 @@ mod tests {
     fn compose_parts_only_system_prompt() {
         let ctx = Context {
             system_prompt: Some("Hello".into()),
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -297,7 +297,7 @@ mod tests {
     fn grouped_empty_context() {
         let ctx = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,
@@ -317,7 +317,7 @@ mod tests {
     fn grouped_only_stable() {
         let ctx = Context {
             system_prompt: Some("System".into()),
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: Some("Rules".into()),
@@ -364,7 +364,7 @@ mod tests {
     fn grouped_only_volatile() {
         let ctx = Context {
             system_prompt: None,
-            messages: vec![],
+            messages: vec![].into(),
             tools: None,
             working_directory: None,
             rules_content: None,

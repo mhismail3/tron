@@ -147,7 +147,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // 3. Build context (base from CM, external fields from RunContext/params)
     let mut context = context_manager.build_base_context();
-    context.messages = context_manager.get_messages();
+    context.messages = context_manager.get_messages_arc();
     context.tools = Some(registry.definitions());
     context.skill_context = run_context.skill_context.clone();
     context.subagent_results_context = run_context.subagent_results.clone();
