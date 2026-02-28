@@ -10,7 +10,7 @@ struct TokenBadge: View {
             HStack(spacing: 2) {
                 Image(systemName: "arrow.up")
                     .font(TronTypography.labelSM)
-                Text(record.formattedContextWindow)
+                Text(record.formattedNewInput)
             }
 
             HStack(spacing: 2) {

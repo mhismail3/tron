@@ -66,8 +66,9 @@ fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
 
 /// Compute per-turn delta (new tokens added this turn).
 ///
-/// For Anthropic: `rawInputTokens` represents genuinely new, non-cached input.
-/// iOS displays this as the down-arrow metric (separate from cache lightning bolt).
+/// For Anthropic/MiniMax: `raw_input + cache_creation` — uncached tokens plus
+/// tokens newly written to cache this turn. Cache *reads* are pre-existing
+/// context, not new content.
 /// For other providers: use context window delta (no cache semantics).
 fn compute_new_input_tokens(
     source: &TokenSource,
@@ -75,7 +76,7 @@ fn compute_new_input_tokens(
     previous_baseline: u64,
 ) -> u64 {
     if matches!(source.provider, ProviderType::Anthropic | ProviderType::MiniMax) {
-        source.raw_input_tokens
+        source.raw_input_tokens + source.raw_cache_creation_tokens
     } else {
         if previous_baseline == 0 {
             return context_window_tokens;
@@ -181,11 +182,11 @@ mod tests {
 
     // ── Per-turn delta calculation ──
 
-    // ── Anthropic: newInputTokens = rawInputTokens (non-cached) ──
+    // ── Anthropic: newInputTokens = rawInput + cacheCreation (non-cached-read) ──
 
     #[test]
-    fn anthropic_first_turn_new_input_is_raw_only() {
-        // rawInput=604, cacheRead=8266 → newInputTokens = 604 (NOT 8870)
+    fn anthropic_first_turn_cache_hit_new_input_excludes_cache_read() {
+        // rawInput=604, cacheRead=8266 → newInput = 604 (cache read is pre-existing)
         let source = anthropic_source(604, 8266, 0);
         let record = normalize_tokens(source, 0, make_meta(1));
         assert_eq!(record.computed.new_input_tokens, 604);
@@ -194,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_second_turn_new_input_is_raw_only() {
+    fn anthropic_second_turn_cache_hit_new_input_excludes_cache_read() {
         let source = anthropic_source(604, 8266, 0);
         let record = normalize_tokens(source, 8768, make_meta(2));
         assert_eq!(record.computed.context_window_tokens, 8870);
@@ -203,10 +204,12 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_cache_creation_new_input_is_raw() {
+    fn anthropic_cache_creation_counts_as_new_input() {
+        // rawInput=100, cacheRead=500, cacheCreation=200
+        // New content = 100 + 200 = 300 (cache reads are pre-existing)
         let source = anthropic_source(100, 500, 200);
         let record = normalize_tokens(source, 0, make_meta(1));
-        assert_eq!(record.computed.new_input_tokens, 100);
+        assert_eq!(record.computed.new_input_tokens, 300);
     }
 
     // ── Google/OpenAI: delta-based (no cache semantics) ──
