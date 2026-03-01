@@ -78,24 +78,22 @@ struct MemoryDashboardView: View {
                     .font(TronTypography.mono(size: 20, weight: .bold))
                     .foregroundStyle(.purple)
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 20) {
-                    if actions.notificationUnreadCount > 0 {
-                        NotificationBellButton(
-                            unreadCount: actions.notificationUnreadCount,
-                            accent: .purple,
-                            action: { actions.onNotificationBell() }
-                        )
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                    }
-                    Button(action: actions.onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.purple)
-                            .padding(.horizontal, 4)
-                    }
+            if actions.notificationUnreadCount > 0 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NotificationBellButton(
+                        unreadCount: actions.notificationUnreadCount,
+                        accent: .purple,
+                        action: { actions.onNotificationBell() }
+                    )
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
                 }
-                .animation(.spring(duration: 0.35, bounce: 0.3), value: actions.notificationUnreadCount > 0)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: actions.onSettings) {
+                    Image(systemName: "gearshape")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                        .foregroundStyle(.purple)
+                }
             }
         }
         .sheet(item: $selectedEntry) { entry in
