@@ -54,47 +54,7 @@ struct MemoryDashboardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(NavigationMode.allCases, id: \.self) { mode in
-                        Button {
-                            actions.onNavigationModeChange(mode)
-                        } label: {
-                            Label(mode.rawValue, systemImage: mode.icon)
-                        }
-                    }
-                } label: {
-                    Image("TronLogoVector")
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                        .offset(y: 1)
-                        .foregroundStyle(.purple)
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Text("Memory")
-                    .font(TronTypography.mono(size: 20, weight: .bold))
-                    .foregroundStyle(.purple)
-            }
-            if actions.notificationUnreadCount > 0 {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NotificationBellButton(
-                        unreadCount: actions.notificationUnreadCount,
-                        accent: .purple,
-                        action: { actions.onNotificationBell() }
-                    )
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: actions.onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.purple)
-                }
-            }
+            DashboardToolbarContent(title: "Memory", accent: .purple, actions: actions)
         }
         .sheet(item: $selectedEntry) { entry in
             MemoryDashboardDetailSheet(entry: entry)

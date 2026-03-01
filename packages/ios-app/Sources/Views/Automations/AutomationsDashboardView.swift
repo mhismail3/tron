@@ -52,47 +52,7 @@ struct AutomationsDashboardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(NavigationMode.allCases, id: \.self) { mode in
-                        Button {
-                            actions.onNavigationModeChange(mode)
-                        } label: {
-                            Label(mode.rawValue, systemImage: mode.icon)
-                        }
-                    }
-                } label: {
-                    Image("TronLogoVector")
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                        .offset(y: 1)
-                        .foregroundStyle(.tronCoral)
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Text("Automations")
-                    .font(TronTypography.mono(size: 20, weight: .bold))
-                    .foregroundStyle(.tronCoral)
-            }
-            if actions.notificationUnreadCount > 0 {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NotificationBellButton(
-                        unreadCount: actions.notificationUnreadCount,
-                        accent: .tronCoral,
-                        action: { actions.onNotificationBell() }
-                    )
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: actions.onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronCoral)
-                }
-            }
+            DashboardToolbarContent(title: "Automations", accent: .tronCoral, actions: actions)
         }
         .sheet(item: $selectedJob) { job in
             AutomationDetailSheet(

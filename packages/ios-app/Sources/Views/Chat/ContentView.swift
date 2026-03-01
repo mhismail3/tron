@@ -514,56 +514,12 @@ struct WelcomePage: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if let onToggleSidebar = onToggleSidebar {
-                        // iPad - show emerald sidebar toggle (always visible to allow hide/show)
-                        Button(action: onToggleSidebar) {
-                            Image(systemName: "sidebar.leading")
-                                .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                                .foregroundStyle(.tronEmerald)
-                        }
-                    } else {
-                        // iPhone - show logo menu
-                        Menu {
-                            ForEach(NavigationMode.allCases, id: \.self) { mode in
-                                Button {
-                                    actions.onNavigationModeChange(mode)
-                                } label: {
-                                    Label(mode.rawValue, systemImage: mode.icon)
-                                }
-                            }
-                        } label: {
-                            Image("TronLogoVector")
-                                .renderingMode(.template)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 24)
-                                .offset(y: 1)
-                        }
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Tron")
-                        .font(TronTypography.mono(size: 20, weight: .bold))
-                        .foregroundStyle(.tronEmerald)
-                }
-                if actions.notificationUnreadCount > 0 {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NotificationBellButton(
-                            unreadCount: actions.notificationUnreadCount,
-                            accent: .tronEmerald,
-                            action: { actions.onNotificationBell() }
-                        )
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: actions.onSettings) {
-                        Image(systemName: "gearshape")
-                            .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                    }
-                }
+                DashboardToolbarContent(
+                    title: "Tron",
+                    accent: .tronEmerald,
+                    actions: actions,
+                    onToggleSidebar: onToggleSidebar
+                )
             }
         }
     }

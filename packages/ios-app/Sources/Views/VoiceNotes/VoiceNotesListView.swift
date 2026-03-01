@@ -50,47 +50,7 @@ struct VoiceNotesListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Menu {
-                    ForEach(NavigationMode.allCases, id: \.self) { mode in
-                        Button {
-                            actions.onNavigationModeChange(mode)
-                        } label: {
-                            Label(mode.rawValue, systemImage: mode.icon)
-                        }
-                    }
-                } label: {
-                    Image("TronLogoVector")
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                        .offset(y: 1)
-                        .foregroundStyle(.tronTeal)
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                Text("Voice Notes")
-                    .font(TronTypography.mono(size: 20, weight: .bold))
-                    .foregroundStyle(.tronTeal)
-            }
-            if actions.notificationUnreadCount > 0 {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NotificationBellButton(
-                        unreadCount: actions.notificationUnreadCount,
-                        accent: .tronTeal,
-                        action: { actions.onNotificationBell() }
-                    )
-                    .transition(.scale(scale: 0.5).combined(with: .opacity))
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: actions.onSettings) {
-                    Image(systemName: "gearshape")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(.tronTeal)
-                }
-            }
+            DashboardToolbarContent(title: "Voice Notes", accent: .tronTeal, actions: actions)
         }
         .sheet(item: $selectedNote) { note in
             VoiceNoteDetailSheet(note: note)
