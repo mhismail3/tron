@@ -4,7 +4,7 @@ import Foundation
 /// Handles directory listing, file reading, and repository cloning.
 @MainActor
 final class FilesystemClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -13,7 +13,6 @@ final class FilesystemClient {
     // MARK: - Filesystem Methods
 
     func listDirectory(path: String?, showHidden: Bool = false) async throws -> DirectoryListResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = FilesystemListDirParams(path: path, showHidden: showHidden)
@@ -24,7 +23,6 @@ final class FilesystemClient {
     }
 
     func getHome() async throws -> HomeResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         return try await ws.send(
@@ -35,7 +33,6 @@ final class FilesystemClient {
 
     /// Create a new directory
     func createDirectory(path: String, recursive: Bool = false) async throws -> FilesystemCreateDirResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = FilesystemCreateDirParams(path: path, recursive: recursive)
@@ -47,7 +44,6 @@ final class FilesystemClient {
 
     /// Read file content from server
     func readFile(path: String) async throws -> String {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         struct ReadFileParams: Codable {
@@ -67,7 +63,6 @@ final class FilesystemClient {
 
     /// Clone a Git repository to a target path
     func cloneRepository(url: String, targetPath: String) async throws -> GitCloneResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = GitCloneParams(url: url, targetPath: targetPath)

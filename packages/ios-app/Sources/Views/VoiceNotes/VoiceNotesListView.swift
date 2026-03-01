@@ -5,10 +5,7 @@ import SwiftUI
 struct VoiceNotesListView: View {
     let rpcClient: RPCClient
     let onVoiceNote: () -> Void
-    let onSettings: () -> Void
-    var onNavigationModeChange: ((NavigationMode) -> Void)?
-    var notificationUnreadCount: Int = 0
-    var onNotificationBell: (() -> Void)? = nil
+    let actions: DashboardToolbarActions
 
     @State private var notes: [VoiceNoteMetadata] = []
     @State private var isLoading = true
@@ -57,7 +54,7 @@ struct VoiceNotesListView: View {
                 Menu {
                     ForEach(NavigationMode.allCases, id: \.self) { mode in
                         Button {
-                            onNavigationModeChange?(mode)
+                            actions.onNavigationModeChange(mode)
                         } label: {
                             Label(mode.rawValue, systemImage: mode.icon)
                         }
@@ -79,22 +76,22 @@ struct VoiceNotesListView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 20) {
-                    if notificationUnreadCount > 0 {
+                    if actions.notificationUnreadCount > 0 {
                         NotificationBellButton(
-                            unreadCount: notificationUnreadCount,
+                            unreadCount: actions.notificationUnreadCount,
                             accent: .tronTeal,
-                            action: { onNotificationBell?() }
+                            action: { actions.onNotificationBell() }
                         )
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
-                    Button(action: onSettings) {
+                    Button(action: actions.onSettings) {
                         Image(systemName: "gearshape")
                             .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronTeal)
                             .padding(.horizontal, 4)
                     }
                 }
-                .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)
+                .animation(.spring(duration: 0.35, bounce: 0.3), value: actions.notificationUnreadCount > 0)
             }
         }
         .sheet(item: $selectedNote) { note in

@@ -3,7 +3,7 @@ import Foundation
 /// Client for cron scheduling RPC methods.
 @MainActor
 final class CronClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -13,7 +13,6 @@ final class CronClient {
 
     /// List cron jobs with optional filters.
     func listJobs(enabled: Bool? = nil, tags: [String]? = nil, workspaceId: String? = nil) async throws -> CronListResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronListParams(enabled: enabled, tags: tags, workspaceId: workspaceId)
         return try await ws.send(method: "cron.list", params: params)
@@ -21,7 +20,6 @@ final class CronClient {
 
     /// Get a single job with runtime state and recent runs.
     func getJob(jobId: String) async throws -> CronGetResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronGetParams(jobId: jobId)
         return try await ws.send(method: "cron.get", params: params)
@@ -29,7 +27,6 @@ final class CronClient {
 
     /// Create a new cron job.
     func createJob(_ job: CronCreateJobParams) async throws -> CronCreateResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronCreateParams(job: job)
         return try await ws.send(method: "cron.create", params: params)
@@ -51,7 +48,6 @@ final class CronClient {
         tags: [String]? = nil,
         workspaceId: String? = nil
     ) async throws -> CronUpdateResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronUpdateParams(
             jobId: jobId,
@@ -73,7 +69,6 @@ final class CronClient {
 
     /// Delete a cron job (preserves run history).
     func deleteJob(jobId: String) async throws -> CronDeleteResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronDeleteParams(jobId: jobId)
         return try await ws.send(method: "cron.delete", params: params)
@@ -81,7 +76,6 @@ final class CronClient {
 
     /// Trigger immediate execution of a job.
     func triggerJob(jobId: String) async throws -> CronRunResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronRunParams(jobId: jobId)
         return try await ws.send(method: "cron.run", params: params)
@@ -91,14 +85,12 @@ final class CronClient {
 
     /// Get scheduler health and status.
     func getStatus() async throws -> CronStatusResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         return try await ws.send(method: "cron.status", params: EmptyParams())
     }
 
     /// Get paginated run history for a job.
     func getRuns(jobId: String, limit: Int? = nil, offset: Int? = nil, status: String? = nil) async throws -> CronGetRunsResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = CronGetRunsParams(jobId: jobId, limit: limit, offset: offset, status: status)
         return try await ws.send(method: "cron.getRuns", params: params)

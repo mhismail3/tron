@@ -378,96 +378,81 @@ struct ChatView: View {
                         ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { index, message in
                             MessageBubble(
                                 message: message,
-                                onSkillTap: { [sheetCoordinator] skill in
-                                    sheetCoordinator.showSkillDetail(skill, mode: .skill)
-                                },
-                                onSpellTap: { [sheetCoordinator] spell in
-                                    sheetCoordinator.showSkillDetail(spell, mode: .spell)
-                                },
-                                onAskUserQuestionTap: { data in
-                                    viewModel.openAskUserQuestionSheet(for: data)
-                                },
-                                onThinkingTap: { [sheetCoordinator] content in
-                                    sheetCoordinator.showThinkingDetail(content)
-                                },
-                                onCompactionTap: { [sheetCoordinator] tokensBefore, tokensAfter, reason, summary in
-                                    sheetCoordinator.showCompactionDetail(
-                                        tokensBefore: tokensBefore,
-                                        tokensAfter: tokensAfter,
-                                        reason: reason,
-                                        summary: summary
-                                    )
-                                },
-                                onSubagentTap: { data in
-                                    viewModel.subagentState.showDetails(with: data)
-                                },
-                                onRenderAppUITap: { data in
-                                    // Load canvas from server if not in memory, then show sheet
-                                    Task {
-                                        // Try to load from server (skips if already in memory)
-                                        let loaded = await viewModel.uiCanvasState.loadFromServer(
-                                            canvasId: data.canvasId,
-                                            rpcClient: rpcClient
+                                onTap: { [sheetCoordinator, sessionId] action in
+                                    switch action {
+                                    case .skill(let skill):
+                                        sheetCoordinator.showSkillDetail(skill, mode: .skill)
+                                    case .spell(let spell):
+                                        sheetCoordinator.showSkillDetail(spell, mode: .spell)
+                                    case .askUserQuestion(let data):
+                                        viewModel.openAskUserQuestionSheet(for: data)
+                                    case .thinking(let content):
+                                        sheetCoordinator.showThinkingDetail(content)
+                                    case .compaction(let tokensBefore, let tokensAfter, let reason, let summary):
+                                        sheetCoordinator.showCompactionDetail(
+                                            tokensBefore: tokensBefore,
+                                            tokensAfter: tokensAfter,
+                                            reason: reason,
+                                            summary: summary
                                         )
-
-                                        if loaded {
-                                            viewModel.uiCanvasState.activeCanvasId = data.canvasId
-                                            viewModel.uiCanvasState.showSheet = true
-                                        } else {
-                                            // Canvas not found on server - show error
-                                            viewModel.showErrorAlert("Canvas not found")
+                                    case .subagent(let data):
+                                        viewModel.subagentState.showDetails(with: data)
+                                    case .renderAppUI(let data):
+                                        Task {
+                                            let loaded = await viewModel.uiCanvasState.loadFromServer(
+                                                canvasId: data.canvasId,
+                                                rpcClient: rpcClient
+                                            )
+                                            if loaded {
+                                                viewModel.uiCanvasState.activeCanvasId = data.canvasId
+                                                viewModel.uiCanvasState.showSheet = true
+                                            } else {
+                                                viewModel.showErrorAlert("Canvas not found")
+                                            }
                                         }
+                                    case .taskManager(let data):
+                                        sheetCoordinator.showTaskDetail(data)
+                                    case .notifyApp(let data):
+                                        sheetCoordinator.showNotifyApp(data)
+                                    case .commandTool(let data):
+                                        sheetCoordinator.showCommandToolDetail(data)
+                                    case .queryAgent(let data):
+                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(
+                                            id: data.toolCallId,
+                                            toolName: "QueryAgent",
+                                            normalizedName: "queryagent",
+                                            icon: data.queryType.icon,
+                                            iconColor: .tronIndigo,
+                                            displayName: "Query Agent (\(data.queryType.displayName))",
+                                            summary: data.resultPreview ?? "",
+                                            status: data.status == .error ? .error : .success,
+                                            durationMs: data.durationMs,
+                                            arguments: "",
+                                            result: data.fullResult,
+                                            isResultTruncated: false
+                                        ))
+                                    case .waitForAgents(let data):
+                                        sheetCoordinator.showCommandToolDetail(CommandToolChipData(
+                                            id: data.toolCallId,
+                                            toolName: "WaitForAgents",
+                                            normalizedName: "waitforagents",
+                                            icon: "hourglass",
+                                            iconColor: .tronTeal,
+                                            displayName: "Wait For Agents",
+                                            summary: data.resultPreview ?? "",
+                                            status: data.status == .error ? .error : .success,
+                                            durationMs: data.durationMs,
+                                            arguments: "",
+                                            result: data.fullResult,
+                                            isResultTruncated: false
+                                        ))
+                                    case .memoryUpdated(let title, let entryType, let eventId):
+                                        sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId, eventId: eventId)
+                                    case .subagentResult(let sid):
+                                        viewModel.subagentState.showDetails(for: sid)
+                                    case .providerError(let data):
+                                        sheetCoordinator.showProviderErrorDetail(data)
                                     }
-                                },
-                                onTaskManagerTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showTaskDetail(data)
-                                },
-                                onNotifyAppTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showNotifyApp(data)
-                                },
-                                onCommandToolTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showCommandToolDetail(data)
-                                },
-                                onQueryAgentTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showCommandToolDetail(CommandToolChipData(
-                                        id: data.toolCallId,
-                                        toolName: "QueryAgent",
-                                        normalizedName: "queryagent",
-                                        icon: data.queryType.icon,
-                                        iconColor: .tronIndigo,
-                                        displayName: "Query Agent (\(data.queryType.displayName))",
-                                        summary: data.resultPreview ?? "",
-                                        status: data.status == .error ? .error : .success,
-                                        durationMs: data.durationMs,
-                                        arguments: "",
-                                        result: data.fullResult,
-                                        isResultTruncated: false
-                                    ))
-                                },
-                                onWaitForAgentsTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showCommandToolDetail(CommandToolChipData(
-                                        id: data.toolCallId,
-                                        toolName: "WaitForAgents",
-                                        normalizedName: "waitforagents",
-                                        icon: "hourglass",
-                                        iconColor: .tronTeal,
-                                        displayName: "Wait For Agents",
-                                        summary: data.resultPreview ?? "",
-                                        status: data.status == .error ? .error : .success,
-                                        durationMs: data.durationMs,
-                                        arguments: "",
-                                        result: data.fullResult,
-                                        isResultTruncated: false
-                                    ))
-                                },
-                                onMemoryUpdatedTap: { [sheetCoordinator, sessionId] title, entryType, eventId in
-                                    sheetCoordinator.showMemoryDetail(title: title, entryType: entryType, sessionId: sessionId, eventId: eventId)
-                                },
-                                onSubagentResultTap: { sessionId in
-                                    viewModel.subagentState.showDetails(for: sessionId)
-                                },
-                                onProviderErrorTap: { [sheetCoordinator] data in
-                                    sheetCoordinator.showProviderErrorDetail(data)
                                 }
                             )
                             .id(message.id)

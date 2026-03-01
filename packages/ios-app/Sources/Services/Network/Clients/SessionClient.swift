@@ -4,7 +4,7 @@ import Foundation
 /// Handles session creation, listing, resumption, deletion, and forking.
 @MainActor
 final class SessionClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -16,7 +16,6 @@ final class SessionClient {
         workingDirectory: String,
         model: String? = nil
     ) async throws -> SessionCreateResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = SessionCreateParams(
@@ -43,7 +42,6 @@ final class SessionClient {
         offset: Int = 0,
         includeArchived: Bool = false
     ) async throws -> SessionListResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = SessionListParams(
@@ -67,7 +65,6 @@ final class SessionClient {
     }
 
     func resume(sessionId: String) async throws {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = SessionResumeParams(sessionId: sessionId)
@@ -82,7 +79,6 @@ final class SessionClient {
     }
 
     func archive(_ sessionId: String) async throws {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = SessionArchiveParams(sessionId: sessionId)
@@ -95,7 +91,6 @@ final class SessionClient {
     }
 
     func unarchive(_ sessionId: String) async throws {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = SessionUnarchiveParams(sessionId: sessionId)
@@ -105,7 +100,6 @@ final class SessionClient {
     }
 
     func getHistory(limit: Int = 100) async throws -> [HistoryMessage] {
-        guard let transport else { throw RPCClientError.noActiveSession }
         let (ws, sessionId) = try transport.requireSession()
 
         let params = SessionHistoryParams(
@@ -123,10 +117,6 @@ final class SessionClient {
     }
 
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
-        guard let transport else {
-            logger.error("[FORK] Cannot fork - WebSocket not connected", category: .session)
-            throw RPCClientError.connectionNotEstablished
-        }
         let ws = try transport.requireConnection()
 
         let params = SessionForkParams(sessionId: sessionId, fromEventId: fromEventId)

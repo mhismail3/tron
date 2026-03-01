@@ -33,11 +33,8 @@ struct SessionSidebar: View {
     let onNewSession: () -> Void
     var onNewSessionLongPress: (() -> Void)? = nil
     let onDeleteSession: (String) -> Void
-    let onSettings: () -> Void
     let onVoiceNote: () -> Void
-    var onNavigationModeChange: ((NavigationMode) -> Void)?
-    var notificationUnreadCount: Int = 0
-    var onNotificationBell: (() -> Void)? = nil
+    let actions: DashboardToolbarActions
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -109,7 +106,7 @@ struct SessionSidebar: View {
                 Menu {
                     ForEach(NavigationMode.allCases, id: \.self) { mode in
                         Button {
-                            onNavigationModeChange?(mode)
+                            actions.onNavigationModeChange(mode)
                         } label: {
                             Label(mode.rawValue, systemImage: mode.icon)
                         }
@@ -131,22 +128,22 @@ struct SessionSidebar: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 20) {
-                    if notificationUnreadCount > 0 {
+                    if actions.notificationUnreadCount > 0 {
                         NotificationBellButton(
-                            unreadCount: notificationUnreadCount,
+                            unreadCount: actions.notificationUnreadCount,
                             accent: .tronEmerald,
-                            action: { onNotificationBell?() }
+                            action: { actions.onNotificationBell() }
                         )
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
-                    Button(action: onSettings) {
+                    Button(action: actions.onSettings) {
                         Image(systemName: "gearshape")
                             .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                             .foregroundStyle(.tronEmerald)
                             .padding(.horizontal, 4)
                     }
                 }
-                .animation(.spring(duration: 0.35, bounce: 0.3), value: notificationUnreadCount > 0)
+                .animation(.spring(duration: 0.35, bounce: 0.3), value: actions.notificationUnreadCount > 0)
             }
         }
     }

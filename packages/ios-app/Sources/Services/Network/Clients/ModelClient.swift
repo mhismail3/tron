@@ -12,7 +12,7 @@ protocol ModelClientProtocol {
 /// Handles model switching and listing with caching.
 @MainActor
 final class ModelClient: ModelClientProtocol {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     // Model list cache (5-minute TTL to reduce redundant server calls)
     private var modelCache: [ModelInfo]?
@@ -26,7 +26,6 @@ final class ModelClient: ModelClientProtocol {
     // MARK: - Model Methods
 
     func switchModel(_ sessionId: String, model: String) async throws -> ModelSwitchResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = ModelSwitchParams(sessionId: sessionId, model: model)
@@ -54,7 +53,6 @@ final class ModelClient: ModelClientProtocol {
             return cached
         }
 
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let result: ModelListResult = try await ws.send(

@@ -3,7 +3,7 @@ import Foundation
 /// Client for notification inbox RPC methods.
 @MainActor
 final class NotificationClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -11,7 +11,6 @@ final class NotificationClient {
 
     /// List recent notifications with read state.
     func listNotifications(limit: Int = 50) async throws -> NotificationListResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = NotificationListParams(limit: limit)
         return try await ws.send(method: "notifications.list", params: params)
@@ -19,7 +18,6 @@ final class NotificationClient {
 
     /// Mark a single notification as read.
     func markRead(eventId: String) async throws -> NotificationMarkReadResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         let params = NotificationMarkReadParams(eventId: eventId)
         return try await ws.send(method: "notifications.markRead", params: params)
@@ -27,7 +25,6 @@ final class NotificationClient {
 
     /// Mark all unread notifications as read.
     func markAllRead() async throws -> NotificationMarkAllReadResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
         return try await ws.send(method: "notifications.markAllRead", params: EmptyParams())
     }

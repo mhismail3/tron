@@ -4,7 +4,7 @@ import Foundation
 /// Handles context snapshots, clearing, and compaction.
 @MainActor
 final class ContextClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -14,7 +14,6 @@ final class ContextClient {
 
     /// Get context snapshot for a session
     func getSnapshot(sessionId: String) async throws -> ContextSnapshotResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = ContextGetSnapshotParams(sessionId: sessionId)
@@ -26,7 +25,6 @@ final class ContextClient {
 
     /// Get detailed context snapshot with per-message token breakdown
     func getDetailedSnapshot(sessionId: String) async throws -> DetailedContextSnapshotResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = ContextGetSnapshotParams(sessionId: sessionId)
@@ -38,7 +36,6 @@ final class ContextClient {
 
     /// Clear all messages from context, preserving system prompt and tools
     func clear(sessionId: String) async throws -> ContextClearResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = ContextClearParams(sessionId: sessionId)
@@ -50,7 +47,6 @@ final class ContextClient {
 
     /// Compact context by summarizing older messages
     func compact(sessionId: String) async throws -> ContextCompactResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = ContextCompactParams(sessionId: sessionId)

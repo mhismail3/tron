@@ -4,7 +4,7 @@ import Foundation
 /// Handles event history retrieval, incremental sync, and ancestor traversal.
 @MainActor
 final class EventSyncClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -19,7 +19,6 @@ final class EventSyncClient {
         limit: Int? = nil,
         beforeEventId: String? = nil
     ) async throws -> EventsGetHistoryResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = EventsGetHistoryParams(
@@ -40,7 +39,6 @@ final class EventSyncClient {
         afterTimestamp: String? = nil,
         limit: Int? = nil
     ) async throws -> EventsGetSinceResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = EventsGetSinceParams(
@@ -79,7 +77,6 @@ final class EventSyncClient {
 
     /// Get ancestor events for an event (traverses across session boundaries via parent_id chain)
     func getAncestors(_ eventId: String) async throws -> [RawEvent] {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = TreeGetAncestorsParams(eventId: eventId)

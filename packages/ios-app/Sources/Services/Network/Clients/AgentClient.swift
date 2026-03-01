@@ -4,7 +4,7 @@ import Foundation
 /// Handles prompts, abort, state queries, and tool results.
 @MainActor
 final class AgentClient {
-    private weak var transport: RPCTransport?
+    private unowned let transport: RPCTransport
 
     init(transport: RPCTransport) {
         self.transport = transport
@@ -20,7 +20,6 @@ final class AgentClient {
         skills: [Skill]? = nil,
         spells: [Skill]? = nil
     ) async throws {
-        guard let transport else { throw RPCClientError.noActiveSession }
         let (ws, sessionId) = try transport.requireSession()
 
         let params = AgentPromptParams(
@@ -44,7 +43,6 @@ final class AgentClient {
     }
 
     func abort() async throws {
-        guard let transport else { return }
         guard let (ws, sessionId) = try? transport.requireSession() else { return }
 
         let params = AgentAbortParams(sessionId: sessionId)
@@ -53,7 +51,6 @@ final class AgentClient {
     }
 
     func getState() async throws -> AgentStateResult {
-        guard let transport else { throw RPCClientError.noActiveSession }
         let (ws, sessionId) = try transport.requireSession()
 
         let params = AgentStateParams(sessionId: sessionId)
@@ -62,7 +59,6 @@ final class AgentClient {
 
     /// Get agent state for a specific session (used for dashboard polling)
     func getState(sessionId: String) async throws -> AgentStateResult {
-        guard let transport else { throw RPCClientError.connectionNotEstablished }
         let ws = try transport.requireConnection()
 
         let params = AgentStateParams(sessionId: sessionId)
@@ -74,10 +70,6 @@ final class AgentClient {
     /// Send a tool result for interactive tools like AskUserQuestion.
     /// This unblocks the agent which is waiting for user input.
     func sendToolResult(sessionId: String, toolCallId: String, result: AskUserQuestionResult) async throws {
-        guard let transport else {
-            logger.error("[TOOL_RESULT] Cannot send tool result - WebSocket not connected", category: .session)
-            throw RPCClientError.connectionNotEstablished
-        }
         let ws = try transport.requireConnection()
 
         let params = ToolResultParams(sessionId: sessionId, toolCallId: toolCallId, result: result)

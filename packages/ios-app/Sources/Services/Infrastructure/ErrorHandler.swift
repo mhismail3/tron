@@ -126,34 +126,6 @@ final class ErrorHandler {
         showError = false
     }
 
-    /// Wrap an async throwing operation with error handling.
-    /// Context is required to ensure meaningful error messages.
-    func withErrorHandling<T>(
-        context: String,
-        operation: () async throws -> T
-    ) async -> T? {
-        do {
-            return try await operation()
-        } catch {
-            handle(error, context: context)
-            return nil
-        }
-    }
-
-    /// Wrap a throwing operation with error handling (non-async).
-    /// Context is required to ensure meaningful error messages.
-    func withErrorHandling<T>(
-        context: String,
-        operation: () throws -> T
-    ) -> T? {
-        do {
-            return try operation()
-        } catch {
-            handle(error, context: context)
-            return nil
-        }
-    }
-
     /// Log an error silently without showing to user.
     /// Context is required to ensure meaningful error messages.
     func logError(_ error: Error, context: String) {

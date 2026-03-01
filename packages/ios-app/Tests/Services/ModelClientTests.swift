@@ -6,18 +6,6 @@ import Foundation
 @Suite("ModelClient Tests")
 struct ModelClientTests {
 
-    @Test("switchModel throws when transport is nil")
-    func switchModelNoTransport() async {
-        let client: ModelClient = {
-            let transport = MockRPCTransport()
-            return ModelClient(transport: transport)
-        }()
-
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.switchModel("test-session", model: "claude-sonnet-4-20250514")
-        }
-    }
-
     @Test("switchModel throws when webSocket is nil")
     func switchModelNoConnection() async {
         let transport = MockRPCTransport()
@@ -26,18 +14,6 @@ struct ModelClientTests {
 
         await #expect(throws: RPCClientError.self) {
             _ = try await client.switchModel("test-session", model: "claude-sonnet-4-20250514")
-        }
-    }
-
-    @Test("list throws when transport is nil")
-    func listNoTransport() async {
-        let client: ModelClient = {
-            let transport = MockRPCTransport()
-            return ModelClient(transport: transport)
-        }()
-
-        await #expect(throws: RPCClientError.self) {
-            _ = try await client.list()
         }
     }
 

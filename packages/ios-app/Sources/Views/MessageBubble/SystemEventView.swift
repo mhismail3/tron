@@ -5,10 +5,7 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct SystemEventView: View {
     let event: SystemEvent
-    var onCompactionTap: ((Int, Int, String, String?) -> Void)?
-    var onMemoryUpdatedTap: ((String, String, String?) -> Void)?
-    var onSubagentResultTap: ((String) -> Void)?
-    var onProviderErrorTap: ((ProviderErrorDetailData) -> Void)?
+    var onTap: ((MessageBubbleTapAction) -> Void)?
 
     var body: some View {
         // Memory updating/updated share a single view for smooth in-place animation
@@ -30,7 +27,7 @@ struct SystemEventView: View {
             title: title,
             entryType: entryType,
             onTap: isInProgress ? nil : {
-                onMemoryUpdatedTap?(title, entryType, eventId)
+                onTap?(.memoryUpdated(title: title, entryType: entryType, eventId: eventId))
             }
         )
     }
@@ -62,7 +59,7 @@ struct SystemEventView: View {
                 tokensAfter: tokensAfter,
                 reason: reason,
                 onTap: {
-                    onCompactionTap?(tokensBefore, tokensAfter, reason, summary)
+                    onTap?(.compaction(tokensBefore: tokensBefore, tokensAfter: tokensAfter, reason: reason, summary: summary))
                 }
             )
 
@@ -93,7 +90,7 @@ struct SystemEventView: View {
                 taskPreview: taskPreview,
                 success: success,
                 onTap: {
-                    onSubagentResultTap?(subagentSessionId)
+                    onTap?(.subagentResult(sessionId: subagentSessionId))
                 }
             )
 
@@ -104,7 +101,7 @@ struct SystemEventView: View {
             ProviderErrorNotificationView(
                 data: data,
                 onTap: {
-                    onProviderErrorTap?(data)
+                    onTap?(.providerError(data))
                 }
             )
 

@@ -75,8 +75,7 @@ final class ChatViewModel: ChatEventContext {
     /// Input bar state (text, attachments, skills, reasoning level)
     let inputBarState = InputBarState()
     /// Model picker state (cached models, optimistic updates, switching)
-    /// Note: Initialized lazily in init since it depends on rpcClient.model
-    private(set) var modelPickerState: ModelPickerState!
+    let modelPickerState: ModelPickerState
 
     // MARK: - Protocol Conformance (ChatEventContext)
     // These are thin wrappers for protocol conformance only

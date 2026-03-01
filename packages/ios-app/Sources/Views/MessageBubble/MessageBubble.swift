@@ -4,21 +4,7 @@ import SwiftUI
 
 struct MessageBubble: View {
     let message: ChatMessage
-    var onSkillTap: ((Skill) -> Void)?
-    var onSpellTap: ((Skill) -> Void)?
-    var onAskUserQuestionTap: ((AskUserQuestionToolData) -> Void)?
-    var onThinkingTap: ((String) -> Void)?
-    var onCompactionTap: ((Int, Int, String, String?) -> Void)?
-    var onSubagentTap: ((SubagentToolData) -> Void)?
-    var onRenderAppUITap: ((RenderAppUIChipData) -> Void)?
-    var onTaskManagerTap: ((TaskManagerChipData) -> Void)?
-    var onNotifyAppTap: ((NotifyAppChipData) -> Void)?
-    var onCommandToolTap: ((CommandToolChipData) -> Void)?
-    var onQueryAgentTap: ((QueryAgentChipData) -> Void)?
-    var onWaitForAgentsTap: ((WaitForAgentsChipData) -> Void)?
-    var onMemoryUpdatedTap: ((String, String, String?) -> Void)?
-    var onSubagentResultTap: ((String) -> Void)?
-    var onProviderErrorTap: ((ProviderErrorDetailData) -> Void)?
+    var onTap: ((MessageBubbleTapAction) -> Void)?
 
     private var isUserMessage: Bool {
         message.role == .user
@@ -42,14 +28,14 @@ struct MessageBubble: View {
             if let skills = message.skills, !skills.isEmpty {
                 if #available(iOS 26.0, *) {
                     MessageSkillChips(skills: skills) { skill in
-                        onSkillTap?(skill)
+                        onTap?(.skill(skill))
                     }
                 } else {
                     // Fallback for older iOS
                     HStack(spacing: 6) {
                         ForEach(skills) { skill in
                             SkillChipFallback(skill: skill) {
-                                onSkillTap?(skill)
+                                onTap?(.skill(skill))
                             }
                         }
                     }
@@ -60,14 +46,14 @@ struct MessageBubble: View {
             if let spells = message.spells, !spells.isEmpty {
                 if #available(iOS 26.0, *) {
                     MessageSpellChips(spells: spells) { spell in
-                        onSpellTap?(spell)
+                        onTap?(.spell(spell))
                     }
                 } else {
                     // Fallback for older iOS
                     HStack(spacing: 6) {
                         ForEach(spells) { spell in
                             SkillChipFallback(skill: spell, mode: .spell) {
-                                onSpellTap?(spell)
+                                onTap?(.spell(spell))
                             }
                         }
                     }
@@ -104,7 +90,7 @@ struct MessageBubble: View {
 
         case .thinking(let visible, let isExpanded, let isStreaming):
             ThinkingContentView(content: visible, isExpanded: isExpanded, isStreaming: isStreaming) {
-                onThinkingTap?(visible)
+                onTap?(.thinking(visible))
             }
 
         case .toolUse(let tool):
@@ -115,11 +101,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseSpawnSubagent(from: tool) {
                     if #available(iOS 26.0, *) {
                         SubagentChip(data: chipData) {
-                            onSubagentTap?(chipData)
+                            onTap?(.subagent(chipData))
                         }
                     } else {
                         SubagentChipFallback(data: chipData) {
-                            onSubagentTap?(chipData)
+                            onTap?(.subagent(chipData))
                         }
                     }
                 } else {
@@ -131,11 +117,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseWaitForSubagent(from: tool) {
                     if #available(iOS 26.0, *) {
                         SubagentChip(data: chipData) {
-                            onSubagentTap?(chipData)
+                            onTap?(.subagent(chipData))
                         }
                     } else {
                         SubagentChipFallback(data: chipData) {
-                            onSubagentTap?(chipData)
+                            onTap?(.subagent(chipData))
                         }
                     }
                 } else {
@@ -147,11 +133,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseRenderAppUI(from: tool) {
                     if #available(iOS 26.0, *) {
                         RenderAppUIChip(data: chipData) {
-                            onRenderAppUITap?(chipData)
+                            onTap?(.renderAppUI(chipData))
                         }
                     } else {
                         RenderAppUIChipFallback(data: chipData) {
-                            onRenderAppUITap?(chipData)
+                            onTap?(.renderAppUI(chipData))
                         }
                     }
                 } else {
@@ -163,11 +149,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseTaskManager(from: tool) {
                     if #available(iOS 26.0, *) {
                         TaskManagerChip(data: chipData) {
-                            onTaskManagerTap?(chipData)
+                            onTap?(.taskManager(chipData))
                         }
                     } else {
                         TaskManagerChipFallback(data: chipData) {
-                            onTaskManagerTap?(chipData)
+                            onTap?(.taskManager(chipData))
                         }
                     }
                 } else {
@@ -179,11 +165,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseNotifyApp(from: tool) {
                     if #available(iOS 26.0, *) {
                         NotifyAppChip(data: chipData) {
-                            onNotifyAppTap?(chipData)
+                            onTap?(.notifyApp(chipData))
                         }
                     } else {
                         NotifyAppChipFallback(data: chipData) {
-                            onNotifyAppTap?(chipData)
+                            onTap?(.notifyApp(chipData))
                         }
                     }
                 } else {
@@ -194,11 +180,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseQueryAgent(from: tool) {
                     if #available(iOS 26.0, *) {
                         QueryAgentChip(data: chipData) {
-                            onQueryAgentTap?(chipData)
+                            onTap?(.queryAgent(chipData))
                         }
                     } else {
                         QueryAgentChipFallback(data: chipData) {
-                            onQueryAgentTap?(chipData)
+                            onTap?(.queryAgent(chipData))
                         }
                     }
                 } else {
@@ -208,11 +194,11 @@ struct MessageBubble: View {
                 if let chipData = ToolResultParser.parseWaitForAgents(from: tool) {
                     if #available(iOS 26.0, *) {
                         WaitForAgentsChip(data: chipData) {
-                            onWaitForAgentsTap?(chipData)
+                            onTap?(.waitForAgents(chipData))
                         }
                     } else {
                         WaitForAgentsChipFallback(data: chipData) {
-                            onWaitForAgentsTap?(chipData)
+                            onTap?(.waitForAgents(chipData))
                         }
                     }
                 } else {
@@ -226,11 +212,11 @@ struct MessageBubble: View {
                 let chipData = CommandToolChipData(from: tool)
                 if #available(iOS 26.0, *) {
                     CommandToolChip(data: chipData) {
-                        onCommandToolTap?(chipData)
+                        onTap?(.commandTool(chipData))
                     }
                 } else {
                     CommandToolChipFallback(data: chipData) {
-                        onCommandToolTap?(chipData)
+                        onTap?(.commandTool(chipData))
                     }
                 }
             }
@@ -250,13 +236,7 @@ struct MessageBubble: View {
 
         case .systemEvent(let event):
             if #available(iOS 26.0, *) {
-                SystemEventView(
-                    event: event,
-                    onCompactionTap: onCompactionTap,
-                    onMemoryUpdatedTap: onMemoryUpdatedTap,
-                    onSubagentResultTap: onSubagentResultTap,
-                    onProviderErrorTap: onProviderErrorTap
-                )
+                SystemEventView(event: event, onTap: onTap)
             } else {
                 // Fallback without subagent result notification for older iOS
                 Text(event.textContent)
@@ -267,7 +247,7 @@ struct MessageBubble: View {
         case .askUserQuestion(let data):
             if #available(iOS 26.0, *) {
                 AskUserQuestionToolViewer(data: data) {
-                    onAskUserQuestionTap?(data)
+                    onTap?(.askUserQuestion(data))
                 }
             } else {
                 // Fallback for older iOS
@@ -280,22 +260,22 @@ struct MessageBubble: View {
         case .subagent(let data):
             if #available(iOS 26.0, *) {
                 SubagentChip(data: data) {
-                    onSubagentTap?(data)
+                    onTap?(.subagent(data))
                 }
             } else {
                 SubagentChipFallback(data: data) {
-                    onSubagentTap?(data)
+                    onTap?(.subagent(data))
                 }
             }
 
         case .renderAppUI(let data):
             if #available(iOS 26.0, *) {
                 RenderAppUIChip(data: data) {
-                    onRenderAppUITap?(data)
+                    onTap?(.renderAppUI(data))
                 }
             } else {
                 RenderAppUIChipFallback(data: data) {
-                    onRenderAppUITap?(data)
+                    onTap?(.renderAppUI(data))
                 }
             }
         }
