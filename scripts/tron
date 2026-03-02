@@ -484,12 +484,17 @@ cmd_dev() {
 
     local do_build=false
     local do_test=false
+    local do_background=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -b|--build)   do_build=true; shift ;;
             -t|--test)    do_test=true; shift ;;
+            -d|--background) do_background=true; shift ;;
             -bt|-tb)      do_build=true; do_test=true; shift ;;
+            -bd|-db)      do_build=true; do_background=true; shift ;;
+            -btd|-bdt|-tbd|-tdb|-dbt|-dtb) do_build=true; do_test=true; do_background=true; shift ;;
+            -td|-dt)      do_test=true; do_background=true; shift ;;
             --stop)       dev_stop; return ;;
             --log|--logs) dev_tail_log; return ;;
             -h|--help)
@@ -502,15 +507,18 @@ cmd_dev() {
                 echo "Usage: tron dev [options]"
                 echo ""
                 echo "Options:"
-                echo "  -b, --build     Build before starting"
-                echo "  -t, --test      Run tests before starting"
-                echo "  --stop          Stop dev server and restart production"
-                echo "  --log           Tail the server log"
+                echo "  -b, --build       Build before starting"
+                echo "  -t, --test        Run tests before starting"
+                echo "  -d, --background  Run in background (log to server.log)"
+                echo "  --stop            Stop dev server and restart production"
+                echo "  --log             Tail the server log"
                 echo ""
                 echo "Examples:"
                 echo "  tron dev          # Take over prod port (cargo run, auto-builds)"
                 echo "  tron dev -b       # Explicit build then start"
                 echo "  tron dev -bt      # Build, test, then start"
+                echo "  tron dev -bd      # Build then start in background"
+                echo "  tron dev -btd     # Build, test, then start in background"
                 echo "  tron dev --stop   # Stop dev, restart production"
                 echo ""
                 echo "Note: kill -9 bypasses the cleanup trap. Use 'tron start' to"
@@ -535,7 +543,11 @@ cmd_dev() {
         fi
     fi
 
-    dev_start_foreground
+    if [ "$do_background" = true ]; then
+        dev_start_background
+    else
+        dev_start_foreground
+    fi
 }
 
 dev_start_foreground() {
@@ -573,6 +585,57 @@ dev_start_foreground() {
     RUST_LOG="${RUST_LOG:-debug}" cargo run --release \
         --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
         --bin tron -- --port "$PROD_PORT"
+}
+
+dev_start_background() {
+    # Stop prod service for takeover
+    if service_is_running; then
+        print_status "Stopping production service for dev takeover..."
+        launchctl unload "$PLIST_PATH" 2>/dev/null || true
+        sleep 1
+    fi
+
+    # Verify port is free
+    local existing_pid
+    existing_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$existing_pid" ]; then
+        print_error "Port $PROD_PORT still in use (PID: $existing_pid)"
+        print_status "Restarting production service..."
+        if ensure_prod_binary; then
+            launchctl load "$PLIST_PATH" 2>/dev/null || true
+        fi
+        return 1
+    fi
+
+    local log_file="$DEPLOY_DIR/dev-server.log"
+
+    RUST_LOG="${RUST_LOG:-debug}" cargo run --release \
+        --manifest-path "$RUST_WORKSPACE/Cargo.toml" \
+        --bin tron -- --port "$PROD_PORT" \
+        > "$log_file" 2>&1 &
+
+    local pid=$!
+    sleep 2
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo ""
+        echo -e "${CYAN}Tron Dev Server (background)${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Server:  http://localhost:$PROD_PORT"
+        echo "  PID:     $pid"
+        echo "  Log:     $log_file"
+        echo ""
+        echo -e "${YELLOW}Use 'tron dev --stop' to stop and restart prod.${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    else
+        print_error "Dev server failed to start. Check log: $log_file"
+        print_status "Restarting production service..."
+        if ensure_prod_binary; then
+            launchctl load "$PLIST_PATH" 2>/dev/null || true
+            print_success "Production service restarted"
+        fi
+        return 1
+    fi
 }
 
 dev_stop() {
