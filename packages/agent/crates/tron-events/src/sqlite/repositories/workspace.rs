@@ -163,6 +163,35 @@ impl WorkspaceRepo {
         )?;
         Ok(exists)
     }
+
+    /// Find all workspaces whose path matches the given prefix.
+    ///
+    /// Returns exact match + children (paths starting with `prefix/`).
+    /// Excludes siblings that share a common prefix but diverge at a non-`/` boundary
+    /// (e.g., prefix `/tmp/proj` matches `/tmp/proj/sub` but NOT `/tmp/projOther`).
+    pub fn find_by_path_prefix(conn: &Connection, prefix: &str) -> Result<Vec<WorkspaceRow>> {
+        let like_pattern = format!("{prefix}/%");
+        let mut stmt = conn.prepare(
+            "SELECT w.id, w.path, w.name, w.created_at, w.last_activity_at,
+                    (SELECT COUNT(*) FROM sessions WHERE workspace_id = w.id) as session_count
+             FROM workspaces w
+             WHERE w.path = ?1 OR w.path LIKE ?2
+             ORDER BY w.last_activity_at DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![prefix, like_pattern], |row| {
+                Ok(WorkspaceRow {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    name: row.get(2)?,
+                    created_at: row.get(3)?,
+                    last_activity_at: row.get(4)?,
+                    session_count: row.get(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -448,6 +477,88 @@ mod tests {
         .unwrap();
 
         assert_eq!(WorkspaceRepo::count(&conn).unwrap(), 2);
+    }
+
+    // ── find_by_path_prefix ─────────────────────────────────────────
+
+    #[test]
+    fn find_by_path_prefix_exact_match() {
+        let conn = setup();
+        let ws = WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/tmp/proj", name: None },
+        ).unwrap();
+
+        let results = WorkspaceRepo::find_by_path_prefix(&conn, "/tmp/proj").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, ws.id);
+    }
+
+    #[test]
+    fn find_by_path_prefix_includes_children() {
+        let conn = setup();
+        let ws1 = WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/tmp/proj", name: None },
+        ).unwrap();
+        let ws2 = WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/tmp/proj/sub", name: None },
+        ).unwrap();
+
+        let results = WorkspaceRepo::find_by_path_prefix(&conn, "/tmp/proj").unwrap();
+        assert_eq!(results.len(), 2);
+        let ids: Vec<&str> = results.iter().map(|w| w.id.as_str()).collect();
+        assert!(ids.contains(&ws1.id.as_str()));
+        assert!(ids.contains(&ws2.id.as_str()));
+    }
+
+    #[test]
+    fn find_by_path_prefix_excludes_sibling() {
+        let conn = setup();
+        let ws1 = WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/tmp/proj", name: None },
+        ).unwrap();
+        WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/tmp/projOther", name: None },
+        ).unwrap();
+
+        let results = WorkspaceRepo::find_by_path_prefix(&conn, "/tmp/proj").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, ws1.id);
+    }
+
+    #[test]
+    fn find_by_path_prefix_no_match() {
+        let conn = setup();
+        let results = WorkspaceRepo::find_by_path_prefix(&conn, "/nonexistent").unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn find_by_path_prefix_multiple_children() {
+        let conn = setup();
+        WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/a", name: None },
+        ).unwrap();
+        WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/a/b", name: None },
+        ).unwrap();
+        WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/a/b/c", name: None },
+        ).unwrap();
+        WorkspaceRepo::create(
+            &conn,
+            &CreateWorkspaceOptions { path: "/a/d", name: None },
+        ).unwrap();
+
+        let results = WorkspaceRepo::find_by_path_prefix(&conn, "/a").unwrap();
+        assert_eq!(results.len(), 4);
     }
 
     #[test]
