@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Search event content using FTS5.
@@ -18,17 +18,14 @@ impl MethodHandler for ContentSearchHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let query = require_string_param(params.as_ref(), "query")?;
 
-        let session_id = params
-            .as_ref()
-            .and_then(|p| p.get("sessionId"))
-            .and_then(Value::as_str);
+        let session_id = opt_string(params.as_ref(), "sessionId");
 
         let limit = params
             .as_ref()
             .and_then(|p| p.get("limit"))
             .and_then(Value::as_i64);
 
-        let results = if let Some(sid) = session_id {
+        let results = if let Some(sid) = session_id.as_deref() {
             ctx.event_store
                 .search_in_session(sid, &query, limit)
                 .map_err(|e| RpcError::Internal {
@@ -75,17 +72,14 @@ impl MethodHandler for EventSearchHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let query = require_string_param(params.as_ref(), "query")?;
 
-        let session_id = params
-            .as_ref()
-            .and_then(|p| p.get("sessionId"))
-            .and_then(Value::as_str);
+        let session_id = opt_string(params.as_ref(), "sessionId");
 
         let limit = params
             .as_ref()
             .and_then(|p| p.get("limit"))
             .and_then(Value::as_i64);
 
-        let results = if let Some(sid) = session_id {
+        let results = if let Some(sid) = session_id.as_deref() {
             ctx.event_store
                 .search_in_session(sid, &query, limit)
                 .map_err(|e| RpcError::Internal {

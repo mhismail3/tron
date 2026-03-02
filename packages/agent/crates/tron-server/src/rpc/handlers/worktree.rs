@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Get worktree status for a session.
@@ -171,11 +171,8 @@ impl MethodHandler for MergeHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.merge"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let target_branch = params
-            .as_ref()
-            .and_then(|p| p.get("targetBranch"))
-            .and_then(Value::as_str)
-            .unwrap_or("main");
+        let target_branch = opt_string(params.as_ref(), "targetBranch");
+        let target_branch = target_branch.as_deref().unwrap_or("main");
 
         let dir = get_worktree_dir(ctx, &session_id)?;
 

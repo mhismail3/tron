@@ -4,7 +4,7 @@
 //! run but never cause the run itself to be retried.
 
 use crate::executor::ExecutorDeps;
-use crate::types::{CronJob, CronRun, Delivery};
+use crate::types::{CronJob, CronRun, Delivery, DeliveryOutcome};
 
 /// Deliver run results through all configured delivery modes.
 pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
@@ -14,7 +14,7 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
         job.delivery.clone()
     };
 
-    let mut statuses = Vec::new();
+    let mut statuses: Vec<DeliveryOutcome> = Vec::new();
     for mode in &delivery_modes {
         let result = match mode {
             Delivery::Silent => Ok(()),
@@ -25,7 +25,7 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
             }
         };
         match result {
-            Ok(()) => statuses.push("ok"),
+            Ok(()) => statuses.push(DeliveryOutcome::Ok),
             Err(e) => {
                 tracing::warn!(
                     job_id = %job.id,
@@ -33,19 +33,19 @@ pub async fn deliver(job: &CronJob, run: &CronRun, deps: &ExecutorDeps) {
                     error = %e,
                     "delivery failed"
                 );
-                statuses.push("failed");
+                statuses.push(DeliveryOutcome::Failed);
             }
         }
     }
 
-    let overall = if statuses.iter().all(|s| *s == "ok") {
-        "ok"
-    } else if statuses.iter().any(|s| *s == "ok") {
-        "partial"
+    let overall = if statuses.iter().all(|s| *s == DeliveryOutcome::Ok) {
+        DeliveryOutcome::Ok
+    } else if statuses.iter().any(|s| *s == DeliveryOutcome::Ok) {
+        DeliveryOutcome::Partial
     } else {
-        "failed"
+        DeliveryOutcome::Failed
     };
-    let _ = crate::store::update_delivery_status(&deps.pool, &run.id, overall);
+    let _ = crate::store::update_delivery_status(&deps.pool, &run.id, &overall);
 }
 
 async fn deliver_ws(
@@ -268,7 +268,7 @@ mod tests {
         let deps = make_deps();
         // WebSocket delivery fails (no broadcaster), but Silent succeeds
         deliver(&job, &make_run(), &deps).await;
-        // delivery_status should be "partial" (if we check the DB)
+        // delivery_status should be Partial (if we check the DB)
     }
 
     #[tokio::test]

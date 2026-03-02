@@ -122,6 +122,13 @@ impl RpcError {
     }
 }
 
+/// Serialize a value to JSON, mapping errors to [`RpcError::Internal`].
+pub fn to_json_value<T: serde::Serialize>(val: &T) -> Result<serde_json::Value, RpcError> {
+    serde_json::to_value(val).map_err(|e| RpcError::Internal {
+        message: e.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

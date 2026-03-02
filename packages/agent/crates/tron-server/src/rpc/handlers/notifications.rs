@@ -12,7 +12,7 @@ use tracing::{instrument, warn};
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_u64, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 // ── notifications.list ──────────────────────────────────────────────
@@ -24,12 +24,7 @@ pub struct ListHandler;
 impl MethodHandler for ListHandler {
     #[instrument(skip(self, ctx), fields(method = "notifications.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(50)
-            .min(100);
+        let limit = opt_u64(params.as_ref(), "limit", 50).min(100);
 
         let conn = ctx.event_store.pool().get().map_err(|e| RpcError::Internal {
             message: format!("Failed to get DB connection: {e}"),

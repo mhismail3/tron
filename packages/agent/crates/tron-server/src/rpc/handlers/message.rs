@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Delete a message from a session.
@@ -19,14 +19,11 @@ impl MethodHandler for DeleteMessageHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let event_id = require_string_param(params.as_ref(), "targetEventId")?;
 
-        let reason = params
-            .as_ref()
-            .and_then(|p| p.get("reason"))
-            .and_then(Value::as_str);
+        let reason = opt_string(params.as_ref(), "reason");
 
         let deletion_event = ctx
             .event_store
-            .delete_message(&session_id, &event_id, reason)
+            .delete_message(&session_id, &event_id, reason.as_deref())
             .map_err(|e| {
                 let msg = e.to_string();
                 if msg.contains("not found") {
@@ -48,7 +45,7 @@ impl MethodHandler for DeleteMessageHandler {
                 target_event_id: event_id.clone(),
                 target_type: deletion_event.event_type.clone(),
                 target_turn: None,
-                reason: reason.map(String::from),
+                reason,
             });
 
         Ok(serde_json::json!({

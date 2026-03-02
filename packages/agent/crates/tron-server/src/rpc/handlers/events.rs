@@ -7,7 +7,7 @@ use tron_events::sqlite::row_types::EventRow;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::{require_param, require_string_param};
+use crate::rpc::handlers::{opt_array, opt_string, require_param, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Convert an `EventRow` to wire format (camelCase).
@@ -99,20 +99,13 @@ impl MethodHandler for GetHistoryHandler {
             .and_then(|p| p.get("limit"))
             .and_then(Value::as_i64);
 
-        let type_filter: Option<Vec<String>> = params
-            .as_ref()
-            .and_then(|p| p.get("types"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            });
+        let type_filter: Option<Vec<String>> = opt_array(params.as_ref(), "types").map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        });
 
-        let before_event_id = params
-            .as_ref()
-            .and_then(|p| p.get("beforeEventId"))
-            .and_then(Value::as_str);
+        let before_event_id = opt_string(params.as_ref(), "beforeEventId");
 
         let events = if let Some(ref types) = type_filter {
             let type_strs: Vec<&str> = types.iter().map(String::as_str).collect();
@@ -170,14 +163,10 @@ impl MethodHandler for GetSinceHandler {
 
         // Resolve cursor: prefer afterEventId, fall back to afterSequence
         // Default -1 so `sequence > -1` returns ALL events including session.start (seq 0)
-        let after_sequence = if let Some(event_id) = params
-            .as_ref()
-            .and_then(|p| p.get("afterEventId"))
-            .and_then(Value::as_str)
-        {
+        let after_sequence = if let Some(event_id) = opt_string(params.as_ref(), "afterEventId") {
             // Look up the event to get its sequence number
             ctx.event_store
-                .get_event(event_id)
+                .get_event(&event_id)
                 .map_err(|e| RpcError::Internal {
                     message: e.to_string(),
                 })?
@@ -264,10 +253,7 @@ impl MethodHandler for AppendHandler {
                     message: format!("Unknown event type: {event_type_str}"),
                 })?;
 
-        let parent_id = params
-            .as_ref()
-            .and_then(|p| p.get("parentId"))
-            .and_then(Value::as_str);
+        let parent_id = opt_string(params.as_ref(), "parentId");
 
         let event = ctx
             .event_store
@@ -275,7 +261,7 @@ impl MethodHandler for AppendHandler {
                 session_id: &session_id,
                 event_type,
                 payload: payload.clone(),
-                parent_id,
+                parent_id: parent_id.as_deref(),
             })
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),

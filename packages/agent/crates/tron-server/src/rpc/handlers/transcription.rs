@@ -10,6 +10,7 @@ use tron_transcription::TranscriptionResult;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
+use crate::rpc::handlers::opt_string;
 use crate::rpc::registry::MethodHandler;
 
 /// Maximum audio size in bytes (50 MB).
@@ -120,16 +121,14 @@ pub struct TranscribeAudioHandler;
 impl MethodHandler for TranscribeAudioHandler {
     #[instrument(skip(self, ctx), fields(method = "transcribe.audio"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let audio_base64 = params
-            .as_ref()
-            .and_then(|p| p.get("audioBase64"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| RpcError::InvalidParams {
+        let audio_base64 = opt_string(params.as_ref(), "audioBase64").ok_or_else(|| {
+            RpcError::InvalidParams {
                 message: "Missing required parameter: audioBase64".into(),
-            })?;
+            }
+        })?;
 
         // Strip data URI prefix if present (clients may send "data:audio/m4a;base64,...")
-        let audio_base64 = normalize_base64(audio_base64);
+        let audio_base64 = normalize_base64(&audio_base64);
 
         // Decode and validate size
         let audio_bytes = base64::engine::general_purpose::STANDARD
@@ -148,11 +147,8 @@ impl MethodHandler for TranscribeAudioHandler {
             });
         }
 
-        let mime_type = params
-            .as_ref()
-            .and_then(|p| p.get("mimeType"))
-            .and_then(Value::as_str)
-            .unwrap_or("audio/wav");
+        let mime_type = opt_string(params.as_ref(), "mimeType");
+        let mime_type = mime_type.as_deref().unwrap_or("audio/wav");
 
         let resp = transcribe_audio_full(ctx, &audio_bytes, mime_type).await?;
         serde_json::to_value(&resp).map_err(|e| RpcError::Internal {

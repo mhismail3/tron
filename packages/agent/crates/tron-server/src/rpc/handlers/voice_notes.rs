@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_u64, opt_string, require_string_param};
 use crate::rpc::handlers::transcription::{normalize_base64, transcribe_audio};
 use crate::rpc::registry::MethodHandler;
 
@@ -28,11 +28,8 @@ impl MethodHandler for SaveHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let audio_base64 = require_string_param(params.as_ref(), "audioBase64")?;
 
-        let mime_type = params
-            .as_ref()
-            .and_then(|p| p.get("mimeType"))
-            .and_then(Value::as_str)
-            .unwrap_or("audio/wav");
+        let mime_type_owned = opt_string(params.as_ref(), "mimeType");
+        let mime_type = mime_type_owned.as_deref().unwrap_or("audio/wav");
         let dir = notes_dir();
         let _ = std::fs::create_dir_all(&dir);
 
@@ -85,19 +82,8 @@ pub struct ListHandler;
 impl MethodHandler for ListHandler {
     #[instrument(skip(self, _ctx), fields(method = "voiceNotes.list"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(Value::as_u64)
-            .unwrap_or(50);
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-
-        let offset = params
-            .as_ref()
-            .and_then(|p| p.get("offset"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let offset = usize::try_from(offset).unwrap_or(0);
+        let limit = usize::try_from(opt_u64(params.as_ref(), "limit", 50)).unwrap_or(usize::MAX);
+        let offset = usize::try_from(opt_u64(params.as_ref(), "offset", 0)).unwrap_or(0);
 
         let dir = notes_dir();
         let mut notes = Vec::new();

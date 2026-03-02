@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 fn get_u32_param(params: Option<&Value>, key: &str, default: u32) -> u32 {
@@ -53,16 +53,8 @@ impl MethodHandler for CreateTaskHandler {
         let title = require_string_param(params.as_ref(), "title")?;
         let conn = get_task_conn(ctx)?;
 
-        let project_id = params
-            .as_ref()
-            .and_then(|p| p.get("projectId"))
-            .and_then(Value::as_str)
-            .map(String::from);
-        let description = params
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .and_then(Value::as_str)
-            .map(String::from);
+        let project_id = opt_string(params.as_ref(), "projectId");
+        let description = opt_string(params.as_ref(), "description");
 
         let task = tron_runtime::tasks::TaskService::create_task(
             &conn,
@@ -110,26 +102,14 @@ impl MethodHandler for UpdateTaskHandler {
 
         let mut updates = tron_runtime::tasks::TaskUpdateParams::default();
 
-        if let Some(title) = params
-            .as_ref()
-            .and_then(|p| p.get("title"))
-            .and_then(Value::as_str)
-        {
-            updates.title = Some(title.to_string());
+        if let Some(title) = opt_string(params.as_ref(), "title") {
+            updates.title = Some(title);
         }
-        if let Some(status_str) = params
-            .as_ref()
-            .and_then(|p| p.get("status"))
-            .and_then(Value::as_str)
-        {
-            updates.status = serde_json::from_value(Value::String(status_str.into())).ok();
+        if let Some(status_str) = opt_string(params.as_ref(), "status") {
+            updates.status = serde_json::from_value(Value::String(status_str)).ok();
         }
-        if let Some(desc) = params
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .and_then(Value::as_str)
-        {
-            updates.description = Some(desc.to_string());
+        if let Some(desc) = opt_string(params.as_ref(), "description") {
+            updates.description = Some(desc);
         }
 
         let task = tron_runtime::tasks::TaskService::update_task(&conn, &task_id, &updates, None)
@@ -148,20 +128,11 @@ impl MethodHandler for ListTasksHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let conn = get_task_conn(ctx)?;
 
-        let status_filter = params
-            .as_ref()
-            .and_then(|p| p.get("status"))
-            .and_then(Value::as_str)
-            .and_then(|s| {
-                serde_json::from_value::<tron_runtime::tasks::TaskStatus>(Value::String(s.into()))
-                    .ok()
-            });
+        let status_filter = opt_string(params.as_ref(), "status").and_then(|s| {
+            serde_json::from_value::<tron_runtime::tasks::TaskStatus>(Value::String(s)).ok()
+        });
 
-        let project_id = params
-            .as_ref()
-            .and_then(|p| p.get("projectId"))
-            .and_then(Value::as_str)
-            .map(String::from);
+        let project_id = opt_string(params.as_ref(), "projectId");
 
         let filter = tron_runtime::tasks::TaskFilter {
             status: status_filter,
@@ -250,16 +221,8 @@ impl MethodHandler for CreateProjectHandler {
         let title = require_string_param(params.as_ref(), "title")?;
         let conn = get_task_conn(ctx)?;
 
-        let description = params
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .and_then(Value::as_str)
-            .map(String::from);
-        let area_id = params
-            .as_ref()
-            .and_then(|p| p.get("areaId"))
-            .and_then(Value::as_str)
-            .map(String::from);
+        let description = opt_string(params.as_ref(), "description");
+        let area_id = opt_string(params.as_ref(), "areaId");
 
         let project = tron_runtime::tasks::TaskService::create_project(
             &conn,
@@ -337,19 +300,11 @@ impl MethodHandler for UpdateProjectHandler {
         let conn = get_task_conn(ctx)?;
 
         let mut updates = tron_runtime::tasks::ProjectUpdateParams::default();
-        if let Some(title) = params
-            .as_ref()
-            .and_then(|p| p.get("title"))
-            .and_then(Value::as_str)
-        {
-            updates.title = Some(title.to_string());
+        if let Some(title) = opt_string(params.as_ref(), "title") {
+            updates.title = Some(title);
         }
-        if let Some(desc) = params
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .and_then(Value::as_str)
-        {
-            updates.description = Some(desc.to_string());
+        if let Some(desc) = opt_string(params.as_ref(), "description") {
+            updates.description = Some(desc);
         }
 
         let project =
@@ -428,11 +383,7 @@ impl MethodHandler for CreateAreaHandler {
         let title = require_string_param(params.as_ref(), "title")?;
         let conn = get_task_conn(ctx)?;
 
-        let description = params
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .and_then(Value::as_str)
-            .map(String::from);
+        let description = opt_string(params.as_ref(), "description");
 
         let area = tron_runtime::tasks::TaskService::create_area(
             &conn,
@@ -510,19 +461,11 @@ impl MethodHandler for UpdateAreaHandler {
         let conn = get_task_conn(ctx)?;
 
         let mut updates = tron_runtime::tasks::AreaUpdateParams::default();
-        if let Some(title) = params
-            .as_ref()
-            .and_then(|p| p.get("title"))
-            .and_then(Value::as_str)
-        {
-            updates.title = Some(title.to_string());
+        if let Some(title) = opt_string(params.as_ref(), "title") {
+            updates.title = Some(title);
         }
-        if let Some(desc) = params
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .and_then(Value::as_str)
-        {
-            updates.description = Some(desc.to_string());
+        if let Some(desc) = opt_string(params.as_ref(), "description") {
+            updates.description = Some(desc);
         }
 
         let area = tron_runtime::tasks::TaskRepository::update_area(&conn, &area_id, &updates)

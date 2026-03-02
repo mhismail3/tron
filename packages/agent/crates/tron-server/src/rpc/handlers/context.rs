@@ -16,7 +16,7 @@ use tron_skills::registry::SkillRegistry;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::handlers::session_context::{
     RuleFileLevel, SessionContextArtifacts, collect_dynamic_rule_paths,
     load_session_context_artifacts,
@@ -489,11 +489,7 @@ impl MethodHandler for ConfirmCompactionHandler {
     )]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let edited_summary = params
-            .as_ref()
-            .and_then(|p| p.get("editedSummary"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
+        let edited_summary = opt_string(params.as_ref(), "editedSummary");
 
         let mut cm = build_context_manager_for_session(&session_id, ctx)?.context_manager;
         let summarizer = KeywordSummarizer::new();

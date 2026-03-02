@@ -16,8 +16,8 @@ use serde_json::Value;
 use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
-use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::{require_param, require_string_param};
+use crate::rpc::errors::{to_json_value, RpcError};
+use crate::rpc::handlers::{opt_array, opt_bool, opt_u64, require_param, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 fn scheduler(ctx: &RpcContext) -> Result<&std::sync::Arc<tron_cron::CronScheduler>, RpcError> {
@@ -38,20 +38,13 @@ impl MethodHandler for ListHandler {
         let sched = scheduler(ctx)?;
         let jobs = sched.jobs();
 
-        let enabled_filter = params
-            .as_ref()
-            .and_then(|p| p.get("enabled"))
-            .and_then(|v| v.as_bool());
+        let enabled_filter = opt_bool(params.as_ref(), "enabled");
 
-        let tag_filter = params
-            .as_ref()
-            .and_then(|p| p.get("tags"))
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            });
+        let tag_filter = opt_array(params.as_ref(), "tags").map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect::<Vec<_>>()
+        });
 
         let workspace_filter = params
             .as_ref()
@@ -95,7 +88,7 @@ impl MethodHandler for ListHandler {
             .collect();
 
         Ok(serde_json::json!({
-            "jobs": serde_json::to_value(&filtered).map_err(|e| RpcError::Internal { message: e.to_string() })?,
+            "jobs": to_json_value(&filtered)?,
             "runtimeState": runtime_states,
         }))
     }
@@ -128,7 +121,7 @@ impl MethodHandler for GetHandler {
             )?;
 
         Ok(serde_json::json!({
-            "job": serde_json::to_value(job).map_err(|e| RpcError::Internal { message: e.to_string() })?,
+            "job": to_json_value(job)?,
             "runtimeState": runtime_state.map(|rs| serde_json::json!({
                 "jobId": rs.job_id,
                 "nextRunAt": rs.next_run_at,
@@ -136,7 +129,7 @@ impl MethodHandler for GetHandler {
                 "consecutiveFailures": rs.consecutive_failures,
                 "runningSince": rs.running_since,
             })),
-            "recentRuns": serde_json::to_value(&recent_runs).map_err(|e| RpcError::Internal { message: e.to_string() })?,
+            "recentRuns": to_json_value(&recent_runs)?,
         }))
     }
 }
@@ -311,7 +304,7 @@ impl MethodHandler for CreateHandler {
         sched.reschedule_notify().notify_one();
 
         Ok(serde_json::json!({
-            "job": serde_json::to_value(&job).map_err(|e| RpcError::Internal { message: e.to_string() })?,
+            "job": to_json_value(&job)?,
         }))
     }
 }
@@ -460,7 +453,7 @@ impl MethodHandler for UpdateHandler {
         sched.reschedule_notify().notify_one();
 
         Ok(serde_json::json!({
-            "job": serde_json::to_value(&updated_job).map_err(|e| RpcError::Internal { message: e.to_string() })?,
+            "job": to_json_value(&updated_job)?,
         }))
     }
 }
@@ -584,17 +577,8 @@ impl MethodHandler for GetRunsHandler {
         let sched = scheduler(ctx)?;
         let job_id = require_string_param(params.as_ref(), "jobId")?;
 
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(20) as u32;
-
-        let offset = params
-            .as_ref()
-            .and_then(|p| p.get("offset"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+        let limit = opt_u64(params.as_ref(), "limit", 20) as u32;
+        let offset = opt_u64(params.as_ref(), "offset", 0) as u32;
 
         let status_filter = params
             .as_ref()
@@ -613,7 +597,7 @@ impl MethodHandler for GetRunsHandler {
         })?;
 
         Ok(serde_json::json!({
-            "runs": serde_json::to_value(&runs).map_err(|e| RpcError::Internal { message: e.to_string() })?,
+            "runs": to_json_value(&runs)?,
             "total": total,
         }))
     }

@@ -31,7 +31,10 @@ fn now_iso() -> String {
 
 /// Parse a JSON array string into a `Vec<String>`.
 fn parse_tags(json: &str) -> Vec<String> {
-    serde_json::from_str(json).unwrap_or_default()
+    serde_json::from_str(json).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "corrupt tags JSON in task DB");
+        Vec::new()
+    })
 }
 
 /// Serialize tags to a JSON array string.
@@ -41,7 +44,12 @@ fn tags_to_json(tags: &[String]) -> String {
 
 /// Parse optional JSON metadata.
 fn parse_metadata(json: Option<String>) -> Option<serde_json::Value> {
-    json.and_then(|s| serde_json::from_str(&s).ok())
+    json.and_then(|s| {
+        serde_json::from_str(&s).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "corrupt metadata JSON in task DB");
+            None
+        })
+    })
 }
 
 /// Task repository for SQL CRUD operations.
@@ -894,10 +902,7 @@ impl TaskRepository {
                 Ok(TaskDependency {
                     blocker_task_id: row.get(0)?,
                     blocked_task_id: row.get(1)?,
-                    relationship: match row.get::<_, String>(2)?.as_str() {
-                        "related" => DependencyRelationship::Related,
-                        _ => DependencyRelationship::Blocks,
-                    },
+                    relationship: DependencyRelationship::from_sql(&row.get::<_, String>(2)?),
                     created_at: row.get(3)?,
                 })
             })?
@@ -917,10 +922,7 @@ impl TaskRepository {
                 Ok(TaskDependency {
                     blocker_task_id: row.get(0)?,
                     blocked_task_id: row.get(1)?,
-                    relationship: match row.get::<_, String>(2)?.as_str() {
-                        "related" => DependencyRelationship::Related,
-                        _ => DependencyRelationship::Blocks,
-                    },
+                    relationship: DependencyRelationship::from_sql(&row.get::<_, String>(2)?),
                     created_at: row.get(3)?,
                 })
             })?
@@ -1040,18 +1042,7 @@ impl TaskRepository {
                     task_id: row.get(1)?,
                     session_id: row.get(2)?,
                     event_id: row.get(3)?,
-                    action: match row.get::<_, String>(4)?.as_str() {
-                        "created" => ActivityAction::Created,
-                        "status_changed" => ActivityAction::StatusChanged,
-                        "note_added" => ActivityAction::NoteAdded,
-                        "time_logged" => ActivityAction::TimeLogged,
-                        "dependency_added" => ActivityAction::DependencyAdded,
-                        "dependency_removed" => ActivityAction::DependencyRemoved,
-                        "moved" => ActivityAction::Moved,
-                        "deleted" => ActivityAction::Deleted,
-                        // "updated" and unknown values
-                        _ => ActivityAction::Updated,
-                    },
+                    action: ActivityAction::from_sql(&row.get::<_, String>(4)?),
                     old_value: row.get(5)?,
                     new_value: row.get(6)?,
                     detail: row.get(7)?,

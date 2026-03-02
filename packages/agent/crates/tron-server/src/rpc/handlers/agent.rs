@@ -11,7 +11,7 @@ use tron_events::EventType;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_array, opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Extract skill/spell names from a JSON array.
@@ -479,37 +479,19 @@ impl MethodHandler for PromptHandler {
         )?;
 
         // Extract optional extra params
-        let reasoning_level = params
-            .as_ref()
-            .and_then(|p| p.get("reasoningLevel"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let images = params
-            .as_ref()
-            .and_then(|p| p.get("images"))
-            .and_then(|v| v.as_array())
-            .cloned();
-        let attachments = params
-            .as_ref()
-            .and_then(|p| p.get("attachments"))
-            .and_then(|v| v.as_array())
-            .cloned();
-        let raw_skills_json = params
-            .as_ref()
-            .and_then(|p| p.get("skills"))
-            .and_then(|v| v.as_array())
-            .cloned();
-        let raw_spells_json = params
-            .as_ref()
-            .and_then(|p| p.get("spells"))
-            .and_then(|v| v.as_array())
-            .cloned();
+        let reasoning_level = opt_string(params.as_ref(), "reasoningLevel");
+        let images = opt_array(params.as_ref(), "images").cloned();
+        let attachments = opt_array(params.as_ref(), "attachments").cloned();
+        let raw_skills_json = opt_array(params.as_ref(), "skills").cloned();
+        let raw_spells_json = opt_array(params.as_ref(), "spells").cloned();
         let skills = {
-            let v = extract_skills(params.as_ref().and_then(|p| p.get("skills")));
+            let tmp = raw_skills_json.clone().map(Value::Array);
+            let v = extract_skills(tmp.as_ref());
             if v.is_empty() { None } else { Some(v) }
         };
         let spells = {
-            let v = extract_skills(params.as_ref().and_then(|p| p.get("spells")));
+            let tmp = raw_spells_json.clone().map(Value::Array);
+            let v = extract_skills(tmp.as_ref());
             if v.is_empty() { None } else { Some(v) }
         };
 

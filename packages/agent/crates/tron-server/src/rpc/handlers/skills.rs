@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Shape skill for the wire format (excludes internal fields: skillMdPath, lastModified, frontmatter).
@@ -76,11 +76,8 @@ pub struct RefreshSkillsHandler;
 impl MethodHandler for RefreshSkillsHandler {
     #[instrument(skip(self, ctx), fields(method = "skill.refresh"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let working_dir = params
-            .as_ref()
-            .and_then(|p| p.get("workingDirectory"))
-            .and_then(Value::as_str)
-            .unwrap_or("/tmp");
+        let working_dir = opt_string(params.as_ref(), "workingDirectory");
+        let working_dir = working_dir.as_deref().unwrap_or("/tmp");
 
         let skill_registry = ctx.skill_registry.clone();
         let working_dir = working_dir.to_string();
@@ -107,10 +104,7 @@ impl MethodHandler for RemoveSkillHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let name = remove_skill_name(params.as_ref())?;
 
-        let session_id = params
-            .as_ref()
-            .and_then(|p| p.get("sessionId"))
-            .and_then(Value::as_str);
+        let session_id = opt_string(params.as_ref(), "sessionId");
 
         let mut registry = ctx.skill_registry.write();
         if !registry.has(name) {

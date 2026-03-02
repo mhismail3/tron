@@ -44,6 +44,19 @@ impl TaskStatus {
             Self::Cancelled => "cancelled",
         }
     }
+
+    /// Parse from SQL column value. Unknown values default to `Pending`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "backlog" => Self::Backlog,
+            "pending" => Self::Pending,
+            "in_progress" => Self::InProgress,
+            "completed" => Self::Completed,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Pending,
+        }
+    }
 }
 
 impl std::fmt::Display for TaskStatus {
@@ -75,6 +88,18 @@ impl TaskPriority {
             Self::Medium => "medium",
             Self::High => "high",
             Self::Critical => "critical",
+        }
+    }
+
+    /// Parse from SQL column value. Unknown values default to `Medium`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "critical" => Self::Critical,
+            _ => Self::Medium,
         }
     }
 }
@@ -110,6 +135,18 @@ impl TaskSource {
             Self::System => "system",
         }
     }
+
+    /// Parse from SQL column value. Unknown values default to `Agent`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "agent" => Self::Agent,
+            "user" => Self::User,
+            "skill" => Self::Skill,
+            "system" => Self::System,
+            _ => Self::Agent,
+        }
+    }
 }
 
 /// Project status.
@@ -137,6 +174,18 @@ impl ProjectStatus {
             Self::Archived => "archived",
         }
     }
+
+    /// Parse from SQL column value. Unknown values default to `Active`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "active" => Self::Active,
+            "paused" => Self::Paused,
+            "completed" => Self::Completed,
+            "archived" => Self::Archived,
+            _ => Self::Active,
+        }
+    }
 }
 
 /// Area status.
@@ -158,6 +207,16 @@ impl AreaStatus {
             Self::Archived => "archived",
         }
     }
+
+    /// Parse from SQL column value. Unknown values default to `Active`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "active" => Self::Active,
+            "archived" => Self::Archived,
+            _ => Self::Active,
+        }
+    }
 }
 
 /// Type of dependency relationship between tasks.
@@ -177,6 +236,15 @@ impl DependencyRelationship {
         match self {
             Self::Blocks => "blocks",
             Self::Related => "related",
+        }
+    }
+
+    /// Parse from SQL column value. Unknown values default to `Blocks`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "related" => Self::Related,
+            _ => Self::Blocks,
         }
     }
 }
@@ -219,6 +287,23 @@ impl ActivityAction {
             Self::DependencyRemoved => "dependency_removed",
             Self::Moved => "moved",
             Self::Deleted => "deleted",
+        }
+    }
+
+    /// Parse from SQL column value. Unknown values default to `Updated`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "created" => Self::Created,
+            "status_changed" => Self::StatusChanged,
+            "updated" => Self::Updated,
+            "note_added" => Self::NoteAdded,
+            "time_logged" => Self::TimeLogged,
+            "dependency_added" => Self::DependencyAdded,
+            "dependency_removed" => Self::DependencyRemoved,
+            "moved" => Self::Moved,
+            "deleted" => Self::Deleted,
+            _ => Self::Updated,
         }
     }
 }
@@ -912,6 +997,129 @@ mod tests {
             let back: ActivityAction = serde_json::from_str(&json).unwrap();
             assert_eq!(back, action);
         }
+    }
+
+    // ── from_sql roundtrip tests ──
+
+    #[test]
+    fn test_task_status_sql_roundtrip() {
+        for status in [
+            TaskStatus::Backlog,
+            TaskStatus::Pending,
+            TaskStatus::InProgress,
+            TaskStatus::Completed,
+            TaskStatus::Cancelled,
+        ] {
+            assert_eq!(TaskStatus::from_sql(status.as_sql()), status);
+        }
+    }
+
+    #[test]
+    fn test_task_status_from_sql_unknown_defaults_to_pending() {
+        assert_eq!(TaskStatus::from_sql("garbage"), TaskStatus::Pending);
+        assert_eq!(TaskStatus::from_sql(""), TaskStatus::Pending);
+        assert_eq!(TaskStatus::from_sql("COMPLETED"), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn test_task_priority_sql_roundtrip() {
+        for p in [
+            TaskPriority::Low,
+            TaskPriority::Medium,
+            TaskPriority::High,
+            TaskPriority::Critical,
+        ] {
+            assert_eq!(TaskPriority::from_sql(p.as_sql()), p);
+        }
+    }
+
+    #[test]
+    fn test_task_priority_from_sql_unknown_defaults_to_medium() {
+        assert_eq!(TaskPriority::from_sql("unknown"), TaskPriority::Medium);
+    }
+
+    #[test]
+    fn test_task_source_sql_roundtrip() {
+        for s in [
+            TaskSource::Agent,
+            TaskSource::User,
+            TaskSource::Skill,
+            TaskSource::System,
+        ] {
+            assert_eq!(TaskSource::from_sql(s.as_sql()), s);
+        }
+    }
+
+    #[test]
+    fn test_task_source_from_sql_unknown_defaults_to_agent() {
+        assert_eq!(TaskSource::from_sql("unknown"), TaskSource::Agent);
+    }
+
+    #[test]
+    fn test_project_status_sql_roundtrip() {
+        for s in [
+            ProjectStatus::Active,
+            ProjectStatus::Paused,
+            ProjectStatus::Completed,
+            ProjectStatus::Archived,
+        ] {
+            assert_eq!(ProjectStatus::from_sql(s.as_sql()), s);
+        }
+    }
+
+    #[test]
+    fn test_project_status_from_sql_unknown_defaults_to_active() {
+        assert_eq!(ProjectStatus::from_sql("unknown"), ProjectStatus::Active);
+    }
+
+    #[test]
+    fn test_area_status_sql_roundtrip() {
+        for s in [AreaStatus::Active, AreaStatus::Archived] {
+            assert_eq!(AreaStatus::from_sql(s.as_sql()), s);
+        }
+    }
+
+    #[test]
+    fn test_area_status_from_sql_unknown_defaults_to_active() {
+        assert_eq!(AreaStatus::from_sql("garbage"), AreaStatus::Active);
+    }
+
+    #[test]
+    fn test_dependency_relationship_sql_roundtrip() {
+        for rel in [DependencyRelationship::Blocks, DependencyRelationship::Related] {
+            assert_eq!(DependencyRelationship::from_sql(rel.as_sql()), rel);
+        }
+    }
+
+    #[test]
+    fn test_dependency_relationship_from_sql_unknown_defaults_to_blocks() {
+        assert_eq!(
+            DependencyRelationship::from_sql("garbage"),
+            DependencyRelationship::Blocks
+        );
+    }
+
+    #[test]
+    fn test_activity_action_sql_roundtrip() {
+        for a in [
+            ActivityAction::Created,
+            ActivityAction::StatusChanged,
+            ActivityAction::Updated,
+            ActivityAction::NoteAdded,
+            ActivityAction::TimeLogged,
+            ActivityAction::DependencyAdded,
+            ActivityAction::DependencyRemoved,
+            ActivityAction::Moved,
+            ActivityAction::Deleted,
+        ] {
+            assert_eq!(ActivityAction::from_sql(a.as_sql()), a);
+        }
+    }
+
+    #[test]
+    fn test_activity_action_from_sql_unknown_defaults_to_updated() {
+        assert_eq!(ActivityAction::from_sql("unknown"), ActivityAction::Updated);
+        assert_eq!(ActivityAction::from_sql(""), ActivityAction::Updated);
     }
 
     #[test]

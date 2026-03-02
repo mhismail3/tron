@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_bool, opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// List directory contents.
@@ -17,18 +17,8 @@ impl MethodHandler for ListDirHandler {
     #[instrument(skip(self, _ctx), fields(method = "filesystem.listDir"))]
     async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-        let path = params
-            .as_ref()
-            .and_then(|p| p.get("path"))
-            .and_then(Value::as_str)
-            .unwrap_or(&home)
-            .to_string();
-
-        let show_hidden = params
-            .as_ref()
-            .and_then(|p| p.get("showHidden"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let path = opt_string(params.as_ref(), "path").unwrap_or(home);
+        let show_hidden = opt_bool(params.as_ref(), "showHidden").unwrap_or(false);
 
         let entries = std::fs::read_dir(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {

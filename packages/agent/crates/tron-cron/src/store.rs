@@ -8,7 +8,7 @@ use rusqlite::params;
 use tron_events::ConnectionPool;
 
 use crate::errors::CronError;
-use crate::types::{CronJob, CronRun, JobRuntimeState, RunStatus};
+use crate::types::{CronJob, CronRun, DeliveryOutcome, JobRuntimeState, RunStatus};
 
 /// Insert or update a job definition in SQLite (from config file sync).
 pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError> {
@@ -17,14 +17,8 @@ pub fn upsert_job(pool: &ConnectionPool, job: &CronJob) -> Result<(), CronError>
     let payload_json = serde_json::to_string(&job.payload)?;
     let delivery_json = serde_json::to_string(&job.delivery)?;
     let tags_json = serde_json::to_string(&job.tags)?;
-    let overlap = match job.overlap_policy {
-        crate::types::OverlapPolicy::Skip => "skip",
-        crate::types::OverlapPolicy::Allow => "allow",
-    };
-    let misfire = match job.misfire_policy {
-        crate::types::MisfirePolicy::Skip => "skip",
-        crate::types::MisfirePolicy::RunOnce => "run_once",
-    };
+    let overlap = job.overlap_policy.as_sql();
+    let misfire = job.misfire_policy.as_sql();
 
     conn.execute(
         "INSERT INTO cron_jobs (
@@ -370,12 +364,12 @@ pub fn count_running_runs(pool: &ConnectionPool, job_id: &str) -> Result<u32, Cr
 pub fn update_delivery_status(
     pool: &ConnectionPool,
     run_id: &str,
-    status: &str,
+    status: &DeliveryOutcome,
 ) -> Result<(), CronError> {
     let conn = pool.get()?;
     conn.execute(
         "UPDATE cron_runs SET delivery_status = ?1 WHERE id = ?2",
-        params![status, run_id],
+        params![status.as_str(), run_id],
     )?;
     Ok(())
 }
@@ -468,6 +462,7 @@ pub fn sync_from_config(
 // ── Internal helpers ──
 
 fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
+    let id: String = row.get(0)?;
     let schedule_json: String = row.get(4)?;
     let payload_json: String = row.get(5)?;
     let delivery_json: String = row.get(6)?;
@@ -478,55 +473,66 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let updated_str: String = row.get(15)?;
 
     Ok(CronJob {
-        id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
         enabled: row.get(3)?,
-        schedule: serde_json::from_str(&schedule_json).unwrap_or(crate::types::Schedule::Every {
-            interval_secs: 60,
-            anchor: None,
+        schedule: serde_json::from_str(&schedule_json).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, job_id = %id, "corrupt schedule_json in DB, using default");
+            crate::types::Schedule::Every { interval_secs: 60, anchor: None }
         }),
-        payload: serde_json::from_str(&payload_json).unwrap_or(crate::types::Payload::ShellCommand {
-            command: "true".into(),
-            working_directory: None,
-            timeout_secs: 300,
+        payload: serde_json::from_str(&payload_json).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, job_id = %id, "corrupt payload_json in DB, using default");
+            crate::types::Payload::ShellCommand { command: "true".into(), working_directory: None, timeout_secs: 300 }
         }),
-        delivery: serde_json::from_str(&delivery_json).unwrap_or_default(),
-        overlap_policy: match overlap_str.as_str() {
-            "allow" => crate::types::OverlapPolicy::Allow,
-            _ => crate::types::OverlapPolicy::Skip,
-        },
-        misfire_policy: match misfire_str.as_str() {
-            "run_once" => crate::types::MisfirePolicy::RunOnce,
-            _ => crate::types::MisfirePolicy::Skip,
-        },
+        delivery: serde_json::from_str(&delivery_json).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, job_id = %id, "corrupt delivery_json in DB, using default");
+            Vec::new()
+        }),
+        overlap_policy: crate::types::OverlapPolicy::from_sql(&overlap_str),
+        misfire_policy: crate::types::MisfirePolicy::from_sql(&misfire_str),
         max_retries: row.get(9)?,
         auto_disable_after: row.get(10)?,
         stuck_timeout_secs: row.get(11)?,
-        tags: serde_json::from_str(&tags_json).unwrap_or_default(),
+        tags: serde_json::from_str(&tags_json).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, job_id = %id, "corrupt tags_json in DB, using default");
+            Vec::new()
+        }),
         workspace_id: row.get(13)?,
         created_at: DateTime::parse_from_rfc3339(&created_str)
             .map(|t| t.to_utc())
-            .unwrap_or_else(|_| Utc::now()),
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, job_id = %id, "corrupt created_at in DB, using now");
+                Utc::now()
+            }),
         updated_at: DateTime::parse_from_rfc3339(&updated_str)
             .map(|t| t.to_utc())
-            .unwrap_or_else(|_| Utc::now()),
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, job_id = %id, "corrupt updated_at in DB, using now");
+                Utc::now()
+            }),
+        id,
     })
 }
 
 fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
+    let id: String = row.get(0)?;
     let status_str: String = row.get(3)?;
     let started_str: String = row.get(4)?;
     let completed_str: Option<String> = row.get(5)?;
 
     Ok(CronRun {
-        id: row.get(0)?,
         job_id: row.get(1)?,
         job_name: row.get(2)?,
-        status: RunStatus::from_str(&status_str).unwrap_or(RunStatus::Failed),
+        status: RunStatus::from_str(&status_str).unwrap_or_else(|| {
+            tracing::warn!(status = %status_str, run_id = %id, "unknown RunStatus in DB");
+            RunStatus::Failed
+        }),
         started_at: DateTime::parse_from_rfc3339(&started_str)
             .map(|t| t.to_utc())
-            .unwrap_or_else(|_| Utc::now()),
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, run_id = %id, "corrupt started_at in DB, using now");
+                Utc::now()
+            }),
         completed_at: completed_str.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|t| t.to_utc())),
         duration_ms: row.get(6)?,
         output: row.get(7)?,
@@ -535,7 +541,8 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
         exit_code: row.get(10)?,
         attempt: row.get(11)?,
         session_id: row.get(12)?,
-        delivery_status: row.get(13)?,
+        delivery_status: row.get::<_, Option<String>>(13)?.map(|s| DeliveryOutcome::from_sql(&s)),
+        id,
     })
 }
 

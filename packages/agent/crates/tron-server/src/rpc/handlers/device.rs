@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
 /// Register an APNS device token.
@@ -28,25 +28,18 @@ impl MethodHandler for RegisterTokenHandler {
             });
         }
 
-        let session_id = params
-            .as_ref()
-            .and_then(|p| p.get("sessionId"))
-            .and_then(Value::as_str);
-
-        let workspace_id = params
-            .as_ref()
-            .and_then(|p| p.get("workspaceId"))
-            .and_then(Value::as_str);
-
-        let environment = params
-            .as_ref()
-            .and_then(|p| p.get("environment"))
-            .and_then(Value::as_str)
-            .unwrap_or("production");
+        let session_id = opt_string(params.as_ref(), "sessionId");
+        let workspace_id = opt_string(params.as_ref(), "workspaceId");
+        let environment = opt_string(params.as_ref(), "environment");
 
         let result = ctx
             .event_store
-            .register_device_token(&device_token, session_id, workspace_id, environment)
+            .register_device_token(
+                &device_token,
+                session_id.as_deref(),
+                workspace_id.as_deref(),
+                environment.as_deref().unwrap_or("production"),
+            )
             .map_err(|e| RpcError::Internal {
                 message: format!("Failed to register device token: {e}"),
             })?;

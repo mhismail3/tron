@@ -178,6 +178,46 @@ pub enum MisfirePolicy {
     RunOnce,
 }
 
+impl OverlapPolicy {
+    /// SQL string representation.
+    #[must_use]
+    pub fn as_sql(&self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::Allow => "allow",
+        }
+    }
+
+    /// Parse from SQL column value. Unknown values default to `Skip`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "allow" => Self::Allow,
+            _ => Self::Skip,
+        }
+    }
+}
+
+impl MisfirePolicy {
+    /// SQL string representation.
+    #[must_use]
+    pub fn as_sql(&self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::RunOnce => "run_once",
+        }
+    }
+
+    /// Parse from SQL column value. Unknown values default to `Skip`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "run_once" => Self::RunOnce,
+            _ => Self::Skip,
+        }
+    }
+}
+
 // ── CronJob ─────────────────────────────────────────────────────────
 
 /// Complete cron job definition.
@@ -275,6 +315,40 @@ impl RunStatus {
     }
 }
 
+/// Outcome of result delivery attempts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeliveryOutcome {
+    /// All channels delivered successfully.
+    Ok,
+    /// Some channels succeeded, some failed.
+    Partial,
+    /// All channels failed.
+    Failed,
+}
+
+impl DeliveryOutcome {
+    /// SQL string representation.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Partial => "partial",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// Parse from SQL column value. Unknown values default to `Failed`.
+    #[must_use]
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "ok" => Self::Ok,
+            "partial" => Self::Partial,
+            _ => Self::Failed,
+        }
+    }
+}
+
 /// Execution record for a single cron job run.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -314,9 +388,9 @@ pub struct CronRun {
     /// Associated session ID (agent turns only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
-    /// Delivery outcome (`"ok"`, `"partial"`, `"failed"`).
+    /// Delivery outcome.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delivery_status: Option<String>,
+    pub delivery_status: Option<DeliveryOutcome>,
 }
 
 /// Runtime state for a job (SQLite-only, not in JSON config file).
@@ -530,6 +604,61 @@ mod tests {
         assert_eq!(job.auto_disable_after, 0);
         assert_eq!(job.stuck_timeout_secs, 7200);
         assert!(job.tags.is_empty());
+    }
+
+    #[test]
+    fn delivery_outcome_serde_roundtrip() {
+        for outcome in [DeliveryOutcome::Ok, DeliveryOutcome::Partial, DeliveryOutcome::Failed] {
+            let json = serde_json::to_string(&outcome).unwrap();
+            let back: DeliveryOutcome = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, outcome);
+        }
+    }
+
+    #[test]
+    fn delivery_outcome_serde_values() {
+        assert_eq!(serde_json::to_string(&DeliveryOutcome::Ok).unwrap(), "\"ok\"");
+        assert_eq!(serde_json::to_string(&DeliveryOutcome::Partial).unwrap(), "\"partial\"");
+        assert_eq!(serde_json::to_string(&DeliveryOutcome::Failed).unwrap(), "\"failed\"");
+    }
+
+    #[test]
+    fn delivery_outcome_as_str() {
+        assert_eq!(DeliveryOutcome::Ok.as_str(), "ok");
+        assert_eq!(DeliveryOutcome::Partial.as_str(), "partial");
+        assert_eq!(DeliveryOutcome::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn delivery_outcome_from_sql() {
+        assert_eq!(DeliveryOutcome::from_sql("ok"), DeliveryOutcome::Ok);
+        assert_eq!(DeliveryOutcome::from_sql("partial"), DeliveryOutcome::Partial);
+        assert_eq!(DeliveryOutcome::from_sql("failed"), DeliveryOutcome::Failed);
+        assert_eq!(DeliveryOutcome::from_sql("garbage"), DeliveryOutcome::Failed);
+    }
+
+    #[test]
+    fn overlap_policy_sql_roundtrip() {
+        for p in [OverlapPolicy::Skip, OverlapPolicy::Allow] {
+            assert_eq!(OverlapPolicy::from_sql(p.as_sql()), p);
+        }
+    }
+
+    #[test]
+    fn overlap_policy_from_sql_unknown_defaults_to_skip() {
+        assert_eq!(OverlapPolicy::from_sql("garbage"), OverlapPolicy::Skip);
+    }
+
+    #[test]
+    fn misfire_policy_sql_roundtrip() {
+        for p in [MisfirePolicy::Skip, MisfirePolicy::RunOnce] {
+            assert_eq!(MisfirePolicy::from_sql(p.as_sql()), p);
+        }
+    }
+
+    #[test]
+    fn misfire_policy_from_sql_unknown_defaults_to_skip() {
+        assert_eq!(MisfirePolicy::from_sql("garbage"), MisfirePolicy::Skip);
     }
 
     #[test]

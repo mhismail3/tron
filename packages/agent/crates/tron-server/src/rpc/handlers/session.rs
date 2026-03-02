@@ -8,7 +8,7 @@ use tron_runtime::agent::event_emitter::EventEmitter;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::{self, RpcError};
-use crate::rpc::handlers::require_string_param;
+use crate::rpc::handlers::{opt_bool, opt_string, require_string_param};
 use crate::rpc::handlers::session_context::{RuleFileLevel, load_session_context_artifacts};
 use crate::rpc::registry::MethodHandler;
 
@@ -20,19 +20,13 @@ impl MethodHandler for CreateSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.create"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let working_dir = require_string_param(params.as_ref(), "workingDirectory")?;
-        let model = params
-            .as_ref()
-            .and_then(|p| p.get("model"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("claude-sonnet-4-20250514");
-        let title = params
-            .as_ref()
-            .and_then(|p| p.get("title"))
-            .and_then(|v| v.as_str());
+        let model_owned = opt_string(params.as_ref(), "model");
+        let model = model_owned.as_deref().unwrap_or("claude-sonnet-4-20250514");
+        let title = opt_string(params.as_ref(), "title");
 
         let session_id = ctx
             .session_manager
-            .create_session(model, &working_dir, title)
+            .create_session(model, &working_dir, title.as_deref())
             .map_err(|e| RpcError::Internal {
                 message: e.to_string(),
             })?;
@@ -193,11 +187,7 @@ pub struct ListSessionsHandler;
 impl MethodHandler for ListSessionsHandler {
     #[instrument(skip(self, ctx), fields(method = "session.list"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let include_archived = params
-            .as_ref()
-            .and_then(|p| p.get("includeArchived"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let include_archived = opt_bool(params.as_ref(), "includeArchived").unwrap_or(false);
 
         #[allow(clippy::cast_possible_truncation)]
         let limit = params
@@ -296,14 +286,11 @@ impl MethodHandler for ForkSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.fork", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let title = params
-            .as_ref()
-            .and_then(|p| p.get("title"))
-            .and_then(|v| v.as_str());
+        let title = opt_string(params.as_ref(), "title");
 
         let fork_result = ctx
             .session_manager
-            .fork_session(&session_id, None, title)
+            .fork_session(&session_id, None, title.as_deref())
             .map_err(|e| RpcError::NotFound {
                 code: errors::SESSION_NOT_FOUND.into(),
                 message: e.to_string(),
@@ -443,10 +430,7 @@ impl MethodHandler for GetHistoryHandler {
             .and_then(serde_json::Value::as_u64)
             .map(|v| v as usize);
 
-        let before_id = params
-            .as_ref()
-            .and_then(|p| p.get("beforeId"))
-            .and_then(serde_json::Value::as_str);
+        let before_id = opt_string(params.as_ref(), "beforeId");
 
         // Verify session exists
         let _ = ctx

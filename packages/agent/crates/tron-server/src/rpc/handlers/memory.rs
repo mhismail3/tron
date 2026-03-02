@@ -19,6 +19,8 @@ use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
 use crate::rpc::registry::MethodHandler;
 
+use super::{opt_array, opt_string, opt_u64};
+
 // =============================================================================
 // Cycle boundary helpers
 // =============================================================================
@@ -433,29 +435,14 @@ pub struct GetLedgerHandler;
 impl MethodHandler for GetLedgerHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.getLedger"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let working_dir: Option<String> = params
-            .as_ref()
-            .and_then(|p| p.get("workingDirectory"))
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(ToOwned::to_owned);
+        let working_dir: Option<String> =
+            opt_string(params.as_ref(), "workingDirectory").filter(|s| !s.is_empty());
 
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(Value::as_u64)
-            .map_or(50i64, |v| i64::try_from(v).unwrap_or(50));
+        let limit = i64::try_from(opt_u64(params.as_ref(), "limit", 50)).unwrap_or(50);
 
-        let offset = params
-            .as_ref()
-            .and_then(|p| p.get("offset"))
-            .and_then(Value::as_u64)
-            .map_or(0i64, |v| i64::try_from(v).unwrap_or(0));
+        let offset = i64::try_from(opt_u64(params.as_ref(), "offset", 0)).unwrap_or(0);
 
-        let tags_filter: Option<Vec<String>> = params
-            .as_ref()
-            .and_then(|p| p.get("tags"))
-            .and_then(Value::as_array)
+        let tags_filter: Option<Vec<String>> = opt_array(params.as_ref(), "tags")
             .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect());
 
         // Fetch raw events — either workspace-scoped or global
@@ -574,20 +561,12 @@ impl MethodHandler for UpdateLedgerHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         // Accept either sessionId directly or workingDirectory (find most recent session)
         let session_id_owned: String;
-        if let Some(sid) = params
-            .as_ref()
-            .and_then(|p| p.get("sessionId"))
-            .and_then(Value::as_str)
-        {
-            session_id_owned = sid.to_owned();
-        } else if let Some(wd) = params
-            .as_ref()
-            .and_then(|p| p.get("workingDirectory"))
-            .and_then(Value::as_str)
-        {
+        if let Some(sid) = opt_string(params.as_ref(), "sessionId") {
+            session_id_owned = sid;
+        } else if let Some(wd) = opt_string(params.as_ref(), "workingDirectory") {
             // Find most recent session for this workspace
             let filter = tron_runtime::SessionFilter {
-                workspace_path: Some(wd.to_owned()),
+                workspace_path: Some(wd),
                 limit: Some(1),
                 ..Default::default()
             };
@@ -718,23 +697,12 @@ pub struct SearchMemoryHandler;
 impl MethodHandler for SearchMemoryHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.search"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let search_text = params
-            .as_ref()
-            .and_then(|p| p.get("searchText"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let search_text = opt_string(params.as_ref(), "searchText").unwrap_or_default();
 
-        let type_filter = params
-            .as_ref()
-            .and_then(|p| p.get("type"))
-            .and_then(Value::as_str);
+        let type_filter = opt_string(params.as_ref(), "type");
 
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(Value::as_u64)
-            .unwrap_or(20);
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let limit =
+            usize::try_from(opt_u64(params.as_ref(), "limit", 20)).unwrap_or(usize::MAX);
 
         let sessions = ctx
             .session_manager
@@ -768,7 +736,7 @@ impl MethodHandler for SearchMemoryHandler {
                 }
 
                 // Type filter
-                if let Some(tf) = type_filter {
+                if let Some(tf) = type_filter.as_deref() {
                     let entry_type = payload
                         .get("entryType")
                         .and_then(Value::as_str)
@@ -805,12 +773,8 @@ pub struct GetHandoffsHandler;
 impl MethodHandler for GetHandoffsHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.getHandoffs"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let limit = params
-            .as_ref()
-            .and_then(|p| p.get("limit"))
-            .and_then(Value::as_u64)
-            .unwrap_or(10);
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let limit =
+            usize::try_from(opt_u64(params.as_ref(), "limit", 10)).unwrap_or(usize::MAX);
 
         let sessions = ctx
             .session_manager
