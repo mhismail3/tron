@@ -53,7 +53,7 @@ struct MemoryDashboardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            DashboardToolbarContent(title: "Memory", accent: .purple, actions: actions)
+            DashboardToolbarContent(title: "Memories", accent: .purple, actions: actions)
         }
         .sheet(item: $selectedEntry) { entry in
             MemoryDashboardDetailSheet(entry: entry)
