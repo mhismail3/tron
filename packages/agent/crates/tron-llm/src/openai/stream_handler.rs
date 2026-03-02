@@ -98,6 +98,7 @@ pub fn process_stream_event(
                     if let Some(call_id) = &item.call_id {
                         let name = item.name.clone().unwrap_or_default();
                         let initial_args = item.arguments.clone().unwrap_or_default();
+                        let is_new = !state.tool_calls.contains_key(call_id.as_str());
                         let _ = state.tool_calls.insert(
                             call_id.clone(),
                             ToolCallState {
@@ -106,10 +107,12 @@ pub fn process_stream_event(
                                 args: initial_args,
                             },
                         );
-                        events.push(StreamEvent::ToolCallStart {
-                            tool_call_id: call_id.clone(),
-                            name,
-                        });
+                        if is_new {
+                            events.push(StreamEvent::ToolCallStart {
+                                tool_call_id: call_id.clone(),
+                                name,
+                            });
+                        }
                     }
                 } else if item.item_type == OutputItemType::Reasoning && !state.thinking_started {
                     state.thinking_started = true;
@@ -892,6 +895,26 @@ mod tests {
         if let Some(StreamEvent::Done { stop_reason, .. }) = done {
             assert_eq!(stop_reason, "tool_calls");
         }
+    }
+
+    #[test]
+    fn duplicate_output_item_added_emits_toolcall_start_once() {
+        let mut state = create_stream_state();
+        let events1 = process_stream_event(
+            &function_call_added_event("call_dup", "read_file"),
+            &mut state,
+        );
+        assert_eq!(events1.len(), 1);
+        assert!(matches!(&events1[0], StreamEvent::ToolCallStart { .. }));
+
+        // Second OutputItemAdded for the same call_id should NOT emit ToolCallStart
+        let events2 = process_stream_event(
+            &function_call_added_event("call_dup", "read_file"),
+            &mut state,
+        );
+        assert!(events2.is_empty(), "duplicate OutputItemAdded should not emit ToolCallStart");
+        // State should still have exactly one entry
+        assert_eq!(state.tool_calls.len(), 1);
     }
 
     // ── Unknown events ─────────────────────────────────────────────

@@ -166,11 +166,15 @@ pub async fn process_stream(
                     }
 
                     StreamEvent::ToolCallEnd { tool_call } => {
-                        // Use the provider-parsed tool call directly
+                        // Use the provider-parsed tool call directly; dedup by ID
                         current_tool_id = None;
                         current_tool_name = None;
                         current_tool_args.clear();
-                        tool_calls.push(tool_call);
+                        if let Some(pos) = tool_calls.iter().position(|tc| tc.id == tool_call.id) {
+                            tool_calls[pos] = tool_call;
+                        } else {
+                            tool_calls.push(tool_call);
+                        }
                     }
 
                     StreamEvent::Done {
@@ -267,7 +271,11 @@ fn finalize_tool_call(
                 Map::new()
             }
         };
-        tool_calls.push(ToolCall::new(id, name, arguments));
+        if let Some(pos) = tool_calls.iter().position(|tc| tc.id == id) {
+            tool_calls[pos] = ToolCall::new(id, name, arguments);
+        } else {
+            tool_calls.push(ToolCall::new(id, name, arguments));
+        }
         current_args.clear();
     }
 }
@@ -741,6 +749,39 @@ mod tests {
         } else {
             panic!("Expected text content");
         }
+    }
+
+    #[tokio::test]
+    async fn duplicate_tool_calls_deduped_by_id() {
+        let s = stream! {
+            yield Ok(StreamEvent::Start);
+            // First occurrence — empty/malformed args
+            yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "bash".into() });
+            yield Ok(StreamEvent::ToolCallDelta { tool_call_id: "tc-dup".into(), arguments_delta: "{}".into() });
+            // Second occurrence — valid args (replaces via ToolCallEnd dedup)
+            yield Ok(StreamEvent::ToolCallStart { tool_call_id: "tc-dup".into(), name: "bash".into() });
+            yield Ok(StreamEvent::ToolCallEnd {
+                tool_call: ToolCall::new("tc-dup", "bash", {
+                    let mut m = Map::new();
+                    let _ = m.insert("command".into(), serde_json::json!("ls"));
+                    m
+                }),
+            });
+            yield Ok(StreamEvent::Done {
+                message: AssistantMessage { content: vec![], token_usage: None },
+                stop_reason: "tool_use".into(),
+            });
+        };
+
+        let emitter = make_emitter();
+        let cancel = CancellationToken::new();
+        let result = process_stream(Box::pin(s), "s1", &emitter, &cancel)
+            .await
+            .unwrap();
+
+        assert_eq!(result.tool_calls.len(), 1, "duplicate tool calls should be deduped");
+        assert_eq!(result.tool_calls[0].id, "tc-dup");
+        assert_eq!(result.tool_calls[0].arguments["command"], serde_json::json!("ls"));
     }
 
     // -- finalize_tool_call unit tests --

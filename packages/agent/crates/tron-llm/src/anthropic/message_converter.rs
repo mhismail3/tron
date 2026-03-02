@@ -110,7 +110,8 @@ fn convert_messages_impl(
         }
     }
 
-    merge_consecutive_roles(result)
+    let merged = merge_consecutive_roles(result);
+    dedup_tool_blocks(merged)
 }
 
 /// Merge consecutive messages with the same role into a single message.
@@ -130,6 +131,48 @@ fn merge_consecutive_roles(messages: Vec<AnthropicMessageParam>) -> Vec<Anthropi
         merged.push(msg);
     }
     merged
+}
+
+/// Deduplicate tool blocks within messages.
+///
+/// Handles existing sessions with duplicate tool events stored in the DB:
+/// - In assistant messages: duplicate `tool_use` blocks with same `id` → keep last
+/// - In user messages: duplicate `tool_result` blocks with same `tool_use_id` → keep last
+fn dedup_tool_blocks(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessageParam> {
+    messages
+        .into_iter()
+        .map(|mut msg| {
+            let key = if msg.role == "assistant" {
+                "id"
+            } else {
+                "tool_use_id"
+            };
+            let block_type = if msg.role == "assistant" {
+                "tool_use"
+            } else {
+                "tool_result"
+            };
+
+            // Track seen IDs — keep last occurrence by reversing, dedup, then reverse back
+            let mut seen = std::collections::HashSet::new();
+            let mut deduped: Vec<Value> = msg
+                .content
+                .into_iter()
+                .rev()
+                .filter(|block| {
+                    if block.get("type").and_then(|t| t.as_str()) == Some(block_type) {
+                        if let Some(id) = block.get(key).and_then(|v| v.as_str()) {
+                            return seen.insert(id.to_owned());
+                        }
+                    }
+                    true // non-tool blocks always kept
+                })
+                .collect();
+            deduped.reverse();
+            msg.content = deduped;
+            msg
+        })
+        .collect()
 }
 
 /// Convert a user message to Anthropic format.
@@ -767,6 +810,65 @@ mod tests {
         assert!(mapping.is_empty());
     }
 
+    // ── dedup_tool_blocks ──────────────────────────────────────────────
+
+    #[test]
+    fn dedup_assistant_tool_use_keeps_last() {
+        let messages = vec![AnthropicMessageParam {
+            role: "assistant".into(),
+            content: vec![
+                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "bash", "input": {"cmd": "echo old"}}),
+                json!({"type": "text", "text": "thinking..."}),
+                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "bash", "input": {"cmd": "echo new"}}),
+            ],
+        }];
+        let deduped = dedup_tool_blocks(messages);
+        assert_eq!(deduped[0].content.len(), 2);
+        assert_eq!(deduped[0].content[0]["type"], "text");
+        assert_eq!(deduped[0].content[1]["id"], "toolu_remap_1");
+        assert_eq!(deduped[0].content[1]["input"]["cmd"], "echo new");
+    }
+
+    #[test]
+    fn dedup_user_tool_result_keeps_last() {
+        let messages = vec![AnthropicMessageParam {
+            role: "user".into(),
+            content: vec![
+                json!({"type": "tool_result", "tool_use_id": "toolu_remap_1", "content": [{"type": "text", "text": "old result"}]}),
+                json!({"type": "tool_result", "tool_use_id": "toolu_remap_1", "content": [{"type": "text", "text": "new result"}]}),
+                json!({"type": "tool_result", "tool_use_id": "toolu_remap_2", "content": [{"type": "text", "text": "unique"}]}),
+            ],
+        }];
+        let deduped = dedup_tool_blocks(messages);
+        assert_eq!(deduped[0].content.len(), 2);
+        assert_eq!(deduped[0].content[0]["tool_use_id"], "toolu_remap_1");
+        assert_eq!(deduped[0].content[0]["content"][0]["text"], "new result");
+        assert_eq!(deduped[0].content[1]["tool_use_id"], "toolu_remap_2");
+    }
+
+    #[test]
+    fn dedup_no_duplicates_unchanged() {
+        let messages = vec![
+            AnthropicMessageParam {
+                role: "assistant".into(),
+                content: vec![
+                    json!({"type": "tool_use", "id": "toolu_1", "name": "a", "input": {}}),
+                    json!({"type": "tool_use", "id": "toolu_2", "name": "b", "input": {}}),
+                ],
+            },
+            AnthropicMessageParam {
+                role: "user".into(),
+                content: vec![
+                    json!({"type": "tool_result", "tool_use_id": "toolu_1", "content": []}),
+                    json!({"type": "tool_result", "tool_use_id": "toolu_2", "content": []}),
+                ],
+            },
+        ];
+        let deduped = dedup_tool_blocks(messages);
+        assert_eq!(deduped[0].content.len(), 2);
+        assert_eq!(deduped[1].content.len(), 2);
+    }
+
     // ── merge_consecutive_roles ─────────────────────────────────────────
 
     #[test]
@@ -884,5 +986,77 @@ mod tests {
         assert_eq!(converted[2].content[0]["type"], "tool_result");
         assert_eq!(converted[2].content[1]["type"], "tool_result");
         assert_eq!(converted[2].content[2]["type"], "tool_result");
+    }
+
+    // ── End-to-end: cross-provider duplicate tool_result dedup ─────────
+
+    #[test]
+    fn full_flow_duplicate_openai_tool_results_deduped_after_remap() {
+        // Simulates the exact bug: OpenAI-format IDs + duplicate tool_results from DB
+        let mut args = Map::new();
+        let _ = args.insert("command".into(), json!("ls"));
+        let messages = vec![
+            Message::user("run something"),
+            Message::Assistant {
+                content: vec![
+                    AssistantContent::ToolUse {
+                        id: "call_abc123".into(),
+                        name: "bash".into(),
+                        arguments: args.clone(),
+                        thought_signature: None,
+                    },
+                    AssistantContent::ToolUse {
+                        id: "call_def456".into(),
+                        name: "read".into(),
+                        arguments: args,
+                        thought_signature: None,
+                    },
+                ],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            // Duplicate tool_results from DB (same tool_call_id executed twice)
+            Message::ToolResult {
+                tool_call_id: "call_abc123".into(),
+                content: ToolResultMessageContent::Text("first execution".into()),
+                is_error: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "call_abc123".into(),
+                content: ToolResultMessageContent::Text("second execution".into()),
+                is_error: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "call_def456".into(),
+                content: ToolResultMessageContent::Text("read output".into()),
+                is_error: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "call_def456".into(),
+                content: ToolResultMessageContent::Text("read output dup".into()),
+                is_error: None,
+            },
+        ];
+        let converted = convert_messages(&messages);
+        // user, assistant, user (merged tool_results)
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[2].role, "user");
+        // Should have exactly 2 tool_results (one per unique ID), not 4
+        assert_eq!(
+            converted[2].content.len(),
+            2,
+            "duplicate tool_results should be deduped to one per tool_use_id"
+        );
+        // Both should be tool_result type
+        assert_eq!(converted[2].content[0]["type"], "tool_result");
+        assert_eq!(converted[2].content[1]["type"], "tool_result");
+        // Verify IDs were remapped (OpenAI → Anthropic format)
+        let id0 = converted[2].content[0]["tool_use_id"].as_str().unwrap();
+        let id1 = converted[2].content[1]["tool_use_id"].as_str().unwrap();
+        assert!(id0.starts_with("toolu_remap_"), "should be remapped: {id0}");
+        assert!(id1.starts_with("toolu_remap_"), "should be remapped: {id1}");
+        assert_ne!(id0, id1, "two distinct tool_use_ids");
     }
 }
