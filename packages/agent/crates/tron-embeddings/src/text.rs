@@ -56,6 +56,9 @@ pub fn build_embedding_text(payload: &MemoryLedgerPayload) -> String {
     if !payload.tags.is_empty() {
         parts.push(payload.tags.join(" "));
     }
+    if !payload.entry_type.is_empty() {
+        parts.push(format!("type: {}", payload.entry_type));
+    }
     if !payload.working_directory.is_empty() {
         let project = Path::new(&payload.working_directory)
             .file_name()
@@ -182,6 +185,7 @@ mod tests {
         payload.thinking_insights = vec![];
         payload.decisions = vec![];
         payload.tags = vec![];
+        payload.entry_type = String::new();
         payload.working_directory = String::new();
         let text = build_embedding_text(&payload);
         assert!(!text.contains("\n\n"), "no double newlines");
@@ -198,6 +202,7 @@ mod tests {
         payload.thinking_insights = vec![];
         payload.decisions = vec![];
         payload.tags = vec![];
+        payload.entry_type = String::new();
         payload.working_directory = String::new();
         let text = build_embedding_text(&payload);
         assert_eq!(text, "Implement auth");
@@ -271,8 +276,8 @@ mod tests {
         let payload = make_payload();
         let text = build_embedding_text(&payload);
         let lines: Vec<&str> = text.lines().collect();
-        // title, input, actions, files, lessons, insights, decisions, tags, project
-        assert_eq!(lines.len(), 9);
+        // title, input, actions, files, lessons, insights, decisions, tags, type, project
+        assert_eq!(lines.len(), 10);
     }
 
     #[test]
@@ -286,6 +291,7 @@ mod tests {
         payload.thinking_insights = vec![];
         payload.decisions = vec![];
         payload.tags = vec![];
+        payload.entry_type = String::new();
         payload.working_directory = String::new();
         let text = build_embedding_text(&payload);
         assert!(text.is_empty());
@@ -381,6 +387,76 @@ mod tests {
         assert!(text.contains("Always check expiry"));
         assert!(text.contains("JWT refresh: simpler"));
         assert!(text.contains("auth"));
+    }
+
+    #[test]
+    fn entry_type_included_in_text() {
+        let payload = make_payload();
+        let text = build_embedding_text(&payload);
+        assert!(text.contains("type: feature"));
+    }
+
+    #[test]
+    fn personal_entry_type_in_text() {
+        let mut payload = make_payload();
+        payload.entry_type = "personal".into();
+        payload.files = vec![];
+        let text = build_embedding_text(&payload);
+        assert!(text.contains("type: personal"));
+    }
+
+    #[test]
+    fn non_code_entry_produces_meaningful_text() {
+        let mut payload = make_payload();
+        payload.title = "User prefers Vim keybindings".into();
+        payload.entry_type = "preference".into();
+        payload.input = "Discussed editor preferences".into();
+        payload.actions = vec!["Noted Vim preference".into()];
+        payload.files = vec![];
+        payload.decisions = vec![];
+        payload.lessons = vec!["User uses Vim keybindings in all editors and IDEs".into()];
+        payload.thinking_insights = vec![];
+        payload.tags = vec!["preference".into(), "workflow".into()];
+        let text = build_embedding_text(&payload);
+        assert!(text.contains("User prefers Vim keybindings"));
+        assert!(text.contains("type: preference"));
+        assert!(text.contains("User uses Vim keybindings"));
+        assert!(text.contains("preference workflow"));
+        assert!(!text.contains("(modified)"));
+        assert!(!text.contains("(created)"));
+    }
+
+    #[test]
+    fn knowledge_entry_from_json() {
+        let json = serde_json::json!({
+            "title": "RRF ranking explained",
+            "input": "Discussed how RRF fusion works",
+            "actions": ["Explained reciprocal rank fusion algorithm"],
+            "lessons": ["RRF uses k=60 by default, higher k reduces top-rank advantage"],
+            "tags": ["knowledge", "search", "algorithms"],
+            "entryType": "knowledge",
+            "status": "completed"
+        });
+        let text = build_embedding_text_from_json(json);
+        assert!(text.contains("RRF ranking explained"));
+        assert!(text.contains("type: knowledge"));
+        assert!(text.contains("reciprocal rank fusion"));
+    }
+
+    #[test]
+    fn personal_entry_lessons_become_lesson_vectors() {
+        let mut payload = make_payload();
+        payload.title = "User background".into();
+        payload.entry_type = "personal".into();
+        payload.lessons = vec![
+            "User is based in Austin, TX".into(),
+            "User prefers async communication".into(),
+        ];
+        payload.files = vec![];
+        let texts = build_lesson_texts(&payload);
+        assert_eq!(texts.len(), 2);
+        assert!(texts[0].contains("User is based in Austin"));
+        assert!(texts[1].contains("async communication"));
     }
 
     #[test]

@@ -44,6 +44,9 @@ Examples of good memory recalls:
 - Touching context-manager? → `action: "recall", query: "context manager changes"`
 - Fixing a WebSocket bug? → `action: "recall", query: "WebSocket issues and fixes"`
 - Setting up a new provider? → `action: "recall", query: "adding new LLM provider"`
+- User mentions a preference? → `action: "recall", query: "user preferences and workflow habits"`
+- Non-code discussion? → `action: "recall", query: "past conversations about <topic>"`
+- Personal context matters? → `action: "recall", query: "user schedule and personal context"`
 
 Think of it this way: a person who forgets what they did yesterday is ineffective. You don't have to be that person. You have perfect recall — you just have to look.
 

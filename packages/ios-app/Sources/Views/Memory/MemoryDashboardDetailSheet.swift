@@ -86,7 +86,7 @@ struct MemoryDashboardDetailSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.left.arrow.right")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    Text("\(formatTokens(input)) in / \(formatTokens(output)) out")
+                    Text("\(TokenFormatter.format(input)) in / \(TokenFormatter.format(output)) out")
                         .font(TronTypography.codeSM)
                 }
                 .foregroundStyle(.tronTextMuted)
@@ -95,10 +95,10 @@ struct MemoryDashboardDetailSheet: View {
             if let entryType = entry.entryType {
                 Text(entryType)
                     .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                    .foregroundStyle(colorForType(entryType))
+                    .foregroundStyle(LedgerFormatting.colorForEntryType(entryType))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(colorForType(entryType).opacity(0.15))
+                    .background(LedgerFormatting.colorForEntryType(entryType).opacity(0.15))
                     .clipShape(Capsule())
             }
 
@@ -252,7 +252,7 @@ struct MemoryDashboardDetailSheet: View {
                 HStack(spacing: 8) {
                     Text(file.op)
                         .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .bold))
-                        .foregroundStyle(opColor(file.op))
+                        .foregroundStyle(LedgerFormatting.colorForFileOp(file.op))
                         .frame(width: 16)
 
                     Text(file.path)
@@ -334,32 +334,4 @@ struct MemoryDashboardDetailSheet: View {
         return json
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000.0)
-        }
-        return "\(count)"
-    }
-
-    private func colorForType(_ type: String) -> Color {
-        switch type.lowercased() {
-        case "feature": .green
-        case "bugfix": .red
-        case "refactor": .cyan
-        case "docs": .blue
-        case "config": .orange
-        case "research": .yellow
-        case "conversation": .purple
-        default: .tronTextSecondary
-        }
-    }
-
-    private func opColor(_ op: String) -> Color {
-        switch op.uppercased() {
-        case "C": .green
-        case "M": .yellow
-        case "D": .red
-        default: .tronTextMuted
-        }
-    }
 }

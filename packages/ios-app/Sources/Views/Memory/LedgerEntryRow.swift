@@ -16,10 +16,10 @@ struct LedgerEntryRow: View {
                 if let entryType = entry.entryType {
                     Text(entryType)
                         .font(TronTypography.mono(size: TronTypography.sizeSM, weight: .medium))
-                        .foregroundStyle(colorForType(entryType))
+                        .foregroundStyle(LedgerFormatting.colorForEntryType(entryType))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(colorForType(entryType).opacity(0.15))
+                        .background(LedgerFormatting.colorForEntryType(entryType).opacity(0.15))
                         .clipShape(Capsule())
                 }
 
@@ -101,19 +101,6 @@ struct LedgerEntryRow: View {
     }
 
     // MARK: - Helpers
-
-    private func colorForType(_ type: String) -> Color {
-        switch type.lowercased() {
-        case "feature": .green
-        case "bugfix": .red
-        case "refactor": .cyan
-        case "docs": .blue
-        case "config": .orange
-        case "research": .yellow
-        case "conversation": .purple
-        default: .tronTextSecondary
-        }
-    }
 
     private func relativeDate(_ timestamp: String) -> String {
         DateParser.relativeAbbreviated(timestamp)

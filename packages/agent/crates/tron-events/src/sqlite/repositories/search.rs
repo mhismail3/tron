@@ -986,6 +986,29 @@ mod tests {
     }
 
     #[test]
+    fn extract_ledger_content_non_code_entry() {
+        let content = extract_content(
+            r#"{
+                "title": "User prefers dark mode",
+                "entryType": "preference",
+                "status": "completed",
+                "input": "discussed UI preferences",
+                "actions": ["noted dark mode preference"],
+                "lessons": ["user strongly prefers dark mode in all tools and editors"],
+                "decisions": [{"choice": "dark theme default", "reason": "user preference"}],
+                "tags": ["preference", "ui", "workflow"]
+            }"#,
+        );
+        assert!(content.contains("User prefers dark mode"));
+        assert!(content.contains("preference"));
+        assert!(content.contains("dark mode in all tools"));
+        assert!(content.contains("dark theme default"));
+        assert!(content.contains("workflow"));
+        // No file paths in non-code entry
+        assert!(!content.contains("src/"));
+    }
+
+    #[test]
     fn extract_tool_name_from_payload() {
         assert_eq!(extract_tool_name(r#"{"toolName": "Bash"}"#), "Bash");
         assert_eq!(extract_tool_name(r#"{"name": "Read"}"#), "Read");

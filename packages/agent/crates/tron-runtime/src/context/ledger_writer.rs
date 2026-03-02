@@ -17,7 +17,7 @@ use serde_json::Value;
 pub struct LedgerEntry {
     /// Short descriptive title (under 80 chars).
     pub title: String,
-    /// Entry type: feature, bugfix, refactor, docs, config, research, conversation.
+    /// Entry type: feature, bugfix, refactor, docs, config, research, personal, preference, knowledge, conversation.
     pub entry_type: String,
     /// Status: `completed`, `partial`, `in_progress`.
     #[serde(default = "default_status")]
@@ -534,5 +534,76 @@ mod tests {
     fn extract_json_passthrough() {
         let input = "no json here";
         assert_eq!(extract_json(input), "no json here");
+    }
+
+    // ── Non-code entry types ──
+
+    #[test]
+    fn parse_personal_entry_type() {
+        let response = r#"{"title": "User prefers dark mode everywhere", "entryType": "personal"}"#;
+        match parse_ledger_response(response).unwrap() {
+            LedgerParseResult::Entry(entry) => {
+                assert_eq!(entry.entry_type, "personal");
+                assert_eq!(entry.title, "User prefers dark mode everywhere");
+            }
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    #[test]
+    fn parse_preference_entry_type() {
+        let response =
+            r#"{"title": "Prefers bun over npm for package management", "entryType": "preference"}"#;
+        match parse_ledger_response(response).unwrap() {
+            LedgerParseResult::Entry(entry) => assert_eq!(entry.entry_type, "preference"),
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    #[test]
+    fn parse_knowledge_entry_type() {
+        let response = r#"{"title": "Discussed RRF ranking algorithm", "entryType": "knowledge"}"#;
+        match parse_ledger_response(response).unwrap() {
+            LedgerParseResult::Entry(entry) => assert_eq!(entry.entry_type, "knowledge"),
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    #[test]
+    fn parse_non_code_entry_without_files() {
+        let response = r#"{
+            "title": "User works remotely from Austin",
+            "entryType": "personal",
+            "tags": ["personal", "location"],
+            "input": "Mentioned working from Austin",
+            "actions": ["Recorded user's location context"],
+            "lessons": ["User is based in Austin, TX and prefers morning meetings"]
+        }"#;
+        match parse_ledger_response(response).unwrap() {
+            LedgerParseResult::Entry(entry) => {
+                assert!(entry.files.is_empty());
+                assert_eq!(entry.lessons.len(), 1);
+                assert_eq!(entry.tags, vec!["personal", "location"]);
+            }
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
+    }
+
+    #[test]
+    fn parse_entry_with_only_lessons() {
+        let response = r#"{
+            "title": "Always use semantic versioning",
+            "entryType": "preference",
+            "lessons": ["User strongly prefers semver for all packages"]
+        }"#;
+        match parse_ledger_response(response).unwrap() {
+            LedgerParseResult::Entry(entry) => {
+                assert!(entry.files.is_empty());
+                assert!(entry.actions.is_empty());
+                assert!(entry.decisions.is_empty());
+                assert_eq!(entry.lessons.len(), 1);
+            }
+            LedgerParseResult::Skip => panic!("expected entry"),
+        }
     }
 }

@@ -98,7 +98,7 @@ impl EmbeddingController {
 
     /// Embed a memory ledger entry and store its vectors.
     ///
-    /// Creates 1 summary vector plus per-lesson vectors if the entry has >1 lesson.
+    /// Creates 1 summary vector plus per-lesson vectors for each lesson.
     pub async fn embed_memory(
         &self,
         event_id: &str,
@@ -112,6 +112,16 @@ impl EmbeddingController {
             debug!(event_id, "skipping embedding: empty text");
             return Ok(());
         }
+
+        // Extract metadata from payload
+        let entry_type = payload
+            .get("entryType")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let created_at = payload
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // Delete existing vectors for this event (clean upsert)
         let repo_del = Arc::clone(repo);
@@ -128,18 +138,27 @@ impl EmbeddingController {
         let id_s = format!("{event_id}-summary");
         let eid_s = event_id.to_owned();
         let ws_s = workspace_id.to_owned();
+        let et_s = entry_type.clone();
+        let ca_s = created_at.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            repo_s
-                .lock()
-                .store(&id_s, &eid_s, &ws_s, "summary", 0, None, None, &embedding)
+            repo_s.lock().store(
+                &id_s,
+                &eid_s,
+                &ws_s,
+                "summary",
+                0,
+                et_s.as_deref(),
+                ca_s.as_deref(),
+                &embedding,
+            )
         })
         .await
         .map_err(|e| EmbeddingError::Internal(format!("join: {e}")))?;
 
-        // 2. Per-lesson vectors (only if >1 lesson — with 1 lesson the summary covers it)
+        // 2. Per-lesson vectors
         if let Ok(parsed) = serde_json::from_value::<MemoryLedgerPayload>(payload.clone()) {
             let lesson_texts = build_lesson_texts(&parsed);
-            if lesson_texts.len() > 1 {
+            if !lesson_texts.is_empty() {
                 for (i, lesson_text) in lesson_texts.iter().enumerate() {
                     let prefixed_lesson = with_document_prefix(lesson_text);
                     if let Ok(lesson_emb) = service.embed_single(&prefixed_lesson).await {
@@ -147,6 +166,8 @@ impl EmbeddingController {
                         let id_l = format!("{event_id}-lesson-{}", i + 1);
                         let eid_l = event_id.to_owned();
                         let ws_l = workspace_id.to_owned();
+                        let et_l = entry_type.clone();
+                        let ca_l = created_at.clone();
                         let chunk_idx = (i + 1) as i64;
                         let _ = tokio::task::spawn_blocking(move || {
                             repo_l.lock().store(
@@ -155,8 +176,8 @@ impl EmbeddingController {
                                 &ws_l,
                                 "lesson",
                                 chunk_idx,
-                                None,
-                                None,
+                                et_l.as_deref(),
+                                ca_l.as_deref(),
                                 &lesson_emb,
                             )
                         })
@@ -490,6 +511,16 @@ impl EmbeddingController {
                 continue;
             }
 
+            // Extract metadata from payload
+            let entry_type = payload_clone
+                .get("entryType")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let created_at = payload_clone
+                .get("timestamp")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+
             // Delete existing vectors for clean re-embed
             let _ = repo.lock().delete_by_event(&entry.event_id);
 
@@ -504,8 +535,8 @@ impl EmbeddingController {
                         &entry.workspace_id,
                         "summary",
                         0,
-                        None,
-                        None,
+                        entry_type.as_deref(),
+                        created_at.as_deref(),
                         &embedding,
                     ) {
                         Ok(()) => result.succeeded += 1,
@@ -526,7 +557,7 @@ impl EmbeddingController {
             // Per-lesson vectors
             if let Ok(parsed) = serde_json::from_value::<MemoryLedgerPayload>(payload_clone) {
                 let lesson_texts = build_lesson_texts(&parsed);
-                if lesson_texts.len() > 1 {
+                if !lesson_texts.is_empty() {
                     for (i, lesson_text) in lesson_texts.iter().enumerate() {
                         let prefixed_lesson = with_document_prefix(lesson_text);
                         if let Ok(lesson_emb) = service.embed_single(&prefixed_lesson).await {
@@ -537,8 +568,8 @@ impl EmbeddingController {
                                 &entry.workspace_id,
                                 "lesson",
                                 (i + 1) as i64,
-                                None,
-                                None,
+                                entry_type.as_deref(),
+                                created_at.as_deref(),
                                 &lesson_emb,
                             );
                         }
@@ -624,7 +655,8 @@ mod tests {
         ctrl.embed_memory("evt1", "ws1", &test_payload())
             .await
             .unwrap();
-        assert_eq!(repo.lock().count().unwrap(), 1);
+        // 1 summary + 1 lesson (test_payload has 1 lesson)
+        assert_eq!(repo.lock().count().unwrap(), 2);
     }
 
     #[tokio::test]
@@ -748,7 +780,8 @@ mod tests {
         assert_eq!(result.succeeded, 2);
         assert_eq!(result.failed, 0);
         assert_eq!(result.skipped, 0);
-        assert_eq!(repo.lock().count().unwrap(), 2);
+        // 2 entries x (1 summary + 1 lesson) = 4 vectors
+        assert_eq!(repo.lock().count().unwrap(), 4);
     }
 
     #[tokio::test]
@@ -852,6 +885,74 @@ mod tests {
         assert_eq!(results.len(), 2);
         // Results should be ordered by similarity
         assert!(results[0].similarity >= results[1].similarity);
+    }
+
+    #[tokio::test]
+    async fn embed_memory_stores_entry_type() {
+        let dims = 512;
+        let mut ctrl = make_controller(dims);
+        ctrl.set_service(make_service(dims));
+        let repo = make_repo(dims);
+        ctrl.set_vector_repo(Arc::clone(&repo));
+
+        let payload = serde_json::json!({
+            "title": "User prefers dark mode",
+            "entryType": "preference",
+            "status": "completed",
+            "input": "Mentioned dark mode preference",
+            "lessons": ["User strongly prefers dark mode"],
+            "tags": ["preference"]
+        });
+        ctrl.embed_memory("evt1", "ws1", &payload).await.unwrap();
+
+        // Verify entry_type filter works
+        let results = ctrl
+            .search(
+                "dark mode",
+                &SearchOptions {
+                    limit: 5,
+                    entry_type: Some("preference".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].event_id, "evt1");
+
+        // Verify filtering by wrong type returns nothing
+        let results = ctrl
+            .search(
+                "dark mode",
+                &SearchOptions {
+                    limit: 5,
+                    entry_type: Some("feature".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn embed_single_lesson_creates_lesson_vector() {
+        let dims = 512;
+        let mut ctrl = make_controller(dims);
+        ctrl.set_service(make_service(dims));
+        let repo = make_repo(dims);
+        ctrl.set_vector_repo(Arc::clone(&repo));
+
+        let payload = serde_json::json!({
+            "title": "User lives in Austin",
+            "entryType": "personal",
+            "lessons": ["User is based in Austin, TX and works remotely"],
+            "tags": ["personal"]
+        });
+        ctrl.embed_memory("evt1", "ws1", &payload).await.unwrap();
+
+        // 1 summary + 1 lesson = 2 vectors
+        assert_eq!(repo.lock().count().unwrap(), 2);
     }
 
     #[test]
@@ -1081,18 +1182,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embed_memory_single_lesson_no_extra_vectors() {
+    async fn embed_memory_single_lesson_creates_lesson_vector_too() {
         let dims = 512;
         let mut ctrl = make_controller(dims);
         ctrl.set_service(make_service(dims));
         let repo = make_repo(dims);
         ctrl.set_vector_repo(Arc::clone(&repo));
 
-        // test_payload() has exactly 1 lesson — no per-lesson vectors
+        // test_payload() has exactly 1 lesson — now creates 1 summary + 1 lesson vector
         ctrl.embed_memory("evt1", "ws1", &test_payload())
             .await
             .unwrap();
-        assert_eq!(repo.lock().count().unwrap(), 1);
+        assert_eq!(repo.lock().count().unwrap(), 2);
     }
 
     #[tokio::test]

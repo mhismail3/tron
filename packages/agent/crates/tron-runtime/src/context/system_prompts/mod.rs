@@ -90,35 +90,76 @@ pub const MEMORY_LEDGER_PROMPT: &str = r#"You are a memory indexer. Analyze the 
 ## Instructions
 
 1. Read the events provided (user prompt, tool calls, assistant response, thinking blocks)
-2. Decide: is this worth recording? Skip trivial interactions:
-   - Simple greetings or pleasantries
-   - Clarification questions with no action taken
-   - "Yes/No" confirmations with no substantive work
+2. Decide: is this worth recording? Skip ONLY truly empty interactions:
+   - Bare greetings with zero information exchange ("hi", "thanks", "ok")
+   - System errors with no user context
 3. If worth recording, return a JSON object (no markdown fencing)
 4. If not worth recording, return: {"skip": true}
+
+Record generously. If the user shared anything about themselves, their preferences, opinions, workflow, interests, or life context — that is worth recording even without code changes. If the user and assistant discussed a topic, explored an idea, or reached a conclusion — record it.
 
 ## Output Format (when recording)
 
 Return a single JSON object:
 {
   "title": "Short descriptive title (under 80 chars)",
-  "entryType": "feature|bugfix|refactor|docs|config|research|conversation",
+  "entryType": "<type>",
   "status": "completed|partial|in_progress",
   "tags": ["relevant", "tags"],
-  "input": "What the user asked for (1 sentence)",
-  "actions": ["What was done (1-3 bullet points)"],
+  "input": "What the user asked for or discussed (1 sentence)",
+  "actions": ["What was done or discussed (1-3 bullet points)"],
   "files": [{"path": "relative/path", "op": "C|M|D", "why": "purpose"}],
-  "decisions": [{"choice": "What was chosen", "reason": "Why"}],
-  "lessons": ["Patterns or insights worth remembering"],
+  "decisions": [{"choice": "What was chosen or expressed", "reason": "Why"}],
+  "lessons": ["Standalone facts worth remembering — see guidance below"],
   "thinkingInsights": ["Key reasoning from thinking blocks"]
 }
+
+### Entry types
+
+Choose the most specific type:
+
+- **feature** — new functionality was built
+- **bugfix** — a bug was diagnosed or fixed
+- **refactor** — code was restructured without behavior change
+- **docs** — documentation was written or updated
+- **config** — configuration, settings, or environment changes
+- **research** — investigation, exploration, or learning about a technical topic
+- **personal** — something about the user: background, life context, schedule, contacts, personal facts
+- **preference** — user's stated preferences, opinions, workflow habits, tool choices, style preferences
+- **knowledge** — general knowledge, non-code topics, interesting findings, factual discussions
+- **conversation** — substantive discussion that doesn't fit other categories
+
+### Writing good lessons
+
+Lessons are the primary recall signal — each lesson gets its own search vector. Write them as standalone, specific facts that make sense without surrounding context:
+
+Good lessons (self-contained, specific):
+- "User is based in Austin, TX and works remotely"
+- "User strongly prefers dark mode in all applications and development tools"
+- "bun:sqlite shim wraps better-sqlite3 for vitest worker isolation"
+- "Anthropic beta endpoint does not support OAuth — returns 401"
+
+Bad lessons (vague, need context):
+- "Noted user location"
+- "Prefers dark mode"
+- "Shim needed for tests"
+- "OAuth doesn't work there"
+
+### Tag guidance
+
+Tags can be anything relevant. Examples beyond code topics:
+- Technical: ios, rust, auth, websocket, ui
+- Personal: preference, workflow, habit, opinion
+- Topical: design, architecture, career, health, travel, finance
+- Meta: setup, tooling, learning
 
 ## Rules
 
 - Be concise — this is a metadata index, not a transcript
-- Focus on WHAT changed and WHY
+- For code changes: focus on WHAT changed and WHY
+- For non-code interactions: capture the key information, preference, or conclusion
 - Extract thinking insights that explain non-obvious decisions
-- File paths should be relative to the working directory
+- File paths should be relative to the working directory (omit files array for non-code entries)
 - Tags should be lowercase, no spaces
 - Return ONLY valid JSON, no explanation text"#;
 

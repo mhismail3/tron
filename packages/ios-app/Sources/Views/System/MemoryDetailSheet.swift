@@ -184,7 +184,7 @@ struct MemoryDetailSheet: View {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.left.arrow.right")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    Text("\(formatTokens(input)) in / \(formatTokens(output)) out")
+                    Text("\(TokenFormatter.format(input)) in / \(TokenFormatter.format(output)) out")
                         .font(TronTypography.codeSM)
                 }
                 .foregroundStyle(.tronTextMuted)
@@ -244,13 +244,6 @@ struct MemoryDetailSheet: View {
     }
 
     // MARK: - Helpers
-
-    private func formatTokens(_ count: Int) -> String {
-        if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000.0)
-        }
-        return "\(count)"
-    }
 
     private func prettyPrintPayload(_ payload: [String: AnyCodable]) -> String {
         let raw = payload.mapValues { $0.value }
