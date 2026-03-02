@@ -17,7 +17,6 @@ use tron_runtime::context::ledger_writer::LedgerParseResult;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
 
 // =============================================================================
@@ -423,14 +422,23 @@ fn event_to_ledger_dto(event: &tron_events::sqlite::row_types::EventRow) -> Valu
     })
 }
 
-/// Get ledger entries for a workspace.
+/// Get ledger entries, optionally scoped to a workspace.
+///
+/// When `workingDirectory` is provided, returns entries for that workspace and
+/// its children (prefix match). When omitted (or null), returns ALL ledger
+/// entries across all workspaces.
 pub struct GetLedgerHandler;
 
 #[async_trait]
 impl MethodHandler for GetLedgerHandler {
     #[instrument(skip(self, ctx), fields(method = "memory.getLedger"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let working_dir = require_string_param(params.as_ref(), "workingDirectory")?;
+        let working_dir: Option<String> = params
+            .as_ref()
+            .and_then(|p| p.get("workingDirectory"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
 
         let limit = params
             .as_ref()
@@ -450,32 +458,65 @@ impl MethodHandler for GetLedgerHandler {
             .and_then(Value::as_array)
             .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect());
 
-        // Resolve workspace from path
-        let workspace = ctx
-            .event_store
-            .get_workspace_by_path(&working_dir)
-            .unwrap_or(None);
-
-        let Some(workspace) = workspace else {
-            return Ok(serde_json::json!({
-                "entries": [],
-                "hasMore": false,
-                "totalCount": 0,
-            }));
-        };
-
-        // When tag filtering is active, we must fetch all events to filter in memory
-        if let Some(ref tags) = tags_filter {
-            let all_events = ctx
+        // Fetch raw events — either workspace-scoped or global
+        let (all_events_for_tags, count_and_page) = if let Some(ref dir) = working_dir {
+            // Workspace-scoped: prefix match
+            let workspaces = ctx
                 .event_store
-                .get_events_by_workspace_and_types(
-                    &workspace.id,
-                    &["memory.ledger"],
-                    None,
-                    None,
-                )
+                .find_workspaces_by_path_prefix(dir)
                 .unwrap_or_default();
 
+            if workspaces.is_empty() {
+                return Ok(serde_json::json!({
+                    "entries": [],
+                    "hasMore": false,
+                    "totalCount": 0,
+                }));
+            }
+
+            let workspace_ids: Vec<&str> = workspaces.iter().map(|w| w.id.as_str()).collect();
+
+            if tags_filter.is_some() {
+                let events = ctx
+                    .event_store
+                    .get_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"], None, None)
+                    .unwrap_or_default();
+                (Some(events), None)
+            } else {
+                let total_count = ctx
+                    .event_store
+                    .count_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"])
+                    .unwrap_or(0);
+                let events = ctx
+                    .event_store
+                    .get_events_by_workspaces_and_types(&workspace_ids, &["memory.ledger"], Some(limit), Some(offset))
+                    .unwrap_or_default();
+                (None, Some((events, total_count)))
+            }
+        } else {
+            // Global: all workspaces
+            if tags_filter.is_some() {
+                let events = ctx
+                    .event_store
+                    .get_all_events_by_types(&["memory.ledger"], None, None)
+                    .unwrap_or_default();
+                (Some(events), None)
+            } else {
+                let total_count = ctx
+                    .event_store
+                    .count_all_events_by_types(&["memory.ledger"])
+                    .unwrap_or(0);
+                let events = ctx
+                    .event_store
+                    .get_all_events_by_types(&["memory.ledger"], Some(limit), Some(offset))
+                    .unwrap_or_default();
+                (None, Some((events, total_count)))
+            }
+        };
+
+        // Tag-filtered path: filter in memory, then paginate
+        if let Some(all_events) = all_events_for_tags {
+            let tags = tags_filter.as_ref().unwrap();
             let filtered: Vec<Value> = all_events
                 .iter()
                 .map(event_to_ledger_dto)
@@ -510,22 +551,8 @@ impl MethodHandler for GetLedgerHandler {
             }));
         }
 
-        // No tag filter — use efficient workspace-level query with SQL pagination
-        let total_count = ctx
-            .event_store
-            .count_events_by_workspace_and_types(&workspace.id, &["memory.ledger"])
-            .unwrap_or(0);
-
-        let events = ctx
-            .event_store
-            .get_events_by_workspace_and_types(
-                &workspace.id,
-                &["memory.ledger"],
-                Some(limit),
-                Some(offset),
-            )
-            .unwrap_or_default();
-
+        // Non-tag path: already paginated by SQL
+        let (events, total_count) = count_and_page.unwrap();
         let entries: Vec<Value> = events.iter().map(event_to_ledger_dto).collect();
         #[allow(clippy::cast_possible_wrap)]
         let has_more = (offset + limit) < total_count;
@@ -1104,6 +1131,140 @@ mod tests {
         assert!(session_ids.contains(&sid2.as_str()));
     }
 
+    // ── Path prefix matching tests ────────────────────────────────
+
+    #[tokio::test]
+    async fn get_ledger_includes_child_workspaces() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Parent entry"}));
+        seed_ledger_event(&ctx, "/tmp/proj/sub", json!({"title": "Child entry"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(result["totalCount"], 2);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_excludes_unrelated_workspaces() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Included"}));
+        seed_ledger_event(&ctx, "/tmp/other", json!({"title": "Excluded"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["title"].as_str().unwrap(), "Included");
+    }
+
+    #[tokio::test]
+    async fn get_ledger_prefix_requires_separator() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/proj", json!({"title": "Match"}));
+        seed_ledger_event(&ctx, "/tmp/projOther", json!({"title": "No match"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["title"].as_str().unwrap(), "Match");
+    }
+
+    #[tokio::test]
+    async fn get_ledger_parent_prefix() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/a/b", json!({"title": "B"}));
+        seed_ledger_event(&ctx, "/tmp/a/c", json!({"title": "C"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/a"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(result["totalCount"], 2);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_pagination_across_workspaces() {
+        let ctx = make_test_context();
+        let sid1 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj", Some("test")).unwrap();
+        for i in 0..3 {
+            let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                session_id: &sid1,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({"title": format!("Parent {i}")}),
+                parent_id: None,
+            });
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let sid2 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj/sub", Some("test")).unwrap();
+        for i in 0..3 {
+            let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                session_id: &sid2,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({"title": format!("Child {i}")}),
+                parent_id: None,
+            });
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj", "limit": 4})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 4);
+        assert_eq!(result["totalCount"], 6);
+        assert_eq!(result["hasMore"], true);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_tag_filter_across_workspaces() {
+        let ctx = make_test_context();
+        let sid1 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj", Some("test")).unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid1,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Parent tagged", "tags": ["ios"]}),
+            parent_id: None,
+        });
+        let sid2 = ctx.session_manager.create_session("claude-opus-4-6", "/tmp/proj/sub", Some("test")).unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid2,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Child tagged", "tags": ["ios"]}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid2,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Child untagged", "tags": ["server"]}),
+            parent_id: None,
+        });
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/proj", "tags": ["ios"]})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(result["totalCount"], 2);
+    }
+
     #[tokio::test]
     async fn get_ledger_returns_entries() {
         let ctx = make_test_context();
@@ -1134,14 +1295,160 @@ mod tests {
         assert!(result["totalCount"].is_number());
     }
 
+    // ── Optional workingDirectory (global query) tests ────────────
+
     #[tokio::test]
-    async fn get_ledger_missing_working_dir() {
+    async fn get_ledger_no_working_dir_returns_all() {
         let ctx = make_test_context();
-        let err = GetLedgerHandler
+        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry A1"}));
+        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry A2"}));
+        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry B1"}));
+
+        let result = GetLedgerHandler
             .handle(Some(json!({})), &ctx)
             .await
-            .unwrap_err();
-        assert_eq!(err.code(), "INVALID_PARAMS");
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 3);
+        assert_eq!(result["totalCount"], 3);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_null_working_dir_returns_all() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry 1"}));
+        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry 2"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": null})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(result["totalCount"], 2);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_no_working_dir_respects_pagination() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/a", Some("test"))
+            .unwrap();
+        for i in 0..3 {
+            let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({"title": format!("A{i}")}),
+                parent_id: None,
+            });
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let sid2 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/b", Some("test"))
+            .unwrap();
+        for i in 0..2 {
+            let _ = ctx.event_store.append(&tron_events::AppendOptions {
+                session_id: &sid2,
+                event_type: tron_events::EventType::MemoryLedger,
+                payload: json!({"title": format!("B{i}")}),
+                parent_id: None,
+            });
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"limit": 2, "offset": 1})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(result["totalCount"], 5);
+        assert_eq!(result["hasMore"], true);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_no_working_dir_with_tag_filter() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/a", Some("test"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "iOS tagged", "tags": ["ios"]}),
+            parent_id: None,
+        });
+        let sid2 = ctx
+            .session_manager
+            .create_session("claude-opus-4-6", "/tmp/b", Some("test"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid2,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "iOS tagged 2", "tags": ["ios"]}),
+            parent_id: None,
+        });
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid2,
+            event_type: tron_events::EventType::MemoryLedger,
+            payload: json!({"title": "Server tagged", "tags": ["server"]}),
+            parent_id: None,
+        });
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"tags": ["ios"]})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(result["totalCount"], 2);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_no_working_dir_empty_db() {
+        let ctx = make_test_context();
+        let result = GetLedgerHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"], json!([]));
+        assert_eq!(result["hasMore"], false);
+        assert_eq!(result["totalCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn get_ledger_with_working_dir_still_filters() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "A entry"}));
+        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "B entry"}));
+
+        let result = GetLedgerHandler
+            .handle(Some(json!({"workingDirectory": "/tmp/a"})), &ctx)
+            .await
+            .unwrap();
+
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["title"].as_str().unwrap(), "A entry");
+    }
+
+    #[tokio::test]
+    async fn get_ledger_no_params_returns_all() {
+        let ctx = make_test_context();
+        seed_ledger_event(&ctx, "/tmp/a", json!({"title": "Entry 1"}));
+        seed_ledger_event(&ctx, "/tmp/b", json!({"title": "Entry 2"}));
+
+        let result = GetLedgerHandler
+            .handle(None, &ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(result["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(result["totalCount"], 2);
     }
 
     #[tokio::test]

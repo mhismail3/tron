@@ -192,7 +192,6 @@ struct ContentView: View {
         NavigationStack {
             MemoryDashboardView(
                 rpcClient: rpcClient,
-                workingDirectory: quickSessionWorkspace,
                 actions: dashboardActions
             )
         }
@@ -263,7 +262,6 @@ struct ContentView: View {
             } else if navigationMode == .memory {
                 MemoryDashboardView(
                     rpcClient: rpcClient,
-                    workingDirectory: quickSessionWorkspace,
                     actions: dashboardActions
                 )
             } else if navigationMode == .sandboxes {

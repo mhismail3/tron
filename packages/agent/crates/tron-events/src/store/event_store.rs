@@ -649,6 +649,23 @@ impl EventStore {
         EventRepo::count_by_workspace_and_types(&conn, workspace_id, types)
     }
 
+    /// Get events of specific types across ALL workspaces (global query).
+    pub fn get_all_events_by_types(
+        &self,
+        types: &[&str],
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_all_by_types(&conn, types, limit, offset)
+    }
+
+    /// Count events of specific types across ALL workspaces (global query).
+    pub fn count_all_events_by_types(&self, types: &[&str]) -> Result<i64> {
+        let conn = self.conn()?;
+        EventRepo::count_all_by_types(&conn, types)
+    }
+
     /// Count total events in a session.
     pub fn count_events(&self, session_id: &str) -> Result<i64> {
         let conn = self.conn()?;
@@ -888,6 +905,34 @@ impl EventStore {
     pub fn get_workspace_by_path(&self, path: &str) -> Result<Option<WorkspaceRow>> {
         let conn = self.conn()?;
         WorkspaceRepo::get_by_path(&conn, path)
+    }
+
+    /// Find all workspaces whose path matches the given prefix (exact + children).
+    pub fn find_workspaces_by_path_prefix(&self, prefix: &str) -> Result<Vec<WorkspaceRow>> {
+        let conn = self.conn()?;
+        WorkspaceRepo::find_by_path_prefix(&conn, prefix)
+    }
+
+    /// Get events across multiple workspaces by types.
+    pub fn get_events_by_workspaces_and_types(
+        &self,
+        workspace_ids: &[&str],
+        types: &[&str],
+        limit: Option<i64>,
+        offset: Option<i64>,
+    ) -> Result<Vec<EventRow>> {
+        let conn = self.conn()?;
+        EventRepo::get_by_workspaces_and_types(&conn, workspace_ids, types, limit, offset)
+    }
+
+    /// Count events across multiple workspaces by types.
+    pub fn count_events_by_workspaces_and_types(
+        &self,
+        workspace_ids: &[&str],
+        types: &[&str],
+    ) -> Result<i64> {
+        let conn = self.conn()?;
+        EventRepo::count_by_workspaces_and_types(&conn, workspace_ids, types)
     }
 
     /// Get or create workspace by path.

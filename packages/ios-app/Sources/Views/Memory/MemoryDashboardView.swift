@@ -3,7 +3,6 @@ import SwiftUI
 @available(iOS 26.0, *)
 struct MemoryDashboardView: View {
     let rpcClient: RPCClient
-    let workingDirectory: String
     let actions: DashboardToolbarActions
 
     @State private var entries: [LedgerEntryDTO] = []
@@ -58,6 +57,7 @@ struct MemoryDashboardView: View {
         }
         .sheet(item: $selectedEntry) { entry in
             MemoryDashboardDetailSheet(entry: entry)
+                .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showingTagFilter) {
             TagFilterSheet(
@@ -202,7 +202,6 @@ struct MemoryDashboardView: View {
 
         do {
             let result = try await rpcClient.misc.getLedgerEntries(
-                workingDirectory: workingDirectory,
                 limit: pageSize,
                 offset: 0
             )
@@ -226,7 +225,6 @@ struct MemoryDashboardView: View {
 
         do {
             let result = try await rpcClient.misc.getLedgerEntries(
-                workingDirectory: workingDirectory,
                 limit: pageSize,
                 offset: entries.count
             )

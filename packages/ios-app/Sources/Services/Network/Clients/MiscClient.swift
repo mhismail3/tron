@@ -85,9 +85,9 @@ final class MiscClient {
         return result.handoffs
     }
 
-    /// Get paginated ledger entries for a workspace
+    /// Get paginated ledger entries, optionally scoped to a workspace
     func getLedgerEntries(
-        workingDirectory: String,
+        workingDirectory: String? = nil,
         limit: Int? = nil,
         offset: Int? = nil,
         tags: [String]? = nil

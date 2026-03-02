@@ -71,12 +71,12 @@ struct TreeGetAncestorsResult: Decodable {
 // MARK: - Memory Ledger Methods
 
 struct MemoryGetLedgerParams: Encodable {
-    let workingDirectory: String
+    let workingDirectory: String?
     let limit: Int?
     let offset: Int?
     let tags: [String]?
 
-    init(workingDirectory: String, limit: Int? = nil, offset: Int? = nil, tags: [String]? = nil) {
+    init(workingDirectory: String? = nil, limit: Int? = nil, offset: Int? = nil, tags: [String]? = nil) {
         self.workingDirectory = workingDirectory
         self.limit = limit
         self.offset = offset
