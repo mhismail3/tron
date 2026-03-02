@@ -38,12 +38,12 @@ struct AutomationRunDetailSheet: View {
 
                     // Timestamps
                     VStack(alignment: .leading, spacing: 8) {
-                        infoRow("Started", value: formatDate(run.startedAt))
+                        infoRow("Started", value: DateParser.shortDateTime(run.startedAt))
                         if let completed = run.completedAt {
-                            infoRow("Completed", value: formatDate(completed))
+                            infoRow("Completed", value: DateParser.shortDateTime(completed))
                         }
                         if let duration = run.durationMs {
-                            infoRow("Duration", value: formatDuration(duration))
+                            infoRow("Duration", value: DurationFormatter.format(duration))
                         }
                         if let exitCode = run.exitCode {
                             infoRow("Exit Code", value: "\(exitCode)")
@@ -167,15 +167,4 @@ struct AutomationRunDetailSheet: View {
         }
     }
 
-    private func formatDate(_ isoString: String) -> String {
-        DateParser.shortDateTime(isoString)
-    }
-
-    private func formatDuration(_ ms: Int) -> String {
-        if ms < 1000 { return "\(ms)ms" }
-        if ms < 60000 { return String(format: "%.1fs", Double(ms) / 1000) }
-        let minutes = ms / 60000
-        let seconds = (ms % 60000) / 1000
-        return "\(minutes)m \(seconds)s"
-    }
 }

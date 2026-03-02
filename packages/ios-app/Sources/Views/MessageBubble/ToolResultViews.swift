@@ -92,7 +92,7 @@ struct StandaloneToolResultView: View {
 
                 // Duration if available
                 if let durationMs = result.durationMs {
-                    Text(formatDuration(durationMs))
+                    Text(DurationFormatter.format(durationMs, style: .compact))
                         .font(TronTypography.codeSM)
                         .foregroundStyle(.tronTextMuted)
                 }
@@ -121,14 +121,6 @@ struct StandaloneToolResultView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func formatDuration(_ ms: Int) -> String {
-        if ms < 1000 {
-            return "\(ms)ms"
-        } else {
-            let seconds = Double(ms) / 1000.0
-            return String(format: "%.1fs", seconds)
-        }
-    }
 }
 
 // MARK: - Error Content View (Terminal-style)

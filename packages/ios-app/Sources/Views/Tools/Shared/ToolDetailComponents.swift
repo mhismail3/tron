@@ -112,19 +112,11 @@ struct ToolStatusBadge: View {
 struct ToolDurationBadge: View {
     let durationMs: Int
 
-    private var formattedDuration: String {
-        if durationMs < 1000 {
-            return "\(durationMs)ms"
-        } else {
-            return String(format: "%.1fs", Double(durationMs) / 1000.0)
-        }
-    }
-
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "clock")
                 .font(.system(size: 11))
-            Text(formattedDuration)
+            Text(DurationFormatter.format(durationMs, style: .compact))
                 .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .medium))
         }
         .foregroundStyle(.tronTextMuted)

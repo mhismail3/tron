@@ -25,15 +25,6 @@ struct SessionTokensCard: View {
         cacheCreation5mTokens > 0 || cacheCreation1hTokens > 0
     }
 
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
-    }
-
     var body: some View {
         VStack(spacing: 12) {
             // Header with total
@@ -48,7 +39,7 @@ struct SessionTokensCard: View {
 
                 Spacer()
 
-                Text(formatTokenCount(totalTokens))
+                Text(TokenFormatter.format(totalTokens))
                     .font(TronTypography.mono(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronAmber)
             }
@@ -65,7 +56,7 @@ struct SessionTokensCard: View {
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                     }
-                    Text(formatTokenCount(inputTokens))
+                    Text(TokenFormatter.format(inputTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronAmberLight)
                 }
@@ -83,7 +74,7 @@ struct SessionTokensCard: View {
                             .font(TronTypography.mono(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextMuted)
                     }
-                    Text(formatTokenCount(outputTokens))
+                    Text(TokenFormatter.format(outputTokens))
                         .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(.tronAmberLight)
                 }
@@ -105,7 +96,7 @@ struct SessionTokensCard: View {
                                 .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                 .foregroundStyle(.tronTextMuted)
                         }
-                        Text(formatTokenCount(cacheReadTokens))
+                        Text(TokenFormatter.format(cacheReadTokens))
                             .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                             .foregroundStyle(.tronAmber)
                     }
@@ -124,7 +115,7 @@ struct SessionTokensCard: View {
                                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronTextMuted)
                             }
-                            Text(formatTokenCount(cacheCreation5mTokens))
+                            Text(TokenFormatter.format(cacheCreation5mTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronAmber)
                         }
@@ -141,7 +132,7 @@ struct SessionTokensCard: View {
                                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronTextMuted)
                             }
-                            Text(formatTokenCount(cacheCreation1hTokens))
+                            Text(TokenFormatter.format(cacheCreation1hTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronAmber)
                         }
@@ -159,7 +150,7 @@ struct SessionTokensCard: View {
                                     .font(TronTypography.mono(size: TronTypography.sizeCaption))
                                     .foregroundStyle(.tronTextMuted)
                             }
-                            Text(formatTokenCount(cacheCreationTokens))
+                            Text(TokenFormatter.format(cacheCreationTokens))
                                 .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
                                 .foregroundStyle(.tronAmber)
                         }

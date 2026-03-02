@@ -193,7 +193,7 @@ struct EntitySnapshotCard: View {
                     if let extra = item.extra {
                         Text(extra)
                             .font(TronTypography.mono(size: 10, weight: .medium))
-                            .foregroundStyle(priorityColor(for: extra))
+                            .foregroundStyle(TaskFormatting.priorityColor(extra))
                     }
                 }
 
@@ -339,16 +339,16 @@ struct EntitySnapshotCard: View {
         if hasTimestamps {
             HStack(spacing: 12) {
                 if let created = entity.createdAt {
-                    timestampLabel("Created", value: formatTimestamp(created))
+                    timestampLabel("Created", value: DateParser.formatRelativeOrAbsolute(created))
                 }
                 if let updated = entity.updatedAt {
-                    timestampLabel("Updated", value: formatTimestamp(updated))
+                    timestampLabel("Updated", value: DateParser.formatRelativeOrAbsolute(updated))
                 }
                 if let started = entity.startedAt {
-                    timestampLabel("Started", value: formatTimestamp(started))
+                    timestampLabel("Started", value: DateParser.formatRelativeOrAbsolute(started))
                 }
                 if let completed = entity.completedAt {
-                    timestampLabel("Done", value: formatTimestamp(completed))
+                    timestampLabel("Done", value: DateParser.formatRelativeOrAbsolute(completed))
                 }
                 Spacer()
             }
@@ -371,7 +371,7 @@ struct EntitySnapshotCard: View {
 
     @ViewBuilder
     private func statusBadge(_ status: String) -> some View {
-        let color = statusColor(for: status)
+        let color = TaskFormatting.statusColor(status)
         HStack(spacing: 4) {
             Circle()
                 .fill(color)
@@ -394,7 +394,7 @@ struct EntitySnapshotCard: View {
 
     @ViewBuilder
     private func priorityBadge(_ priority: String) -> some View {
-        let color = priorityColor(for: priority)
+        let color = TaskFormatting.priorityColor(priority)
         Text(priority)
             .font(TronTypography.mono(size: 11, weight: .medium))
             .foregroundStyle(color)
@@ -473,42 +473,4 @@ struct EntitySnapshotCard: View {
             .padding(.top, 5)
     }
 
-    // MARK: - Color Helpers
-
-    private func statusColor(for status: String) -> Color {
-        switch status {
-        case "completed": return .tronSuccess
-        case "in_progress": return .tronTeal
-        case "cancelled": return .tronError
-        case "backlog": return .tronSlate
-        case "paused": return .tronAmber
-        case "archived": return .tronSlate
-        case "active": return .tronTeal
-        default: return .tronSlate
-        }
-    }
-
-    private func priorityColor(for priority: String) -> Color {
-        switch priority {
-        case "critical", "[critical]": return .tronError
-        case "high", "[high]": return .orange
-        case "low", "[low]": return .tronTextMuted
-        default: return .tronTextSecondary
-        }
-    }
-
-    private func formatTimestamp(_ iso: String) -> String {
-        // Extract date portion: "2026-02-11T10:00:00Z" → "Feb 11"
-        let parts = iso.split(separator: "T")
-        guard let datePart = parts.first else { return iso }
-        let datePieces = datePart.split(separator: "-")
-        guard datePieces.count >= 3,
-              let month = Int(datePieces[1]),
-              let day = Int(datePieces[2]) else { return String(datePart) }
-
-        let monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        let monthName = month > 0 && month <= 12 ? monthNames[month] : "\(month)"
-        return "\(monthName) \(day)"
-    }
 }

@@ -1,15 +1,5 @@
 import SwiftUI
 
-// MARK: - Token Formatting Helper
-
-func formatTokenCount(_ count: Int) -> String {
-    if count >= 1_000_000 {
-        return String(format: "%.1fM", Double(count) / 1_000_000)
-    } else if count >= 1000 {
-        return String(format: "%.1fk", Double(count) / 1000)
-    }
-    return "\(count)"
-}
 // MARK: - Context Usage Gauge View
 
 @available(iOS 26.0, *)
@@ -33,20 +23,11 @@ struct ContextUsageGaugeView: View {
     }
 
     private var formattedTokens: String {
-        formatTokenCount(currentTokens)
+        TokenFormatter.format(currentTokens)
     }
 
     private var formattedLimit: String {
-        formatTokenCount(contextLimit)
-    }
-
-    private func formatTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1000 {
-            return String(format: "%.1fk", Double(count) / 1000)
-        }
-        return "\(count)"
+        TokenFormatter.format(contextLimit)
     }
 
     var body: some View {
@@ -101,7 +82,7 @@ struct ContextUsageGaugeView: View {
 
                     Spacer()
 
-                    Text("\(formatTokenCount(contextLimit - currentTokens)) remaining")
+                    Text("\(TokenFormatter.format(contextLimit - currentTokens)) remaining")
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 }

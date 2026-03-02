@@ -99,7 +99,7 @@ struct ContainerDetailSheet: View {
             Spacer()
 
             // Created date
-            Text(relativeDate(container.createdAt))
+            Text(DateParser.relativeAbbreviated(container.createdAt))
                 .font(TronTypography.codeSM)
                 .foregroundStyle(.tronTextMuted)
         }
@@ -224,10 +224,6 @@ struct ContainerDetailSheet: View {
         case "gone": .red
         default: .tronTextMuted
         }
-    }
-
-    private func relativeDate(_ timestamp: String) -> String {
-        DateParser.relativeAbbreviated(timestamp)
     }
 
     private func prettyPrintContainer() -> String {

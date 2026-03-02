@@ -104,10 +104,10 @@ struct AutomationDetailSheet: View {
                 sectionTitle("Runtime")
 
                 if let nextRun = state.nextRunAt {
-                    infoRow("Next Run", value: formatDate(nextRun), icon: "arrow.right.circle")
+                    infoRow("Next Run", value: DateParser.shortDateTime(nextRun), icon: "arrow.right.circle")
                 }
                 if let lastRun = state.lastRunAt {
-                    infoRow("Last Run", value: formatDate(lastRun), icon: "arrow.left.circle")
+                    infoRow("Last Run", value: DateParser.shortDateTime(lastRun), icon: "arrow.left.circle")
                 }
                 if state.consecutiveFailures > 0 {
                     infoRow("Failures", value: "\(state.consecutiveFailures) consecutive",
@@ -184,12 +184,12 @@ struct AutomationDetailSheet: View {
             runStatusIcon(run.status)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(formatDate(run.startedAt))
+                Text(DateParser.shortDateTime(run.startedAt))
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextPrimary)
 
                 if let duration = run.durationMs {
-                    Text(formatDuration(duration))
+                    Text(DurationFormatter.format(duration))
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 }
@@ -285,18 +285,6 @@ struct AutomationDetailSheet: View {
         case "skipped": return .tronTextMuted
         default: return .tronTextSecondary
         }
-    }
-
-    private func formatDate(_ isoString: String) -> String {
-        DateParser.shortDateTime(isoString)
-    }
-
-    private func formatDuration(_ ms: Int) -> String {
-        if ms < 1000 { return "\(ms)ms" }
-        if ms < 60000 { return String(format: "%.1fs", Double(ms) / 1000) }
-        let minutes = ms / 60000
-        let seconds = (ms % 60000) / 1000
-        return "\(minutes)m \(seconds)s"
     }
 
     private func loadRuns() async {

@@ -133,10 +133,10 @@ struct TaskDetailSheet: View {
                     if let priority = item.priority {
                         Text(priority)
                             .font(TronTypography.mono(size: 10, weight: .medium))
-                            .foregroundStyle(priorityColor(priority))
+                            .foregroundStyle(TaskFormatting.priorityColor(priority))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(priorityColor(priority).opacity(0.15))
+                            .background(TaskFormatting.priorityColor(priority).opacity(0.15))
                             .clipShape(Capsule())
                     }
                 }
@@ -182,7 +182,7 @@ struct TaskDetailSheet: View {
 
                 ForEach(items) { item in
                     HStack(alignment: .top, spacing: 8) {
-                        statusDot(for: statusMark(item.status))
+                        statusDot(for: TaskFormatting.statusMark(item.status))
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title)
@@ -413,7 +413,7 @@ struct TaskDetailSheet: View {
 
     @ViewBuilder
     private func statusPill(_ status: String) -> some View {
-        let color = statusColor(status)
+        let color = TaskFormatting.statusColor(status)
         HStack(spacing: 3) {
             Circle()
                 .fill(color)
@@ -464,40 +464,6 @@ struct TaskDetailSheet: View {
             .padding(.top, 5)
     }
 
-    // MARK: - Color Helpers
-
-    private func statusColor(_ status: String) -> Color {
-        switch status {
-        case "completed": return .tronSuccess
-        case "in_progress": return .tronTeal
-        case "cancelled": return .tronError
-        case "backlog": return .tronSlate
-        case "paused": return .tronAmber
-        case "archived": return .tronSlate
-        case "active": return .tronTeal
-        case "pending": return .tronSlate
-        default: return .tronSlate
-        }
-    }
-
-    private func priorityColor(_ priority: String) -> Color {
-        switch priority {
-        case "critical": return .tronError
-        case "high": return .orange
-        case "low": return .tronTextMuted
-        default: return .tronTextSecondary
-        }
-    }
-
-    private func statusMark(_ status: String) -> String {
-        switch status {
-        case "completed": return "x"
-        case "in_progress": return ">"
-        case "cancelled": return "-"
-        case "backlog": return "b"
-        default: return " "
-        }
-    }
 }
 
 // MARK: - Legacy Fallback

@@ -346,14 +346,14 @@ struct SourceChangesSheet: View {
         HStack(alignment: .top, spacing: 0) {
             Text(line.lineNum.map(String.init) ?? "")
                 .font(TronTypography.pill)
-                .foregroundStyle(lineNumColor(for: line.type).opacity(0.6))
+                .foregroundStyle(DiffFormatting.lineNumColor(for: line.type).opacity(0.6))
                 .frame(width: lineNumWidth, alignment: .trailing)
                 .padding(.leading, 4)
                 .padding(.trailing, 4)
 
-            Text(marker(for: line.type))
+            Text(DiffFormatting.marker(for: line.type))
                 .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
-                .foregroundStyle(markerColor(for: line.type))
+                .foregroundStyle(DiffFormatting.markerColor(for: line.type))
                 .frame(width: 14)
                 .padding(.trailing, 4)
 
@@ -364,7 +364,7 @@ struct SourceChangesSheet: View {
         }
         .frame(minHeight: 18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(lineBackground(for: line.type))
+        .background(DiffFormatting.lineBackground(for: line.type))
     }
 
     private var diffSeparatorRow: some View {
@@ -381,38 +381,6 @@ struct SourceChangesSheet: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-    }
-
-    private func marker(for type: EditDiffLineType) -> String {
-        switch type {
-        case .addition: return "+"
-        case .deletion: return "\u{2212}"
-        case .context, .separator: return ""
-        }
-    }
-
-    private func markerColor(for type: EditDiffLineType) -> Color {
-        switch type {
-        case .addition: return .tronSuccess
-        case .deletion: return .tronError
-        case .context, .separator: return .clear
-        }
-    }
-
-    private func lineNumColor(for type: EditDiffLineType) -> Color {
-        switch type {
-        case .addition: return .tronSuccess
-        case .deletion: return .tronError
-        case .context, .separator: return .tronTextMuted
-        }
-    }
-
-    private func lineBackground(for type: EditDiffLineType) -> Color {
-        switch type {
-        case .addition: return Color.tronSuccess.opacity(0.08)
-        case .deletion: return Color.tronError.opacity(0.08)
-        case .context, .separator: return .clear
-        }
     }
 
     // MARK: - Data Loading

@@ -25,7 +25,7 @@ struct LedgerEntryRow: View {
 
                 Spacer()
 
-                Text(relativeDate(entry.timestamp))
+                Text(DateParser.relativeAbbreviated(entry.timestamp))
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
@@ -100,9 +100,4 @@ struct LedgerEntryRow: View {
         .hoverEffect(.highlight)
     }
 
-    // MARK: - Helpers
-
-    private func relativeDate(_ timestamp: String) -> String {
-        DateParser.relativeAbbreviated(timestamp)
-    }
 }

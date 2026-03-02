@@ -17,7 +17,7 @@ struct ContainerRow: View {
 
                 Spacer()
 
-                Text(relativeDate(container.createdAt))
+                Text(DateParser.relativeAbbreviated(container.createdAt))
                     .font(TronTypography.codeSM)
                     .foregroundStyle(.tronTextMuted)
             }
@@ -83,9 +83,4 @@ struct ContainerRow: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private func relativeDate(_ timestamp: String) -> String {
-        DateParser.relativeAbbreviated(timestamp)
-    }
 }
