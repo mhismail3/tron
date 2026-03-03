@@ -1,11 +1,39 @@
 import Foundation
 import AVFoundation
 
+// MARK: - Audio Capture Buffer
+
+/// Thread-safe buffer for accumulating PCM audio from the audio engine's tap callback.
+/// Tap callback (audio thread) appends chunks; main actor drains after engine stops.
+final class AudioCaptureBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var chunks: [Data] = []
+
+    func append(_ data: Data) {
+        lock.withLock { chunks.append(data) }
+    }
+
+    func drain() -> Data {
+        lock.withLock {
+            defer { chunks = [] }
+            var combined = Data()
+            for chunk in chunks { combined.append(chunk) }
+            return combined
+        }
+    }
+
+    func discard() {
+        lock.withLock { chunks = [] }
+    }
+}
+
 // MARK: - Audio Recorder
+
+private let log = TronLogger.shared
 
 @Observable
 @MainActor
-final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
+final class AudioRecorder {
     enum RecorderError: LocalizedError {
         case permissionDenied
         case startFailed(String)
@@ -24,35 +52,15 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
 
     var onFinish: ((URL?, Bool) -> Void)?
 
-    private var recorder: AVAudioRecorder?
-    private var currentURL: URL?
+    /// Session options shared with AudioAvailabilityMonitor to prevent mismatches.
+    nonisolated static let sessionOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers]
+
+    private var engine: AVAudioEngine?
+    private let captureBuffer = AudioCaptureBuffer()
+    private var sampleRate: Double = 44_100
     private var autoStopTask: Task<Void, Never>?
-    /// Whether audio session has been pre-warmed
-    private var isSessionPrewarmed = false
 
-    // MARK: - Pre-warming (Performance Optimization)
-
-    /// Pre-warm the audio session for faster mic response on first tap.
-    /// Call this when ChatView appears to eliminate first-tap latency.
-    /// This configures the audio session without activating it,
-    /// so the actual recording start is nearly instant.
-    func prewarmAudioSession() {
-        guard !isSessionPrewarmed else { return }
-
-        Task.detached(priority: .utility) {
-            let session = AVAudioSession.sharedInstance()
-            do {
-                // Configure the category but don't activate yet
-                // This initializes the audio hardware in the background
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
-                await MainActor.run {
-                    self.isSessionPrewarmed = true
-                }
-            } catch {
-                // Silently fail - will retry on actual recording start
-            }
-        }
-    }
+    // MARK: - Permission
 
     func requestPermission() async -> Bool {
         switch AVAudioApplication.shared.recordPermission {
@@ -73,154 +81,225 @@ final class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         }
     }
 
+    // MARK: - Recording
+
     func startRecording(maxDuration: TimeInterval) async throws {
-        if isRecording {
-            return
-        }
-        let hasPermission = await requestPermission()
-        guard hasPermission else {
+        if isRecording { return }
+
+        guard await requestPermission() else {
             throw RecorderError.permissionDenied
         }
 
-        // Prevent AudioAvailabilityMonitor from interfering with our recording
         AudioAvailabilityMonitor.shared.isRecordingInProgress = true
 
+        // Configure audio session
         let session = AVAudioSession.sharedInstance()
         do {
-            do {
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP])
-            } catch {
-                // Fallback for environments that reject playAndRecord (e.g. simulator)
-                try session.setCategory(.record, mode: .default, options: [])
-            }
+            try session.setCategory(.playAndRecord, mode: .default, options: Self.sessionOptions)
+            try session.setPreferredSampleRate(44_100)
             try session.setActive(true, options: [])
         } catch {
             AudioAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed("Failed to configure audio session: \(error.localizedDescription)")
         }
-        if !session.isInputAvailable {
+
+        sampleRate = session.sampleRate
+        log.info("[AudioRecorder] session activated — sampleRate=\(sampleRate)Hz", category: .audio)
+
+        // Set up AVAudioEngine with input tap.
+        // Pass nil format to installTap — lets the engine deliver buffers in the hardware's
+        // native format without conversion. Passing an explicit format can trigger an
+        // Objective-C exception (NSException) if CoreAudio considers it invalid, which
+        // Swift's do/catch cannot intercept.
+        let audioEngine = AVAudioEngine()
+        let inputNode = audioEngine.inputNode
+        let hwFormat = inputNode.outputFormat(forBus: 0)
+
+        guard hwFormat.channelCount > 0, hwFormat.sampleRate > 0 else {
             AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-            throw RecorderError.startFailed("No audio input available")
-        }
-        if let inputs = session.availableInputs, let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
-            try? session.setPreferredInput(builtIn)
+            try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            throw RecorderError.startFailed("No audio input available (channels=\(hwFormat.channelCount), rate=\(hwFormat.sampleRate))")
         }
 
-        let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tron-recording-\(UUID().uuidString)")
-            .appendingPathExtension("m4a")
+        log.info("[AudioRecorder] input format — channels=\(hwFormat.channelCount), rate=\(hwFormat.sampleRate)Hz", category: .audio)
 
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-        ]
+        // Install tap via nonisolated helper. AVAudioNodeTapBlock is not @Sendable,
+        // so a closure created in this @MainActor function inherits @MainActor isolation.
+        // The audio thread then fails dispatch_assert_queue(main) when calling the tap.
+        // Building the closure in a nonisolated context avoids the inherited isolation.
+        Self.installInputTap(on: inputNode, buffer: captureBuffer)
 
         do {
-            let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
-            recorder.delegate = self
-            recorder.isMeteringEnabled = false
-            if !recorder.prepareToRecord() {
-                AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-                throw RecorderError.startFailed("Failed to prepare recorder")
-            }
-            guard recorder.record() else {
-                AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-                throw RecorderError.startFailed("Recorder refused to start")
-            }
-            self.recorder = recorder
-            self.currentURL = fileURL
-            isRecording = true
-            autoStopTask?.cancel()
-            autoStopTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(maxDuration))
-                await MainActor.run {
-                    self?.stopRecording()
-                }
-            }
-        } catch let error as RecorderError {
-            AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-            throw error
+            try audioEngine.start()
         } catch {
+            inputNode.removeTap(onBus: 0)
             AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-            throw RecorderError.startFailed("Failed to start recording: \(error.localizedDescription)")
+            try? session.setActive(false, options: [.notifyOthersOnDeactivation])
+            throw RecorderError.startFailed("Failed to start audio engine: \(error.localizedDescription)")
+        }
+
+        engine = audioEngine
+        isRecording = true
+        log.info("[AudioRecorder] RECORDING STARTED", category: .audio)
+
+        autoStopTask?.cancel()
+        autoStopTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(maxDuration))
+            guard let self else { return }
+            let (url, success) = self.stopRecording()
+            self.onFinish?(url, success)
         }
     }
 
-    func stopRecording() {
+    /// Stop recording and return the WAV file URL.
+    /// Does NOT call `onFinish` — the caller is responsible for handling the result.
+    /// Auto-stop task calls `onFinish` explicitly for the unattended timeout case.
+    @discardableResult
+    func stopRecording() -> (url: URL?, success: Bool) {
         autoStopTask?.cancel()
         autoStopTask = nil
-        recorder?.stop()
+
+        guard isRecording, let audioEngine = engine else { return (nil, false) }
+        isRecording = false
+
+        audioEngine.inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        engine = nil
+
+        let pcmData = captureBuffer.drain()
+        let url = Self.writeWAVFile(pcmData: pcmData, sampleRate: sampleRate)
+        let success = url != nil
+
+        if success {
+            log.info("[AudioRecorder] RECORDING STOPPED — pcmBytes=\(pcmData.count), sampleRate=\(sampleRate)", category: .audio)
+        } else {
+            log.warning("[AudioRecorder] recording stopped but WAV write failed — pcmBytes=\(pcmData.count)", category: .audio)
+        }
+
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
+        deactivateSession()
+
+        return (url, success)
     }
 
     func cancelRecording() {
         autoStopTask?.cancel()
         autoStopTask = nil
-        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-        recorder?.stop()
-        cleanupFile()
-    }
 
-    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        Task { @MainActor [weak self] in
-            self?.handleRecorderFinished(success: flag)
+        if let audioEngine = engine {
+            audioEngine.inputNode.removeTap(onBus: 0)
+            audioEngine.stop()
+            engine = nil
         }
-    }
 
-    nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        Task { @MainActor [weak self] in
-            self?.handleRecorderError()
-        }
-    }
-
-    private func handleRecorderFinished(success: Bool) {
-        autoStopTask?.cancel()
-        autoStopTask = nil
         isRecording = false
+        captureBuffer.discard()
         AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-        defer {
-            recorder = nil
-        }
+        deactivateSession()
+        log.info("[AudioRecorder] recording cancelled", category: .audio)
+    }
+
+    // MARK: - WAV File Writing
+
+    /// Write raw Int16 PCM data as a standard WAV file. Returns nil if pcmData is empty.
+    static func writeWAVFile(pcmData: Data, sampleRate: Double) -> URL? {
+        guard !pcmData.isEmpty else { return nil }
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tron-recording-\(UUID().uuidString)")
+            .appendingPathExtension("wav")
+
+        let channels: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let byteRate = UInt32(sampleRate) * UInt32(channels) * UInt32(bitsPerSample / 8)
+        let blockAlign = channels * (bitsPerSample / 8)
+        let dataSize = UInt32(pcmData.count)
+        let fileSize = 36 + dataSize // RIFF chunk size = total - 8
+
+        var header = Data(capacity: 44)
+
+        // RIFF header
+        header.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        header.append(littleEndian: fileSize)
+        header.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+
+        // fmt subchunk
+        header.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        header.append(littleEndian: UInt32(16))               // subchunk size
+        header.append(littleEndian: UInt16(1))                // PCM format
+        header.append(littleEndian: channels)
+        header.append(littleEndian: UInt32(sampleRate))
+        header.append(littleEndian: byteRate)
+        header.append(littleEndian: blockAlign)
+        header.append(littleEndian: bitsPerSample)
+
+        // data subchunk
+        header.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        header.append(littleEndian: dataSize)
+
+        var fileData = header
+        fileData.append(pcmData)
 
         do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            try fileData.write(to: url)
+            return url
         } catch {
-            // Ignore deactivation errors
-        }
-
-        if !success {
-            cleanupFile()
-        }
-
-        let finishedURL = success ? currentURL : nil
-        onFinish?(finishedURL, success)
-        currentURL = nil
-    }
-
-    private func handleRecorderError() {
-        autoStopTask?.cancel()
-        autoStopTask = nil
-        isRecording = false
-        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-        defer {
-            recorder = nil
-        }
-
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-        } catch {
-            // Ignore deactivation errors
-        }
-
-        cleanupFile()
-        onFinish?(nil, false)
-    }
-
-    private func cleanupFile() {
-        if let url = currentURL {
+            log.error("[AudioRecorder] WAV write failed: \(error.localizedDescription)", category: .audio)
             try? FileManager.default.removeItem(at: url)
+            return nil
         }
-        currentURL = nil
+    }
+
+    // MARK: - Private
+
+    /// Install the input tap in a nonisolated context so the callback closure does NOT
+    /// inherit @MainActor isolation. AVAudioNodeTapBlock is not @Sendable, so Swift 6
+    /// would otherwise compile the closure with @MainActor isolation — causing
+    /// _dispatch_assert_queue_fail when the audio render thread invokes it.
+    nonisolated private static func installInputTap(on inputNode: AVAudioInputNode, buffer: AudioCaptureBuffer) {
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { pcmBuffer, _ in
+            guard let floatData = pcmBuffer.floatChannelData else { return }
+            let frameCount = Int(pcmBuffer.frameLength)
+            let channels = Int(pcmBuffer.format.channelCount)
+            guard frameCount > 0, channels > 0 else { return }
+
+            var int16Data = Data(count: frameCount * 2)
+            int16Data.withUnsafeMutableBytes { rawBuffer in
+                let samples = rawBuffer.bindMemory(to: Int16.self)
+                for i in 0..<frameCount {
+                    var sample: Float
+                    if channels > 1 {
+                        sample = (floatData[0][i] + floatData[1][i]) * 0.5
+                    } else {
+                        sample = floatData[0][i]
+                    }
+                    let clamped = max(-1.0, min(1.0, sample))
+                    samples[i] = Int16(clamped * 32767.0)
+                }
+            }
+            buffer.append(int16Data)
+        }
+    }
+
+    private func deactivateSession() {
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        } catch {
+            log.warning("[AudioRecorder] session deactivation failed: \(error.localizedDescription)", category: .audio)
+        }
+    }
+}
+
+// MARK: - Data + Little-Endian Helpers
+
+private extension Data {
+    mutating func append(littleEndian value: UInt16) {
+        var v = value.littleEndian
+        append(Data(bytes: &v, count: 2))
+    }
+
+    mutating func append(littleEndian value: UInt32) {
+        var v = value.littleEndian
+        append(Data(bytes: &v, count: 4))
     }
 }

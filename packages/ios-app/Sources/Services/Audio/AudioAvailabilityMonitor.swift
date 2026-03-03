@@ -156,7 +156,7 @@ final class AudioAvailabilityMonitor {
             // Only set the category - do NOT activate the session
             // Activating would interrupt other apps' audio playback
             // Use .allowBluetoothHFP instead of deprecated .allowBluetooth
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try session.setCategory(.playAndRecord, mode: .default, options: AudioRecorder.sessionOptions)
             return true
         } catch {
             return false

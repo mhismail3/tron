@@ -9,7 +9,8 @@ extension ChatViewModel: TranscriptionContext {
         try await audioRecorder.startRecording(maxDuration: maxRecordingDuration)
     }
 
-    func stopRecording() {
+    @discardableResult
+    func stopRecording() -> (url: URL?, success: Bool) {
         audioRecorder.stopRecording()
     }
 

@@ -52,14 +52,14 @@ struct ChatView: View {
     let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(rpcClient: RPCClient, sessionId: String, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(rpcClient: RPCClient, sessionId: String, audioRecorder: AudioRecorder, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
         self.rpcClient = rpcClient
         self.skillStore = skillStore
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
-        _viewModel = State(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId))
+        _viewModel = State(wrappedValue: ChatViewModel(rpcClient: rpcClient, sessionId: sessionId, audioRecorder: audioRecorder))
         _isInteractionEnabled = State(initialValue: rpcClient.connectionState.canInteract)
     }
 
@@ -255,20 +255,15 @@ struct ChatView: View {
             //
             // Critical order:
             // 1. Set manager reference first (sync, instant)
-            // 2. Pre-warm audio session for instant mic response
-            // 3. Connect/resume and prefetch models run in parallel
-            // 4. Sync/load messages runs after connect/resume completes
+            // 2. Connect/resume and prefetch models run in parallel
+            // 3. Sync/load messages runs after connect/resume completes
             //
-            // Model prefetch and audio prewarm are independent and don't block UI
+            // Model prefetch is independent and doesn't block UI
 
             logger.debug("[INIT] task started, messages=\(viewModel.messages.count) scrollProxy=\(scrollProxy != nil) initialLoadComplete=\(initialLoadComplete)", category: .ui)
 
             let workspaceId = eventStoreManager.activeSession?.workspaceId ?? ""
             viewModel.setEventStoreManager(eventStoreManager, workspaceId: workspaceId)
-
-            // Pre-warm audio session in background for instant mic button response
-            // This eliminates the 100-300ms delay on first mic tap
-            viewModel.prewarmAudioSession()
 
             // Run model prefetch in parallel with connect/resume
             // This is a fire-and-forget operation that doesn't block session entry

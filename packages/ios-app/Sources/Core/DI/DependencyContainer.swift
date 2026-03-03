@@ -53,6 +53,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Deep link router - persists across server changes
     private(set) var deepLinkRouter: DeepLinkRouter
 
+    /// Shared audio recorder (AVAudioEngine-based, no pre-warming needed)
+    let audioRecorder = AudioRecorder()
+
     // MARK: - Recreatable Services (When Server Changes)
 
     /// RPC client for server communication - recreated when server settings change

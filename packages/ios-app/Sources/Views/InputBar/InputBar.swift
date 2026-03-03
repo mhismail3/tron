@@ -183,7 +183,10 @@ struct InputBar: View {
                         isRecording: config.isRecording,
                         isTranscribing: config.isTranscribing,
                         isProcessing: config.isProcessing || config.readOnly,
-                        onMicTap: actions.onMicTap,
+                        onMicTap: {
+                            isFocused = false
+                            actions.onMicTap()
+                        },
                         buttonSize: actionButtonSize,
                         audioMonitor: audioMonitor
                     )

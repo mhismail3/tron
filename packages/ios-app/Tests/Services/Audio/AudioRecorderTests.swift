@@ -1,5 +1,94 @@
 import XCTest
+import AVFoundation
 @testable import TronMobile
+
+// MARK: - AudioCaptureBuffer Tests
+
+final class AudioCaptureBufferTests: XCTestCase {
+
+    func test_initialDrainReturnsEmpty() {
+        let buffer = AudioCaptureBuffer()
+        XCTAssertTrue(buffer.drain().isEmpty)
+    }
+
+    func test_appendAndDrain() {
+        let buffer = AudioCaptureBuffer()
+        buffer.append(Data([1, 2, 3]))
+        buffer.append(Data([4, 5, 6]))
+        let result = buffer.drain()
+        XCTAssertEqual(result, Data([1, 2, 3, 4, 5, 6]))
+    }
+
+    func test_drainClearsBuffer() {
+        let buffer = AudioCaptureBuffer()
+        buffer.append(Data([1, 2]))
+        _ = buffer.drain()
+        XCTAssertTrue(buffer.drain().isEmpty)
+    }
+
+    func test_discardClearsBuffer() {
+        let buffer = AudioCaptureBuffer()
+        buffer.append(Data([1, 2]))
+        buffer.discard()
+        XCTAssertTrue(buffer.drain().isEmpty)
+    }
+
+    func test_largeConcatenation() {
+        let buffer = AudioCaptureBuffer()
+        let chunk = Data(repeating: 0x42, count: 8192)
+        for _ in 0..<100 { buffer.append(chunk) }
+        let result = buffer.drain()
+        XCTAssertEqual(result.count, 819_200)
+    }
+}
+
+// MARK: - WAV File Writing Tests
+
+@MainActor
+final class WAVFileWritingTests: XCTestCase {
+
+    func test_headerIs44Bytes() {
+        let pcm = Data(repeating: 0, count: 100)
+        let url = AudioRecorder.writeWAVFile(pcmData: pcm, sampleRate: 44100)
+        XCTAssertNotNil(url)
+        let data = try! Data(contentsOf: url!)
+        XCTAssertEqual(data.count, 144)
+        try? FileManager.default.removeItem(at: url!)
+    }
+
+    func test_riffHeader() {
+        let pcm = Data([0x01, 0x00, 0xFF, 0x7F])
+        let url = AudioRecorder.writeWAVFile(pcmData: pcm, sampleRate: 44100)!
+        let data = try! Data(contentsOf: url)
+        XCTAssertEqual(String(data: data[0..<4], encoding: .ascii), "RIFF")
+        XCTAssertEqual(String(data: data[8..<12], encoding: .ascii), "WAVE")
+        XCTAssertEqual(String(data: data[12..<16], encoding: .ascii), "fmt ")
+        XCTAssertEqual(String(data: data[36..<40], encoding: .ascii), "data")
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func test_sampleRateInHeader() {
+        let pcm = Data(repeating: 0, count: 4)
+        let url = AudioRecorder.writeWAVFile(pcmData: pcm, sampleRate: 48000)!
+        let data = try! Data(contentsOf: url)
+        let rate: UInt32 = data.subdata(in: 24..<28).withUnsafeBytes { $0.load(as: UInt32.self) }
+        XCTAssertEqual(rate, 48000)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func test_pcmDataIntact() {
+        let pcm = Data([0x01, 0x00, 0xFF, 0x7F, 0x00, 0x80])
+        let url = AudioRecorder.writeWAVFile(pcmData: pcm, sampleRate: 44100)!
+        let data = try! Data(contentsOf: url)
+        XCTAssertEqual(data.subdata(in: 44..<50), pcm)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func test_emptyPCM_returnsNil() {
+        let url = AudioRecorder.writeWAVFile(pcmData: Data(), sampleRate: 44100)
+        XCTAssertNil(url)
+    }
+}
 
 // MARK: - AudioRecorder Tests
 
@@ -24,7 +113,7 @@ final class AudioRecorderTests: XCTestCase {
         XCTAssertEqual(error.errorDescription, message)
     }
 
-    // MARK: - Initial State Tests
+    // MARK: - State Machine Tests
 
     func test_initialState_isNotRecording() {
         let recorder = AudioRecorder()
@@ -36,70 +125,33 @@ final class AudioRecorderTests: XCTestCase {
         XCTAssertNil(recorder.onFinish)
     }
 
-    // MARK: - Property Access Tests
-
-    func test_isRecording_isAccessible() {
+    func test_stopRecording_whenNotRecording_isIdempotent() {
         let recorder = AudioRecorder()
-        _ = recorder.isRecording
+        let result1 = recorder.stopRecording()
+        let result2 = recorder.stopRecording()
+        XCTAssertFalse(recorder.isRecording)
+        XCTAssertNil(result1.url)
+        XCTAssertFalse(result1.success)
+        XCTAssertNil(result2.url)
+        XCTAssertFalse(result2.success)
     }
 
-    func test_onFinish_canBeSet() {
+    func test_cancelRecording_whenNotRecording_isIdempotent() {
         let recorder = AudioRecorder()
-        var callbackCalled = false
-        recorder.onFinish = { _, _ in
-            callbackCalled = true
-        }
-
-        // Verify callback is set (we can't actually invoke it without recording)
-        XCTAssertNotNil(recorder.onFinish)
-        XCTAssertFalse(callbackCalled) // Not called yet
-    }
-
-    // MARK: - Cancel Recording Tests
-
-    func test_cancelRecording_whenNotRecording_doesNotCrash() {
-        let recorder = AudioRecorder()
+        recorder.cancelRecording()
         recorder.cancelRecording()
         XCTAssertFalse(recorder.isRecording)
     }
 
-    // MARK: - Stop Recording Tests
-
-    func test_stopRecording_whenNotRecording_doesNotCrash() {
+    func test_onFinish_canBeSetAndCleared() {
         let recorder = AudioRecorder()
-        recorder.stopRecording()
-        XCTAssertFalse(recorder.isRecording)
-    }
-
-    // MARK: - Prewarm Tests
-
-    func test_prewarmAudioSession_doesNotCrash() {
-        let recorder = AudioRecorder()
-        recorder.prewarmAudioSession()
-        // Should not crash and should return immediately
-    }
-
-    func test_prewarmAudioSession_canBeCalledMultipleTimes() {
-        let recorder = AudioRecorder()
-        recorder.prewarmAudioSession()
-        recorder.prewarmAudioSession()
-        recorder.prewarmAudioSession()
-        // Should not crash, second+ calls should be no-ops
-    }
-
-    // MARK: - Callback Tests
-
-    func test_onFinish_callback_signature() {
-        let recorder = AudioRecorder()
-        var receivedURL: URL?
-        var receivedSuccess: Bool?
-
-        recorder.onFinish = { url, success in
-            receivedURL = url
-            receivedSuccess = success
-        }
-
-        // Verify the callback type is correct (can accept optional URL and Bool)
+        recorder.onFinish = { _, _ in }
         XCTAssertNotNil(recorder.onFinish)
+        recorder.onFinish = nil
+        XCTAssertNil(recorder.onFinish)
+    }
+
+    func test_sessionOptions_containsDefaultToSpeaker() {
+        XCTAssertTrue(AudioRecorder.sessionOptions.contains(.defaultToSpeaker))
     }
 }
