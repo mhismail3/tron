@@ -150,7 +150,28 @@ impl MethodHandler for TranscribeAudioHandler {
         let mime_type = opt_string(params.as_ref(), "mimeType");
         let mime_type = mime_type.as_deref().unwrap_or("audio/wav");
 
+        info!(
+            audio_bytes = audio_bytes.len(),
+            mime_type,
+            "transcribe.audio: received {} bytes, mime={}",
+            audio_bytes.len(),
+            mime_type
+        );
+
         let resp = transcribe_audio_full(ctx, &audio_bytes, mime_type).await?;
+
+        info!(
+            text_len = resp.text.len(),
+            duration = resp.duration_seconds,
+            processing_ms = resp.processing_time_ms,
+            text_preview = %if resp.text.len() > 100 { &resp.text[..100] } else { &resp.text },
+            "transcribe.audio: result text_len={}, duration={:.1}s, processing={}ms, text=\"{}\"",
+            resp.text.len(),
+            resp.duration_seconds,
+            resp.processing_time_ms,
+            if resp.text.len() > 100 { &resp.text[..100] } else { &resp.text }
+        );
+
         serde_json::to_value(&resp).map_err(|e| RpcError::Internal {
             message: format!("serialize response: {e}"),
         })

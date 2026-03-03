@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = TronLogger.shared
+
 /// Protocol defining the context required by TranscriptionCoordinator.
 ///
 /// This protocol allows TranscriptionCoordinator to be tested independently from ChatViewModel
@@ -27,8 +29,9 @@ protocol TranscriptionContext: LoggingContext {
     /// Start audio recording
     func startRecording() async throws
 
-    /// Stop audio recording
-    func stopRecording()
+    /// Stop audio recording and return the recorded file
+    @discardableResult
+    func stopRecording() -> (url: URL?, success: Bool)
 
     /// Transcribe audio data
     /// - Parameters:
@@ -75,8 +78,10 @@ final class TranscriptionCoordinator {
     ///
     /// - Parameter context: The context providing access to state and dependencies
     func toggleRecording(context: TranscriptionContext) async {
+        log.info("[Transcription] toggleRecording — isRecording=\(context.isRecording)", category: .audio)
         if context.isRecording {
-            context.stopRecording()
+            let (url, success) = context.stopRecording()
+            await handleRecordingFinished(url: url, success: success, context: context)
         } else {
             await startRecording(context: context)
         }
@@ -88,15 +93,15 @@ final class TranscriptionCoordinator {
     private func startRecording(context: TranscriptionContext) async {
         // Don't start if already processing or transcribing
         guard !context.isProcessing && !context.isTranscribing else {
-            context.logDebug("Cannot start recording - processing=\(context.isProcessing), transcribing=\(context.isTranscribing)")
+            log.debug("[Transcription] startRecording blocked — processing=\(context.isProcessing), transcribing=\(context.isTranscribing)", category: .audio)
             return
         }
 
         do {
             try await context.startRecording()
-            context.logInfo("Started audio recording (max \(context.maxRecordingDuration)s)")
+            log.info("[Transcription] recording started (max \(context.maxRecordingDuration)s)", category: .audio)
         } catch {
-            context.logError("Failed to start recording: \(error.localizedDescription)")
+            log.error("[Transcription] startRecording failed: \(error.localizedDescription)", category: .audio)
             context.appendTranscriptionFailedNotification()
         }
     }
@@ -110,7 +115,11 @@ final class TranscriptionCoordinator {
     ///   - success: Whether the recording completed successfully
     ///   - context: The context providing access to state and dependencies
     func handleRecordingFinished(url: URL?, success: Bool, context: TranscriptionContext) async {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        log.info("[Transcription] handleRecordingFinished — success=\(success), hasURL=\(url != nil), file=\(url?.lastPathComponent ?? "nil")", category: .audio)
+
         guard success, let url = url else {
+            log.warning("[Transcription] recording failed — showing notification", category: .audio)
             context.appendTranscriptionFailedNotification()
             return
         }
@@ -120,17 +129,26 @@ final class TranscriptionCoordinator {
 
         do {
             // Load and validate audio data
+            let tLoad = CFAbsoluteTimeGetCurrent()
             let audioData = try await context.loadAudioData(from: url)
+            let loadMs = (CFAbsoluteTimeGetCurrent() - tLoad) * 1000
+            log.info("[Transcription] audio loaded — \(audioData.count) bytes (\(String(format: "%.1f", Double(audioData.count) / 1024))KB) in \(String(format: "%.1f", loadMs))ms, mimeType=\(mimeType(for: url))", category: .audio)
 
             // Transcribe the audio
+            let tTranscribe = CFAbsoluteTimeGetCurrent()
             let result = try await context.transcribeAudio(
                 data: audioData,
                 mimeType: mimeType(for: url),
                 fileName: url.lastPathComponent
             )
+            let transcribeMs = (CFAbsoluteTimeGetCurrent() - tTranscribe) * 1000
+            let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
             let transcript = result.trimmingCharacters(in: .whitespacesAndNewlines)
+            log.info("[Transcription] SERVER RETURNED — transcribeRPC=\(String(format: "%.0f", transcribeMs))ms, totalPipeline=\(String(format: "%.0f", totalMs))ms, rawLen=\(result.count), trimmedLen=\(transcript.count), text=\"\(String(transcript.prefix(100)))\"", category: .audio)
+
             guard !transcript.isEmpty else {
+                log.warning("[Transcription] empty transcript after trim — showing noSpeech", category: .audio)
                 context.appendNoSpeechDetectedNotification()
                 return
             }
@@ -142,18 +160,18 @@ final class TranscriptionCoordinator {
                 context.inputText += "\n" + transcript
             }
 
-            context.logInfo("Transcription complete: \(transcript.count) characters")
+            log.info("[Transcription] complete — \(transcript.count) chars inserted", category: .audio)
 
         } catch let error as AudioFileTooSmallError {
-            context.logError("Recorded audio too small (\(error.size) bytes)")
+            log.error("[Transcription] audio too small: \(error.size) bytes — showing noSpeech", category: .audio)
             context.appendNoSpeechDetectedNotification()
         } catch {
             if isNoSpeechDetectedError(error) {
-                context.logInfo("No speech detected in transcription: \(error.localizedDescription)")
+                log.info("[Transcription] server returned noSpeech: \(error.localizedDescription)", category: .audio)
                 context.appendNoSpeechDetectedNotification()
                 return
             }
-            context.logError("Transcription failed: \(error.localizedDescription)")
+            log.error("[Transcription] transcription failed: \(error.localizedDescription)", category: .audio)
             context.appendTranscriptionFailedNotification()
         }
     }

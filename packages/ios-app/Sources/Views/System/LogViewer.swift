@@ -311,6 +311,7 @@ struct LogViewer: View {
         case .general: return .gray
         case .notification: return .red
         case .database: return .indigo
+        case .audio: return .mint
         }
     }
 }
@@ -394,6 +395,7 @@ struct LogRow: View {
         case .general: return .gray
         case .notification: return .red
         case .database: return .indigo
+        case .audio: return .mint
         }
     }
 

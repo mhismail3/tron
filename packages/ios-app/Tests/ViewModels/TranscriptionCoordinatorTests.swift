@@ -310,6 +310,7 @@ final class MockTranscriptionContext: TranscriptionContext {
     var transcriptionShouldFailWithNoSpeech = false
     var transcriptionResult: String = ""
     var simulateAudioFileSize: Int = 0
+    var stopRecordingResult: (url: URL?, success: Bool) = (nil, false)
 
     // MARK: - Protocol Methods
 
@@ -320,8 +321,10 @@ final class MockTranscriptionContext: TranscriptionContext {
         }
     }
 
-    func stopRecording() {
+    @discardableResult
+    func stopRecording() -> (url: URL?, success: Bool) {
         stopRecordingCalled = true
+        return stopRecordingResult
     }
 
     func transcribeAudio(data: Data, mimeType: String, fileName: String) async throws -> String {

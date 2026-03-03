@@ -14,7 +14,7 @@ final class MediaClient {
 
     func transcribeAudio(
         audioData: Data,
-        mimeType: String = "audio/m4a",
+        mimeType: String = "audio/wav",
         fileName: String? = nil
     ) async throws -> TranscribeAudioResult {
         let ws = try transport.requireConnection()
@@ -51,7 +51,7 @@ final class MediaClient {
     /// Save a voice note with transcription
     func saveVoiceNote(
         audioData: Data,
-        mimeType: String = "audio/m4a",
+        mimeType: String = "audio/wav",
         fileName: String? = nil
     ) async throws -> VoiceNotesSaveResult {
         let ws = try transport.requireConnection()

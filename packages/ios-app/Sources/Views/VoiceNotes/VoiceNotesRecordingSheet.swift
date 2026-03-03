@@ -76,8 +76,8 @@ struct VoiceNotesRecordingSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .onAppear {
-            // Auto-start recording when sheet appears
             Task {
+                await recorder.prepare()
                 try? await recorder.startRecording()
             }
         }

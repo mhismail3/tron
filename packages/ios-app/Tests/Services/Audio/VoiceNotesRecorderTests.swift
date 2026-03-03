@@ -21,9 +21,9 @@ final class VoiceNotesRecorderTests: XCTestCase {
     }
 
     func test_stateEnum_stoppedEquality() {
-        let url1 = URL(string: "file:///test1.m4a")!
-        let url2 = URL(string: "file:///test1.m4a")!
-        let url3 = URL(string: "file:///test2.m4a")!
+        let url1 = URL(string: "file:///test1.wav")!
+        let url2 = URL(string: "file:///test1.wav")!
+        let url3 = URL(string: "file:///test2.wav")!
 
         XCTAssertEqual(VoiceNotesRecorder.State.stopped(url1), VoiceNotesRecorder.State.stopped(url2))
         XCTAssertNotEqual(VoiceNotesRecorder.State.stopped(url1), VoiceNotesRecorder.State.stopped(url3))

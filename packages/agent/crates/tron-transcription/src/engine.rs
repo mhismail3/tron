@@ -162,9 +162,18 @@ impl TranscriptionEngine {
         audio_data: &[u8],
         mime_type: &str,
     ) -> Result<TranscriptionResult, TranscriptionError> {
+        let total_start = std::time::Instant::now();
+
         // Step 1: Decode audio to 16kHz mono f32
+        let input_len = audio_data.len();
+        info!(
+            "transcribe: starting — input_bytes={}, mime={}",
+            input_len, mime_type
+        );
+
         let data = audio_data.to_vec();
         let mime = mime_type.to_string();
+        let decode_start = std::time::Instant::now();
         let (samples, _source_rate) =
             tokio::task::spawn_blocking(move || audio::decode_audio(data, &mime))
                 .await
@@ -172,17 +181,32 @@ impl TranscriptionEngine {
 
         #[allow(clippy::cast_precision_loss)]
         let duration_seconds = samples.len() as f64 / f64::from(audio::TARGET_SAMPLE_RATE);
-        debug!(
-            "decoded {:.1}s of audio ({} samples)",
+        let decode_ms = decode_start.elapsed().as_millis();
+        info!(
+            "transcribe: decoded {:.2}s of audio ({} samples at {}Hz) in {}ms",
             duration_seconds,
-            samples.len()
+            samples.len(),
+            audio::TARGET_SAMPLE_RATE,
+            decode_ms
         );
 
         // Steps 2-4: Run ONNX inference on blocking thread
         let engine = Arc::clone(self);
+        let inference_start = std::time::Instant::now();
         let text = tokio::task::spawn_blocking(move || engine.run_inference(&samples))
             .await
             .inference("inference task")??;
+        let inference_ms = inference_start.elapsed().as_millis();
+        let total_ms = total_start.elapsed().as_millis();
+
+        info!(
+            "transcribe: complete — text_len={}, decode={}ms, inference={}ms, total={}ms, text=\"{}\"",
+            text.len(),
+            decode_ms,
+            inference_ms,
+            total_ms,
+            if text.len() > 100 { &text[..100] } else { &text }
+        );
 
         Ok(TranscriptionResult {
             text,

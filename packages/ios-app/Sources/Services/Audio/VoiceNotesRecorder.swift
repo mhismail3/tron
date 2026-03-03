@@ -5,7 +5,7 @@ import AVFoundation
 /// Supports 5-minute max duration with auto-stop.
 @Observable
 @MainActor
-final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
+final class VoiceNotesRecorder {
     enum RecorderError: LocalizedError {
         case permissionDenied
         case startFailed(String)
@@ -21,18 +21,17 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
     enum State: Equatable {
         case idle
         case recording
-        case stopped(URL)  // Contains the recorded file URL
+        case stopped(URL)
         case saving
     }
 
     private(set) var state: State = .idle
-    private(set) var audioLevel: Float = 0  // Normalized 0-1 for visualization
+    private(set) var audioLevel: Float = 0
     private(set) var recordingDuration: TimeInterval = 0
 
-    static let maxDuration: TimeInterval = 300  // 5 minutes
+    static let maxDuration: TimeInterval = 300
 
-    private var recorder: AVAudioRecorder?
-    private var currentURL: URL?
+    private let engine = AudioCaptureEngine()
     private var levelTimer: Timer?
     private var durationTimer: Timer?
     private var autoStopTask: Task<Void, Never>?
@@ -43,25 +42,13 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
         return false
     }
 
-    // MARK: - Permission
+    // MARK: - Pre-warming
 
-    func requestPermission() async -> Bool {
-        switch AVAudioApplication.shared.recordPermission {
-        case .granted:
-            return true
-        case .denied:
-            return false
-        case .undetermined:
-            return await withCheckedContinuation { continuation in
-                AVAudioApplication.requestRecordPermission { allowed in
-                    DispatchQueue.main.async {
-                        continuation.resume(returning: allowed)
-                    }
-                }
-            }
-        @unknown default:
-            return false
-        }
+    /// Pre-warm the audio engine so recording starts instantly.
+    /// Call this when the recording sheet appears.
+    func prepare() async {
+        guard await engine.requestPermission() else { return }
+        try? await engine.prepare()
     }
 
     // MARK: - Recording Control
@@ -69,69 +56,44 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
     func startRecording() async throws {
         guard state == .idle else { return }
 
-        let hasPermission = await requestPermission()
-        guard hasPermission else { throw RecorderError.permissionDenied }
-
-        // Configure audio session
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-            try session.setActive(true)
-        } catch {
-            throw RecorderError.startFailed("Failed to configure audio: \(error.localizedDescription)")
+        guard await engine.requestPermission() else {
+            throw RecorderError.permissionDenied
         }
 
-        // Create temp file
-        let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("voice-note-\(UUID().uuidString)")
-            .appendingPathExtension("m4a")
-
-        let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-        ]
-
         do {
-            let recorder = try AVAudioRecorder(url: fileURL, settings: settings)
-            recorder.delegate = self
-            recorder.isMeteringEnabled = true  // Enable for level visualization
-
-            guard recorder.prepareToRecord(), recorder.record() else {
-                throw RecorderError.startFailed("Failed to start recording")
-            }
-
-            self.recorder = recorder
-            self.currentURL = fileURL
-            self.state = .recording
-            self.recordingDuration = 0
-
-            // Tell the availability monitor we're recording so it doesn't interfere
-            AudioAvailabilityMonitor.shared.isRecordingInProgress = true
-
-            startTimers()
-            scheduleAutoStop()
-        } catch let error as RecorderError {
-            throw error
+            try await engine.start()
         } catch {
             throw RecorderError.startFailed(error.localizedDescription)
         }
+
+        state = .recording
+        recordingDuration = 0
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = true
+
+        startTimers()
+        scheduleAutoStop()
     }
 
     func stopRecording() {
         guard isRecording else { return }
         autoStopTask?.cancel()
         stopTimers()
-        recorder?.stop()
-        // State transition handled in delegate
+
+        let url = engine.stop()
+        audioLevel = 0
+        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
+
+        if let url {
+            state = .stopped(url)
+        } else {
+            state = .idle
+        }
     }
 
     func cancelRecording() {
         autoStopTask?.cancel()
         stopTimers()
-        recorder?.stop()
-        cleanupFile()
+        engine.cancel()
         state = .idle
         audioLevel = 0
         recordingDuration = 0
@@ -142,7 +104,6 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
         cancelRecording()
     }
 
-    /// Get the recorded file URL (only valid when state == .stopped)
     func getRecordingURL() -> URL? {
         if case .stopped(let url) = state {
             return url
@@ -150,7 +111,6 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
         return nil
     }
 
-    /// Mark as saving (for UI state tracking)
     func markSaving() {
         if case .stopped = state {
             state = .saving
@@ -160,18 +120,13 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
     // MARK: - Timer Management
 
     private func startTimers() {
-        // Level meter update at 10Hz for smooth visualization
-        // Use Timer.publish to avoid Task spawning overhead
         levelTimer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
-            // Direct call - timer fires on main thread, class is @MainActor
-            // Use assumeIsolated since we know we're on main thread
             MainActor.assumeIsolated {
                 self?.updateMeters()
             }
         }
         RunLoop.main.add(levelTimer!, forMode: .common)
 
-        // Duration update at 1Hz
         durationTimer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.recordingDuration += 1
@@ -188,69 +143,16 @@ final class VoiceNotesRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     private func updateMeters() {
-        recorder?.updateMeters()
-        let power = recorder?.averagePower(forChannel: 0) ?? -160
-        // Normalize from dB (-50 to 0 range) to 0-1
-        audioLevel = max(0, min(1, (power + 50) / 50))
+        audioLevel = engine.currentAudioLevel
     }
 
     private func scheduleAutoStop() {
         autoStopTask = Task {
             try? await Task.sleep(for: .seconds(Self.maxDuration))
-            await MainActor.run {
-                if self.isRecording {
-                    self.stopRecording()
-                }
+            guard !Task.isCancelled else { return }
+            if self.isRecording {
+                self.stopRecording()
             }
         }
-    }
-
-    // MARK: - AVAudioRecorderDelegate
-
-    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        Task { @MainActor in
-            self.handleRecorderFinished(success: flag)
-        }
-    }
-
-    nonisolated func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        Task { @MainActor in
-            self.handleRecorderError()
-        }
-    }
-
-    private func handleRecorderFinished(success: Bool) {
-        stopTimers()
-        audioLevel = 0
-        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-
-        if success, let url = currentURL {
-            state = .stopped(url)
-        } else {
-            cleanupFile()
-            state = .idle
-        }
-
-        recorder = nil
-    }
-
-    private func handleRecorderError() {
-        stopTimers()
-        audioLevel = 0
-        AudioAvailabilityMonitor.shared.isRecordingInProgress = false
-        cleanupFile()
-        state = .idle
-        recorder = nil
-
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-    }
-
-    private func cleanupFile() {
-        if let url = currentURL {
-            try? FileManager.default.removeItem(at: url)
-        }
-        currentURL = nil
     }
 }

@@ -9,6 +9,8 @@ use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+use tracing::{debug, info, warn};
+
 use crate::types::{ResultExt, TranscriptionError};
 
 /// Target sample rate for the transcription model.
@@ -25,6 +27,15 @@ const MAX_AUDIO_SAMPLES: usize = 30 * 60 * 16_000;
 /// Takes ownership of `data` to avoid an extra copy (the previous `&[u8]`
 /// signature required `.to_vec()` for the `Cursor`).
 pub fn decode_audio(data: Vec<u8>, mime_type: &str) -> Result<(Vec<f32>, u32), TranscriptionError> {
+    let input_bytes = data.len();
+    info!(
+        input_bytes,
+        mime_type,
+        "audio decode: input {} bytes, mime={}",
+        input_bytes,
+        mime_type
+    );
+
     let cursor = Cursor::new(data);
     let mss = MediaSourceStream::new(Box::new(cursor), MediaSourceStreamOptions::default());
 
@@ -72,6 +83,17 @@ pub fn decode_audio(data: Vec<u8>, mime_type: &str) -> Result<(Vec<f32>, u32), T
     let channels = codec_params
         .channels
         .map_or(1, symphonia::core::audio::Channels::count);
+    let bits_per_sample = codec_params.bits_per_sample.unwrap_or(0);
+
+    info!(
+        source_rate,
+        channels,
+        bits_per_sample,
+        "audio decode: source_rate={}Hz, channels={}, bits={}",
+        source_rate,
+        channels,
+        bits_per_sample
+    );
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&codec_params, &DecoderOptions::default())
@@ -124,14 +146,44 @@ pub fn decode_audio(data: Vec<u8>, mime_type: &str) -> Result<(Vec<f32>, u32), T
     }
 
     if all_samples.is_empty() {
+        warn!("audio decode: no samples decoded from {} input bytes", input_bytes);
         return Err(TranscriptionError::AudioDecode(
             "no audio samples decoded".into(),
         ));
     }
 
+    // Check audio content before resampling
+    let pre_resample_len = all_samples.len();
+    let max_amplitude = all_samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+    let rms = (all_samples.iter().map(|s| s * s).sum::<f32>() / all_samples.len() as f32).sqrt();
+    #[allow(clippy::cast_precision_loss)]
+    let pre_duration = all_samples.len() as f64 / f64::from(source_rate);
+    info!(
+        pre_resample_samples = pre_resample_len,
+        max_amplitude = %format!("{:.6}", max_amplitude),
+        rms = %format!("{:.6}", rms),
+        duration_sec = %format!("{:.2}", pre_duration),
+        "audio decode: {} samples ({:.2}s), maxAmp={:.6}, rms={:.6}",
+        pre_resample_len, pre_duration, max_amplitude, rms
+    );
+
+    if max_amplitude < 0.001 {
+        warn!(
+            "audio decode: WARNING — near-silent audio! maxAmp={:.6}, rms={:.6}. File may contain no real microphone data.",
+            max_amplitude, rms
+        );
+    }
+
     // Resample if needed
     if source_rate != TARGET_SAMPLE_RATE {
+        let pre_len = all_samples.len();
         all_samples = resample(&all_samples, source_rate, TARGET_SAMPLE_RATE)?;
+        info!(
+            "audio decode: resampled {}Hz→{}Hz, {} → {} samples",
+            source_rate, TARGET_SAMPLE_RATE, pre_len, all_samples.len()
+        );
+    } else {
+        debug!("audio decode: no resampling needed (already {}Hz)", source_rate);
     }
 
     Ok((all_samples, source_rate))
