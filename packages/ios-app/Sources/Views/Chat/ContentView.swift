@@ -404,6 +404,7 @@ struct ContentView: View {
             ChatView(
                 rpcClient: rpcClient,
                 sessionId: sessionId,
+                audioRecorder: dependencies.audioRecorder,
                 skillStore: skillStore,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
@@ -414,6 +415,7 @@ struct ContentView: View {
             ChatView(
                 rpcClient: rpcClient,
                 sessionId: sessionId,
+                audioRecorder: dependencies.audioRecorder,
                 skillStore: skillStore,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget

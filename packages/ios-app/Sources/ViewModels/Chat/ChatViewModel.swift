@@ -190,7 +190,7 @@ final class ChatViewModel: ChatEventContext {
     /// Single source of truth for canvasId → messageId mapping, placeholder IDs, and pending events
     let renderAppUIChipTracker = RenderAppUIChipTracker()
 
-    let audioRecorder = AudioRecorder()
+    let audioRecorder: AudioRecorder
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end
@@ -229,9 +229,10 @@ final class ChatViewModel: ChatEventContext {
 
     // MARK: - Initialization
 
-    init(rpcClient: RPCClient, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
+    init(rpcClient: RPCClient, sessionId: String, audioRecorder: AudioRecorder = AudioRecorder(), eventStoreManager: EventStoreManager? = nil) {
         self.rpcClient = rpcClient
         self.sessionId = sessionId
+        self.audioRecorder = audioRecorder
         self.eventStoreManager = eventStoreManager
         self.connectionState = rpcClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: rpcClient.model)
@@ -317,12 +318,6 @@ final class ChatViewModel: ChatEventContext {
                 await self.processSelectedImages(self.inputBarState.selectedImages)
             }
         }
-    }
-
-    /// Pre-warm audio session for faster mic button response.
-    /// Call this when ChatView appears to eliminate first-tap latency.
-    func prewarmAudioSession() {
-        audioRecorder.prewarmAudioSession()
     }
 
     /// Set up StreamingManager callbacks for text delta batching
