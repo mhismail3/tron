@@ -72,6 +72,13 @@ import Foundation
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result)
 }
 
+@MainActor protocol WorktreeEventHandler: AnyObject {
+    func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result)
+    func handleWorktreeCommit(_ result: WorktreeCommitPlugin.Result)
+    func handleWorktreeMerged(_ result: WorktreeMergedPlugin.Result)
+    func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result)
+}
+
 @MainActor protocol EventDispatchLogger: AnyObject {
     func logWarning(_ message: String)
     func logDebug(_ message: String)
@@ -85,5 +92,5 @@ import Foundation
     StreamingEventHandler, ToolEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
     UICanvasEventHandler, TaskEventHandler, ServerEventHandler,
-    EventDispatchLogger {}
+    WorktreeEventHandler, EventDispatchLogger {}
 

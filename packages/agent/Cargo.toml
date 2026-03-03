@@ -6,6 +6,7 @@ members = [
     "crates/tron-settings",
     "crates/tron-embeddings",
     "crates/tron-cron",
+    "crates/tron-worktree",
     "crates/tron-llm",
     "crates/tron-runtime",
     "crates/tron-tools",
@@ -22,6 +23,7 @@ default-members = [
     "crates/tron-settings",
     "crates/tron-embeddings",
     "crates/tron-cron",
+    "crates/tron-worktree",
     "crates/tron-llm",
     "crates/tron-runtime",
     "crates/tron-tools",
@@ -145,6 +147,7 @@ tron-tools = { path = "crates/tron-tools" }
 tron-skills = { path = "crates/tron-skills" }
 tron-transcription = { path = "crates/tron-transcription" }
 tron-cron = { path = "crates/tron-cron" }
+tron-worktree = { path = "crates/tron-worktree" }
 tron-server = { path = "crates/tron-server" }
 
 [workspace.lints.rust]

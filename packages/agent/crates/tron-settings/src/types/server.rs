@@ -205,12 +205,59 @@ impl Default for TmuxSettings {
 pub struct SessionSettings {
     /// Timeout for git worktree commands in milliseconds.
     pub worktree_timeout_ms: u64,
+    /// Git worktree isolation settings.
+    pub isolation: IsolationSettings,
 }
 
 impl Default for SessionSettings {
     fn default() -> Self {
         Self {
             worktree_timeout_ms: 30_000,
+            isolation: IsolationSettings::default(),
+        }
+    }
+}
+
+/// When to create isolated git worktrees for sessions.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IsolationMode {
+    /// Every session in a git repo gets its own worktree.
+    #[default]
+    Always,
+    /// Only create worktrees when multiple sessions target the same repo.
+    Lazy,
+    /// Never create worktrees.
+    Never,
+}
+
+/// Git worktree isolation configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IsolationSettings {
+    /// When to create worktrees.
+    pub mode: IsolationMode,
+    /// Directory name under repo root for worktrees.
+    pub base_dir: String,
+    /// Branch name prefix for session branches.
+    pub branch_prefix: String,
+    /// Auto-commit uncommitted changes when releasing a worktree.
+    pub auto_commit_on_release: bool,
+    /// Keep the branch after deleting the worktree directory.
+    pub preserve_branches: bool,
+    /// Delete the worktree directory on release.
+    pub delete_worktree_on_release: bool,
+}
+
+impl Default for IsolationSettings {
+    fn default() -> Self {
+        Self {
+            mode: IsolationMode::Always,
+            base_dir: ".worktrees".to_string(),
+            branch_prefix: "session/".to_string(),
+            auto_commit_on_release: true,
+            preserve_branches: true,
+            delete_worktree_on_release: true,
         }
     }
 }
@@ -327,6 +374,54 @@ mod tests {
     #[test]
     fn session_defaults() {
         let s = SessionSettings::default();
+        assert_eq!(s.worktree_timeout_ms, 30_000);
+        assert_eq!(s.isolation.mode, IsolationMode::Always);
+        assert_eq!(s.isolation.base_dir, ".worktrees");
+        assert_eq!(s.isolation.branch_prefix, "session/");
+        assert!(s.isolation.auto_commit_on_release);
+        assert!(s.isolation.preserve_branches);
+        assert!(s.isolation.delete_worktree_on_release);
+    }
+
+    #[test]
+    fn isolation_mode_serde() {
+        for (mode, expected) in [
+            (IsolationMode::Always, "\"always\""),
+            (IsolationMode::Lazy, "\"lazy\""),
+            (IsolationMode::Never, "\"never\""),
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            assert_eq!(json, expected);
+            let back: IsolationMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, mode);
+        }
+    }
+
+    #[test]
+    fn isolation_partial_json() {
+        let json = serde_json::json!({ "mode": "never" });
+        let s: IsolationSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(s.mode, IsolationMode::Never);
+        assert_eq!(s.base_dir, ".worktrees");
+        assert_eq!(s.branch_prefix, "session/");
+        assert!(s.auto_commit_on_release);
+    }
+
+    #[test]
+    fn session_with_isolation_override() {
+        let json = serde_json::json!({
+            "isolation": { "mode": "lazy", "branchPrefix": "wt/" }
+        });
+        let s: SessionSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(s.isolation.mode, IsolationMode::Lazy);
+        assert_eq!(s.isolation.branch_prefix, "wt/");
+        assert_eq!(s.worktree_timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn empty_session_json_uses_defaults() {
+        let s: SessionSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.isolation.mode, IsolationMode::Always);
         assert_eq!(s.worktree_timeout_ms, 30_000);
     }
 

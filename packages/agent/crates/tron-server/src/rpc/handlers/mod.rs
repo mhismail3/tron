@@ -198,6 +198,16 @@ fn register_platform(registry: &mut MethodRegistry) {
     registry.register("worktree.merge", worktree::MergeHandler);
     registry.register("worktree.list", worktree::ListHandler);
     registry.register("worktree.getDiff", worktree::GetDiffHandler);
+    registry.register("worktree.acquire", worktree::AcquireHandler);
+    registry.register("worktree.release", worktree::ReleaseHandler);
+    registry.register(
+        "worktree.listSessionBranches",
+        worktree::ListSessionBranchesHandler,
+    );
+    registry.register(
+        "worktree.getCommittedDiff",
+        worktree::GetCommittedDiffHandler,
+    );
 
     // Transcription
     registry.register("transcribe.audio", transcription::TranscribeAudioHandler);
@@ -454,6 +464,7 @@ pub(crate) mod test_helpers {
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
+            worktree_coordinator: None,
         }
     }
 
@@ -487,6 +498,7 @@ pub(crate) mod test_helpers {
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
+            worktree_coordinator: None,
         }
     }
 }
@@ -512,8 +524,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            113,
-            "expected 113 methods, got {}",
+            117,
+            "expected 117 methods, got {}",
             reg.methods().len()
         );
     }

@@ -76,6 +76,8 @@ final class ChatViewModel: ChatEventContext {
     let inputBarState = InputBarState()
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
+    /// Worktree isolation state (status, loading)
+    let worktreeState = WorktreeIsolationState()
 
     // MARK: - Protocol Conformance (ChatEventContext)
     // These are thin wrappers for protocol conformance only

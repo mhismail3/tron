@@ -21,9 +21,8 @@ struct WorktreeStatusView: View {
 
     var body: some View {
         if status.hasWorktree, let worktree = status.worktree {
-            HStack(spacing: 12) {
-                // Branch indicator
-                HStack(spacing: 4) {
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.branch")
                         .foregroundStyle(.tronEmerald)
                         .font(TronTypography.caption)
@@ -31,60 +30,84 @@ struct WorktreeStatusView: View {
                     Text(worktree.shortBranch)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
 
                     if worktree.hasUncommittedChanges == true {
                         Circle()
                             .fill(.orange)
                             .frame(width: 6, height: 6)
                     }
-                }
 
-                // Isolated badge
-                if worktree.isolated {
-                    Text("Isolated")
-                        .font(TronTypography.caption2)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                }
-
-                // Commit count
-                Text(commitLabel)
-                    .font(TronTypography.caption)
-                    .foregroundStyle(.tertiary)
-
-                // Loading indicator
-                if isLoading {
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-
-                Spacer()
-
-                // Actions
-                if let onCommit = onCommit {
-                    Button(action: onCommit) {
-                        Label("Commit", systemImage: "checkmark.circle")
-                            .font(TronTypography.caption)
+                    if worktree.isolated {
+                        Text("Isolated")
+                            .font(TronTypography.caption2)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .tint(.accentColor)
-                    .disabled(!canCommit)
+
+                    Text(commitLabel)
+                        .font(TronTypography.caption)
+                        .foregroundStyle(.tertiary)
+
+                    if worktree.isMerged == true {
+                        Text("Merged")
+                            .font(TronTypography.caption2)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.tronSuccess)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                    }
+
+                    if isLoading {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+
+                    Spacer()
                 }
 
-                if let onMerge = onMerge {
-                    Button(action: onMerge) {
-                        Label("Merge", systemImage: "arrow.triangle.merge")
-                            .font(TronTypography.caption)
+                if onCommit != nil || onMerge != nil {
+                    HStack(spacing: 8) {
+                        if let onCommit {
+                            Button(action: onCommit) {
+                                Label("Commit", systemImage: "checkmark.circle")
+                                    .font(TronTypography.caption)
+                                    .lineLimit(1)
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.accentColor)
+                                    .clipShape(Capsule())
+                                    .opacity(canCommit ? 1 : 0.4)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!canCommit)
+                        }
+
+                        if let onMerge {
+                            Button(action: onMerge) {
+                                Label("Merge", systemImage: "arrow.triangle.merge")
+                                    .font(TronTypography.caption)
+                                    .lineLimit(1)
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color.tronEmerald)
+                                    .clipShape(Capsule())
+                                    .opacity(canMerge ? 1 : 0.4)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!canMerge)
+                        }
+
+                        Spacer()
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .tint(.green)
-                    .disabled(!canMerge)
                 }
             }
             .padding(.horizontal, 12)
@@ -107,7 +130,7 @@ struct WorktreeStatusView: View {
     }
 
     private var canMerge: Bool {
-        !isLoading && commitCount > 0
+        !isLoading && commitCount > 0 && status.worktree?.isMerged != true
     }
 }
 
@@ -147,8 +170,11 @@ struct WorktreeBadge: View {
                     branch: "session/abc123",
                     baseCommit: "def456",
                     path: "/path/to/worktree",
+                    baseBranch: "main",
+                    repoRoot: "/path/to/repo",
                     hasUncommittedChanges: true,
-                    commitCount: 3
+                    commitCount: 3,
+                    isMerged: false
                 )
             ),
             onCommit: {},
@@ -163,8 +189,11 @@ struct WorktreeBadge: View {
                     branch: "session/abc123",
                     baseCommit: "def456",
                     path: "/path/to/worktree",
+                    baseBranch: "main",
+                    repoRoot: "/path/to/repo",
                     hasUncommittedChanges: false,
-                    commitCount: 0
+                    commitCount: 0,
+                    isMerged: false
                 )
             ),
             onCommit: {},
@@ -182,8 +211,11 @@ struct WorktreeBadge: View {
             branch: "session/abc123",
             baseCommit: "def456",
             path: "/path",
+            baseBranch: "main",
+            repoRoot: "/path/to/repo",
             hasUncommittedChanges: true,
-            commitCount: 2
+            commitCount: 2,
+            isMerged: false
         )
     )
     .padding()

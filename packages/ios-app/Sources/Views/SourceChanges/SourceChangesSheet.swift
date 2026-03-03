@@ -4,23 +4,64 @@ import SwiftUI
 struct SourceChangesSheet: View {
     let rpcClient: RPCClient
     let sessionId: String
+    let onAskAgent: ((String) -> Void)?
+
+    init(rpcClient: RPCClient, sessionId: String, onAskAgent: ((String) -> Void)? = nil) {
+        self.rpcClient = rpcClient
+        self.sessionId = sessionId
+        self.onAskAgent = onAskAgent
+    }
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
 
+    // MARK: - State
+
+    @State private var selectedTab: SourceControlTab = .thisSession
     @State private var result: WorktreeGetDiffResult?
+    @State private var worktreeStatus: WorktreeGetStatusResult?
+    @State private var committedResult: CommittedDiffResult?
+    @State private var branches: [SessionBranchInfo] = []
     @State private var isLoading = true
+    @State private var isWorktreeLoading = false
+    @State private var isBranchesLoading = true
     @State private var errorMessage: String?
     @State private var expandedFiles: Set<String> = []
+    @State private var expandedCommittedFiles: Set<String> = []
+    @State private var selectedBranch: SessionBranchInfo?
 
-    private var tint: TintedColors {
-        TintedColors(accent: .tronEmerald, colorScheme: colorScheme)
+    enum SourceControlTab: String, CaseIterable {
+        case thisSession = "This Session"
+        case allBranches = "All Branches"
+    }
+
+    /// Show the segmented picker only when there's something to show in "All Branches"
+    private var showTabs: Bool {
+        guard result?.isGitRepo == true else { return false }
+        return worktreeStatus?.hasWorktree == true || !branches.isEmpty
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                content
+            VStack(spacing: 0) {
+                if showTabs {
+                    Picker("", selection: $selectedTab) {
+                        ForEach(SourceControlTab.allCases, id: \.self) { tab in
+                            Text(tab.rawValue).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                }
+
+                ZStack {
+                    switch selectedTab {
+                    case .thisSession:
+                        thisSessionContent
+                    case .allBranches:
+                        allBranchesContent
+                    }
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -48,110 +89,287 @@ struct SourceChangesSheet: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .task { await loadDiff() }
+        .task { await loadAll() }
+        .sheet(item: $selectedBranch) { branch in
+            BranchDetailView(
+                branch: branch,
+                rpcClient: rpcClient,
+                currentSessionId: sessionId,
+                onAskAgent: { message in
+                    selectedBranch = nil
+                    dismiss()
+                    onAskAgent?(message)
+                }
+            )
+            .presentationDragIndicator(.hidden)
+            .adaptivePresentationDetents([.medium, .large])
+        }
     }
 
-    // MARK: - Content States
+    // MARK: - This Session Content
 
     @ViewBuilder
-    private var content: some View {
+    private var thisSessionContent: some View {
         if isLoading {
             loadingView
         } else if let error = errorMessage {
             errorView(error)
         } else if let result, !result.isGitRepo {
             notGitRepoView
-        } else if let result, let files = result.files, files.isEmpty {
-            noChangesView
-        } else if let result, let files = result.files {
-            fileListView(result: result, files: files)
         } else {
+            thisSessionFileList
+        }
+    }
+
+    @ViewBuilder
+    private var thisSessionFileList: some View {
+        let hasWorktree = worktreeStatus?.hasWorktree == true
+        let uncommittedFiles = result?.files ?? []
+        let committedFiles = committedResult?.files ?? []
+        let commits = committedResult?.commits ?? []
+        let hasAnyContent = !uncommittedFiles.isEmpty || !committedFiles.isEmpty || hasWorktree
+
+        if !hasAnyContent {
             noChangesView
-        }
-    }
+        } else {
+            GeometryReader { geometry in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 16) {
+                        if hasWorktree {
+                            WorktreeStatusView(
+                                status: worktreeStatus!,
+                                isLoading: isWorktreeLoading,
+                                onCommit: { commitWorktreeChanges() },
+                                onMerge: { mergeWorktreeChanges() }
+                            )
+                            .padding(.horizontal)
+                        }
 
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .tint(.tronEmerald)
-            Text("Loading changes...")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
+                        if let result {
+                            summaryHeader(result: result, files: uncommittedFiles)
+                                .padding(.horizontal)
+                        }
 
-    private func errorView(_ message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
-                .foregroundStyle(.tronError)
-            Text(message)
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            Button("Retry") { Task { await loadDiff() } }
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronEmerald)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
+                        if hasWorktree && (!commits.isEmpty || !committedFiles.isEmpty) {
+                            committedChangesSection(commits: commits, files: committedFiles)
+                        }
 
-    private var notGitRepoView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 32))
-                .foregroundStyle(.tronTextMuted)
-            Text("Not a Git Repository")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-            Text("This session's working directory is not inside a git repository.")
-                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var noChangesView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 32))
-                .foregroundStyle(.tronSuccess)
-            Text("No uncommitted changes")
-                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - File List
-
-    private func fileListView(result: WorktreeGetDiffResult, files: [DiffFileEntry]) -> some View {
-        GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    summaryHeader(result: result, files: files)
-                        .padding(.horizontal)
-
-                    LazyVStack(spacing: 0) {
-                        ForEach(files) { file in
-                            fileRow(file)
-                            if file.id != files.last?.id {
-                                Divider()
-                                    .foregroundStyle(.tronTextMuted.opacity(0.15))
-                                    .padding(.horizontal)
+                        if hasWorktree && !uncommittedFiles.isEmpty {
+                            uncommittedSection(files: uncommittedFiles)
+                        } else if !hasWorktree && !uncommittedFiles.isEmpty {
+                            LazyVStack(spacing: 0) {
+                                ForEach(uncommittedFiles) { file in
+                                    DiffFileRow(
+                                        file: file,
+                                        isExpanded: expandedFiles.contains(file.path),
+                                        onToggle: { toggleFile(file.path, in: &expandedFiles) }
+                                    )
+                                    if file.id != uncommittedFiles.last?.id {
+                                        Divider()
+                                            .foregroundStyle(.tronTextMuted.opacity(0.15))
+                                            .padding(.horizontal)
+                                    }
+                                }
                             }
+                        }
+
+                        if hasWorktree && uncommittedFiles.isEmpty && committedFiles.isEmpty {
+                            VStack(spacing: 12) {
+                                Image(systemName: "checkmark.circle")
+                                    .font(.system(size: 32))
+                                    .foregroundStyle(.tronSuccess)
+                                Text("No changes")
+                                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                                    .foregroundStyle(.tronTextPrimary)
+                            }
+                            .padding(.vertical, 20)
+                        }
+                    }
+                    .padding(.vertical)
+                    .frame(width: geometry.size.width)
+                }
+                .refreshable { await loadAll() }
+            }
+        }
+    }
+
+    // MARK: - Committed Changes Section
+
+    private func committedChangesSection(commits: [CommitEntry], files: [CommittedFileEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Committed Changes (\(commits.count) commit\(commits.count == 1 ? "" : "s"))")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.horizontal)
+
+            if !commits.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(commits) { commit in
+                        HStack(spacing: 8) {
+                            Text(commit.shortHash)
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronEmerald)
+                            Text(commit.message)
+                                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                                .foregroundStyle(.tronTextPrimary)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+
+            LazyVStack(spacing: 0) {
+                ForEach(files) { file in
+                    DiffFileRow(
+                        file: file,
+                        isExpanded: expandedCommittedFiles.contains(file.path),
+                        onToggle: { toggleFile(file.path, in: &expandedCommittedFiles) }
+                    )
+                    if file.id != files.last?.id {
+                        Divider()
+                            .foregroundStyle(.tronTextMuted.opacity(0.15))
+                            .padding(.horizontal)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Uncommitted Section
+
+    private func uncommittedSection(files: [DiffFileEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Uncommitted Changes")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextSecondary)
+                .padding(.horizontal)
+
+            LazyVStack(spacing: 0) {
+                ForEach(files) { file in
+                    DiffFileRow(
+                        file: file,
+                        isExpanded: expandedFiles.contains(file.path),
+                        onToggle: { toggleFile(file.path, in: &expandedFiles) }
+                    )
+                    if file.id != files.last?.id {
+                        Divider()
+                            .foregroundStyle(.tronTextMuted.opacity(0.15))
+                            .padding(.horizontal)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - All Branches Content
+
+    @ViewBuilder
+    private var allBranchesContent: some View {
+        if isBranchesLoading {
+            loadingView
+        } else if branches.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.tronTextMuted)
+                Text("No session branches found")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    // Active sessions (excluding current)
+                    let activeBranches = branches.filter { $0.isActive && $0.sessionId != sessionId }
+                    if !activeBranches.isEmpty {
+                        sectionHeader("Active Sessions")
+                        ForEach(activeBranches) { branch in
+                            branchRow(branch)
+                        }
+                    }
+
+                    // Preserved branches
+                    let preservedBranches = branches.filter { !$0.isActive }
+                    if !preservedBranches.isEmpty {
+                        sectionHeader("Preserved Branches")
+                        ForEach(preservedBranches) { branch in
+                            branchRow(branch)
+                        }
+                    }
+
+                    // Current session branch
+                    let currentBranches = branches.filter { $0.isActive && $0.sessionId == sessionId }
+                    if !currentBranches.isEmpty {
+                        sectionHeader("Current Session")
+                        ForEach(currentBranches) { branch in
+                            branchRow(branch)
                         }
                     }
                 }
                 .padding(.vertical)
-                .frame(width: geometry.size.width)
             }
-            .refreshable { await loadDiff() }
+            .refreshable { await loadBranches() }
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(.tronTextMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+    }
+
+    private func branchRow(_ branch: SessionBranchInfo) -> some View {
+        Button {
+            selectedBranch = branch
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(branch.shortBranch)
+                        .font(TronTypography.mono(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(.tronTextPrimary)
+
+                    Text(branch.lastCommitMessage)
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.tronTextMuted)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if branch.commitCount > 0 {
+                    Text("\(branch.commitCount)")
+                        .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                }
+
+                if !branch.isActive {
+                    Text("Ended")
+                        .font(TronTypography.caption2)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Summary Header
@@ -198,205 +416,166 @@ struct SourceChangesSheet: View {
         }
     }
 
-    // MARK: - File Row
+    // MARK: - Common Views
 
-    private func fileRow(_ file: DiffFileEntry) -> some View {
-        let isExpanded = expandedFiles.contains(file.path)
-        let langColor = FileDisplayHelpers.languageColor(for: file.fileExtension)
-
-        return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                    if isExpanded {
-                        expandedFiles.remove(file.path)
-                    } else {
-                        expandedFiles.insert(file.path)
-                    }
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    statusIcon(for: file.fileChangeStatus)
-
-                    Image(systemName: FileDisplayHelpers.fileIcon(for: file.fileName))
-                        .font(.system(size: 13))
-                        .foregroundStyle(langColor)
-                        .frame(width: 18)
-
-                    Text(file.path)
-                        .font(TronTypography.mono(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Spacer()
-
-                    if file.additions > 0 || file.deletions > 0 {
-                        HStack(spacing: 4) {
-                            if file.additions > 0 {
-                                Text("+\(file.additions)")
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                                    .foregroundStyle(.tronSuccess)
-                            }
-                            if file.deletions > 0 {
-                                Text("-\(file.deletions)")
-                                    .font(TronTypography.mono(size: TronTypography.sizeCaption, weight: .medium))
-                                    .foregroundStyle(.tronError)
-                            }
-                        }
-                    }
-
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.tronTextMuted)
-                        .frame(width: 16)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                expandedDiffView(file: file, langColor: langColor)
-                    .padding(.horizontal)
-                    .padding(.bottom, 10)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
-            }
-        }
-        .clipped()
-    }
-
-    // MARK: - Status Icon
-
-    private func statusIcon(for status: FileChangeStatus) -> some View {
-        let (icon, color): (String, Color) = switch status {
-        case .modified: ("pencil.circle.fill", .orange)
-        case .added: ("plus.circle.fill", .tronSuccess)
-        case .deleted: ("minus.circle.fill", .tronError)
-        case .renamed: ("arrow.right.circle.fill", .blue)
-        case .untracked: ("questionmark.circle.fill", .tronTextMuted)
-        case .unmerged: ("exclamationmark.triangle.fill", .yellow)
-        case .copied: ("doc.on.doc.fill", .blue)
-        }
-
-        return Image(systemName: icon)
-            .font(.system(size: 15))
-            .foregroundStyle(color)
-            .frame(width: 20)
-    }
-
-    // MARK: - Expanded Diff
-
-    @ViewBuilder
-    private func expandedDiffView(file: DiffFileEntry, langColor: Color) -> some View {
-        if let diffText = file.diff, !diffText.isEmpty {
-            let lines = EditDiffParser.parse(from: diffText)
-            let lineNumWidth = EditDiffParser.lineNumberWidth(for: lines)
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(lines) { line in
-                    switch line.type {
-                    case .separator:
-                        diffSeparatorRow
-                    case .context, .addition, .deletion:
-                        diffLineRow(line, lineNumWidth: lineNumWidth)
-                    }
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(langColor)
-                    .frame(width: 3)
-            }
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(langColor.opacity(0.08)),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    )
-            }
-        } else {
-            let label: String = switch file.fileChangeStatus {
-            case .untracked: "New file (untracked)"
-            case .deleted: "File deleted"
-            default: "No diff available"
-            }
-            Text(label)
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
+    private var loadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .tint(.tronEmerald)
+            Text("Loading changes...")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(.clear)
-                        .glassEffect(
-                            .regular.tint(Color.tronSlate.opacity(0.08)),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        )
-                }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Diff Line Components
-
-    private func diffLineRow(_ line: EditDiffLine, lineNumWidth: CGFloat) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            Text(line.lineNum.map(String.init) ?? "")
-                .font(TronTypography.pill)
-                .foregroundStyle(DiffFormatting.lineNumColor(for: line.type).opacity(0.6))
-                .frame(width: lineNumWidth, alignment: .trailing)
-                .padding(.leading, 4)
-                .padding(.trailing, 4)
-
-            Text(DiffFormatting.marker(for: line.type))
-                .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
-                .foregroundStyle(DiffFormatting.markerColor(for: line.type))
-                .frame(width: 14)
-                .padding(.trailing, 4)
-
-            Text(line.content.isEmpty ? " " : line.content)
-                .font(TronTypography.codeCaption)
-                .foregroundStyle(tint.body)
-                .fixedSize(horizontal: false, vertical: true)
+    private func errorView(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 32))
+                .foregroundStyle(.tronError)
+            Text(message)
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            Button("Retry") { Task { await loadAll() } }
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .medium))
+                .foregroundStyle(.tronEmerald)
         }
-        .frame(minHeight: 18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DiffFormatting.lineBackground(for: line.type))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var diffSeparatorRow: some View {
-        HStack(spacing: 6) {
-            Rectangle()
-                .fill(Color.tronEmerald.opacity(0.15))
-                .frame(height: 1)
-            Text("\u{22EF}")
-                .font(TronTypography.mono(size: TronTypography.sizeCaption))
-                .foregroundStyle(.tronTextMuted.opacity(0.4))
-            Rectangle()
-                .fill(Color.tronEmerald.opacity(0.15))
-                .frame(height: 1)
+    private var notGitRepoView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 32))
+                .foregroundStyle(.tronTextMuted)
+            Text("Not a Git Repository")
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+            Text("This session's working directory is not inside a git repository.")
+                .font(TronTypography.mono(size: TronTypography.sizeBodySM))
+                .foregroundStyle(.tronTextMuted)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var noChangesView: some View {
+        VStack(spacing: 16) {
+            if let status = worktreeStatus, status.hasWorktree {
+                WorktreeStatusView(
+                    status: status,
+                    isLoading: isWorktreeLoading,
+                    onCommit: { commitWorktreeChanges() },
+                    onMerge: { mergeWorktreeChanges() }
+                )
+                .padding(.horizontal)
+            }
+
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.tronSuccess)
+                Text("No uncommitted changes")
+                    .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Helpers
+
+    private func toggleFile(_ path: String, in set: inout Set<String>) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            if set.contains(path) {
+                set.remove(path)
+            } else {
+                set.insert(path)
+            }
+        }
     }
 
     // MARK: - Data Loading
 
-    private func loadDiff() async {
+    private func loadAll() async {
         isLoading = true
         errorMessage = nil
         expandedFiles = []
+        expandedCommittedFiles = []
+
+        async let diffResult = rpcClient.misc.getWorkingDirectoryDiff(sessionId: sessionId)
+        async let statusResult: WorktreeGetStatusResult? = {
+            try? await rpcClient.misc.getWorktreeStatus(sessionId: sessionId)
+        }()
+        async let committedDiffResult: CommittedDiffResult? = {
+            try? await rpcClient.misc.getCommittedDiff(sessionId: sessionId)
+        }()
 
         do {
-            let diffResult = try await rpcClient.misc.getWorkingDirectoryDiff(sessionId: sessionId)
-            result = diffResult
+            result = try await diffResult
         } catch {
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
         }
-
+        worktreeStatus = await statusResult
+        committedResult = await committedDiffResult
         isLoading = false
+
+        await loadBranches()
+    }
+
+    private func loadBranches() async {
+        isBranchesLoading = true
+        branches = (try? await rpcClient.misc.listSessionBranches(sessionId: sessionId)) ?? []
+        isBranchesLoading = false
+    }
+
+    // MARK: - Worktree Actions
+
+    private func commitWorktreeChanges() {
+        Task {
+            isWorktreeLoading = true
+            defer { isWorktreeLoading = false }
+
+            do {
+                let result = try await rpcClient.misc.commitWorktree(
+                    sessionId: sessionId,
+                    message: "Manual commit from iOS"
+                )
+                if result.success {
+                    await loadAll()
+                }
+            } catch {
+                errorMessage = "Commit failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func mergeWorktreeChanges() {
+        Task {
+            isWorktreeLoading = true
+            defer { isWorktreeLoading = false }
+
+            do {
+                let targetBranch = worktreeStatus?.worktree?.baseBranch ?? "main"
+                let mergeResult = try await rpcClient.misc.mergeWorktree(
+                    sessionId: sessionId,
+                    targetBranch: targetBranch
+                )
+                if !mergeResult.success {
+                    if let conflicts = mergeResult.conflicts, !conflicts.isEmpty {
+                        errorMessage = "Merge conflicts in: \(conflicts.joined(separator: ", "))"
+                    } else if let error = mergeResult.error {
+                        errorMessage = error
+                    }
+                }
+                await loadAll()
+            } catch {
+                errorMessage = "Merge failed: \(error.localizedDescription)"
+            }
+        }
     }
 }

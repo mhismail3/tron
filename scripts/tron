@@ -119,6 +119,22 @@ ensure_tron_home() {
     mkdir -p "$TRON_HOME"/mods/apns
 }
 
+# Wait for a port to become free, with timeout.
+# Usage: wait_for_port_free <port> [max_seconds]
+wait_for_port_free() {
+    local port=$1
+    local max_wait=${2:-10}
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        if ! lsof -t -i :"$port" -sTCP:LISTEN &>/dev/null; then
+            return 0
+        fi
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
 #=============================================================================
 # SECTION 3: BUILD FUNCTIONS
 #=============================================================================
@@ -242,9 +258,8 @@ service_stop() {
 
     print_status "Stopping service..."
     launchctl unload "$PLIST_PATH"
-    sleep 1
 
-    if ! service_is_running; then
+    if wait_for_port_free "$PROD_PORT" 10; then
         print_success "Service stopped"
     else
         print_error "Failed to stop service"
@@ -555,19 +570,22 @@ dev_start_foreground() {
     if service_is_running; then
         print_status "Stopping production service for dev takeover..."
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
-        sleep 1
     fi
 
-    # Verify port is free
-    local existing_pid
-    existing_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
-    if [ -n "$existing_pid" ]; then
-        print_error "Port $PROD_PORT still in use (PID: $existing_pid)"
-        print_status "Restarting production service..."
-        if ensure_prod_binary; then
+    # Wait for port to be freed (up to 5 seconds)
+    if ! wait_for_port_free "$PROD_PORT" 10; then
+        local existing_pid
+        existing_pid=$(lsof -t -i :"$PROD_PORT" -sTCP:LISTEN 2>/dev/null || true)
+        print_error "Port $PROD_PORT still in use (PID: $existing_pid) after waiting"
+        print_status "Killing lingering process..."
+        kill -9 "$existing_pid" 2>/dev/null || true
+        sleep 1
+        if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
+            print_error "Port $PROD_PORT still in use, cannot proceed"
+            print_status "Restarting production service..."
             launchctl load "$PLIST_PATH" 2>/dev/null || true
+            return 1
         fi
-        return 1
     fi
 
     # Restart prod on ANY exit (Ctrl+C, error, normal exit)
@@ -592,19 +610,22 @@ dev_start_background() {
     if service_is_running; then
         print_status "Stopping production service for dev takeover..."
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
-        sleep 1
     fi
 
-    # Verify port is free
-    local existing_pid
-    existing_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
-    if [ -n "$existing_pid" ]; then
-        print_error "Port $PROD_PORT still in use (PID: $existing_pid)"
-        print_status "Restarting production service..."
-        if ensure_prod_binary; then
+    # Wait for port to be freed (up to 5 seconds)
+    if ! wait_for_port_free "$PROD_PORT" 10; then
+        local existing_pid
+        existing_pid=$(lsof -t -i :"$PROD_PORT" -sTCP:LISTEN 2>/dev/null || true)
+        print_error "Port $PROD_PORT still in use (PID: $existing_pid) after waiting"
+        print_status "Killing lingering process..."
+        kill -9 "$existing_pid" 2>/dev/null || true
+        sleep 1
+        if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
+            print_error "Port $PROD_PORT still in use, cannot proceed"
+            print_status "Restarting production service..."
             launchctl load "$PLIST_PATH" 2>/dev/null || true
+            return 1
         fi
-        return 1
     fi
 
     local log_file="$DEPLOY_DIR/dev-server.log"

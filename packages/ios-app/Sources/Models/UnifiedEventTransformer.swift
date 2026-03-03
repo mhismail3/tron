@@ -445,14 +445,14 @@ extension UnifiedEventTransformer {
 
             case .worktreeCommit:
                 state.worktree.commits.append(ReconstructedState.WorktreeState.Commit(
-                    hash: event.payload["hash"]?.value as? String ?? "",
+                    hash: event.payload["commitHash"]?.value as? String ?? "",
                     message: event.payload["message"]?.value as? String ?? "",
                     timestamp: parseTimestamp(event.timestamp)
                 ))
 
             case .worktreeMerged:
                 state.worktree.merges.append(ReconstructedState.WorktreeState.Merge(
-                    branch: event.payload["branch"]?.value as? String ?? "",
+                    branch: event.payload["sourceBranch"]?.value as? String ?? "",
                     timestamp: parseTimestamp(event.timestamp)
                 ))
 

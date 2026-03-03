@@ -128,6 +128,8 @@ pub struct SubagentManager {
     tool_factory: tokio::sync::OnceCell<Arc<dyn Fn() -> ToolRegistry + Send + Sync>>,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
+    /// Worktree coordinator for subagent isolation (each subagent gets its own worktree).
+    worktree_coordinator: std::sync::OnceLock<Arc<tron_worktree::WorktreeCoordinator>>,
     /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
 }
@@ -150,8 +152,17 @@ impl SubagentManager {
             tool_factory: tokio::sync::OnceCell::new(),
             guardrails,
             hooks,
+            worktree_coordinator: std::sync::OnceLock::new(),
             subagents: DashMap::new(),
         }
+    }
+
+    /// Set the worktree coordinator for subagent isolation.
+    pub fn set_worktree_coordinator(
+        &self,
+        coordinator: Arc<tron_worktree::WorktreeCoordinator>,
+    ) {
+        let _ = self.worktree_coordinator.set(coordinator);
     }
 
     /// Set the tool factory (breaks circular dependency with tool registry).
@@ -274,6 +285,7 @@ impl SubagentManager {
         let reasoning_level = config.reasoning_level;
         let parent_session_id = config.parent_session_id.clone();
         let tracker_clone = tracker.clone();
+        let wt_coordinator = self.worktree_coordinator.get().cloned();
 
         let subsession_span = info_span!(
             "subsession",
@@ -282,6 +294,29 @@ impl SubagentManager {
             spawn_type = "subsession",
         );
         drop(tokio::spawn(async move {
+            // Acquire worktree isolation for this subagent
+            let working_directory = if let Some(ref coord) = wt_coordinator {
+                match coord
+                    .maybe_acquire(&child_sid, std::path::Path::new(&working_directory))
+                    .await
+                {
+                    Ok(tron_worktree::AcquireResult::Acquired(info)) => {
+                        info.worktree_path.to_string_lossy().to_string()
+                    }
+                    Ok(tron_worktree::AcquireResult::Passthrough) => working_directory,
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %child_sid,
+                            error = %e,
+                            "subsession worktree acquisition failed, using original directory"
+                        );
+                        working_directory
+                    }
+                }
+            } else {
+                working_directory
+            };
+
             let provider = match provider_factory.create_for_model(&model_owned).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -597,6 +632,7 @@ impl SubagentSpawner for SubagentManager {
         let subagent_depth = config.current_depth;
         let blocking = config.blocking;
         let tracker_clone = tracker.clone();
+        let wt_coordinator = self.worktree_coordinator.get().cloned();
 
         let subagent_span = info_span!(
             "subagent",
@@ -606,6 +642,29 @@ impl SubagentSpawner for SubagentManager {
             spawn_type = "tool_agent",
         );
         drop(tokio::spawn(async move {
+            // Acquire worktree isolation for this subagent
+            let working_directory = if let Some(ref coord) = wt_coordinator {
+                match coord
+                    .maybe_acquire(&child_sid, std::path::Path::new(&working_directory))
+                    .await
+                {
+                    Ok(tron_worktree::AcquireResult::Acquired(info)) => {
+                        info.worktree_path.to_string_lossy().to_string()
+                    }
+                    Ok(tron_worktree::AcquireResult::Passthrough) => working_directory,
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %child_sid,
+                            error = %e,
+                            "subagent worktree acquisition failed, using original directory"
+                        );
+                        working_directory
+                    }
+                }
+            } else {
+                working_directory
+            };
+
             let provider = match provider_factory.create_for_model(&model_owned).await {
                 Ok(p) => p,
                 Err(e) => {

@@ -1,17 +1,63 @@
-//! Worktree handlers: getStatus, commit, merge, list, getDiff.
-
-use std::collections::HashMap;
+//! Worktree handlers: getStatus, commit, merge, list, getDiff, acquire, release.
+//!
+//! All worktree operations require a `WorktreeCoordinator` on `RpcContext`.
+//! `GetDiffHandler` is the one exception — it works on any session's working
+//! directory (with or without a worktree) since "show me the diff" is useful
+//! regardless of isolation mode.
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tracing::instrument;
+use tron_worktree::{count_diff_stats, split_diff_by_file};
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
 use crate::rpc::handlers::{opt_string, require_string_param};
 use crate::rpc::registry::MethodHandler;
 
+// ── Helpers ─────────────────────────────────────────────────────────
+
+fn require_coordinator(ctx: &RpcContext) -> Result<&tron_worktree::WorktreeCoordinator, RpcError> {
+    ctx.worktree_coordinator
+        .as_deref()
+        .ok_or_else(|| RpcError::Internal {
+            message: "Worktree isolation is not enabled".into(),
+        })
+}
+
+/// Resolve the directory to diff for a session.
+///
+/// Prefers the coordinator's worktree path (if active), otherwise uses the
+/// session's original working directory. This is intentionally lenient — getDiff
+/// should work for any session, not only those with worktrees.
+fn resolve_diff_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
+    // Check coordinator for active worktree
+    if let Some(ref coord) = ctx.worktree_coordinator {
+        if let Some(dir) = coord.effective_working_dir(session_id) {
+            return Ok(dir);
+        }
+    }
+
+    // Fall back to session's original working directory
+    let session = ctx
+        .session_manager
+        .get_session(session_id)
+        .map_err(|e| RpcError::Internal {
+            message: format!("Session lookup failed: {e}"),
+        })?
+        .ok_or_else(|| RpcError::NotFound {
+            code: "SESSION_NOT_FOUND".into(),
+            message: format!("Session '{session_id}' not found"),
+        })?;
+    Ok(session.working_directory)
+}
+
+// ── GetStatus ───────────────────────────────────────────────────────
+
 /// Get worktree status for a session.
+///
+/// Returns enriched status including `isolated`, `hasUncommittedChanges`,
+/// and `commitCount` fields that the iOS client expects.
 pub struct GetStatusHandler;
 
 #[async_trait]
@@ -19,75 +65,35 @@ impl MethodHandler for GetStatusHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.getStatus"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let coord = require_coordinator(ctx)?;
 
-        // Check if session has worktree.acquired events
-        let events = ctx
-            .event_store
-            .get_events_by_type(&session_id, &["worktree.acquired"], Some(1))
-            .unwrap_or_default();
-
-        let has_worktree = !events.is_empty();
-        let worktree = if has_worktree {
-            events
-                .first()
-                .and_then(|e| serde_json::from_str::<Value>(&e.payload).ok())
-        } else {
-            None
-        };
-
-        Ok(serde_json::json!({
-            "hasWorktree": has_worktree,
-            "worktree": worktree,
-        }))
-    }
-}
-
-/// Look up the worktree working directory from session events.
-fn get_worktree_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
-    let events = ctx
-        .event_store
-        .get_events_by_type(session_id, &["worktree.acquired"], Some(1))
-        .unwrap_or_default();
-
-    let event = events.first().ok_or_else(|| RpcError::NotFound {
-        code: "WORKTREE_NOT_FOUND".into(),
-        message: format!("No worktree found for session '{session_id}'"),
-    })?;
-
-    let payload: Value = serde_json::from_str(&event.payload).map_err(|e| RpcError::Internal {
-        message: format!("Failed to parse worktree event: {e}"),
-    })?;
-
-    payload
-        .get("workingDirectory")
-        .or_else(|| payload.get("path"))
-        .and_then(Value::as_str)
-        .map(String::from)
-        .ok_or_else(|| RpcError::Internal {
-            message: "Worktree event missing working directory".into(),
-        })
-}
-
-/// Resolve the git directory for a session: prefer worktree, fall back to working_directory.
-fn resolve_git_dir(ctx: &RpcContext, session_id: &str) -> Result<String, RpcError> {
-    match get_worktree_dir(ctx, session_id) {
-        Ok(dir) => Ok(dir),
-        Err(RpcError::NotFound { .. }) => {
-            let session = ctx
-                .session_manager
-                .get_session(session_id)
-                .map_err(|e| RpcError::Internal {
-                    message: format!("Session lookup failed: {e}"),
-                })?
-                .ok_or_else(|| RpcError::NotFound {
-                    code: "SESSION_NOT_FOUND".into(),
-                    message: format!("Session '{session_id}' not found"),
-                })?;
-            Ok(session.working_directory)
+        match coord.get_status(&session_id).await {
+            Ok(Some(status)) => Ok(serde_json::json!({
+                "hasWorktree": true,
+                "worktree": {
+                    "isolated": status.isolated,
+                    "path": status.path,
+                    "branch": status.branch,
+                    "baseCommit": status.base_commit,
+                    "baseBranch": status.base_branch,
+                    "repoRoot": status.repo_root,
+                    "hasUncommittedChanges": status.has_uncommitted_changes,
+                    "commitCount": status.commit_count,
+                    "isMerged": status.is_merged,
+                },
+            })),
+            Ok(None) => Ok(serde_json::json!({
+                "hasWorktree": false,
+                "worktree": null,
+            })),
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Failed to get worktree status: {e}"),
+            }),
         }
-        Err(other) => Err(other),
     }
 }
+
+// ── Commit ──────────────────────────────────────────────────────────
 
 /// Commit worktree changes.
 pub struct CommitHandler;
@@ -98,70 +104,37 @@ impl MethodHandler for CommitHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = require_string_param(params.as_ref(), "message")?;
+        let coord = require_coordinator(ctx)?;
 
-        let dir = get_worktree_dir(ctx, &session_id)?;
-
-        // Stage all changes
-        let add_output = tokio::process::Command::new("git")
-            .args(["-C", &dir, "add", "-A"])
-            .output()
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to run git add: {e}"),
-            })?;
-
-        if !add_output.status.success() {
-            let stderr = String::from_utf8_lossy(&add_output.stderr);
-            return Err(RpcError::Internal {
-                message: format!("git add failed: {stderr}"),
+        if coord.get_info(&session_id).is_none() {
+            return Err(RpcError::NotFound {
+                code: "WORKTREE_NOT_FOUND".into(),
+                message: format!("No worktree found for session '{session_id}'"),
             });
         }
 
-        // Commit
-        let commit_output = tokio::process::Command::new("git")
-            .args(["-C", &dir, "commit", "-m", &message])
-            .output()
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to run git commit: {e}"),
-            })?;
-
-        if !commit_output.status.success() {
-            let stderr = String::from_utf8_lossy(&commit_output.stderr);
-            let stdout = String::from_utf8_lossy(&commit_output.stdout);
-            // "nothing to commit" is not a real error
-            if stdout.contains("nothing to commit") || stderr.contains("nothing to commit") {
-                return Ok(serde_json::json!({
-                    "success": true,
-                    "commitHash": null,
-                    "message": "nothing to commit",
-                }));
-            }
-            return Err(RpcError::Internal {
-                message: format!("git commit failed: {stderr}"),
-            });
+        match coord.commit(&session_id, &message).await {
+            Ok(Some(result)) => Ok(serde_json::json!({
+                "success": true,
+                "commitHash": result.commit_hash,
+                "message": message,
+                "filesChanged": result.files_changed,
+                "insertions": result.insertions,
+                "deletions": result.deletions,
+            })),
+            Ok(None) => Ok(serde_json::json!({
+                "success": true,
+                "commitHash": null,
+                "message": "nothing to commit",
+            })),
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Commit failed: {e}"),
+            }),
         }
-
-        // Get the commit hash
-        let rev_output = tokio::process::Command::new("git")
-            .args(["-C", &dir, "rev-parse", "HEAD"])
-            .output()
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to get commit hash: {e}"),
-            })?;
-
-        let commit_hash = String::from_utf8_lossy(&rev_output.stdout)
-            .trim()
-            .to_string();
-
-        Ok(serde_json::json!({
-            "success": true,
-            "commitHash": commit_hash,
-            "message": message,
-        }))
     }
 }
+
+// ── Merge ───────────────────────────────────────────────────────────
 
 /// Merge worktree.
 pub struct MergeHandler;
@@ -173,44 +146,43 @@ impl MethodHandler for MergeHandler {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let target_branch = opt_string(params.as_ref(), "targetBranch");
         let target_branch = target_branch.as_deref().unwrap_or("main");
+        let strategy_str = opt_string(params.as_ref(), "strategy");
+        let coord = require_coordinator(ctx)?;
 
-        let dir = get_worktree_dir(ctx, &session_id)?;
-
-        let merge_output = tokio::process::Command::new("git")
-            .args(["-C", &dir, "merge", target_branch, "--no-edit"])
-            .output()
-            .await
-            .map_err(|e| RpcError::Internal {
-                message: format!("Failed to run git merge: {e}"),
-            })?;
-
-        if !merge_output.status.success() {
-            let stderr = String::from_utf8_lossy(&merge_output.stderr);
-            let stdout = String::from_utf8_lossy(&merge_output.stdout);
-
-            // Check for merge conflicts
-            if stdout.contains("CONFLICT") || stderr.contains("CONFLICT") {
-                return Ok(serde_json::json!({
-                    "success": false,
-                    "merged": false,
-                    "conflicts": true,
-                    "message": stdout.trim(),
-                }));
-            }
-
-            return Err(RpcError::Internal {
-                message: format!("git merge failed: {stderr}"),
+        if coord.get_info(&session_id).is_none() {
+            return Err(RpcError::NotFound {
+                code: "WORKTREE_NOT_FOUND".into(),
+                message: format!("No worktree found for session '{session_id}'"),
             });
         }
 
-        Ok(serde_json::json!({
-            "success": true,
-            "merged": true,
-            "conflicts": false,
-            "message": String::from_utf8_lossy(&merge_output.stdout).trim(),
-        }))
+        let strategy = match strategy_str.as_deref() {
+            Some("rebase") => tron_worktree::MergeStrategy::Rebase,
+            Some("squash") => tron_worktree::MergeStrategy::Squash,
+            _ => tron_worktree::MergeStrategy::Merge,
+        };
+
+        match coord.merge(&session_id, target_branch, strategy).await {
+            Ok(result) => {
+                let conflicts: Option<Vec<String>> = if result.conflicts.is_empty() {
+                    None
+                } else {
+                    Some(result.conflicts)
+                };
+                Ok(serde_json::json!({
+                    "success": result.success,
+                    "mergeCommit": result.merge_commit,
+                    "conflicts": conflicts,
+                }))
+            }
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Merge failed: {e}"),
+            }),
+        }
     }
 }
+
+// ── List ────────────────────────────────────────────────────────────
 
 /// List worktrees across all sessions.
 pub struct ListHandler;
@@ -219,42 +191,171 @@ pub struct ListHandler;
 impl MethodHandler for ListHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.list"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        // Query all sessions for worktree.acquired events
-        let sessions = ctx
-            .session_manager
-            .list_sessions(&tron_runtime::SessionFilter {
-                include_archived: false,
-                ..Default::default()
+        let coord = require_coordinator(ctx)?;
+
+        let active = coord.list_active();
+        let worktrees: Vec<Value> = active
+            .iter()
+            .map(|info| {
+                serde_json::json!({
+                    "sessionId": info.session_id,
+                    "path": info.worktree_path.to_string_lossy(),
+                    "branch": info.branch,
+                    "baseCommit": info.base_commit,
+                    "baseBranch": info.base_branch,
+                    "repoRoot": info.repo_root.to_string_lossy(),
+                })
             })
-            .unwrap_or_default();
-
-        let mut worktrees = Vec::new();
-
-        for session in sessions {
-            let events = ctx
-                .event_store
-                .get_events_by_type(&session.id, &["worktree.acquired"], Some(1))
-                .unwrap_or_default();
-
-            for event in events {
-                if let Ok(mut parsed) = serde_json::from_str::<Value>(&event.payload) {
-                    if let Some(obj) = parsed.as_object_mut() {
-                        let _ = obj.insert("sessionId".into(), serde_json::json!(session.id));
-                    }
-                    worktrees.push(parsed);
-                }
-            }
-        }
-
+            .collect();
         Ok(serde_json::json!({ "worktrees": worktrees }))
     }
 }
 
-// ── GetDiff handler ─────────────────────────────────────────────────
+// ── Acquire ─────────────────────────────────────────────────────────
+
+/// Explicitly acquire a worktree for a session.
+pub struct AcquireHandler;
+
+#[async_trait]
+impl MethodHandler for AcquireHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.acquire"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let coord = require_coordinator(ctx)?;
+
+        // Resolve session working directory
+        let session = ctx
+            .session_manager
+            .get_session(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: format!("Session lookup failed: {e}"),
+            })?
+            .ok_or_else(|| RpcError::NotFound {
+                code: "SESSION_NOT_FOUND".into(),
+                message: format!("Session '{session_id}' not found"),
+            })?;
+
+        let working_dir = std::path::Path::new(&session.working_directory);
+
+        match coord.maybe_acquire(&session_id, working_dir).await {
+            Ok(tron_worktree::AcquireResult::Acquired(info)) => Ok(serde_json::json!({
+                "acquired": true,
+                "path": info.worktree_path.to_string_lossy(),
+                "branch": info.branch,
+                "baseCommit": info.base_commit,
+                "baseBranch": info.base_branch,
+            })),
+            Ok(tron_worktree::AcquireResult::Passthrough) => Ok(serde_json::json!({
+                "acquired": false,
+                "reason": "not a git repo or isolation disabled",
+            })),
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Worktree acquisition failed: {e}"),
+            }),
+        }
+    }
+}
+
+// ── Release ─────────────────────────────────────────────────────────
+
+/// Explicitly release a session's worktree.
+pub struct ReleaseHandler;
+
+#[async_trait]
+impl MethodHandler for ReleaseHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.release"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let coord = require_coordinator(ctx)?;
+
+        coord
+            .release(&session_id)
+            .await
+            .map_err(|e| RpcError::Internal {
+                message: format!("Worktree release failed: {e}"),
+            })?;
+
+        Ok(serde_json::json!({
+            "released": true,
+            "sessionId": session_id,
+        }))
+    }
+}
+
+// ── ListSessionBranches ─────────────────────────────────────────────
+
+/// List all session branches (active and preserved) for the repo.
+pub struct ListSessionBranchesHandler;
+
+#[async_trait]
+impl MethodHandler for ListSessionBranchesHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.listSessionBranches"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let coord = require_coordinator(ctx)?;
+
+        let dir = resolve_diff_dir(ctx, &session_id)?;
+        let dir_path = std::path::Path::new(&dir);
+        let repo_root_str = match coord.resolve_repo_root(dir_path).await {
+            Ok(root) => root,
+            Err(_) => return Ok(serde_json::json!({ "branches": [] })),
+        };
+
+        let repo_root = std::path::Path::new(&repo_root_str);
+        match coord.list_session_branches(repo_root).await {
+            Ok(branches) => {
+                Ok(serde_json::json!({ "branches": branches }))
+            }
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Failed to list session branches: {e}"),
+            }),
+        }
+    }
+}
+
+// ── GetCommittedDiff ────────────────────────────────────────────────
+
+/// Get committed diff for a session (base..HEAD).
+pub struct GetCommittedDiffHandler;
+
+#[async_trait]
+impl MethodHandler for GetCommittedDiffHandler {
+    #[instrument(skip(self, ctx), fields(method = "worktree.getCommittedDiff"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let session_id = require_string_param(params.as_ref(), "sessionId")?;
+        let coord = require_coordinator(ctx)?;
+
+        match coord.get_committed_diff(&session_id).await {
+            Ok(Some(result)) => {
+                serde_json::to_value(&result).map_err(|e| RpcError::Internal {
+                    message: format!("Serialization failed: {e}"),
+                })
+            }
+            Ok(None) => Ok(serde_json::json!({
+                "commits": [],
+                "files": [],
+                "summary": {
+                    "totalFiles": 0,
+                    "totalAdditions": 0,
+                    "totalDeletions": 0,
+                },
+                "truncated": false,
+            })),
+            Err(e) => Err(RpcError::Internal {
+                message: format!("Failed to get committed diff: {e}"),
+            }),
+        }
+    }
+}
+
+// ── GetDiff ─────────────────────────────────────────────────────────
 
 const MAX_DIFF_BYTES: usize = 1_024 * 1_024; // 1 MB
 
 /// Get unified diff of all uncommitted changes for a session's working directory.
+///
+/// Works for any session — uses the worktree path if one is active, otherwise
+/// the session's original working directory. Does not require a coordinator.
 pub struct GetDiffHandler;
 
 #[async_trait]
@@ -262,7 +363,7 @@ impl MethodHandler for GetDiffHandler {
     #[instrument(skip(self, ctx), fields(method = "worktree.getDiff"))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
-        let dir = resolve_git_dir(ctx, &session_id)?;
+        let dir = resolve_diff_dir(ctx, &session_id)?;
 
         // Verify directory exists
         if !std::path::Path::new(&dir).is_dir() {
@@ -475,55 +576,6 @@ fn unquote_path(raw: &str) -> String {
     }
 }
 
-/// Split combined diff output by file, returning (path, diff_chunk) pairs.
-fn split_diff_by_file(diff: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    let mut current_path: Option<String> = None;
-    let mut current_chunk = String::new();
-
-    for line in diff.lines() {
-        if let Some(rest) = line.strip_prefix("diff --git a/") {
-            // Flush previous chunk
-            if let Some(path) = current_path.take() {
-                let _ = map.insert(path, current_chunk.clone());
-            }
-            current_chunk.clear();
-
-            // Parse path from "diff --git a/foo b/foo"
-            // Find the " b/" separator — the path after "b/" is the actual file path
-            if let Some(b_idx) = rest.rfind(" b/") {
-                current_path = Some(rest[b_idx + 3..].to_string());
-            }
-        } else if current_path.is_some() {
-            if !current_chunk.is_empty() {
-                current_chunk.push('\n');
-            }
-            current_chunk.push_str(line);
-        }
-    }
-
-    // Flush last chunk
-    if let Some(path) = current_path {
-        let _ = map.insert(path, current_chunk);
-    }
-
-    map
-}
-
-/// Count additions and deletions in a diff chunk.
-fn count_diff_stats(chunk: &str) -> (usize, usize) {
-    let mut additions = 0;
-    let mut deletions = 0;
-    for line in chunk.lines() {
-        if line.starts_with('+') && !line.starts_with("+++") {
-            additions += 1;
-        } else if line.starts_with('-') && !line.starts_with("---") {
-            deletions += 1;
-        }
-    }
-    (additions, deletions)
-}
-
 /// Detect if diff shows a binary file.
 fn is_binary_diff(chunk: &str) -> bool {
     chunk.contains("Binary files") && chunk.contains("differ")
@@ -535,26 +587,24 @@ mod tests {
     use crate::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
 
-    // ── Existing tests ──────────────────────────────────────────────
+    // ── Handler tests (coordinator-required) ────────────────────────
 
     #[tokio::test]
-    async fn get_status_no_worktree() {
+    async fn get_status_requires_coordinator() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
             .create_session("model", "/tmp", Some("test"))
             .unwrap();
-
-        let result = GetStatusHandler
+        let err = GetStatusHandler
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
-            .unwrap();
-        assert_eq!(result["hasWorktree"], false);
-        assert!(result["worktree"].is_null());
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
     }
 
     #[tokio::test]
-    async fn commit_no_worktree_returns_not_found() {
+    async fn commit_requires_coordinator() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
@@ -567,7 +617,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(err.code(), "WORKTREE_NOT_FOUND");
+        assert!(err.to_string().contains("not enabled"));
     }
 
     #[tokio::test]
@@ -581,7 +631,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn merge_no_worktree_returns_not_found() {
+    async fn merge_requires_coordinator() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
@@ -591,125 +641,102 @@ mod tests {
             .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
             .unwrap_err();
-        assert_eq!(err.code(), "WORKTREE_NOT_FOUND");
+        assert!(err.to_string().contains("not enabled"));
     }
 
     #[tokio::test]
-    async fn commit_with_worktree_nothing_to_commit() {
+    async fn list_requires_coordinator() {
+        let ctx = make_test_context();
+        let err = ListHandler.handle(None, &ctx).await.unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    #[tokio::test]
+    async fn acquire_requires_coordinator() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
             .create_session("m", "/tmp", None)
             .unwrap();
-
-        // Create a temp git repo
-        let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().to_str().unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["init", dir])
-            .output()
-            .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "config", "user.email", "test@test.com"])
-            .output()
-            .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "config", "user.name", "Test"])
-            .output()
-            .unwrap();
-        // Create initial commit
-        std::fs::write(tmp.path().join("init.txt"), "init").unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "add", "-A"])
-            .output()
-            .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "commit", "-m", "init"])
-            .output()
-            .unwrap();
-
-        // Persist worktree.acquired event
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::WorktreeAcquired,
-            payload: json!({"workingDirectory": dir}),
-            parent_id: None,
-        });
-
-        let result = CommitHandler
-            .handle(
-                Some(json!({"sessionId": sid, "message": "test commit"})),
-                &ctx,
-            )
+        let err = AcquireHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
-            .unwrap();
-        assert_eq!(result["success"], true);
-        assert_eq!(result["message"], "nothing to commit");
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
     }
 
     #[tokio::test]
-    async fn commit_with_changes_returns_hash() {
+    async fn release_requires_coordinator() {
+        let ctx = make_test_context();
+        let err = ReleaseHandler
+            .handle(Some(json!({"sessionId": "s1"})), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    // ── ListSessionBranches handler tests ───────────────────────────
+
+    #[tokio::test]
+    async fn list_session_branches_requires_coordinator() {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
             .create_session("m", "/tmp", None)
             .unwrap();
-
-        // Create a temp git repo
-        let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().to_str().unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["init", dir])
-            .output()
-            .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "config", "user.email", "test@test.com"])
-            .output()
-            .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "config", "user.name", "Test"])
-            .output()
-            .unwrap();
-        // Initial commit
-        std::fs::write(tmp.path().join("init.txt"), "init").unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "add", "-A"])
-            .output()
-            .unwrap();
-        let _ = std::process::Command::new("git")
-            .args(["-C", dir, "commit", "-m", "init"])
-            .output()
-            .unwrap();
-
-        // Create a new file to commit
-        std::fs::write(tmp.path().join("new.txt"), "new content").unwrap();
-
-        // Persist worktree.acquired event
-        let _ = ctx.event_store.append(&tron_events::AppendOptions {
-            session_id: &sid,
-            event_type: tron_events::EventType::WorktreeAcquired,
-            payload: json!({"workingDirectory": dir}),
-            parent_id: None,
-        });
-
-        let result = CommitHandler
-            .handle(
-                Some(json!({"sessionId": sid, "message": "add new file"})),
-                &ctx,
-            )
+        let err = ListSessionBranchesHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
             .await
-            .unwrap();
-        assert_eq!(result["success"], true);
-        assert!(result["commitHash"].is_string());
-        assert!(!result["commitHash"].as_str().unwrap().is_empty());
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
     }
 
     #[tokio::test]
-    async fn list_worktrees_empty() {
+    async fn list_session_branches_missing_session_id() {
         let ctx = make_test_context();
-        let result = ListHandler.handle(None, &ctx).await.unwrap();
-        assert!(result["worktrees"].is_array());
-        assert!(result["worktrees"].as_array().unwrap().is_empty());
+        let err = ListSessionBranchesHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn list_session_branches_session_not_found() {
+        let ctx = make_test_context();
+        // Need coordinator for this to get past require_coordinator
+        // Without coordinator, it errors with "not enabled" first
+        let err = ListSessionBranchesHandler
+            .handle(Some(json!({"sessionId": "nonexistent"})), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    // ── GetCommittedDiff handler tests ──────────────────────────────
+
+    #[tokio::test]
+    async fn committed_diff_requires_coordinator() {
+        let ctx = make_test_context();
+        let sid = ctx
+            .session_manager
+            .create_session("m", "/tmp", None)
+            .unwrap();
+        let err = GetCommittedDiffHandler
+            .handle(Some(json!({"sessionId": sid})), &ctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not enabled"));
+    }
+
+    #[tokio::test]
+    async fn committed_diff_missing_session_id() {
+        let ctx = make_test_context();
+        let err = GetCommittedDiffHandler
+            .handle(Some(json!({})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
     }
 
     // ── Parsing helper tests ────────────────────────────────────────
@@ -1130,42 +1157,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_diff_worktree_preferred() {
-        let ctx = make_test_context();
-        let (tmp_wt, dir_wt) = make_git_repo();
-        let sid = ctx
-            .session_manager
-            .create_session("m", "/tmp", None)
-            .unwrap();
-
-        // Add worktree event pointing to a different dir
-        ctx.event_store
-            .append(&tron_events::AppendOptions {
-                session_id: &sid,
-                event_type: tron_events::EventType::WorktreeAcquired,
-                payload: json!({"workingDirectory": dir_wt}),
-                parent_id: None,
-            })
-            .unwrap();
-
-        // Modify a file in the worktree dir
-        std::fs::write(tmp_wt.path().join("init.txt"), "changed").unwrap();
-
-        let result = GetDiffHandler
-            .handle(Some(json!({"sessionId": sid})), &ctx)
-            .await
-            .unwrap();
-        assert_eq!(result["isGitRepo"], true);
-        // Should see the modified file from worktree dir, not /tmp
-        let files = result["files"].as_array().unwrap();
-        assert!(!files.is_empty());
-    }
-
-    #[tokio::test]
     async fn get_diff_falls_back_to_working_directory() {
         let ctx = make_test_context();
         let (_tmp, dir) = make_git_repo();
-        // No worktree event — should fall back to session working_directory
+        // No worktree — should fall back to session working_directory
         let sid = ctx
             .session_manager
             .create_session("m", &dir, None)

@@ -675,6 +675,32 @@ async fn main() -> Result<()> {
     // Wire cron scheduler into tool factory (breaks circular dep via OnceLock)
     let _ = cron_scheduler_cell.set(cron_scheduler.clone());
 
+    // Worktree coordinator (with broadcast sender for real-time WebSocket events)
+    let worktree_coordinator = {
+        let wt_config = tron_worktree::WorktreeConfig::from_settings(&settings.session);
+        let coord = Arc::new(tron_worktree::WorktreeCoordinator::with_broadcast(
+            wt_config,
+            event_store.clone(),
+            orchestrator.broadcast().sender(),
+        ));
+        // Rebuild active worktrees from persisted events, then recover orphans.
+        coord.rebuild_from_events();
+        let coord_for_recovery = coord.clone();
+        let _ = tokio::spawn(async move {
+            let count = coord_for_recovery.recover_orphans().await;
+            if count > 0 {
+                tracing::info!(count, "recovered orphaned worktrees");
+            }
+        });
+        // Wire coordinator into SessionManager (for end_session release)
+        session_manager.set_worktree_coordinator(coord.clone());
+        // Wire coordinator into SubagentManager (for subagent isolation)
+        if let Some(ref sm) = shared_subagent_manager {
+            sm.set_worktree_coordinator(coord.clone());
+        }
+        Some(coord)
+    };
+
     // RPC context
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
@@ -693,6 +719,7 @@ async fn main() -> Result<()> {
         shutdown_coordinator: None, // set by TronServer after creation
         origin: origin.clone(),
         cron_scheduler: Some(cron_scheduler.clone()),
+        worktree_coordinator,
     };
 
     // Method registry
@@ -1132,6 +1159,7 @@ mod tests {
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
+            worktree_coordinator: None,
         };
 
         let mut registry = MethodRegistry::new();
@@ -1317,6 +1345,7 @@ mod tests {
             shutdown_coordinator: None,
             origin: "localhost:9847".to_string(),
             cron_scheduler: None,
+            worktree_coordinator: None,
         };
 
         let mut registry = MethodRegistry::new();

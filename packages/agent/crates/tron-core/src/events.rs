@@ -808,6 +808,49 @@ tron_events! {
         #[serde(rename = "completedAt")]
         completed_at: String,
     } => "subagent_result_available",
+
+    // -- Worktree isolation --
+
+    /// Worktree acquired for a session.
+    WorktreeAcquired {
+        path: String,
+        branch: String,
+        #[serde(rename = "baseCommit")]
+        base_commit: String,
+        #[serde(rename = "baseBranch", skip_serializing_if = "Option::is_none")]
+        base_branch: Option<String>,
+    } => "worktree.acquired",
+
+    /// Commit made in a session's worktree.
+    WorktreeCommit {
+        #[serde(rename = "commitHash")]
+        commit_hash: String,
+        message: String,
+        #[serde(rename = "filesChanged")]
+        files_changed: Vec<String>,
+        insertions: usize,
+        deletions: usize,
+    } => "worktree.commit",
+
+    /// Session branch merged into target.
+    WorktreeMerged {
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "targetBranch")]
+        target_branch: String,
+        #[serde(rename = "mergeCommit", skip_serializing_if = "Option::is_none")]
+        merge_commit: Option<String>,
+        strategy: String,
+    } => "worktree.merged",
+
+    /// Worktree released (session ended or explicit release).
+    WorktreeReleased {
+        #[serde(rename = "finalCommit", skip_serializing_if = "Option::is_none")]
+        final_commit: Option<String>,
+        #[serde(rename = "branchPreserved")]
+        branch_preserved: bool,
+        deleted: bool,
+    } => "worktree.released",
 }
 
 impl TronEvent {
@@ -1555,7 +1598,7 @@ mod tests {
                 event: json!({"type": "text_delta", "data": {"delta": "hi"}}),
             },
             TronEvent::SubagentResultAvailable {
-                base,
+                base: base.clone(),
                 parent_session_id: "p1".into(),
                 subagent_session_id: "sub-1".into(),
                 task: "t".into(),
@@ -1566,6 +1609,34 @@ mod tests {
                 token_usage: None,
                 error: None,
                 completed_at: "2024-01-01T00:00:00Z".into(),
+            },
+            TronEvent::WorktreeAcquired {
+                base: base.clone(),
+                path: "/repo/.worktrees/session/abc".into(),
+                branch: "session/abc".into(),
+                base_commit: "deadbeef".into(),
+                base_branch: Some("main".into()),
+            },
+            TronEvent::WorktreeCommit {
+                base: base.clone(),
+                commit_hash: "cafebabe".into(),
+                message: "wip".into(),
+                files_changed: vec!["file.txt".into()],
+                insertions: 10,
+                deletions: 2,
+            },
+            TronEvent::WorktreeMerged {
+                base: base.clone(),
+                source_branch: "session/abc".into(),
+                target_branch: "main".into(),
+                merge_commit: Some("12345678".into()),
+                strategy: "merge".into(),
+            },
+            TronEvent::WorktreeReleased {
+                base,
+                final_commit: Some("cafebabe".into()),
+                branch_preserved: true,
+                deleted: true,
             },
         ];
 

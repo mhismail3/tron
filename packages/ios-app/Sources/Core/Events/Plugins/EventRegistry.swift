@@ -138,6 +138,12 @@ final class EventRegistry: @unchecked Sendable {
         // Server events
         register(ServerRestartingPlugin.self)
 
+        // Worktree events
+        register(WorktreeAcquiredPlugin.self)
+        register(WorktreeCommitPlugin.self)
+        register(WorktreeMergedPlugin.self)
+        register(WorktreeReleasedPlugin.self)
+
         logger.info("Registered \(pluginCount) event plugins", category: .events)
     }
 

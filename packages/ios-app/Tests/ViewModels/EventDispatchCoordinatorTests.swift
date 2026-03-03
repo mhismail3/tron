@@ -896,6 +896,25 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleServerRestartingCalledWith = result
     }
 
+    // MARK: - Worktree
+    var handleWorktreeAcquiredCalledWith: WorktreeAcquiredPlugin.Result?
+    var handleWorktreeCommitCalledWith: WorktreeCommitPlugin.Result?
+    var handleWorktreeMergedCalledWith: WorktreeMergedPlugin.Result?
+    var handleWorktreeReleasedCalledWith: WorktreeReleasedPlugin.Result?
+
+    func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result) {
+        handleWorktreeAcquiredCalledWith = result
+    }
+    func handleWorktreeCommit(_ result: WorktreeCommitPlugin.Result) {
+        handleWorktreeCommitCalledWith = result
+    }
+    func handleWorktreeMerged(_ result: WorktreeMergedPlugin.Result) {
+        handleWorktreeMergedCalledWith = result
+    }
+    func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result) {
+        handleWorktreeReleasedCalledWith = result
+    }
+
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

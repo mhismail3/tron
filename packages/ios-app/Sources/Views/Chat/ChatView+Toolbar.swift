@@ -28,7 +28,7 @@ extension ChatView {
         }
     }
 
-    /// Principal toolbar item (title)
+    /// Principal toolbar item (title + worktree badge)
     @ToolbarContentBuilder
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
@@ -40,6 +40,9 @@ extension ChatView {
                     Text("forked")
                         .font(TronTypography.pillValue)
                         .foregroundStyle(.tronEmerald.opacity(0.6))
+                }
+                if let worktree = viewModel.worktreeState.worktree {
+                    WorktreeBadge(worktree: worktree)
                 }
             }
         }

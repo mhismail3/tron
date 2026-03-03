@@ -22,6 +22,8 @@ pub struct ReconstructedState {
     pub system_prompt: Option<String>,
     /// Whether the session has ended.
     pub is_ended: bool,
+    /// Active worktree path (from `worktree.acquired` event, if not released).
+    pub worktree_path: Option<String>,
 }
 
 /// Reconstruct session state from the event store.
@@ -33,7 +35,19 @@ pub fn reconstruct(
         .get_state_at_head(session_id)
         .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
-    Ok(from_session_state(&state))
+    let mut result = from_session_state(&state);
+
+    // Check for active worktree
+    if let Ok(Some(event)) = event_store.get_active_worktree(session_id) {
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload) {
+            result.worktree_path = payload
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+        }
+    }
+
+    Ok(result)
 }
 
 /// Convert `SessionState` to `ReconstructedState`.
@@ -79,6 +93,7 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
         working_directory: Some(state.working_directory.clone()),
         system_prompt: state.system_prompt.clone(),
         is_ended: state.is_ended.unwrap_or(false),
+        worktree_path: None,
     }
 }
 

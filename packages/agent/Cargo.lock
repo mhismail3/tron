@@ -3802,6 +3802,7 @@ dependencies = [
  "tron-skills",
  "tron-tools",
  "tron-transcription",
+ "tron-worktree",
  "uuid",
 ]
 
@@ -4000,6 +4001,7 @@ dependencies = [
  "tron-llm",
  "tron-settings",
  "tron-tools",
+ "tron-worktree",
  "uuid",
  "walkdir",
 ]
@@ -4042,6 +4044,7 @@ dependencies = [
  "tron-skills",
  "tron-tools",
  "tron-transcription",
+ "tron-worktree",
  "uuid",
 ]
 
@@ -4116,6 +4119,22 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "tron-worktree"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tron-core",
+ "tron-events",
+ "tron-settings",
 ]
 
 [[package]]

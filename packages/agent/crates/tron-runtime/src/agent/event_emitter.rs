@@ -47,6 +47,11 @@ impl EventEmitter {
         self.tx.subscribe()
     }
 
+    /// Get a clone of the broadcast sender for external components.
+    pub fn sender(&self) -> broadcast::Sender<TronEvent> {
+        self.tx.clone()
+    }
+
     /// Get the number of active subscribers.
     pub fn subscriber_count(&self) -> usize {
         self.tx.receiver_count()

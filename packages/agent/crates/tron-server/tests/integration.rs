@@ -68,6 +68,7 @@ async fn boot_server() -> (String, Arc<TronServer>) {
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
+        worktree_coordinator: None,
     };
 
     let mut registry = MethodRegistry::new();
@@ -242,6 +243,7 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
+        worktree_coordinator: None,
     };
 
     let mut registry = MethodRegistry::new();

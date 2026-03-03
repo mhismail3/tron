@@ -27,6 +27,7 @@ tron-tools = { path = "../tron-tools" }
 tron-skills = { path = "../tron-skills" }
 tron-embeddings = { path = "../tron-embeddings" }
 tron-transcription = { path = "../tron-transcription", features = ["ort"] }
+tron-worktree.workspace = true
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true

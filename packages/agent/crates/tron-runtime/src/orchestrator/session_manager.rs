@@ -51,6 +51,7 @@ pub struct SessionManager {
     active_sessions: DashMap<String, Arc<ActiveSession>>,
     plan_mode: DashMap<String, bool>,
     origin: Option<String>,
+    worktree_coordinator: std::sync::OnceLock<Arc<tron_worktree::WorktreeCoordinator>>,
 }
 
 impl SessionManager {
@@ -61,6 +62,7 @@ impl SessionManager {
             active_sessions: DashMap::new(),
             plan_mode: DashMap::new(),
             origin: None,
+            worktree_coordinator: std::sync::OnceLock::new(),
         }
     }
 
@@ -68,6 +70,13 @@ impl SessionManager {
     pub fn with_origin(mut self, origin: String) -> Self {
         self.origin = Some(origin);
         self
+    }
+
+    /// Set the worktree coordinator for session isolation.
+    ///
+    /// Uses `OnceLock` so this can be called after the manager is `Arc`-wrapped.
+    pub fn set_worktree_coordinator(&self, coordinator: Arc<tron_worktree::WorktreeCoordinator>) {
+        let _ = self.worktree_coordinator.set(coordinator);
     }
 
     /// Create a new session.
@@ -130,7 +139,20 @@ impl SessionManager {
     }
 
     /// End a session (flush events, persist session.end, remove from active map).
+    ///
+    /// INVARIANT: worktree is released BEFORE `session.end` event is persisted.
     pub async fn end_session(&self, session_id: &str) -> Result<(), RuntimeError> {
+        // Release worktree before ending the session
+        if let Some(coord) = self.worktree_coordinator.get() {
+            if let Err(e) = coord.release(session_id).await {
+                tracing::warn!(
+                    session_id,
+                    error = %e,
+                    "failed to release worktree during session end"
+                );
+            }
+        }
+
         if let Some((_, active)) = self.active_sessions.remove(session_id) {
             active.context.persister.flush().await?;
         }

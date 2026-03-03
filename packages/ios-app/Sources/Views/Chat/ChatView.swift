@@ -288,6 +288,11 @@ struct ChatView: View {
                 await viewModel.requestBrowserStatus()
             }
 
+            // Check worktree status in parallel (fire-and-forget)
+            Task {
+                await viewModel.requestWorktreeStatus()
+            }
+
             // Connect and resume - this is required before loading messages
             logger.debug("[INIT] starting connectAndResume", category: .ui)
             await viewModel.connectAndResume()

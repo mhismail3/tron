@@ -117,7 +117,15 @@ struct ChatSheetContent: View {
             )
 
         case .sourceChanges:
-            SourceChangesSheet(rpcClient: rpcClient, sessionId: sessionId)
+            SourceChangesSheet(
+                rpcClient: rpcClient,
+                sessionId: sessionId,
+                onAskAgent: { message in
+                    sheetCoordinator?.dismiss()
+                    viewModel.inputText = message
+                    viewModel.sendMessage()
+                }
+            )
         }
     }
 

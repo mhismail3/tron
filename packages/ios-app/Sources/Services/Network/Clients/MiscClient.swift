@@ -124,12 +124,6 @@ final class MiscClient {
         return try await ws.send(method: "worktree.getStatus", params: params)
     }
 
-    /// Get worktree status for current session
-    func getWorktreeStatus() async throws -> WorktreeGetStatusResult {
-        let (_, sessionId) = try transport.requireSession()
-        return try await getWorktreeStatus(sessionId: sessionId)
-    }
-
     /// Commit changes in a session's worktree
     func commitWorktree(sessionId: String, message: String) async throws -> WorktreeCommitResult {
         let ws = try transport.requireConnection()
@@ -142,12 +136,6 @@ final class MiscClient {
         }
 
         return result
-    }
-
-    /// Commit changes in current session's worktree
-    func commitWorktree(message: String) async throws -> WorktreeCommitResult {
-        let (_, sessionId) = try transport.requireSession()
-        return try await commitWorktree(sessionId: sessionId, message: message)
     }
 
     /// Merge a session's worktree to a target branch
@@ -172,22 +160,25 @@ final class MiscClient {
         return result
     }
 
-    /// Merge current session's worktree to a target branch
-    func mergeWorktree(targetBranch: String, strategy: String? = nil) async throws -> WorktreeMergeResult {
-        let (_, sessionId) = try transport.requireSession()
-        return try await mergeWorktree(sessionId: sessionId, targetBranch: targetBranch, strategy: strategy)
+    /// List all session branches (active and preserved) for the session's repo
+    func listSessionBranches(sessionId: String) async throws -> [SessionBranchInfo] {
+        let ws = try transport.requireConnection()
+        let params = ListSessionBranchesParams(sessionId: sessionId)
+        let result: SessionBranchListResult = try await ws.send(
+            method: "worktree.listSessionBranches",
+            params: params
+        )
+        return result.branches
     }
 
-    /// List all worktrees
-    func listWorktrees() async throws -> [WorktreeListItem] {
+    /// Get committed diff (base..HEAD) for a session
+    func getCommittedDiff(sessionId: String) async throws -> CommittedDiffResult {
         let ws = try transport.requireConnection()
-
-        let result: WorktreeListResult = try await ws.send(
-            method: "worktree.list",
-            params: EmptyParams()
+        let params = GetCommittedDiffParams(sessionId: sessionId)
+        return try await ws.send(
+            method: "worktree.getCommittedDiff",
+            params: params
         )
-
-        return result.worktrees
     }
 
     // MARK: - Diff Methods
@@ -197,12 +188,6 @@ final class MiscClient {
         let ws = try transport.requireConnection()
         let params = WorktreeGetDiffParams(sessionId: sessionId)
         return try await ws.send(method: "worktree.getDiff", params: params)
-    }
-
-    /// Get diff for current session
-    func getWorkingDirectoryDiff() async throws -> WorktreeGetDiffResult {
-        let (_, sessionId) = try transport.requireSession()
-        return try await getWorkingDirectoryDiff(sessionId: sessionId)
     }
 
     // MARK: - Skill Methods

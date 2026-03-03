@@ -541,6 +541,7 @@ impl MethodHandler for PromptHandler {
             let subagent_manager = ctx.subagent_manager.clone();
             let shutdown_coordinator = ctx.shutdown_coordinator.clone();
             let shutdown_coordinator_for_register = ctx.shutdown_coordinator.clone();
+            let worktree_coordinator = ctx.worktree_coordinator.clone();
             let prompt_clone = prompt.clone();
             let reasoning_level_clone = reasoning_level.clone();
             let images_clone = images.clone();
@@ -579,6 +580,61 @@ impl MethodHandler for PromptHandler {
                         (fresh_state, fresh_persister)
                     }
                 };
+
+                // 1b. Worktree isolation — deferred acquisition at first prompt
+                let worktree_info: Option<tron_worktree::WorktreeInfo> =
+                    if let Some(wt_path) = &state.worktree_path {
+                        // Resumed session — reconstruct minimal info from coordinator
+                        worktree_coordinator
+                            .as_ref()
+                            .and_then(|c| c.get_info(&session_id_clone))
+                            .or_else(|| {
+                                // Fallback: create partial info from event data
+                                Some(tron_worktree::WorktreeInfo {
+                                    session_id: session_id_clone.clone(),
+                                    worktree_path: std::path::PathBuf::from(wt_path),
+                                    branch: String::new(),
+                                    base_commit: String::new(),
+                                    base_branch: None,
+                                    original_working_dir: std::path::PathBuf::from(&working_dir),
+                                    repo_root: std::path::PathBuf::from(&working_dir),
+                                })
+                            })
+                    } else if let Some(ref coord) = worktree_coordinator {
+                        match coord
+                            .maybe_acquire(
+                                &session_id_clone,
+                                std::path::Path::new(&working_dir),
+                            )
+                            .await
+                        {
+                            Ok(tron_worktree::AcquireResult::Acquired(wt_info)) => {
+                                info!(
+                                    session_id = %session_id_clone,
+                                    worktree = %wt_info.worktree_path.display(),
+                                    branch = %wt_info.branch,
+                                    "worktree acquired for session"
+                                );
+                                Some(wt_info)
+                            }
+                            Ok(tron_worktree::AcquireResult::Passthrough) => None,
+                            Err(e) => {
+                                warn!(
+                                    session_id = %session_id_clone,
+                                    error = %e,
+                                    "worktree acquisition failed, using original directory"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
+                let working_dir = worktree_info
+                    .as_ref()
+                    .map(|i| i.worktree_path.to_string_lossy().to_string())
+                    .unwrap_or(working_dir);
 
                 // 2. Load project rules via ContextLoader
                 let project_rules = {
@@ -721,6 +777,27 @@ impl MethodHandler for PromptHandler {
                     } else {
                         None
                     }
+                };
+
+                // 5b. Append worktree isolation context to memory
+                let memory = if let Some(ref wt) = worktree_info {
+                    let wt_ctx = format!(
+                        "\n\n## Environment Isolation\n\
+                         Working in git worktree: {}\n\
+                         Branch: {}{}",
+                        wt.worktree_path.display(),
+                        wt.branch,
+                        wt.base_branch
+                            .as_ref()
+                            .map(|b| format!(" (based on {b})"))
+                            .unwrap_or_default(),
+                    );
+                    Some(match memory {
+                        Some(m) => format!("{m}{wt_ctx}"),
+                        None => wt_ctx,
+                    })
+                } else {
+                    memory
                 };
 
                 // 6. Get messages from reconstructed state

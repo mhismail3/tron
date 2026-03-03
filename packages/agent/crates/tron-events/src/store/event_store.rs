@@ -1013,6 +1013,35 @@ impl EventStore {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Worktree queries
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Get the active worktree for a session, if any.
+    ///
+    /// Returns the most recent `worktree.acquired` event if there is no
+    /// subsequent `worktree.released` event (or the acquired event has a
+    /// higher sequence number).
+    pub fn get_active_worktree(&self, session_id: &str) -> Result<Option<EventRow>> {
+        let acquired = self
+            .get_events_by_type(session_id, &["worktree.acquired"], None)?;
+        if acquired.is_empty() {
+            return Ok(None);
+        }
+
+        let released = self
+            .get_events_by_type(session_id, &["worktree.released"], None)?;
+
+        let latest_acquired = acquired.last();
+        let latest_released = released.last();
+
+        match (latest_acquired, latest_released) {
+            (Some(acq), None) => Ok(Some(acq.clone())),
+            (Some(acq), Some(rel)) if acq.sequence > rel.sequence => Ok(Some(acq.clone())),
+            _ => Ok(None),
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Device tokens
     // ─────────────────────────────────────────────────────────────────────
 
@@ -3071,5 +3100,130 @@ mod tests {
         // Final check: all 51 events present (root + 50)
         let final_count = store.count_events(&session_id).unwrap();
         assert_eq!(final_count, 51);
+    }
+
+    // ── Worktree queries ─────────────────────────────────────────────
+
+    #[test]
+    fn get_active_worktree_none() {
+        let store = setup();
+        let session = store
+            .create_session("model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let result = store.get_active_worktree(&session.session.id).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_active_worktree_acquired() {
+        let store = setup();
+        let session = store
+            .create_session("model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let sid = &session.session.id;
+
+        store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::WorktreeAcquired,
+                payload: serde_json::json!({
+                    "path": "/repo/.worktrees/session/abc",
+                    "branch": "session/abc",
+                    "baseCommit": "deadbeef",
+                    "isolated": true
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = store.get_active_worktree(sid).unwrap();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn get_active_worktree_released() {
+        let store = setup();
+        let session = store
+            .create_session("model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let sid = &session.session.id;
+
+        store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::WorktreeAcquired,
+                payload: serde_json::json!({
+                    "path": "/repo/.worktrees/session/abc",
+                    "branch": "session/abc",
+                    "baseCommit": "deadbeef",
+                    "isolated": true
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::WorktreeReleased,
+                payload: serde_json::json!({
+                    "deleted": true,
+                    "branchPreserved": true
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = store.get_active_worktree(sid).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn get_active_worktree_reacquired() {
+        let store = setup();
+        let session = store
+            .create_session("model", "/tmp", Some("test"), None, None)
+            .unwrap();
+        let sid = &session.session.id;
+
+        // Acquired
+        store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::WorktreeAcquired,
+                payload: serde_json::json!({
+                    "path": "/first", "branch": "b1", "baseCommit": "aaa", "isolated": true
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Released
+        store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::WorktreeReleased,
+                payload: serde_json::json!({ "deleted": true, "branchPreserved": true }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        // Re-acquired
+        store
+            .append(&AppendOptions {
+                session_id: sid,
+                event_type: EventType::WorktreeAcquired,
+                payload: serde_json::json!({
+                    "path": "/second", "branch": "b2", "baseCommit": "bbb", "isolated": true
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+
+        let result = store.get_active_worktree(sid).unwrap();
+        assert!(result.is_some());
+        let event = result.unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&event.payload).unwrap();
+        assert_eq!(payload["path"], "/second");
     }
 }

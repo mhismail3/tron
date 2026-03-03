@@ -739,6 +739,64 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
             set_opt(&mut data, "error", error);
             Some(data)
         }
+        // -- Worktree isolation --
+        TronEvent::WorktreeAcquired {
+            path,
+            branch,
+            base_commit,
+            base_branch,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "path": path,
+                "branch": branch,
+                "baseCommit": base_commit,
+            });
+            set_opt(&mut data, "baseBranch", base_branch);
+            Some(data)
+        }
+        TronEvent::WorktreeCommit {
+            commit_hash,
+            message,
+            files_changed,
+            insertions,
+            deletions,
+            ..
+        } => Some(serde_json::json!({
+            "commitHash": commit_hash,
+            "message": message,
+            "filesChanged": files_changed,
+            "insertions": insertions,
+            "deletions": deletions,
+        })),
+        TronEvent::WorktreeMerged {
+            source_branch,
+            target_branch,
+            merge_commit,
+            strategy,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "sourceBranch": source_branch,
+                "targetBranch": target_branch,
+                "strategy": strategy,
+            });
+            set_opt(&mut data, "mergeCommit", merge_commit);
+            Some(data)
+        }
+        TronEvent::WorktreeReleased {
+            final_commit,
+            branch_preserved,
+            deleted,
+            ..
+        } => {
+            let mut data = serde_json::json!({
+                "branchPreserved": branch_preserved,
+                "deleted": deleted,
+            });
+            set_opt(&mut data, "finalCommit", final_commit);
+            Some(data)
+        }
         // Events with no additional data (empty object so clients can decode `data: {}`)
         TronEvent::AgentStart { .. }
         | TronEvent::AgentReady { .. }
@@ -800,6 +858,10 @@ pub fn tron_event_to_rpc(event: &TronEvent) -> RpcEvent {
         "subagent_failed" => "agent.subagent_failed",
         "subagent_event" => "agent.subagent_event",
         "subagent_result_available" => "agent.subagent_result_available",
+        "worktree.acquired" => "worktree.acquired",
+        "worktree.commit" => "worktree.commit",
+        "worktree.merged" => "worktree.merged",
+        "worktree.released" => "worktree.released",
         other => other,
     };
 
@@ -2258,5 +2320,77 @@ mod tests {
 
         drop(tx);
         let _ = handle.await;
+    }
+
+    #[test]
+    fn converts_worktree_acquired() {
+        let event = TronEvent::WorktreeAcquired {
+            base: BaseEvent::now("s1"),
+            path: "/repo/.worktrees/session/abc".into(),
+            branch: "session/abc".into(),
+            base_commit: "deadbeef".into(),
+            base_branch: Some("main".into()),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "worktree.acquired");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["path"], "/repo/.worktrees/session/abc");
+        assert_eq!(data["branch"], "session/abc");
+        assert_eq!(data["baseCommit"], "deadbeef");
+        assert_eq!(data["baseBranch"], "main");
+    }
+
+    #[test]
+    fn converts_worktree_commit() {
+        let event = TronEvent::WorktreeCommit {
+            base: BaseEvent::now("s1"),
+            commit_hash: "cafebabe".into(),
+            message: "wip".into(),
+            files_changed: vec!["file.txt".into(), "other.rs".into()],
+            insertions: 10,
+            deletions: 2,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "worktree.commit");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["commitHash"], "cafebabe");
+        assert_eq!(data["message"], "wip");
+        assert_eq!(data["filesChanged"].as_array().unwrap().len(), 2);
+        assert_eq!(data["insertions"], 10);
+        assert_eq!(data["deletions"], 2);
+    }
+
+    #[test]
+    fn converts_worktree_merged() {
+        let event = TronEvent::WorktreeMerged {
+            base: BaseEvent::now("s1"),
+            source_branch: "session/abc".into(),
+            target_branch: "main".into(),
+            merge_commit: Some("12345678".into()),
+            strategy: "merge".into(),
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "worktree.merged");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["sourceBranch"], "session/abc");
+        assert_eq!(data["targetBranch"], "main");
+        assert_eq!(data["mergeCommit"], "12345678");
+        assert_eq!(data["strategy"], "merge");
+    }
+
+    #[test]
+    fn converts_worktree_released() {
+        let event = TronEvent::WorktreeReleased {
+            base: BaseEvent::now("s1"),
+            final_commit: Some("cafebabe".into()),
+            branch_preserved: true,
+            deleted: true,
+        };
+        let rpc = tron_event_to_rpc(&event);
+        assert_eq!(rpc.event_type, "worktree.released");
+        let data = rpc.data.unwrap();
+        assert_eq!(data["finalCommit"], "cafebabe");
+        assert_eq!(data["branchPreserved"], true);
+        assert_eq!(data["deleted"], true);
     }
 }

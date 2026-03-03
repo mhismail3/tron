@@ -66,6 +66,8 @@ pub struct RpcContext {
     pub origin: String,
     /// Cron scheduler (None = cron not available).
     pub cron_scheduler: Option<std::sync::Arc<tron_cron::CronScheduler>>,
+    /// Worktree coordinator for session isolation (None = isolation disabled).
+    pub worktree_coordinator: Option<std::sync::Arc<tron_worktree::WorktreeCoordinator>>,
 }
 
 #[cfg(test)]
