@@ -53,7 +53,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Deep link router - persists across server changes
     private(set) var deepLinkRouter: DeepLinkRouter
 
-    /// Shared audio recorder — pre-warms via ChatViewModel.setupAudioRecorder()
+    /// Shared audio recorder — starts on-demand when user taps mic
     let audioRecorder = AudioRecorder()
 
     // MARK: - Recreatable Services (When Server Changes)

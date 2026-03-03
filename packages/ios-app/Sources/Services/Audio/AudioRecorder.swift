@@ -37,8 +37,8 @@ final class AudioRecorder {
 
     // MARK: - Pre-warming
 
-    /// Pre-warm the audio engine so recording starts instantly when the user taps.
-    /// Call this when the chat view appears.
+    /// Pre-warm the audio engine so recording starts instantly.
+    /// Only call when recording is imminent (e.g. voice notes sheet onAppear).
     func prepare() async {
         guard await requestPermission() else { return }
         try? await engine.prepare()

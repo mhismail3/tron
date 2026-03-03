@@ -300,9 +300,6 @@ final class ChatViewModel: ChatEventContext {
         audioRecorder.onFinish = { [weak self] url, success in
             Task { await self?.handleRecordingFinished(url: url, success: success) }
         }
-        Task { [weak self] in
-            await self?.audioRecorder.prepare()
-        }
     }
 
     /// Continuation-based loop that reacts to inputBarState.selectedImages changes.
