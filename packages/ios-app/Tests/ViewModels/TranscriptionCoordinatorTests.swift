@@ -260,6 +260,72 @@ final class TranscriptionCoordinatorTests: XCTestCase {
         let error = TranscriptionTestError.custom("Network error")
         XCTAssertFalse(coordinator.isNoSpeechDetectedError(error))
     }
+
+    // MARK: - Transcription Cleanup Tests
+
+    func testCleanTranscriptionStripsLeadingComma() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription(", I want to test"),
+            "I want to test"
+        )
+    }
+
+    func testCleanTranscriptionStripsLeadingPeriod() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription(". And then"),
+            "And then"
+        )
+    }
+
+    func testCleanTranscriptionCapitalizesFirstLetter() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription("hello world"),
+            "Hello world"
+        )
+    }
+
+    func testCleanTranscriptionPreservesCleanText() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription("Hello world"),
+            "Hello world"
+        )
+    }
+
+    func testCleanTranscriptionPreservesInteriorPunctuation() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription("Hello, world. How are you?"),
+            "Hello, world. How are you?"
+        )
+    }
+
+    func testCleanTranscriptionTrimsWhitespace() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription("  hello world  "),
+            "Hello world"
+        )
+    }
+
+    func testCleanTranscriptionEmptyString() {
+        XCTAssertEqual(TranscriptionCoordinator.cleanTranscription(""), "")
+    }
+
+    func testCleanTranscriptionOnlyPunctuation() {
+        XCTAssertEqual(TranscriptionCoordinator.cleanTranscription(",. ;"), "")
+    }
+
+    func testCleanTranscriptionMultipleLeadingPunctuation() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription(",,, well then"),
+            "Well then"
+        )
+    }
+
+    func testCleanTranscriptionPreservesNumbers() {
+        XCTAssertEqual(
+            TranscriptionCoordinator.cleanTranscription(", 42 things"),
+            "42 things"
+        )
+    }
 }
 
 // MARK: - Test Error

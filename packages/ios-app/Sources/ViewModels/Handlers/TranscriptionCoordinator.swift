@@ -144,7 +144,7 @@ final class TranscriptionCoordinator {
             let transcribeMs = (CFAbsoluteTimeGetCurrent() - tTranscribe) * 1000
             let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 
-            let transcript = result.trimmingCharacters(in: .whitespacesAndNewlines)
+            let transcript = Self.cleanTranscription(result)
             log.info("[Transcription] SERVER RETURNED — transcribeRPC=\(String(format: "%.0f", transcribeMs))ms, totalPipeline=\(String(format: "%.0f", totalMs))ms, rawLen=\(result.count), trimmedLen=\(transcript.count), text=\"\(String(transcript.prefix(100)))\"", category: .audio)
 
             guard !transcript.isEmpty else {
@@ -177,6 +177,24 @@ final class TranscriptionCoordinator {
     }
 
     // MARK: - Utilities
+
+    /// Clean raw transcription text for presentation.
+    ///
+    /// ASR models sometimes produce leading punctuation or lowercase starts.
+    /// Server-side cleanup handles most cases; this is a client-side safety net.
+    static func cleanTranscription(_ raw: String) -> String {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return "" }
+
+        // Strip leading punctuation and whitespace
+        while let first = text.first, first.isPunctuation || first == " " {
+            text.removeFirst()
+        }
+        if text.isEmpty { return "" }
+
+        // Capitalize first letter
+        return text.prefix(1).uppercased() + text.dropFirst()
+    }
 
     /// Determine the MIME type for an audio file URL.
     ///

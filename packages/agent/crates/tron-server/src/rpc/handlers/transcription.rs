@@ -89,12 +89,13 @@ async fn transcribe_audio_full(
         Ok(result) => {
             #[allow(clippy::cast_possible_truncation)]
             let elapsed_ms = start.elapsed().as_millis() as u64;
+            let cleaned = cleanup_transcription(&result.text);
             info!(
                 "native transcription succeeded ({:.1}s audio)",
                 result.duration_seconds
             );
             Ok(TranscribeResponse {
-                text: result.text.clone(),
+                text: cleaned,
                 raw_text: result.text,
                 language: result.language,
                 duration_seconds: result.duration_seconds,
@@ -102,7 +103,7 @@ async fn transcribe_audio_full(
                 model: "parakeet-tdt-0.6b-v3".into(),
                 device: "cpu".into(),
                 compute_type: "onnx".into(),
-                cleanup_mode: "none".into(),
+                cleanup_mode: "basic".into(),
             })
         }
         Err(e) => {
@@ -111,6 +112,37 @@ async fn transcribe_audio_full(
                 message: "Transcription not available (engine failed)".into(),
             })
         }
+    }
+}
+
+/// Clean up raw transcription text for presentation.
+///
+/// ASR models like Parakeet sometimes produce artifacts:
+/// - Leading punctuation (`, I want to...` or `. And then...`)
+/// - Leading/trailing whitespace
+///
+/// This function strips those artifacts while preserving the semantic content.
+/// The raw model output is always available in `raw_text`.
+fn cleanup_transcription(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Strip leading punctuation and whitespace
+    let cleaned = trimmed.trim_start_matches(|c: char| c.is_ascii_punctuation() || c == ' ');
+    if cleaned.is_empty() {
+        return String::new();
+    }
+
+    // Capitalize first letter
+    let mut chars = cleaned.chars();
+    match chars.next() {
+        Some(first) => {
+            let upper: String = first.to_uppercase().collect();
+            upper + chars.as_str()
+        }
+        None => String::new(),
     }
 }
 
@@ -418,5 +450,80 @@ mod tests {
     #[test]
     fn normalize_base64_empty() {
         assert_eq!(normalize_base64(""), "");
+    }
+
+    // ── cleanup_transcription tests ──
+
+    #[test]
+    fn cleanup_strips_leading_comma() {
+        assert_eq!(cleanup_transcription(", I want to test"), "I want to test");
+    }
+
+    #[test]
+    fn cleanup_strips_leading_period() {
+        assert_eq!(cleanup_transcription(". And then"), "And then");
+    }
+
+    #[test]
+    fn cleanup_strips_leading_semicolon() {
+        assert_eq!(
+            cleanup_transcription("; something else"),
+            "Something else"
+        );
+    }
+
+    #[test]
+    fn cleanup_capitalizes_first_letter() {
+        assert_eq!(
+            cleanup_transcription("hello world"),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_already_capitalized() {
+        assert_eq!(
+            cleanup_transcription("Hello world"),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn cleanup_preserves_interior_punctuation() {
+        assert_eq!(
+            cleanup_transcription("Hello, world. How are you?"),
+            "Hello, world. How are you?"
+        );
+    }
+
+    #[test]
+    fn cleanup_trims_whitespace() {
+        assert_eq!(
+            cleanup_transcription("  hello world  "),
+            "Hello world"
+        );
+    }
+
+    #[test]
+    fn cleanup_empty_string() {
+        assert_eq!(cleanup_transcription(""), "");
+    }
+
+    #[test]
+    fn cleanup_only_punctuation() {
+        assert_eq!(cleanup_transcription(",. ;"), "");
+    }
+
+    #[test]
+    fn cleanup_preserves_numbers() {
+        assert_eq!(cleanup_transcription(", 42 things"), "42 things");
+    }
+
+    #[test]
+    fn cleanup_multiple_leading_punctuation() {
+        assert_eq!(
+            cleanup_transcription(",,, well then"),
+            "Well then"
+        );
     }
 }
