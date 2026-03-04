@@ -76,7 +76,7 @@ impl AgentFactory {
             }
             // Deny subagent spawning tools when at max nesting depth
             if opts.subagent_max_depth == 0 {
-                for name in &["SpawnSubagent", "QueryAgent", "WaitForAgents"] {
+                for name in &["SpawnSubagent", "WaitForAgents"] {
                     let _ = registry.remove(name);
                 }
             }

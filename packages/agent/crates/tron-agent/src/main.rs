@@ -554,9 +554,6 @@ async fn main() -> Result<()> {
             registry.register(Arc::new(
                 tron_tools::subagent::spawn::SpawnSubagentTool::new(spawner.clone()),
             ));
-            registry.register(Arc::new(tron_tools::subagent::query::QueryAgentTool::new(
-                spawner.clone(),
-            )));
             registry.register(Arc::new(
                 tron_tools::subagent::wait::WaitForAgentsTool::new(spawner.clone()),
             ));

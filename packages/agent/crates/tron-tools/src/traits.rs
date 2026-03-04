@@ -460,18 +460,11 @@ pub trait ContentSummarizer: Send + Sync {
     ) -> Result<SummarizerResult, ToolError>;
 }
 
-/// Subagent spawning (`SpawnSubagent`, `WebFetch` summarizer).
+/// Subagent spawning (`SpawnSubagent`, `WaitForAgents`, `WebFetch` summarizer).
 #[async_trait]
 pub trait SubagentSpawner: Send + Sync {
     /// Spawn a new subagent.
     async fn spawn(&self, config: SubagentConfig) -> Result<SubagentHandle, ToolError>;
-    /// Query a subagent.
-    async fn query_agent(
-        &self,
-        session_id: &str,
-        query_type: &str,
-        limit: Option<u32>,
-    ) -> Result<Value, ToolError>;
     /// Wait for one or more subagents to complete.
     async fn wait_for_agents(
         &self,

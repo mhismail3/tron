@@ -12,7 +12,7 @@
 //! - **Web**: `WebFetch`, `WebSearch`
 //! - **Browser**: `OpenURL`, `BrowseTheWeb`
 //! - **UI**: `AskUserQuestion`, `NotifyApp`, `TaskManager`, `RenderAppUI`
-//! - **Subagent**: `SpawnSubagent`, `QueryAgent`, `WaitForAgents`
+//! - **Subagent**: `SpawnSubagent`, `WaitForAgents`
 //! - **Communication**: `send_message`, `receive_messages`
 //!
 //! ## Crate Position

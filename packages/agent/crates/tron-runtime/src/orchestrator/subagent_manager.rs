@@ -110,8 +110,6 @@ pub struct SubsessionOutput {
 struct TrackedSubagent {
     parent_session_id: String,
     task: String,
-    model: String,
-    depth: u32,
     spawn_type: SpawnType,
     started_at: Instant,
     done: Notify,
@@ -229,8 +227,6 @@ impl SubagentManager {
         let tracker = Arc::new(TrackedSubagent {
             parent_session_id: config.parent_session_id.clone(),
             task: task.clone(),
-            model: model.to_owned(),
-            depth: 0,
             spawn_type: SpawnType::Subsession,
             started_at: Instant::now(),
             done: Notify::new(),
@@ -570,8 +566,6 @@ impl SubagentSpawner for SubagentManager {
         let tracker = Arc::new(TrackedSubagent {
             parent_session_id: parent_sid.clone(),
             task: task.clone(),
-            model: model.to_owned(),
-            depth: config.current_depth,
             spawn_type: SpawnType::ToolAgent,
             started_at: Instant::now(),
             done: Notify::new(),
@@ -1054,94 +1048,6 @@ impl SubagentSpawner for SubagentManager {
         }
     }
 
-    async fn query_agent(
-        &self,
-        session_id: &str,
-        query_type: &str,
-        limit: Option<u32>,
-    ) -> Result<Value, ToolError> {
-        match query_type {
-            "status" => {
-                if let Some(tracker) = self.subagents.get(session_id) {
-                    let result = tracker.result.lock().clone();
-                    let duration_ms = elapsed_ms(&tracker.started_at);
-                    let status = if result.is_some() {
-                        result.as_ref().map_or("unknown", |r| r.status.as_str())
-                    } else {
-                        "running"
-                    };
-                    Ok(json!({
-                        "sessionId": session_id,
-                        "status": status,
-                        "task": tracker.task,
-                        "model": tracker.model,
-                        "durationMs": duration_ms,
-                        "depth": tracker.depth,
-                    }))
-                } else {
-                    // Fall back to DB
-                    let session = self.event_store.get_session(session_id).map_err(|e| {
-                        ToolError::Internal {
-                            message: format!("Failed to query session: {e}"),
-                        }
-                    })?;
-                    if let Some(s) = session {
-                        Ok(json!({
-                            "sessionId": s.id,
-                            "status": if s.ended_at.is_some() { "completed" } else { "unknown" },
-                            "model": s.latest_model,
-                            "task": s.spawn_task,
-                        }))
-                    } else {
-                        Err(ToolError::Validation {
-                            message: format!("Session not found: {session_id}"),
-                        })
-                    }
-                }
-            }
-            "output" => {
-                if let Some(tracker) = self.subagents.get(session_id) {
-                    let result = tracker.result.lock().clone();
-                    if let Some(r) = result {
-                        Ok(json!({ "output": r.output }))
-                    } else {
-                        Ok(json!({ "output": null, "status": "running" }))
-                    }
-                } else {
-                    Ok(json!({ "output": null, "status": "not_tracked" }))
-                }
-            }
-            "events" => {
-                let event_limit = limit.unwrap_or(20);
-                let opts = tron_events::sqlite::repositories::event::ListEventsOptions {
-                    limit: Some(i64::from(event_limit)),
-                    offset: None,
-                };
-                let events = self
-                    .event_store
-                    .get_events_by_session(session_id, &opts)
-                    .map_err(|e| ToolError::Internal {
-                        message: format!("Failed to get events: {e}"),
-                    })?;
-                let summaries: Vec<Value> = events
-                    .iter()
-                    .map(|e| {
-                        json!({
-                            "id": e.id,
-                            "type": e.event_type,
-                            "timestamp": e.timestamp,
-                        })
-                    })
-                    .collect();
-                Ok(json!({ "events": summaries }))
-            }
-            "logs" => Ok(json!({ "logs": [] })),
-            _ => Err(ToolError::Validation {
-                message: format!("Invalid query type: {query_type}"),
-            }),
-        }
-    }
-
     async fn wait_for_agents(
         &self,
         session_ids: &[String],
@@ -1503,45 +1409,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn query_agent_status_running() {
-        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-        let mut config = make_config("test task");
-        config.blocking = false;
-        let handle = manager.spawn(config).await.unwrap();
-
-        // Query immediately (may still be running or completed)
-        let result = manager
-            .query_agent(&handle.session_id, "status", None)
-            .await
-            .unwrap();
-        assert!(result.get("sessionId").is_some());
-        assert!(result.get("status").is_some());
-    }
-
-    #[tokio::test]
-    async fn query_agent_output_after_completion() {
-        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-        let config = make_config("test task");
-        let handle = manager.spawn(config).await.unwrap();
-
-        let result = manager
-            .query_agent(&handle.session_id, "output", None)
-            .await
-            .unwrap();
-        assert!(result.get("output").is_some());
-    }
-
-    #[tokio::test]
-    async fn query_agent_invalid_type() {
-        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-        let err = manager
-            .query_agent("any", "invalid", None)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("Invalid query type"));
-    }
-
-    #[tokio::test]
     async fn wait_all_waits_for_all() {
         let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
 
@@ -1642,13 +1509,6 @@ mod tests {
     async fn truncate_helper() {
         assert_eq!(truncate("hello", 10), "hello");
         assert_eq!(truncate("hello world", 5), "hello");
-    }
-
-    #[tokio::test]
-    async fn query_agent_logs_returns_empty() {
-        let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-        let result = manager.query_agent("any", "logs", None).await.unwrap();
-        assert_eq!(result["logs"], json!([]));
     }
 
     // ── SpawnType tests ──

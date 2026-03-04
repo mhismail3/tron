@@ -228,15 +228,6 @@ mod tests {
             })
         }
 
-        async fn query_agent(
-            &self,
-            _session_id: &str,
-            _query_type: &str,
-            _limit: Option<u32>,
-        ) -> Result<Value, ToolError> {
-            Ok(json!({}))
-        }
-
         async fn wait_for_agents(
             &self,
             _session_ids: &[String],
@@ -428,9 +419,6 @@ mod tests {
                 },
                 token_usage: None,
             })
-        }
-        async fn query_agent(&self, _: &str, _: &str, _: Option<u32>) -> Result<Value, ToolError> {
-            Ok(json!({}))
         }
         async fn wait_for_agents(
             &self,

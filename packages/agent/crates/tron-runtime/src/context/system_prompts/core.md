@@ -250,9 +250,7 @@ Don't batch — send notifications as events happen. Title max 50 chars, body ma
 - **In-process** (default): `blocking: true` waits for result. `blocking: false` is fire-and-forget.
 - **Tmux mode** (`mode: "tmux"`): out-of-process, always fire-and-forget. Use for long-running persistent tasks. Provide `sessionName` for identification.
 - Sub-agents inherit parent model unless overridden. Restrict tools with `toolDenials`.
-- Completed sub-agent results are auto-injected into parent context on next turn — explicit polling is optional.
-
-**QueryAgent** checks sub-agent progress. `queryType`: `"status"`, `"events"`, `"logs"`, `"output"`.
+- Completed sub-agent results are auto-injected into parent context on next turn.
 
 **WaitForAgents** waits for multiple sub-agents. `mode: "all"` (default) or `"any"`.
 

@@ -31,14 +31,6 @@ impl SubagentSpawner for StubSubagentSpawner {
     async fn spawn(&self, _config: SubagentConfig) -> Result<SubagentHandle, ToolError> {
         Err(not_available("Subagent spawning"))
     }
-    async fn query_agent(
-        &self,
-        _session_id: &str,
-        _query_type: &str,
-        _limit: Option<u32>,
-    ) -> Result<Value, ToolError> {
-        Err(not_available("Subagent queries"))
-    }
     async fn wait_for_agents(
         &self,
         _session_ids: &[String],
