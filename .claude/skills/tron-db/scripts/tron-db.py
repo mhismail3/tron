@@ -12,7 +12,7 @@ Commands:
     messages    Get messages (user/assistant) for a session
     tools       Get tool executions for a session
     errors      Find errors in a session
-    logs        Get logs for a session
+    logs        Get logs (server and/or iOS client)
     tokens      Token usage analysis
     turn        Get events for a specific turn
     search      Full-text search events or logs
@@ -22,8 +22,9 @@ Environment:
     TRON_DB - Path to database (default: ~/.tron/database/tron.db)
 
 Origin filtering:
-    --origin prod   Filter to production (localhost:9847)
-    --origin beta   Filter to dev/beta (localhost:9846)
+    --origin prod          Filter to production (localhost:9847)
+    --origin beta          Filter to dev/beta (localhost:9846)
+    --origin client/ios    Filter to iOS client logs (ios-client)
 """
 
 import os
@@ -34,11 +35,13 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Origin mapping: friendly name -> server origin string
+# Origin mapping: friendly name -> origin string
 ORIGIN_MAP = {
     "prod": "localhost:9847",
     "beta": "localhost:9846",
     "dev": "localhost:9846",
+    "client": "ios-client",
+    "ios": "ios-client",
 }
 
 
@@ -76,7 +79,7 @@ def format_origin(origin):
     if not origin:
         return "-"
     for name, value in ORIGIN_MAP.items():
-        if origin == value and name != "dev":
+        if origin == value and name not in ("dev", "ios"):
             return name
     return origin
 
@@ -480,7 +483,7 @@ def cmd_errors(args):
 
 
 def cmd_logs(args):
-    """Get logs for a session."""
+    """Get logs for a session or by origin (e.g. iOS client logs)."""
     conn = get_connection()
 
     query = """
@@ -493,11 +496,25 @@ def cmd_logs(args):
             error_message,
             error_stack,
             trace_id,
+            origin,
             data
         FROM logs
-        WHERE session_id = ? OR session_id LIKE ?
+        WHERE 1=1
     """
-    params = [args.session_id, f"{args.session_id}%"]
+    params = []
+
+    if args.session_id:
+        query += " AND (session_id = ? OR session_id LIKE ?)"
+        params.extend([args.session_id, f"{args.session_id}%"])
+
+    origin = resolve_origin(args.origin)
+    if origin:
+        query += " AND origin = ?"
+        params.append(origin)
+
+    if not args.session_id and not origin:
+        # No filter at all — default to recent logs
+        pass
 
     if args.level:
         level_map = {"trace": 10, "debug": 20, "info": 30, "warn": 40, "error": 50, "fatal": 60}
@@ -509,11 +526,11 @@ def cmd_logs(args):
         query += " AND component LIKE ?"
         params.append(f"%{args.component}%")
 
-    query += " ORDER BY timestamp"
+    query += " ORDER BY timestamp DESC"
 
-    if args.limit:
-        query += " LIMIT ?"
-        params.append(args.limit)
+    limit = args.limit if args.limit else 100
+    query += " LIMIT ?"
+    params.append(limit)
 
     rows = conn.execute(query, params).fetchall()
 
@@ -521,11 +538,12 @@ def cmd_logs(args):
         output_json([dict(r) for r in rows])
         return
 
-    for r in rows:
+    for r in reversed(rows):
         level_colors = {"error": "!", "fatal": "!!", "warn": "?", "info": "", "debug": ".", "trace": ".."}
         prefix = level_colors.get(r["level"], "")
         trace = f" trace={r['trace_id']}" if r["trace_id"] else ""
-        print(f"{prefix}[{r['level'].upper():5}] {format_timestamp(r['timestamp'])} [{r['component']}]{trace}")
+        origin_tag = f" [{format_origin(r['origin'])}]" if not args.origin else ""
+        print(f"{prefix}[{r['level'].upper():5}] {format_timestamp(r['timestamp'])} [{r['component']}]{origin_tag}{trace}")
         print(f"  {r['message']}")
         if r["error_message"]:
             print(f"  Error: {r['error_message']}")
@@ -807,6 +825,14 @@ def cmd_stats(args):
     print(f"Sessions: {row['total_sessions']} ({row['active_sessions']} active)")
     print(f"Events: {row['total_events']:,}")
     print(f"Logs: {row['total_logs']:,}")
+
+    # Show log origin breakdown
+    log_origins = conn.execute(
+        "SELECT COALESCE(origin, 'unknown') as origin, COUNT(*) as cnt FROM logs GROUP BY origin ORDER BY cnt DESC"
+    ).fetchall()
+    if log_origins:
+        print(f"  Log sources: {', '.join(f'{format_origin(r['origin'])}={r['cnt']:,}' for r in log_origins)}")
+
     print(f"Workspaces: {row['total_workspaces']}")
     print()
     print(f"Total Tokens: {format_tokens(row['total_tokens'])}")
@@ -884,11 +910,12 @@ def main():
     p_errors.set_defaults(func=cmd_errors)
 
     # logs
-    p_logs = subparsers.add_parser("logs", help="Get logs for a session")
-    p_logs.add_argument("session_id", help="Session ID (or prefix)")
+    p_logs = subparsers.add_parser("logs", help="Get logs (by session, origin, or all)")
+    p_logs.add_argument("session_id", nargs="?", help="Session ID (or prefix). Omit for origin-based or global queries")
+    p_logs.add_argument("--origin", help="Filter by origin (prod, beta, client/ios)")
     p_logs.add_argument("--level", help="Minimum log level (trace/debug/info/warn/error/fatal)")
-    p_logs.add_argument("--component", help="Filter by component name")
-    p_logs.add_argument("--limit", type=int, help="Max results")
+    p_logs.add_argument("--component", help="Filter by component name (e.g. ios.WebSocket)")
+    p_logs.add_argument("--limit", type=int, help="Max results (default 100)")
     p_logs.add_argument("-v", "--verbose", action="store_true", help="Show stack traces and data")
     p_logs.set_defaults(func=cmd_logs)
 

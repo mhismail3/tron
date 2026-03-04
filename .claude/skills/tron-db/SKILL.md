@@ -12,7 +12,7 @@ tags:
   - introspection
 ---
 
-Debug Tron agent behavior by querying the events database. Use this skill when investigating session issues, analyzing token usage, finding errors, or understanding agent behavior.
+Debug Tron agent behavior by querying the events database. Use this skill when investigating session issues, analyzing token usage, finding errors, or understanding agent behavior. **Both server and iOS client logs live in the same `logs` table** — query with `origin = 'ios-client'` for client logs.
 
 ## Database Location
 
@@ -35,6 +35,11 @@ A CLI tool is available for common queries:
 # Filter by origin (prod vs beta)
 ~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin prod
 ~/.tron/skills/tron-db/scripts/tron-db.py sessions --origin beta
+
+# iOS client logs (no session_id needed)
+~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client
+~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --level error
+~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.WebSocket
 ```
 
 ## Schema Overview
@@ -43,7 +48,7 @@ A CLI tool is available for common queries:
 |-------|---------|
 | `sessions` | Session metadata, token counts, costs, origin |
 | `events` | Immutable event log (messages, tools, config changes) |
-| `logs` | Structured application logs with tracing |
+| `logs` | Structured logs — server AND iOS client (unified) |
 | `blobs` | Content-addressable blob storage |
 | `workspaces` | Project/directory associations |
 | `branches` | Session branching support |
@@ -65,9 +70,14 @@ A CLI tool is available for common queries:
 - `has_thinking` — whether thinking blocks were present
 - `cost` — per-event cost
 
-**logs** tracing columns:
-- `trace_id`, `parent_trace_id`, `depth` — distributed tracing support
-- `origin` — same server origin as sessions
+**logs** columns:
+- `trace_id`, `parent_trace_id`, `depth` — distributed tracing support (server logs only)
+- `origin` — log source:
+  - `localhost:9847` = server production logs
+  - `localhost:9846` = server dev/beta logs
+  - `ios-client` = iOS client logs (ingested via `logs.ingest` RPC)
+- `component` — module name. iOS logs are prefixed `ios.` (e.g. `ios.WebSocket`, `ios.RPC`, `ios.Session`, `ios.Network`)
+- `session_id` — set for server logs, **NULL for iOS client logs** (client logs are not session-scoped)
 
 ## Event Types Reference
 
@@ -467,7 +477,78 @@ GROUP BY model
 ORDER BY turn_count DESC;
 ```
 
-### 23. Database Statistics
+### 23. iOS Client Logs (Recent)
+
+```sql
+-- All recent iOS client logs
+SELECT
+  datetime(timestamp) as time,
+  level,
+  component,
+  message
+FROM logs
+WHERE origin = 'ios-client'
+ORDER BY timestamp DESC
+LIMIT 50;
+
+-- iOS client errors only
+SELECT
+  datetime(timestamp) as time,
+  component,
+  message
+FROM logs
+WHERE origin = 'ios-client'
+  AND level_num >= 50
+ORDER BY timestamp DESC
+LIMIT 50;
+
+-- iOS logs by category (component)
+SELECT
+  datetime(timestamp) as time,
+  level,
+  message
+FROM logs
+WHERE origin = 'ios-client'
+  AND component = 'ios.WebSocket'
+ORDER BY timestamp DESC
+LIMIT 50;
+
+-- Available iOS components: ios.WebSocket, ios.RPC, ios.Session, ios.Chat,
+-- ios.UI, ios.Network, ios.Events, ios.Notification, ios.General, ios.Database, ios.Audio
+```
+
+### 24. iOS Client Logs in Time Range
+
+```sql
+SELECT
+  datetime(timestamp) as time,
+  level,
+  component,
+  message
+FROM logs
+WHERE origin = 'ios-client'
+  AND timestamp BETWEEN '2026-03-03T00:00:00' AND '2026-03-03T23:59:59'
+ORDER BY timestamp;
+```
+
+### 25. Full-Text Search iOS Client Logs
+
+```sql
+SELECT
+  l.id,
+  datetime(l.timestamp) as time,
+  l.level,
+  l.component,
+  snippet(logs_fts, 0, '>>>', '<<<', '...', 30) as match
+FROM logs_fts
+JOIN logs l ON logs_fts.rowid = l.id
+WHERE logs_fts MATCH 'timeout OR disconnect'
+  AND l.origin = 'ios-client'
+ORDER BY l.timestamp DESC
+LIMIT 20;
+```
+
+### 26. Database Statistics
 
 ```sql
 SELECT
@@ -553,6 +634,31 @@ SELECT * FROM sessions;
 3. **Check for compaction events**
    ```bash
    ~/.tron/skills/tron-db/scripts/tron-db.py events SESSION_ID --type compaction
+   ```
+
+### Investigate iOS Client Issues
+
+iOS client logs are ingested into the same `logs` table (via `logs.ingest` RPC). They have `origin = 'ios-client'` and components prefixed `ios.` — no session_id.
+
+1. **Get recent client logs**
+   ```bash
+   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client
+   ```
+
+2. **Find client errors**
+   ```bash
+   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --level error
+   ```
+
+3. **Filter by iOS component**
+   ```bash
+   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.WebSocket
+   ~/.tron/skills/tron-db/scripts/tron-db.py logs --origin client --component ios.RPC
+   ```
+
+4. **Search client logs**
+   ```bash
+   ~/.tron/skills/tron-db/scripts/tron-db.py search --logs "timeout OR disconnect"
    ```
 
 ### Compare Prod vs Beta
