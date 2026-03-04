@@ -11,8 +11,7 @@ pub mod sqlite_task_manager;
 
 pub use apns_delegate::ApnsNotifyDelegate;
 pub use cron_impls::{
-    CronAgentTurnExecutor, CronDelegateImpl, CronEventBroadcaster, CronPushNotifier,
-    CronSystemEventInjector,
+    CronAgentTurnExecutor, CronEventBroadcaster, CronPushNotifier, CronSystemEventInjector,
 };
 pub use sqlite_event_store::SqliteEventStoreQuery;
 pub use sqlite_task_manager::SqliteTaskManagerDelegate;

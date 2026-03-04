@@ -570,13 +570,6 @@ pub trait TaskManagerDelegate: Send + Sync {
     async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError>;
 }
 
-/// Cron job management (`ManageAutomations` tool).
-#[async_trait]
-pub trait CronDelegate: Send + Sync {
-    /// Execute a cron management action (list, get, create, update, delete, trigger, status, get_runs).
-    async fn execute_action(&self, action: &str, params: Value) -> Result<Value, ToolError>;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // HTTP client
 // ─────────────────────────────────────────────────────────────────────────────

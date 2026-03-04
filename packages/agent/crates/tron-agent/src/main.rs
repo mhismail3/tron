@@ -548,7 +548,6 @@ async fn main() -> Result<()> {
         let config = tool_config.clone();
         let spawner: Arc<dyn tron_tools::traits::SubagentSpawner> = subagent_manager.clone();
         let sm_for_summarizer = subagent_manager.clone();
-        let cron_cell_for_closure = cron_scheduler_cell.clone();
         let tool_factory: Arc<dyn Fn() -> ToolRegistry + Send + Sync> = Arc::new(move || {
             let mut registry = create_tool_registry(&config);
             registry.register(Arc::new(
@@ -569,15 +568,6 @@ async fn main() -> Result<()> {
             registry.register(Arc::new(
                 tron_tools::web::web_fetch::WebFetchTool::new_with_summarizer(http, summarizer),
             ));
-
-            // ManageAutomations (cron scheduler set via OnceLock after creation)
-            if let Some(sched) = cron_cell_for_closure.get() {
-                let delegate: Arc<dyn tron_tools::traits::CronDelegate> =
-                    Arc::new(providers::CronDelegateImpl::new(sched.clone()));
-                registry.register(Arc::new(
-                    tron_tools::ui::manage_automations::ManageAutomationsTool::new(delegate),
-                ));
-            }
 
             registry
         });
