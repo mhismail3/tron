@@ -24,4 +24,4 @@ pub use connection::{
     ConnectionConfig, ConnectionPool, PooledConnection, PragmaState, new_file, new_in_memory,
     verify_pragmas,
 };
-pub use migrations::{current_version, latest_version, run_migrations};
+pub use migrations::{MigrationResult, current_version, latest_version, run_migrations};

@@ -324,11 +324,21 @@ async fn main() -> Result<()> {
         .context("Failed to open database")?;
     {
         let conn = pool.get().context("Failed to get DB connection")?;
-        let _ = tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
+        let migration_result =
+            tron_events::run_migrations(&conn).context("Failed to run event migrations")?;
         tron_runtime::tasks::migrations::run_migrations(&conn)
             .context("Failed to run task migrations")?;
         tron_cron::migrations::run_migrations(&conn)
             .context("Failed to run cron migrations")?;
+
+        // v4 purges ~1.55M ort::logging rows. VACUUM reclaims the freed space.
+        // VACUUM cannot run inside a transaction, so it runs here after migrations commit.
+        if migration_result.max_version_applied >= 4 {
+            eprintln!("Reclaiming disk space after ort log purge (VACUUM)...");
+            conn.execute_batch("VACUUM;")
+                .context("Post-migration VACUUM failed")?;
+            eprintln!("VACUUM complete.");
+        }
     }
 
     // Load settings early (needed for log level before logging init)
@@ -345,8 +355,15 @@ async fn main() -> Result<()> {
         .execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
         .context("Failed to set logging connection pragmas")?;
     let origin = format!("localhost:{}", args.port);
+    let module_overrides: Vec<(String, &str)> = settings
+        .logging
+        .module_overrides
+        .iter()
+        .map(|(m, lvl)| (m.clone(), lvl.as_filter_str()))
+        .collect();
     let log_handle = tron_core::logging::init_subscriber_with_sqlite(
         settings.logging.db_log_level.as_filter_str(),
+        &module_overrides,
         log_conn,
         Some(origin.clone()),
     );

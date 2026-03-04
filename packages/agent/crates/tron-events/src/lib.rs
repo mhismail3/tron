@@ -40,7 +40,8 @@ pub use reconstruct::{
 pub use sqlite::repositories::device_token::RegisterTokenResult;
 pub use sqlite::repositories::session::MessagePreview;
 pub use sqlite::{
-    ConnectionConfig, ConnectionPool, PooledConnection, new_file, new_in_memory, run_migrations,
+    ConnectionConfig, ConnectionPool, MigrationResult, PooledConnection, new_file, new_in_memory,
+    run_migrations,
 };
 pub use store::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
 pub use types::{

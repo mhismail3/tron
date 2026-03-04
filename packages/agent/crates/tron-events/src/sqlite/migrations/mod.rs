@@ -36,7 +36,21 @@ const MIGRATIONS: &[Migration] = &[
         description: "Notification read state tracking",
         sql: include_str!("v003_notification_read_state.sql"),
     },
+    Migration {
+        version: 4,
+        description: "Purge ONNX Runtime log spam (ort::logging rows)",
+        sql: include_str!("v004_purge_ort_logs.sql"),
+    },
 ];
+
+/// Result of running migrations.
+#[derive(Debug)]
+pub struct MigrationResult {
+    /// Number of migrations applied.
+    pub applied: u32,
+    /// Highest version that was newly applied (0 if none).
+    pub max_version_applied: u32,
+}
 
 /// Run all pending migrations on the given connection.
 ///
@@ -47,10 +61,11 @@ const MIGRATIONS: &[Migration] = &[
 /// # Errors
 ///
 /// Returns [`EventStoreError::Migration`] if any migration SQL fails.
-pub fn run_migrations(conn: &Connection) -> Result<u32> {
+pub fn run_migrations(conn: &Connection) -> Result<MigrationResult> {
     ensure_version_table(conn)?;
     let current = current_version(conn)?;
     let mut applied = 0;
+    let mut max_version_applied = 0;
 
     for migration in MIGRATIONS {
         if migration.version <= current {
@@ -70,13 +85,17 @@ pub fn run_migrations(conn: &Connection) -> Result<u32> {
 
         apply_migration(conn, migration)?;
         applied += 1;
+        max_version_applied = migration.version;
     }
 
     if applied > 0 {
         info!(applied, "migrations complete");
     }
 
-    Ok(applied)
+    Ok(MigrationResult {
+        applied,
+        max_version_applied,
+    })
 }
 
 /// Return the highest applied migration version, or 0 if none.
@@ -172,8 +191,9 @@ mod tests {
     #[test]
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
-        let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 3);
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 4);
+        assert_eq!(result.max_version_applied, 4);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -232,10 +252,11 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first, 3);
+        assert_eq!(first.applied, 4);
 
         let second = run_migrations(&conn).unwrap();
-        assert_eq!(second, 0);
+        assert_eq!(second.applied, 0);
+        assert_eq!(second.max_version_applied, 0);
     }
 
     #[test]
@@ -249,12 +270,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 3);
+        assert_eq!(current_version(&conn).unwrap(), 4);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 3);
+        assert_eq!(latest_version(), 4);
     }
 
     #[test]
@@ -777,11 +798,11 @@ mod tests {
 
         // Running full migrations (which includes v002) on a fresh DB is fine.
         // Verify no panic and version is correct.
-        assert_eq!(current_version(&conn).unwrap(), 3);
+        assert_eq!(current_version(&conn).unwrap(), 4);
 
-        // Running again skips both migrations.
-        let applied = run_migrations(&conn).unwrap();
-        assert_eq!(applied, 0);
+        // Running again skips all migrations.
+        let result = run_migrations(&conn).unwrap();
+        assert_eq!(result.applied, 0);
     }
 
     #[test]

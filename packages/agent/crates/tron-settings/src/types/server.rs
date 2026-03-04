@@ -3,6 +3,8 @@
 //! These are grouped here because they are all relatively small and
 //! server-oriented.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Server network and runtime settings.
@@ -137,12 +139,16 @@ impl LogLevel {
 pub struct LoggingSettings {
     /// Minimum log level written to the database.
     pub db_log_level: LogLevel,
+    /// Per-module log level overrides. Keys are Rust module/crate names.
+    /// Example: `{"ort": "warn"}` suppresses ONNX Runtime info spam.
+    pub module_overrides: HashMap<String, LogLevel>,
 }
 
 impl Default for LoggingSettings {
     fn default() -> Self {
         Self {
             db_log_level: LogLevel::Info,
+            module_overrides: HashMap::from([("ort".to_string(), LogLevel::Warn)]),
         }
     }
 }

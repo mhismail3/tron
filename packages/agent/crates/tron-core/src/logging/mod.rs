@@ -60,10 +60,12 @@ pub fn init_subscriber(level: &str) {
 /// # Arguments
 ///
 /// * `level` - Minimum log level to display/persist.
+/// * `module_overrides` - Per-module level overrides (e.g. `{"ort": "warn"}`).
 /// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
 /// * `origin` - Server origin (e.g. `"localhost:9847"`) stamped on every log entry.
 pub fn init_subscriber_with_sqlite(
     level: &str,
+    module_overrides: &[(String, &str)],
     conn: rusqlite::Connection,
     origin: Option<String>,
 ) -> TransportHandle {
@@ -71,7 +73,12 @@ pub fn init_subscriber_with_sqlite(
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
+    // Build filter: "info,ort=warn,other_crate=error"
+    let mut filter_str = level.to_string();
+    for (module, lvl) in module_overrides {
+        filter_str.push_str(&format!(",{module}={lvl}"));
+    }
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter_str));
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
