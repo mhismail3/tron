@@ -190,6 +190,45 @@ final class MessagingCoordinator {
         }
     }
 
+    // MARK: - Send Queued Message
+
+    /// Send a previously queued text message (no attachments/skills/spells).
+    ///
+    /// Unlike `sendMessage`, this takes explicit text and doesn't read from `context.inputText`.
+    /// The user's current input bar state is left untouched.
+    func sendQueuedMessage(text: String, context: MessagingContext) async {
+        guard !text.isEmpty else { return }
+
+        context.logInfo("Sending queued message: \"\(text.prefix(100))...\"")
+
+        context.markPendingQuestionsAsSuperseded()
+        context.dismissPendingSubagentResults()
+        context.browserDismissal = .none
+
+        let userMessage = ChatMessage.user(text)
+        context.appendMessage(userMessage)
+        context.currentTurn += 1
+
+        context.isProcessing = true
+        context.setSessionProcessing(true)
+        context.updateSessionDashboardInfo(lastUserPrompt: text, lastAssistantResponse: nil)
+        context.resetStreamingManager()
+
+        do {
+            try await context.sendPromptToServer(
+                text: text,
+                attachments: nil,
+                reasoningLevel: nil,
+                skills: nil,
+                spells: nil
+            )
+            context.logInfo("Queued prompt sent successfully")
+        } catch {
+            context.logError("Failed to send queued prompt: \(error.localizedDescription)")
+            context.handleAgentError("Failed to send message: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Abort Agent
 
     /// Abort the currently running agent.

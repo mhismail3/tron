@@ -102,10 +102,50 @@ extension ChatViewModel {
         }
     }
 
-    /// Abort the currently running agent
+    /// Abort the currently running agent.
+    /// If the message queue has items, shows a confirmation dialog instead.
     func abortAgent() {
+        if messageQueueState.hasMessages {
+            showAbortConfirmation = true
+        } else {
+            Task { await messagingCoordinator.abortAgent(context: self) }
+        }
+    }
+
+    /// Abort and discard all queued messages.
+    func abortAndClearQueue() {
+        messageQueueState.clear()
+        Task { await messagingCoordinator.abortAgent(context: self) }
+    }
+
+    /// Abort but keep queued messages — drain starts after abort completes.
+    func abortKeepQueue() {
         Task {
             await messagingCoordinator.abortAgent(context: self)
+            drainMessageQueue()
+        }
+    }
+
+    // MARK: - Message Queue
+
+    /// Enqueue the current input text for sending when the agent becomes ready.
+    /// Only enqueues text — attachments and skills are not included in queued messages.
+    func enqueueCurrentInput() {
+        let text = inputBarState.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard messageQueueState.enqueue(text) else { return }
+        inputBarState.text = ""
+    }
+
+    /// Drain the next queued message and send it.
+    /// Called after agent.ready, error recovery, and compaction completion.
+    func drainMessageQueue() {
+        guard agentPhase.isIdle else { return }
+        guard !isCompacting else { return }
+        guard let queued = messageQueueState.dequeue() else { return }
+        logInfo("Draining queued message: \"\(queued.text.prefix(50))...\"")
+        Task {
+            await messagingCoordinator.sendQueuedMessage(text: queued.text, context: self)
         }
     }
 

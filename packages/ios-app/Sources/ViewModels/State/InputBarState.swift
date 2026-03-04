@@ -48,6 +48,12 @@ final class InputBarState {
     var hasContent: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
+
+    /// Whether there is text content (ignoring attachments).
+    /// Used for queue-eligible sends during processing.
+    var hasTextContent: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 /// Read-only configuration for the InputBar component
@@ -87,6 +93,12 @@ struct InputBarConfig {
     let animationCoordinator: AnimationCoordinator?
     let readOnly: Bool
 
+    // MARK: - Message Queue
+    /// Queued messages waiting to be sent when the agent becomes ready.
+    let queuedMessages: [QueuedMessage]
+    /// Whether the queue is at capacity.
+    var isQueueFull: Bool { queuedMessages.count >= MessageQueueState.maxCapacity }
+
     init(
         agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
@@ -103,7 +115,8 @@ struct InputBarConfig {
         skillStore: SkillStore? = nil,
         inputHistory: InputHistoryStore? = nil,
         animationCoordinator: AnimationCoordinator? = nil,
-        readOnly: Bool = false
+        readOnly: Bool = false,
+        queuedMessages: [QueuedMessage] = []
     ) {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
@@ -121,6 +134,7 @@ struct InputBarConfig {
         self.inputHistory = inputHistory
         self.animationCoordinator = animationCoordinator
         self.readOnly = readOnly
+        self.queuedMessages = queuedMessages
     }
 }
 
@@ -157,6 +171,9 @@ struct InputBarActions {
     let onSpellRemove: ((Skill) -> Void)?
     let onSpellDetailTap: ((Skill) -> Void)?
 
+    // MARK: - Message Queue
+    let onQueueRemove: ((UUID) -> Void)?
+
     init(
         onSend: @escaping () -> Void = {},
         onAbort: @escaping () -> Void = {},
@@ -172,7 +189,8 @@ struct InputBarActions {
         onSkillRemove: ((Skill) -> Void)? = nil,
         onSkillDetailTap: ((Skill) -> Void)? = nil,
         onSpellRemove: ((Skill) -> Void)? = nil,
-        onSpellDetailTap: ((Skill) -> Void)? = nil
+        onSpellDetailTap: ((Skill) -> Void)? = nil,
+        onQueueRemove: ((UUID) -> Void)? = nil
     ) {
         self.onSend = onSend
         self.onAbort = onAbort
@@ -189,5 +207,6 @@ struct InputBarActions {
         self.onSkillDetailTap = onSkillDetailTap
         self.onSpellRemove = onSpellRemove
         self.onSpellDetailTap = onSpellDetailTap
+        self.onQueueRemove = onQueueRemove
     }
 }

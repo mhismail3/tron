@@ -74,6 +74,10 @@ final class ChatViewModel: ChatEventContext {
     let thinkingState = ThinkingState()
     /// Input bar state (text, attachments, skills, reasoning level)
     let inputBarState = InputBarState()
+    /// Message queue state (queued messages waiting for agent.ready)
+    let messageQueueState = MessageQueueState()
+    /// Whether the abort confirmation dialog should be shown (queue has items)
+    var showAbortConfirmation = false
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
     /// Worktree isolation state (status, loading)

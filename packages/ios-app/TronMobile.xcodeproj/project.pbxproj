@@ -153,10 +153,12 @@
 		3FFA953783EFB05B1D977AFD /* QuickSessionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D5BF3E43D19E7F14626552E /* QuickSessionSection.swift */; };
 		410A12359B1A50994D59624F /* SubagentFailedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 075202841B4A49CB41C8E4A5 /* SubagentFailedPlugin.swift */; };
 		4343B09F9AC2B0516581752C /* ReconstructedState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E25DDCAA3985A00F90FE413 /* ReconstructedState.swift */; };
+		439B9BD7A124E381ADB7974D /* QueuedMessageChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7AD1B96B2C212ED477C66 /* QueuedMessageChipsView.swift */; };
 		43BA34884D69600B7E5AEACB /* AskUserQuestionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81AD25FBBB782DF4866A5852 /* AskUserQuestionTypes.swift */; };
 		43BDB1C765927BE67FE06CBD /* MessageHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35BDCD7F29207A366C356FF4 /* MessageHandlers.swift */; };
 		43CBD93CFE2708C6EF008CBE /* UseCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEB09852325E4D08BEEFADF7 /* UseCase.swift */; };
 		45547C33D9EC4977CC374547 /* ToolPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36D5C1A94E170CFF37A3544A /* ToolPayloads.swift */; };
+		469D9F2F808178424B200CB3 /* MessageQueueState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41F3F49288E68CB2894749F3 /* MessageQueueState.swift */; };
 		47D15DD4869D82F881EBDDD1 /* SessionCreatedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1463E6DC7D278EF388E3BFD2 /* SessionCreatedPlugin.swift */; };
 		490E7266613F29CD1E3F69F3 /* String+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68870B0709527607F70004EB /* String+Extensions.swift */; };
 		4ABA7EF5C28D04DAF3C82F2E /* ToolResultParserNotifyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7826453E02A5DB6A8AB8C69A /* ToolResultParserNotifyAppTests.swift */; };
@@ -610,6 +612,7 @@
 		02CC65FB82E9EFCF7D87F0FF /* SessionSwitchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionSwitchingTests.swift; sourceTree = "<group>"; };
 		034024049425AF37D08ED9AE /* ModelFilteringService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelFilteringService.swift; sourceTree = "<group>"; };
 		035F82385B9FAC875FF522DE /* SessionHistorySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionHistorySheet.swift; sourceTree = "<group>"; };
+		03D7AD1B96B2C212ED477C66 /* QueuedMessageChipsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessageChipsView.swift; sourceTree = "<group>"; };
 		04B82F39D7E9E5692D62AF09 /* TagFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagFilterSheet.swift; sourceTree = "<group>"; };
 		04E4152F68F0335046FD3016 /* TextDeltaPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDeltaPluginTests.swift; sourceTree = "<group>"; };
 		05C2884AEB177DF23F67BF68 /* WorktreeCommitPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeCommitPlugin.swift; sourceTree = "<group>"; };
@@ -743,6 +746,7 @@
 		3FBA23C0842C370DE8FA77A0 /* EventStoreManager+Dashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EventStoreManager+Dashboard.swift"; sourceTree = "<group>"; };
 		417A957F1B03E3F563D2A0F3 /* SheetCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetCoordinator.swift; sourceTree = "<group>"; };
 		41D57DD6FF464C8855554DF5 /* AutomationRunDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationRunDetailSheet.swift; sourceTree = "<group>"; };
+		41F3F49288E68CB2894749F3 /* MessageQueueState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageQueueState.swift; sourceTree = "<group>"; };
 		423BA80E48ED3973E1451D76 /* EventStoreManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManagerProtocol.swift; sourceTree = "<group>"; };
 		42A2750F3AD9ECF8390A7F67 /* AutomationFormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationFormSheet.swift; sourceTree = "<group>"; };
 		431C5DB5DD75AB68A2AAD821 /* ModelNameFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelNameFormatterTests.swift; sourceTree = "<group>"; };
@@ -1483,6 +1487,7 @@
 				B86A01BCFC99D98B0D971D0B /* InputBar.swift */,
 				B478FD27FC82E5A327E552C0 /* InputTextField.swift */,
 				6F1C9A2BCF89A42D355F6C52 /* MentionDetector.swift */,
+				03D7AD1B96B2C212ED477C66 /* QueuedMessageChipsView.swift */,
 				86636B2253DF1CA2F0502BB7 /* StatusPillBar.swift */,
 				6385427D7DFA2EBA2CFB72DF /* WrappingHStackLayout.swift */,
 			);
@@ -2604,6 +2609,7 @@
 				E5E10E2282DECDA458FC3B74 /* ContentViewCoordinator.swift */,
 				EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */,
 				49F8897B954625E3FB843CCE /* InputBarState.swift */,
+				41F3F49288E68CB2894749F3 /* MessageQueueState.swift */,
 				475E03441DAA29FFAE1CC911 /* ModelPickerState.swift */,
 				6D624C6A66950C941B9B8F2F /* RenderAppUIChipTracker.swift */,
 				277426277E34E49215DB26CE /* SettingsState.swift */,
@@ -3158,6 +3164,7 @@
 				43BDB1C765927BE67FE06CBD /* MessageHandlers.swift in Sources */,
 				84C2D650F2A9D3443D1516A5 /* MessageMetadataBadge.swift in Sources */,
 				9B2FEE593AF8140D0A9E4B3A /* MessagePayloads.swift in Sources */,
+				469D9F2F808178424B200CB3 /* MessageQueueState.swift in Sources */,
 				384BD3DA151B485E849055E5 /* MessageRole.swift in Sources */,
 				AF3B529E1C78A0EF05AB96E4 /* MessageWindowManager.swift in Sources */,
 				14A2748B25BADA97EB0B906E /* MessagingCoordinator.swift in Sources */,
@@ -3196,6 +3203,7 @@
 				C9F653247068AA0A2E95D4BE /* PushNotificationService.swift in Sources */,
 				2BC05C3997C6379E6C319AD7 /* QueryAgentChip.swift in Sources */,
 				BC8F6983A4279FC7C40C135C /* QueryAgentTypes.swift in Sources */,
+				439B9BD7A124E381ADB7974D /* QueuedMessageChipsView.swift in Sources */,
 				3FFA953783EFB05B1D977AFD /* QuickSessionSection.swift in Sources */,
 				CD8059BC9B4B2D963C1A3538 /* RPCClient.swift in Sources */,
 				5DF34AB3F00C1BEA17EE3BD8 /* RPCClientProtocol.swift in Sources */,

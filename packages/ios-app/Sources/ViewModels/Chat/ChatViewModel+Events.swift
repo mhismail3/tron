@@ -184,6 +184,7 @@ extension ChatViewModel {
             if self.agentPhase == .postProcessing {
                 self.logWarning("Post-processing timeout — agent.ready never arrived, recovering")
                 self.agentPhase = .idle
+                self.drainMessageQueue()
             }
         }
     }
@@ -193,6 +194,7 @@ extension ChatViewModel {
         postProcessingTimeoutTask = nil
         agentPhase = .idle
         logInfo("Agent ready - post-processing complete")
+        drainMessageQueue()
     }
 
     func handleServerRestarting(_ result: ServerRestartingPlugin.Result) {
@@ -207,6 +209,8 @@ extension ChatViewModel {
         compactionInProgressMessageId = nil
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
+        // Clear queue — server context is lost, queued messages are stale
+        messageQueueState.clear()
     }
 
     func handleCompactionStarted(_ pluginResult: CompactionStartedPlugin.Result) {
@@ -269,6 +273,9 @@ extension ChatViewModel {
         Task {
             await refreshContextFromServer()
         }
+
+        // Compaction finished — if queue was waiting, drain now
+        drainMessageQueue()
     }
 
     func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
@@ -476,6 +483,9 @@ extension ChatViewModel {
             messages.append(.error(result.message))
             logger.error("Agent error: \(result.message)", category: .events)
         }
+
+        // Drain queued messages if any — agent is idle now
+        drainMessageQueue()
     }
 
     /// Handle errors from the agent streaming (shows error in chat)
@@ -509,6 +519,9 @@ extension ChatViewModel {
 
         // Close browser session on error
         closeBrowserSession()
+
+        // Drain queued messages if any — agent is idle now
+        drainMessageQueue()
     }
 
     /// Sync session events from server after turn completes

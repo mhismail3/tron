@@ -5,7 +5,8 @@ import PhotosUI
 
 @available(iOS 26.0, *)
 struct GlassActionButton: View {
-    let isProcessing: Bool
+    /// Show stop icon (red) when true, send arrow when false.
+    let showStop: Bool
     let canSend: Bool
     let onSend: () -> Void
     let onAbort: () -> Void
@@ -14,14 +15,14 @@ struct GlassActionButton: View {
 
     var body: some View {
         Button {
-            if isProcessing {
+            if showStop {
                 onAbort()
             } else {
                 onSend()
             }
         } label: {
             Group {
-                if isProcessing {
+                if showStop {
                     Image(systemName: "stop.fill")
                         .font(TronTypography.button)
                         .foregroundStyle(.red)
@@ -36,11 +37,11 @@ struct GlassActionButton: View {
         }
         .matchedGeometryEffect(id: "actionButtonMorph", in: namespace)
         .glassEffect(
-            .regular.tint(canSend && !isProcessing ? Color.tronEmerald.opacity(0.65) : Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+            .regular.tint(canSend && !showStop ? Color.tronEmerald.opacity(0.65) : Color.tronPhthaloGreen.opacity(0.25)).interactive(),
             in: .circle
         )
-        .disabled(!isProcessing && !canSend)
-        .animation(.easeInOut(duration: 0.2), value: isProcessing)
+        .disabled(!showStop && !canSend)
+        .animation(.easeInOut(duration: 0.2), value: showStop)
         .animation(.easeInOut(duration: 0.2), value: canSend)
     }
 }

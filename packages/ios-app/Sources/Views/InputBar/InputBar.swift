@@ -19,7 +19,6 @@ struct InputBar: View {
     // MARK: - Private State
 
     @FocusState private var isFocused: Bool
-    @State private var blockFocusUntil: Date = .distantPast
     private let audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
     @State private var showCamera = false
@@ -46,11 +45,23 @@ struct InputBar: View {
     // MARK: - Computed Properties
 
     private var canSend: Bool {
-        state.hasContent && !config.isPostProcessing && !config.isCompacting
+        if config.agentPhase.isActive {
+            // During processing/postProcessing: allow send if has text and queue not full
+            return state.hasTextContent && !config.isQueueFull
+        }
+        return state.hasContent && !config.isCompacting
+    }
+
+    /// Show stop button when agent is active and user has no text to queue.
+    private var showStop: Bool {
+        config.agentPhase.isActive && !state.hasTextContent
     }
 
     private var shouldShowActionButton: Bool {
-        config.isProcessing || canSend || config.isPostProcessing
+        if config.agentPhase.isActive {
+            return true  // Always show during processing (either stop or send-to-queue)
+        }
+        return canSend
     }
 
     private var shouldShowStatusPills: Bool {
@@ -116,12 +127,21 @@ struct InputBar: View {
                 .padding(.horizontal, 16)
                 .transition(.opacity)
 
+            // Queued message chips
+            if !config.queuedMessages.isEmpty {
+                QueuedMessageChipsView(
+                    queue: config.queuedMessages,
+                    onRemove: { id in actions.onQueueRemove?(id) }
+                )
+                .padding(.horizontal, 16)
+            }
+
             // Input row - floating liquid glass elements
             HStack(alignment: .bottom, spacing: 12) {
                 // Attachment button
                 if showAttachmentButton {
                     GlassAttachmentButton(
-                        isProcessing: config.isProcessing || config.readOnly,
+                        isProcessing: config.agentPhase.isActive || config.readOnly,
                         hasSkillsAvailable: hasSkillsAvailable,
                         buttonSize: actionButtonSize,
                         skillStore: config.skillStore,
@@ -167,7 +187,7 @@ struct InputBar: View {
                 // Send/Abort button
                 if shouldShowActionButton && !config.readOnly {
                     GlassActionButton(
-                        isProcessing: config.isProcessing,
+                        showStop: showStop,
                         canSend: canSend,
                         onSend: actions.onSend,
                         onAbort: actions.onAbort,
@@ -200,12 +220,7 @@ struct InputBar: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
-        // Focus management
-        .onChange(of: isFocused) { _, newValue in
-            if newValue && Date() < blockFocusUntil {
-                isFocused = false
-            }
-        }
+        // Focus management — no blockFocusUntil; user can tap to refocus for queueing
         .animation(nil, value: isFocused)
         .onChange(of: config.isProcessing) { wasProcessing, isNowProcessing in
             if !wasProcessing && isNowProcessing {
@@ -218,10 +233,6 @@ struct InputBar: View {
                     #selector(UIResponder.resignFirstResponder),
                     to: nil, from: nil, for: nil
                 )
-            } else if wasProcessing && !isNowProcessing {
-                // Processing ended - ensure keyboard stays dismissed and block refocus briefly
-                isFocused = false
-                blockFocusUntil = Date().addingTimeInterval(0.5)
             }
         }
         // Animation coordinator updates
@@ -383,7 +394,7 @@ struct InputBar: View {
                 .padding(.vertical, 10)
                 .lineLimit(1...8)
                 .focused($isFocused)
-                .disabled(config.isProcessing || config.readOnly)
+                .disabled(config.readOnly)
                 .onSubmit {
                     if !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !config.readOnly {
                         actions.onSend()

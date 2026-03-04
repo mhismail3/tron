@@ -111,29 +111,35 @@ struct ChatView: View {
                             skillStore: skillStore,
                             inputHistory: inputHistory,
                             animationCoordinator: viewModel.animationCoordinator,
-                            readOnly: workspaceDeleted || !isInteractionEnabled
+                            readOnly: workspaceDeleted || !isInteractionEnabled,
+                            queuedMessages: viewModel.messageQueueState.queue
                         ),
                         actions: InputBarActions(
                             onSend: { [viewModel, inputHistory, scrollCoordinator] in
                                 inputHistory.addToHistory(viewModel.inputText)
                                 scrollCoordinator.userSentMessage()
 
-                                // CRITICAL: Dismiss keyboard BEFORE processing starts
+                                // Dismiss keyboard on send
                                 UIApplication.shared.sendAction(
                                     #selector(UIResponder.resignFirstResponder),
                                     to: nil, from: nil, for: nil
                                 )
 
-                                // Pass selected skills and spells, then clear them after sending
-                                let skillsToSend = viewModel.inputBarState.selectedSkills
-                                let spellsToSend = viewModel.inputBarState.selectedSpells
-                                viewModel.inputBarState.selectedSkills = []
-                                viewModel.inputBarState.selectedSpells = []  // Spells are ephemeral
-                                viewModel.sendMessage(
-                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                    skills: skillsToSend.isEmpty ? nil : skillsToSend,
-                                    spells: spellsToSend.isEmpty ? nil : spellsToSend
-                                )
+                                if viewModel.agentPhase.isIdle {
+                                    // Normal send: include skills/spells
+                                    let skillsToSend = viewModel.inputBarState.selectedSkills
+                                    let spellsToSend = viewModel.inputBarState.selectedSpells
+                                    viewModel.inputBarState.selectedSkills = []
+                                    viewModel.inputBarState.selectedSpells = []
+                                    viewModel.sendMessage(
+                                        reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                        skills: skillsToSend.isEmpty ? nil : skillsToSend,
+                                        spells: spellsToSend.isEmpty ? nil : spellsToSend
+                                    )
+                                } else {
+                                    // Agent busy: queue text only (no attachments/skills/spells)
+                                    viewModel.enqueueCurrentInput()
+                                }
                             },
                             onAbort: viewModel.abortAgent,
                             onMicTap: viewModel.toggleRecording,
@@ -166,6 +172,9 @@ struct ChatView: View {
                             },
                             onSpellDetailTap: { [sheetCoordinator] spell in
                                 sheetCoordinator.showSkillDetail(spell, mode: .spell)
+                            },
+                            onQueueRemove: { [viewModel] id in
+                                viewModel.messageQueueState.remove(id: id)
                             }
                         )
                     )
@@ -196,6 +205,22 @@ struct ChatView: View {
             Button("OK") { viewModel.clearError() }
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
+        }
+        .confirmationDialog(
+            "Stop Agent",
+            isPresented: $viewModel.showAbortConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Only", role: .destructive) {
+                viewModel.abortKeepQueue()
+            }
+            Button("Stop & Clear Queue", role: .destructive) {
+                viewModel.abortAndClearQueue()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            let count = viewModel.messageQueueState.queue.count
+            Text("You have \(count) queued message\(count == 1 ? "" : "s").")
         }
         // iOS 26 Menu workaround: Handle menu actions via NotificationCenter
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
@@ -312,6 +337,8 @@ struct ChatView: View {
                         // Reconnection after initial setup — use reconnect flow + reload messages
                         await viewModel.reconnectAndResume()
                         await viewModel.syncAndLoadMessagesForResume()
+                        // Drain queued messages that survived disconnect
+                        viewModel.drainMessageQueue()
                     } else {
                         // First connection — use initial connect flow
                         await viewModel.connectAndResume()
