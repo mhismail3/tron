@@ -10,9 +10,8 @@ license.workspace = true
 workspace = true
 
 [features]
-default = ["embeddings", "transcription"]
+default = ["embeddings"]
 embeddings = ["tron-embeddings/ort"]
-transcription = ["tron-transcription/ort"]
 
 [[bin]]
 name = "tron"

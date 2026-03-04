@@ -16,7 +16,7 @@ use tron_runtime::orchestrator::session_manager::SessionManager;
 use tron_runtime::orchestrator::subagent_manager::SubagentManager;
 use tron_skills::registry::SkillRegistry;
 use tron_tools::registry::ToolRegistry;
-use tron_transcription::TranscriptionEngine;
+use tron_transcription::MlxEngine;
 
 use crate::shutdown::ShutdownCoordinator;
 
@@ -52,8 +52,8 @@ pub struct RpcContext {
     pub server_start_time: Instant,
     /// Browser service for CDP-based browser automation (None = browser not available).
     pub browser_service: Option<Arc<tron_tools::cdp::service::BrowserService>>,
-    /// Native transcription engine (lazily loaded via `OnceLock`).
-    pub transcription_engine: Arc<OnceLock<Arc<TranscriptionEngine>>>,
+    /// MLX transcription engine (lazily loaded via `OnceLock`).
+    pub transcription_engine: Arc<OnceLock<Arc<MlxEngine>>>,
     /// Embedding controller for vector search (None = embeddings not loaded).
     pub embedding_controller: Option<Arc<tokio::sync::Mutex<EmbeddingController>>>,
     /// Subagent manager for spawning subsessions (None = fallback to keyword summarizer).

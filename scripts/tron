@@ -545,6 +545,11 @@ cmd_dev() {
         esac
     done
 
+    # Ensure transcription sidecar files are deployed
+    mkdir -p "$HOME/.tron/mods/transcribe"
+    cp "$PROJECT_DIR/services/transcribe/worker.py" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+    cp "$PROJECT_DIR/services/transcribe/requirements.txt" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+
     if [ "$do_build" = true ]; then
         build_rust
     fi
@@ -808,6 +813,12 @@ cmd_deploy() {
     cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
     chmod +x "$INSTALLED_BINARY"
 
+    # Deploy transcription sidecar
+    print_status "Deploying transcription sidecar..."
+    mkdir -p "$HOME/.tron/mods/transcribe"
+    cp "$PROJECT_DIR/services/transcribe/worker.py" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/services/transcribe/requirements.txt" "$HOME/.tron/mods/transcribe/"
+
     # Regenerate plist so paths (e.g. log file) stay current
     print_status "Updating launchd plist..."
     create_launchd_plist
@@ -883,6 +894,13 @@ cmd_install() {
     cp "$RELEASE_BINARY" "$INSTALLED_BINARY"
     chmod +x "$INSTALLED_BINARY"
     print_success "Installed binary"
+
+    # Deploy transcription sidecar
+    print_status "Deploying transcription sidecar..."
+    mkdir -p "$HOME/.tron/mods/transcribe"
+    cp "$PROJECT_DIR/services/transcribe/worker.py" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/services/transcribe/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    print_success "Deployed transcription sidecar"
 
     # Create launchd plist
     print_status "Creating launchd service..."

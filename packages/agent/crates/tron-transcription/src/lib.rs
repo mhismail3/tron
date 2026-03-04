@@ -1,15 +1,13 @@
-//! Rust-native transcription engine using ONNX Runtime with the parakeet-tdt-0.6b-v3 model.
+//! Transcription engine using a parakeet-mlx Python sidecar.
 //!
-//! Replaces the Python `FastAPI` sidecar with zero external dependencies.
+//! Replaces the previous ONNX-native approach with an MLX backend (Apple Silicon)
+//! that correctly handles speech onset (no first-word-loss).
 //!
 //! # Architecture
 //!
 //! ```text
-//! audio bytes → symphonia decode → rubato resample to 16kHz mono f32
-//! → nemo128.onnx (preprocessor) → mel features [1, 128, T]
-//! → encoder-model.onnx → encoder output [1, T', 1024]
-//! → TDT greedy decode (decoder_joint-model.onnx in loop) → token IDs
-//! → vocab.txt lookup → text string
+//! audio bytes → temp file → worker.py (stdin/stdout JSON lines)
+//! → parakeet-mlx (MLX backend) → text result
 //! ```
 //!
 //! ## Crate Position
@@ -17,18 +15,9 @@
 //! Standalone (no tron crate dependencies).
 //! Depended on by: tron-server.
 
-// Always available (no heavy deps)
-pub mod model;
+pub mod mlx;
 pub mod types;
+pub mod venv;
 
-// Feature-gated (require ort + symphonia + rubato)
-#[cfg(feature = "ort")]
-pub(crate) mod audio;
-#[cfg(feature = "ort")]
-pub(crate) mod decoder;
-#[cfg(feature = "ort")]
-pub mod engine;
-
+pub use mlx::MlxEngine;
 pub use types::{ResultExt, TranscriptionError, TranscriptionResult};
-#[cfg(feature = "ort")]
-pub use engine::TranscriptionEngine;

@@ -1,7 +1,5 @@
 //! Transcription handlers: transcribe.audio, transcribe.listModels, transcribe.downloadModel.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::Value;
@@ -44,7 +42,7 @@ pub fn normalize_base64(input: &str) -> &str {
     }
 }
 
-/// Shared transcription helper using the native ONNX engine.
+/// Shared transcription helper using the MLX sidecar.
 ///
 /// Returns a [`TranscriptionResult`] with text, language, and duration.
 pub async fn transcribe_audio(
@@ -70,10 +68,7 @@ pub async fn transcribe_audio(
     }
 }
 
-/// Full transcription via the native ONNX engine.
-///
-/// Returns a [`TranscribeResponse`] with all fields: text, rawText, language,
-/// durationSeconds, processingTimeMs, model, device, computeType, cleanupMode.
+/// Full transcription via the MLX sidecar.
 async fn transcribe_audio_full(
     ctx: &RpcContext,
     audio_bytes: &[u8],
@@ -91,7 +86,7 @@ async fn transcribe_audio_full(
             let elapsed_ms = start.elapsed().as_millis() as u64;
             let cleaned = cleanup_transcription(&result.text);
             info!(
-                "native transcription succeeded ({:.1}s audio)",
+                "transcription succeeded ({:.1}s audio)",
                 result.duration_seconds
             );
             Ok(TranscribeResponse {
@@ -101,13 +96,13 @@ async fn transcribe_audio_full(
                 duration_seconds: result.duration_seconds,
                 processing_time_ms: elapsed_ms,
                 model: "parakeet-tdt-0.6b-v3".into(),
-                device: "cpu".into(),
-                compute_type: "onnx".into(),
+                device: "apple_silicon".into(),
+                compute_type: "mlx".into(),
                 cleanup_mode: "basic".into(),
             })
         }
         Err(e) => {
-            warn!(error = %e, "native transcription failed");
+            warn!(error = %e, "transcription failed");
             Err(RpcError::NotAvailable {
                 message: "Transcription not available (engine failed)".into(),
             })
@@ -146,7 +141,7 @@ fn cleanup_transcription(raw: &str) -> String {
     }
 }
 
-/// Transcribe an audio file via the native ONNX engine.
+/// Transcribe an audio file via the MLX sidecar.
 pub struct TranscribeAudioHandler;
 
 #[async_trait]
@@ -210,15 +205,13 @@ impl MethodHandler for TranscribeAudioHandler {
     }
 }
 
-/// List available transcription models with cached/engine status.
+/// List available transcription models with sidecar status.
 pub struct ListModelsHandler;
 
 #[async_trait]
 impl MethodHandler for ListModelsHandler {
     #[instrument(skip(self, ctx), fields(method = "transcribe.listModels"))]
     async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
-        let model_dir = tron_transcription::model::default_model_dir();
-        let cached = tron_transcription::model::is_model_cached(&model_dir);
         let engine_loaded = ctx.transcription_engine.get().is_some();
 
         Ok(serde_json::json!({
@@ -229,7 +222,7 @@ impl MethodHandler for ListModelsHandler {
                     "size": "600M",
                     "language": "en",
                     "default": true,
-                    "cached": cached,
+                    "cached": engine_loaded,
                     "engineLoaded": engine_loaded,
                 }
             ]
@@ -237,47 +230,26 @@ impl MethodHandler for ListModelsHandler {
     }
 }
 
-/// Trigger background download of the transcription model.
+/// Report sidecar status. Model download happens automatically on first worker start.
 pub struct DownloadModelHandler;
 
 #[async_trait]
 impl MethodHandler for DownloadModelHandler {
     #[instrument(skip(self, _ctx), fields(method = "transcribe.downloadModel"))]
     async fn handle(&self, _params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let model_dir = tron_transcription::model::default_model_dir();
+        let engine_loaded = _ctx.transcription_engine.get().is_some();
 
-        if tron_transcription::model::is_model_cached(&model_dir) {
+        if engine_loaded {
             return Ok(serde_json::json!({
                 "started": false,
-                "reason": "already_cached",
+                "reason": "already_loaded",
             }));
         }
 
-        // Spawn background download + engine load — don't block the RPC response
-        let cell = Arc::clone(&_ctx.transcription_engine);
-        let dir = model_dir.clone();
-        let handle = tokio::spawn(async move {
-            match tron_transcription::model::ensure_model(&dir).await {
-                Ok(()) => {
-                    info!("transcription model download complete");
-                    match tron_transcription::TranscriptionEngine::new(dir).await {
-                        Ok(engine) => {
-                            let _ = cell.set(engine);
-                            info!("native transcription engine loaded");
-                        }
-                        Err(e) => warn!(error = %e, "engine load failed after download"),
-                    }
-                }
-                Err(e) => warn!(error = %e, "transcription model download failed"),
-            }
-        });
-        if let Some(ref coord) = _ctx.shutdown_coordinator {
-            coord.register_task(handle);
-        }
-
         Ok(serde_json::json!({
-            "started": true,
-            "modelDir": model_dir.to_string_lossy(),
+            "started": false,
+            "reason": "sidecar_manages_model_download",
+            "message": "Model downloads automatically when the sidecar starts. Restart the server to retry.",
         }))
     }
 }
@@ -299,8 +271,8 @@ mod tests {
             duration_seconds: 2.5,
             processing_time_ms: 100,
             model: "parakeet".into(),
-            device: "cpu".into(),
-            compute_type: "onnx".into(),
+            device: "apple_silicon".into(),
+            compute_type: "mlx".into(),
             cleanup_mode: "none".into(),
         };
         let val = serde_json::to_value(&resp).unwrap();
@@ -308,7 +280,7 @@ mod tests {
         assert_eq!(val["rawText"], "hello");
         assert_eq!(val["durationSeconds"], 2.5);
         assert_eq!(val["processingTimeMs"], 100);
-        assert_eq!(val["computeType"], "onnx");
+        assert_eq!(val["computeType"], "mlx");
         assert_eq!(val["cleanupMode"], "none");
         // Verify NO snake_case keys leak through
         assert!(val.get("raw_text").is_none());
@@ -378,7 +350,6 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let model = &result["models"][0];
-        // cached field must be present (value depends on filesystem state)
         assert!(model.get("cached").is_some());
         assert!(model["cached"].is_boolean());
     }
@@ -394,10 +365,9 @@ mod tests {
     // ── DownloadModelHandler tests ──
 
     #[tokio::test]
-    async fn download_model_handler_returns_started() {
+    async fn download_model_handler_reports_status() {
         let ctx = make_test_context();
         let result = DownloadModelHandler.handle(None, &ctx).await.unwrap();
-        // Will return either started:true or started:false with reason:already_cached
         assert!(result.get("started").is_some());
         assert!(result["started"].is_boolean());
     }

@@ -8,22 +8,13 @@ license.workspace = true
 [lints]
 workspace = true
 
-[features]
-default = []
-ort = ["dep:ort", "dep:symphonia", "dep:rubato", "dep:hf-hub", "dep:ndarray"]
-
 [dependencies]
-# Always present (lightweight)
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-
-# Feature-gated (heavy)
-ort = { workspace = true, optional = true }
-symphonia = { workspace = true, optional = true }
-rubato = { workspace = true, optional = true }
-hf-hub = { workspace = true, optional = true }
-ndarray = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-tempfile = { workspace = true }
+tempfile.workspace = true

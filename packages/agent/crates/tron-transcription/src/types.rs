@@ -14,51 +14,33 @@ pub struct TranscriptionResult {
 /// Errors that can occur during transcription.
 #[derive(Debug, thiserror::Error)]
 pub enum TranscriptionError {
-    /// Model files not found or failed to download.
-    #[error("model not available: {0}")]
-    ModelNotAvailable(String),
+    /// Sidecar setup failed (Python not found, venv creation, pip install).
+    #[error("setup error: {0}")]
+    Setup(String),
 
-    /// ONNX Runtime session creation or inference failure.
-    #[error("inference error: {0}")]
-    Inference(String),
+    /// Sidecar communication error (broken pipe, timeout, bad JSON).
+    #[error("sidecar error: {0}")]
+    Sidecar(String),
 
-    /// Audio decoding failure (unsupported format, corrupt data).
-    #[error("audio decode error: {0}")]
-    AudioDecode(String),
-
-    /// Resampling failure.
-    #[error("resample error: {0}")]
-    Resample(String),
-
-    /// I/O error (file read/write).
+    /// I/O error (temp file write, process spawn).
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
 
-/// Extension trait to reduce `.map_err()` boilerplate when wrapping errors into `TranscriptionError`.
+/// Extension trait to reduce `.map_err()` boilerplate.
 pub trait ResultExt<T> {
-    /// Wrap the error as [`TranscriptionError::Inference`] with `context` prefix.
-    fn inference(self, context: &str) -> Result<T, TranscriptionError>;
-    /// Wrap the error as [`TranscriptionError::AudioDecode`] with `context` prefix.
-    fn audio_decode(self, context: &str) -> Result<T, TranscriptionError>;
-    /// Wrap the error as [`TranscriptionError::Resample`] with `context` prefix.
-    fn resample(self, context: &str) -> Result<T, TranscriptionError>;
-    /// Wrap the error as [`TranscriptionError::ModelNotAvailable`] with `context` prefix.
-    fn model(self, context: &str) -> Result<T, TranscriptionError>;
+    /// Wrap the error as [`TranscriptionError::Setup`] with `context` prefix.
+    fn setup(self, context: &str) -> Result<T, TranscriptionError>;
+    /// Wrap the error as [`TranscriptionError::Sidecar`] with `context` prefix.
+    fn sidecar(self, context: &str) -> Result<T, TranscriptionError>;
 }
 
 impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
-    fn inference(self, context: &str) -> Result<T, TranscriptionError> {
-        self.map_err(|e| TranscriptionError::Inference(format!("{context}: {e}")))
+    fn setup(self, context: &str) -> Result<T, TranscriptionError> {
+        self.map_err(|e| TranscriptionError::Setup(format!("{context}: {e}")))
     }
-    fn audio_decode(self, context: &str) -> Result<T, TranscriptionError> {
-        self.map_err(|e| TranscriptionError::AudioDecode(format!("{context}: {e}")))
-    }
-    fn resample(self, context: &str) -> Result<T, TranscriptionError> {
-        self.map_err(|e| TranscriptionError::Resample(format!("{context}: {e}")))
-    }
-    fn model(self, context: &str) -> Result<T, TranscriptionError> {
-        self.map_err(|e| TranscriptionError::ModelNotAvailable(format!("{context}: {e}")))
+    fn sidecar(self, context: &str) -> Result<T, TranscriptionError> {
+        self.map_err(|e| TranscriptionError::Sidecar(format!("{context}: {e}")))
     }
 }
 
@@ -80,61 +62,52 @@ mod tests {
 
     #[test]
     fn transcription_error_display() {
-        let e = TranscriptionError::ModelNotAvailable("missing encoder".into());
-        assert!(e.to_string().contains("missing encoder"));
+        let e = TranscriptionError::Setup("missing python".into());
+        assert!(e.to_string().contains("missing python"));
 
-        let e = TranscriptionError::AudioDecode("corrupt header".into());
-        assert!(e.to_string().contains("corrupt header"));
+        let e = TranscriptionError::Sidecar("broken pipe".into());
+        assert!(e.to_string().contains("broken pipe"));
     }
 
     #[test]
-    fn result_ext_inference_context() {
-        let err: Result<(), &str> = Err("onnx failure");
-        let mapped = err.inference("encoder run");
-        assert!(matches!(mapped, Err(TranscriptionError::Inference(s)) if s == "encoder run: onnx failure"));
+    fn result_ext_setup_context() {
+        let err: Result<(), &str> = Err("python not found");
+        let mapped = err.setup("find_python");
+        assert!(
+            matches!(mapped, Err(TranscriptionError::Setup(s)) if s == "find_python: python not found")
+        );
     }
 
     #[test]
-    fn result_ext_audio_decode_context() {
-        let err: Result<(), &str> = Err("corrupt header");
-        let mapped = err.audio_decode("probe");
-        assert!(matches!(mapped, Err(TranscriptionError::AudioDecode(s)) if s == "probe: corrupt header"));
-    }
-
-    #[test]
-    fn result_ext_resample_context() {
-        let err: Result<(), &str> = Err("ratio invalid");
-        let mapped = err.resample("init");
-        assert!(matches!(mapped, Err(TranscriptionError::Resample(s)) if s == "init: ratio invalid"));
-    }
-
-    #[test]
-    fn result_ext_model_context() {
-        let err: Result<(), &str> = Err("download failed");
-        let mapped = err.model("ensure_model");
-        assert!(matches!(mapped, Err(TranscriptionError::ModelNotAvailable(s)) if s == "ensure_model: download failed"));
+    fn result_ext_sidecar_context() {
+        let err: Result<(), &str> = Err("broken pipe");
+        let mapped = err.sidecar("write request");
+        assert!(
+            matches!(mapped, Err(TranscriptionError::Sidecar(s)) if s == "write request: broken pipe")
+        );
     }
 
     #[test]
     fn result_ext_ok_passthrough() {
         let ok: Result<i32, &str> = Ok(42);
-        assert_eq!(ok.inference("ctx").unwrap(), 42);
+        assert_eq!(ok.setup("ctx").unwrap(), 42);
         let ok: Result<i32, &str> = Ok(99);
-        assert_eq!(ok.audio_decode("ctx").unwrap(), 99);
-    }
-
-    #[test]
-    fn result_ext_empty_error_message() {
-        let err: Result<(), &str> = Err("");
-        let mapped = err.inference("ctx");
-        assert!(matches!(mapped, Err(TranscriptionError::Inference(s)) if s == "ctx: "));
+        assert_eq!(ok.sidecar("ctx").unwrap(), 99);
     }
 
     #[test]
     fn result_ext_with_std_io_error() {
         let err: Result<(), std::io::Error> =
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, "gone"));
-        let mapped = err.inference("file read");
-        assert!(matches!(mapped, Err(TranscriptionError::Inference(s)) if s.contains("gone")));
+        let mapped = err.setup("file read");
+        assert!(matches!(mapped, Err(TranscriptionError::Setup(s)) if s.contains("gone")));
+    }
+
+    #[test]
+    fn io_error_from_conversion() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe broken");
+        let te: TranscriptionError = io_err.into();
+        assert!(matches!(te, TranscriptionError::Io(_)));
+        assert!(te.to_string().contains("pipe broken"));
     }
 }

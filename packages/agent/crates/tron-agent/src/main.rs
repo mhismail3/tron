@@ -13,7 +13,7 @@
 //! tron-tools         Tool trait, registry, filesystem/bash/web/browser/subagent tools
 //! tron-skills        SKILL.md parser, registry, context injection
 //! tron-embeddings    ONNX embeddings (EmbeddingGemma-300M), vector search
-//! tron-transcription Native transcription (parakeet-tdt-0.6b via ONNX)
+//! tron-transcription Transcription (parakeet-tdt-0.6b via MLX sidecar)
 //! tron-runtime       Agent loop, context/compaction, hooks, orchestrator, tasks
 //! tron-server        Axum HTTP/WS, RPC handlers, event bridge, APNS
 //! tron-agent         This binary — wires all crates, CLI, DB startup
@@ -587,48 +587,21 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
-    // Native transcription engine (OnceLock — load if cached, else background download)
+    // Transcription sidecar (parakeet-mlx via Python worker)
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
-    #[cfg(feature = "transcription")]
     {
-        let model_dir = tron_transcription::model::default_model_dir();
-        if tron_transcription::model::is_model_cached(&model_dir) {
-            tracing::info!("transcription model cached — loading native engine");
-            match tron_transcription::TranscriptionEngine::new(model_dir).await {
+        let cell = Arc::clone(&transcription_engine);
+        let _ = tokio::spawn(async move {
+            match tron_transcription::MlxEngine::new().await {
                 Ok(engine) => {
-                    let _ = transcription_engine.set(engine);
-                    tracing::info!("native transcription engine ready");
+                    let _ = cell.set(engine);
+                    tracing::info!("transcription sidecar ready (parakeet-mlx)");
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "failed to load transcription engine");
+                    tracing::warn!(error = %e, "transcription sidecar setup failed");
                 }
             }
-        } else {
-            tracing::info!("transcription model not cached — downloading in background");
-            let cell = Arc::clone(&transcription_engine);
-            let _ = tokio::spawn(async move {
-                match tron_transcription::model::ensure_model(&model_dir).await {
-                    Ok(()) => {
-                        match tron_transcription::TranscriptionEngine::new(model_dir).await {
-                            Ok(engine) => {
-                                let _ = cell.set(engine);
-                                tracing::info!(
-                                    "native transcription engine ready (background download)"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "engine load failed after download")
-                            }
-                        }
-                    }
-                    Err(e) => tracing::warn!(error = %e, "transcription model download failed"),
-                }
-            });
-        }
-    }
-    #[cfg(not(feature = "transcription"))]
-    {
-        tracing::info!("transcription feature disabled");
+        });
     }
 
     // Cron scheduler
