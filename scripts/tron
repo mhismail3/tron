@@ -547,8 +547,8 @@ cmd_dev() {
 
     # Ensure transcription sidecar files are deployed
     mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/services/transcribe/worker.py" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
-    cp "$PROJECT_DIR/services/transcribe/requirements.txt" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
+    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/" 2>/dev/null || true
 
     if [ "$do_build" = true ]; then
         build_rust
@@ -816,8 +816,8 @@ cmd_deploy() {
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
     mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/services/transcribe/worker.py" "$HOME/.tron/mods/transcribe/"
-    cp "$PROJECT_DIR/services/transcribe/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
 
     # Regenerate plist so paths (e.g. log file) stay current
     print_status "Updating launchd plist..."
@@ -898,8 +898,8 @@ cmd_install() {
     # Deploy transcription sidecar
     print_status "Deploying transcription sidecar..."
     mkdir -p "$HOME/.tron/mods/transcribe"
-    cp "$PROJECT_DIR/services/transcribe/worker.py" "$HOME/.tron/mods/transcribe/"
-    cp "$PROJECT_DIR/services/transcribe/requirements.txt" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/worker.py" "$HOME/.tron/mods/transcribe/"
+    cp "$PROJECT_DIR/packages/agent/crates/tron-transcription/sidecar/requirements.txt" "$HOME/.tron/mods/transcribe/"
     print_success "Deployed transcription sidecar"
 
     # Create launchd plist
