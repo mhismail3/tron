@@ -301,18 +301,18 @@ final class StreamingManagerTests: XCTestCase {
 
     // MARK: - Scroll Version Throttling
 
-    func testScrollVersionIncrementsEveryThirdFlush() {
+    func testScrollVersionIncrementsEverySixthFlush() {
         let manager = StreamingManager()
         manager.onCreateStreamingMessage = { UUID() }
         manager.onTextUpdate = { _, _ in }
 
-        // Send 9 deltas, flush each one manually via flushPendingTextIfNeeded
-        for i in 0..<9 {
+        // Send 12 deltas, flush each one manually via flushPendingTextIfNeeded
+        for i in 0..<12 {
             manager.handleTextDelta("x\(i)")
             manager.flushPendingTextIfNeeded()
         }
 
-        XCTAssertEqual(manager.scrollVersion, 3, "scrollVersion should increment every 3rd flush")
+        XCTAssertEqual(manager.scrollVersion, 2, "scrollVersion should increment every 6th flush")
     }
 
     func testScrollVersionAlwaysIncrementsOnManualFlush() {

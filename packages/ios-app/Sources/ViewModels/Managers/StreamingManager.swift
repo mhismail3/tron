@@ -14,8 +14,8 @@ final class StreamingManager {
     struct Config {
         /// Maximum streaming text size to prevent memory exhaustion (10MB)
         static let maxStreamingTextSize = 10_000_000
-        /// Target updates per second (30fps for smooth text appearance)
-        static let targetUpdatesPerSecond: Int = 30
+        /// Target updates per second (60fps for fluid text appearance)
+        static let targetUpdatesPerSecond: Int = 60
     }
 
     // MARK: - Streaming State
@@ -44,8 +44,8 @@ final class StreamingManager {
     @ObservationIgnored
     private var flushesSinceLastScroll: Int = 0
 
-    /// Number of content flushes between scroll updates (~10fps at 30fps flush rate)
-    static let flushesPerScrollUpdate: Int = 3
+    /// Number of content flushes between scroll updates (~10fps at 60fps flush rate)
+    static let flushesPerScrollUpdate: Int = 6
 
     // MARK: - Display Link Timer
 
@@ -57,8 +57,8 @@ final class StreamingManager {
     @ObservationIgnored
     private var frameCounter: Int = 0
 
-    /// Number of frames to skip between updates (60fps / 30 target = 2)
-    private let framesPerUpdate: Int = 2
+    /// Flush every display link tick (60fps content updates for fluid streaming)
+    private let framesPerUpdate: Int = 1
 
     // MARK: - Callbacks
 
