@@ -4,7 +4,7 @@ import UIKit
 
 // MARK: - Streaming Manager
 // Manages text delta batching using CADisplayLink for efficient, battery-friendly updates.
-// Replaces Task.sleep-based batching which caused perpetual deferral during rapid deltas.
+// Typewriter animation smooths bursty SSE token delivery into continuous text flow.
 
 @MainActor @Observable
 final class StreamingManager {
@@ -16,6 +16,12 @@ final class StreamingManager {
         static let maxStreamingTextSize = 10_000_000
         /// Target updates per second (60fps for fluid text appearance)
         static let targetUpdatesPerSecond: Int = 60
+
+        // Typewriter animation constants
+        static let baseCharsPerFrame: Int = 4
+        static let maxCharsPerFrame: Int = 16
+        static let catchUpThreshold: Int = 80
+        static let maxCatchUpDepth: Int = 400
     }
 
     // MARK: - Streaming State
@@ -23,12 +29,19 @@ final class StreamingManager {
     /// Current streaming message ID
     private(set) var streamingMessageId: UUID?
 
-    /// Accumulated streaming text
-    private(set) var streamingText: String = ""
+    /// All text received from server (grows in bursts)
+    private(set) var receivedText: String = ""
 
-    /// Pending text delta (not yet flushed to UI)
+    /// Text currently displayed to user (grows smoothly via typewriter animation)
     @ObservationIgnored
-    private var pendingTextDelta: String = ""
+    private(set) var displayedText: String = ""
+
+    /// Character count of displayedText (avoids repeated String.count on large strings)
+    @ObservationIgnored
+    private(set) var displayedCharCount: Int = 0
+
+    /// Public API — returns full received text for external callsites
+    var streamingText: String { receivedText }
 
     /// Whether currently streaming
     var isStreaming: Bool {
@@ -103,13 +116,11 @@ final class StreamingManager {
     }
 
     @objc private func appDidEnterBackground() {
-        // Pause display link to save battery when backgrounded
         displayLinkWrapper?.isPaused = true
     }
 
     @objc private func appWillEnterForeground() {
-        // Resume only if we have pending content to display
-        if !pendingTextDelta.isEmpty && streamingMessageId != nil {
+        if displayedCharCount < receivedText.count && streamingMessageId != nil {
             displayLinkWrapper?.isPaused = false
         }
     }
@@ -118,7 +129,6 @@ final class StreamingManager {
     private func displayLinkFired() {
         frameCounter += 1
 
-        // Only flush every N frames (throttle to ~30 updates/sec)
         guard frameCounter >= framesPerUpdate else { return }
         frameCounter = 0
 
@@ -126,17 +136,38 @@ final class StreamingManager {
     }
 
     func flushPendingTextIfNeeded() {
-        guard !pendingTextDelta.isEmpty,
-              let messageId = streamingMessageId else {
-            // Nothing to flush - pause the display link to save battery
-            if pendingTextDelta.isEmpty {
+        guard let messageId = streamingMessageId else {
+            if displayedCharCount >= receivedText.count {
                 displayLinkWrapper?.isPaused = true
             }
             return
         }
 
-        onTextUpdate?(messageId, streamingText)
-        pendingTextDelta = ""
+        let bufferDepth = receivedText.count - displayedCharCount
+        guard bufferDepth > 0 else {
+            displayLinkWrapper?.isPaused = true
+            return
+        }
+
+        // Adaptive drain rate
+        let charsThisFrame: Int
+        if bufferDepth <= Config.catchUpThreshold {
+            charsThisFrame = Config.baseCharsPerFrame
+        } else if bufferDepth >= Config.maxCatchUpDepth {
+            charsThisFrame = Config.maxCharsPerFrame
+        } else {
+            let ratio = Double(bufferDepth - Config.catchUpThreshold)
+                       / Double(Config.maxCatchUpDepth - Config.catchUpThreshold)
+            charsThisFrame = Config.baseCharsPerFrame
+                           + Int(ratio * Double(Config.maxCharsPerFrame - Config.baseCharsPerFrame))
+        }
+
+        let newCharCount = min(displayedCharCount + charsThisFrame, receivedText.count)
+        let idx = receivedText.index(receivedText.startIndex, offsetBy: newCharCount)
+        displayedText = String(receivedText[..<idx])
+        displayedCharCount = newCharCount
+
+        onTextUpdate?(messageId, displayedText)
 
         flushesSinceLastScroll += 1
         if flushesSinceLastScroll >= Self.flushesPerScrollUpdate {
@@ -151,32 +182,26 @@ final class StreamingManager {
     /// Returns false if backpressure limit reached
     @discardableResult
     func handleTextDelta(_ delta: String) -> Bool {
-        // Enforce backpressure limit
-        guard streamingText.count + delta.count < Config.maxStreamingTextSize else {
+        guard receivedText.count + delta.count < Config.maxStreamingTextSize else {
             return false
         }
 
-        // Strip leading newlines at start of stream (Anthropic adaptive thinking artifact)
         let effectiveDelta: String
-        if streamingText.isEmpty {
+        if receivedText.isEmpty {
             effectiveDelta = String(delta.drop(while: \.isNewline))
             guard !effectiveDelta.isEmpty else { return true }
         } else {
             effectiveDelta = delta
         }
 
-        // Create streaming message if needed (AFTER newline strip to avoid empty placeholders)
         if streamingMessageId == nil {
             if let createMessage = onCreateStreamingMessage {
                 streamingMessageId = createMessage()
             }
         }
 
-        // Accumulate delta (efficient - no timer churn)
-        pendingTextDelta += effectiveDelta
-        streamingText += effectiveDelta
+        receivedText += effectiveDelta
 
-        // Ensure display link is running
         if displayLinkWrapper?.isPaused == true {
             displayLinkWrapper?.isPaused = false
         }
@@ -186,13 +211,14 @@ final class StreamingManager {
 
     // MARK: - Flush and Finalize
 
-    /// Flush pending text to UI immediately
+    /// Snap all received text to display immediately
     func flushPendingText() {
-        guard !pendingTextDelta.isEmpty,
-              let messageId = streamingMessageId else { return }
+        guard let messageId = streamingMessageId else { return }
+        guard displayedCharCount < receivedText.count else { return }
 
-        onTextUpdate?(messageId, streamingText)
-        pendingTextDelta = ""
+        displayedText = receivedText
+        displayedCharCount = receivedText.count
+        onTextUpdate?(messageId, displayedText)
 
         flushesSinceLastScroll = 0
         scrollVersion += 1
@@ -201,24 +227,19 @@ final class StreamingManager {
     /// Finalize the current streaming message
     /// Returns the final text content
     func finalizeStreamingMessage() -> String {
-        // Flush any pending updates first
         flushPendingText()
-
-        // Pause display link since we're done streaming
         displayLinkWrapper?.isPaused = true
 
         guard let messageId = streamingMessageId else { return "" }
 
-        let finalText = streamingText
+        let finalText = receivedText
 
-        // Notify finalization
         onFinalizeMessage?(messageId, finalText)
 
-        // Reset state
         streamingMessageId = nil
-        streamingText = ""
-        pendingTextDelta = ""
-
+        receivedText = ""
+        displayedText = ""
+        displayedCharCount = 0
         return finalText
     }
 
@@ -227,52 +248,48 @@ final class StreamingManager {
         displayLinkWrapper?.isPaused = true
 
         streamingMessageId = nil
-        streamingText = ""
-        pendingTextDelta = ""
+        receivedText = ""
+        displayedText = ""
+        displayedCharCount = 0
         scrollVersion = 0
         flushesSinceLastScroll = 0
     }
 
     // MARK: - State Queries
 
-    /// Check if backpressure limit is approaching
     var isApproachingLimit: Bool {
-        streamingText.count > Config.maxStreamingTextSize * 8 / 10
+        receivedText.count > Config.maxStreamingTextSize * 8 / 10
     }
 
-    /// Current streaming text length
     var currentTextLength: Int {
-        streamingText.count
+        receivedText.count
     }
 
-    /// Remaining capacity before backpressure
     var remainingCapacity: Int {
-        Config.maxStreamingTextSize - streamingText.count
+        Config.maxStreamingTextSize - receivedText.count
     }
 
     // MARK: - In-Progress Session Handling
 
-    /// Handle catching up to an in-progress streaming session
-    /// Used when user joins a session that's already streaming
     func catchUpToInProgress(existingText: String, messageId: UUID) {
         streamingMessageId = messageId
-        streamingText = existingText
-        pendingTextDelta = ""
+        receivedText = existingText
+        displayedText = existingText
+        displayedCharCount = existingText.count
 
-        // Notify UI of current state
-        onTextUpdate?(messageId, streamingText)
+        onTextUpdate?(messageId, displayedText)
         scrollVersion += 1
     }
 
     // MARK: - Reset
 
-    /// Reset all streaming state
     func reset() {
         displayLinkWrapper?.isPaused = true
 
         streamingMessageId = nil
-        streamingText = ""
-        pendingTextDelta = ""
+        receivedText = ""
+        displayedText = ""
+        displayedCharCount = 0
         scrollVersion = 0
         flushesSinceLastScroll = 0
     }
@@ -305,22 +322,17 @@ private final class DisplayLinkWrapper {
     private func setupDisplayLink() {
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
 
-        // Configure for smooth 60fps with ability to drop to 30fps
         displayLink?.preferredFrameRateRange = CAFrameRateRange(
             minimum: 30,
             maximum: 60,
             preferred: 60
         )
 
-        // Add to main run loop in common mode (works during scrolling)
         displayLink?.add(to: .main, forMode: .common)
-
-        // Start paused to save battery - will activate on first delta
         displayLink?.isPaused = true
     }
 
     @objc private func tick() {
-        // We're on main thread (display link always fires on main), safe to call handler
         let handler = self.handler
         MainActor.assumeIsolated {
             handler()

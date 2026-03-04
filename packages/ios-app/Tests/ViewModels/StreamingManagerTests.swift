@@ -376,4 +376,249 @@ final class StreamingManagerTests: XCTestCase {
 
         XCTAssertGreaterThan(manager.scrollVersion, before, "Catch-up should increment scrollVersion")
     }
+
+    // MARK: - Typewriter Animation Tests
+
+    func testTypewriterRevealsTextGradually() {
+        let manager = StreamingManager()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        // Send 16 chars (< catchUpThreshold 80), flush once
+        manager.handleTextDelta("ABCDEFGHIJKLMNOP")
+        manager.flushPendingTextIfNeeded()
+
+        // Should reveal exactly baseCharsPerFrame (4) chars
+        XCTAssertEqual(callbackText, "ABCD")
+    }
+
+    func testTypewriterGradualRevealIsPrefix() {
+        let manager = StreamingManager()
+        var callbacks: [String] = []
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbacks.append(text) }
+
+        let fullText = "ABCDEFGHIJKLMNOPQRST"  // 20 chars
+        manager.handleTextDelta(fullText)
+
+        // Flush 5 times (5 × 4 = 20 chars)
+        for _ in 0..<5 {
+            manager.flushPendingTextIfNeeded()
+        }
+
+        // Each callback should be a growing prefix
+        XCTAssertEqual(callbacks.count, 5)
+        for (i, text) in callbacks.enumerated() {
+            let expectedLen = (i + 1) * StreamingManager.Config.baseCharsPerFrame
+            XCTAssertEqual(text.count, expectedLen)
+            XCTAssertTrue(fullText.hasPrefix(text))
+        }
+
+        // After 5 flushes, fully caught up
+        XCTAssertEqual(callbacks.last, fullText)
+    }
+
+    func testTypewriterPausesWhenFullyCaughtUp() {
+        let manager = StreamingManager()
+        var callbackCount = 0
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in callbackCount += 1 }
+
+        // Send exactly 4 chars (one frame's worth at base rate)
+        manager.handleTextDelta("ABCD")
+        manager.flushPendingTextIfNeeded()
+        XCTAssertEqual(callbackCount, 1)
+
+        // Second flush should NOT fire callback (buffer empty)
+        manager.flushPendingTextIfNeeded()
+        XCTAssertEqual(callbackCount, 1, "Should not fire callback when fully caught up")
+    }
+
+    func testTypewriterAcceleratesOnLargeBuffer() {
+        let manager = StreamingManager()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        // Send 500 chars (> maxCatchUpDepth 400)
+        manager.handleTextDelta(String(repeating: "x", count: 500))
+        manager.flushPendingTextIfNeeded()
+
+        // Should reveal maxCharsPerFrame (16) chars
+        XCTAssertEqual(callbackText?.count, StreamingManager.Config.maxCharsPerFrame)
+    }
+
+    func testTypewriterLinearRampInMiddleRange() {
+        let manager = StreamingManager()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        // Send exactly 240 chars (midpoint between 80 and 400)
+        manager.handleTextDelta(String(repeating: "x", count: 240))
+        manager.flushPendingTextIfNeeded()
+
+        // At midpoint: ratio = (240-80)/(400-80) = 160/320 = 0.5
+        // charsThisFrame = 4 + Int(0.5 * 12) = 4 + 6 = 10
+        XCTAssertEqual(callbackText?.count, 10)
+    }
+
+    func testStreamingTextReturnsReceivedNotDisplayed() {
+        let manager = StreamingManager()
+        var callbackFired = false
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in callbackFired = true }
+
+        manager.handleTextDelta("Full text")
+
+        // streamingText returns full receivedText even before flush
+        XCTAssertEqual(manager.streamingText, "Full text")
+        XCTAssertFalse(callbackFired, "No flush means no callback")
+    }
+
+    // MARK: - Snap/Flush Behavior
+
+    func testFlushPendingTextSnapsAllText() {
+        let manager = StreamingManager()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        // Send long text, call flushPendingText() (snap)
+        let longText = String(repeating: "x", count: 200)
+        manager.handleTextDelta(longText)
+        manager.flushPendingText()
+
+        // Callback receives FULL receivedText (instant snap)
+        XCTAssertEqual(callbackText, longText)
+    }
+
+    func testFinalizeSnapsRemainingAnimation() {
+        let manager = StreamingManager()
+        var callbackText: String?
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbackText = text }
+        manager.onFinalizeMessage = { _, _ in }
+
+        manager.handleTextDelta("Complete response text here")
+        // No flush — animation hasn't started
+        let result = manager.finalizeStreamingMessage()
+
+        XCTAssertEqual(result, "Complete response text here")
+        XCTAssertEqual(callbackText, "Complete response text here")
+    }
+
+    func testFlushPendingTextIdempotent() {
+        let manager = StreamingManager()
+        var callbackCount = 0
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in callbackCount += 1 }
+
+        manager.handleTextDelta("text")
+        manager.flushPendingText()
+        XCTAssertEqual(callbackCount, 1)
+
+        // Second call should be no-op
+        manager.flushPendingText()
+        XCTAssertEqual(callbackCount, 1, "Second flushPendingText should be no-op")
+    }
+
+    // MARK: - Edge Cases
+
+    func testCatchUpShowsAllTextImmediately() {
+        let manager = StreamingManager()
+        var callbackText: String?
+        let msgId = UUID()
+        manager.onTextUpdate = { _, text in callbackText = text }
+
+        manager.catchUpToInProgress(existingText: "Existing content", messageId: msgId)
+
+        XCTAssertEqual(callbackText, "Existing content")
+        XCTAssertEqual(manager.displayedCharCount, "Existing content".count)
+    }
+
+    func testTypewriterHandlesUnicode() {
+        let manager = StreamingManager()
+        var callbacks: [String] = []
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbacks.append(text) }
+
+        // "Hello 🌍🎉 World" — emoji are single Characters in Swift
+        let text = "Hello 🌍🎉 World"
+        manager.handleTextDelta(text)
+
+        // Flush multiple times until fully caught up
+        for _ in 0..<10 {
+            manager.flushPendingTextIfNeeded()
+        }
+
+        // All callback texts must be valid prefixes (no split mid-character)
+        for cb in callbacks {
+            XCTAssertTrue(text.hasPrefix(cb), "'\(cb)' is not a prefix of '\(text)'")
+        }
+
+        // Should eventually show full text
+        XCTAssertEqual(callbacks.last, text)
+    }
+
+    func testResetDuringAnimation() {
+        let manager = StreamingManager()
+        var callbackCount = 0
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in callbackCount += 1 }
+
+        // Send 100 chars, flush once (reveals 4)
+        manager.handleTextDelta(String(repeating: "x", count: 100))
+        manager.flushPendingTextIfNeeded()
+        XCTAssertEqual(callbackCount, 1)
+
+        manager.reset()
+
+        XCTAssertEqual(manager.streamingText, "")
+        XCTAssertNil(manager.streamingMessageId)
+
+        // Next flush should be a no-op
+        manager.flushPendingTextIfNeeded()
+        XCTAssertEqual(callbackCount, 1, "No callback after reset")
+    }
+
+    func testSequentialStreams() {
+        let manager = StreamingManager()
+        var lastCallbackText: String?
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in lastCallbackText = text }
+        manager.onFinalizeMessage = { _, _ in }
+
+        // Stream 1
+        manager.handleTextDelta("Stream one")
+        let result1 = manager.finalizeStreamingMessage()
+        XCTAssertEqual(result1, "Stream one")
+
+        // Stream 2 — starts clean
+        manager.handleTextDelta("Stream two")
+        manager.flushPendingText()
+
+        XCTAssertEqual(manager.streamingText, "Stream two")
+        XCTAssertEqual(lastCallbackText, "Stream two")
+    }
+
+    func testDisplayLinkResumesOnNewDeltaAfterDrain() {
+        let manager = StreamingManager()
+        var callbacks: [String] = []
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, text in callbacks.append(text) }
+
+        // Send 4 chars, flush (fully drained)
+        manager.handleTextDelta("ABCD")
+        manager.flushPendingTextIfNeeded()
+        XCTAssertEqual(callbacks.count, 1)
+        XCTAssertEqual(callbacks[0], "ABCD")
+
+        // Display link pauses (buffer empty). Send 4 more chars → should resume
+        manager.handleTextDelta("EFGH")
+        manager.flushPendingTextIfNeeded()
+        XCTAssertEqual(callbacks.count, 2)
+        XCTAssertEqual(callbacks[1], "ABCDEFGH")
+    }
 }
