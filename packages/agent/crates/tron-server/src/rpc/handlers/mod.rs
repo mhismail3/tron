@@ -131,7 +131,7 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("memory.getHandoffs", memory::GetHandoffsHandler);
 
     // Logs
-    registry.register("logs.export", logs::ExportLogsHandler);
+    registry.register("logs.ingest", logs::IngestLogsHandler);
 }
 
 fn register_capabilities(registry: &mut MethodRegistry) {

@@ -97,6 +97,14 @@ enum DateParser {
         return f
     }()
 
+    // MARK: - ISO8601 Output (Millis)
+
+    /// Format a Date as ISO8601 with fractional seconds (millisecond precision).
+    /// Used for client log ingestion timestamps.
+    static func formatISO8601WithMillis(_ date: Date) -> String {
+        isoWithFractional.string(from: date)
+    }
+
     // MARK: - Parsing
 
     /// Parse an ISO8601 date string, trying fractional seconds first then standard.

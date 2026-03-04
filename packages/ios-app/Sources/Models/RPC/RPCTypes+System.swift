@@ -40,15 +40,21 @@ struct DeviceTokenUnregisterResult: Decodable {
 
 // MARK: - Logs Methods
 
-/// Parameters for logs.export
-struct LogsExportParams: Encodable {
-    let content: String
-    let filename: String?
+/// A single log entry for ingestion into the server database.
+struct ClientLogEntry: Encodable {
+    let timestamp: String   // ISO 8601 with millis ("2026-03-03T14:30:05.123Z")
+    let level: String       // "verbose", "debug", "info", "warning", "error"
+    let category: String    // "WebSocket", "RPC", etc.
+    let message: String
 }
 
-/// Result of logs.export
-struct LogsExportResult: Decodable {
+/// Parameters for logs.ingest
+struct LogsIngestParams: Encodable {
+    let entries: [ClientLogEntry]
+}
+
+/// Result of logs.ingest
+struct LogsIngestResult: Decodable {
     let success: Bool
-    let path: String
-    let bytesWritten: Int
+    let inserted: Int
 }

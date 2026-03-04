@@ -1,48 +1,143 @@
-//! Logs handler: export.
+//! Logs handler: ingest client logs into the database.
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::instrument;
+use tron_core::logging::LogLevel;
+use tron_events::PooledConnection;
 
 use crate::rpc::context::RpcContext;
 use crate::rpc::errors::RpcError;
-use crate::rpc::handlers::require_string_param;
 use crate::rpc::registry::MethodHandler;
 
-/// Resolve the client logs directory path.
-fn client_logs_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    std::path::PathBuf::from(home)
-        .join(".tron")
-        .join("artifacts")
-        .join("client-logs")
+/// A single log entry sent from the iOS client.
+#[derive(Debug, Deserialize)]
+struct ClientLogEntry {
+    timestamp: String,
+    level: String,
+    category: String,
+    message: String,
 }
 
-/// Export client logs to server filesystem.
-pub struct ExportLogsHandler;
+/// Map an iOS level string to `LogLevel`.
+/// iOS sends "verbose" which has no direct match in `from_str_lossy` (it would
+/// default to Info), so we handle it explicitly.
+fn map_ios_level(s: &str) -> LogLevel {
+    match s.to_lowercase().as_str() {
+        "verbose" => LogLevel::Trace,
+        other => LogLevel::from_str_lossy(other),
+    }
+}
+
+/// Insert client log entries into the `logs` table with deduplication.
+///
+/// Reads the high-water mark (`MAX(timestamp)`) for `origin = 'ios-client'`,
+/// filters out entries at or before the watermark, then batch-inserts the rest
+/// in a single transaction.
+///
+/// Returns the number of rows actually inserted.
+fn insert_client_logs(
+    conn: &PooledConnection,
+    entries: &[ClientLogEntry],
+) -> Result<usize, RpcError> {
+    let watermark: Option<String> = conn
+        .query_row(
+            "SELECT MAX(timestamp) FROM logs WHERE origin = 'ios-client'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| RpcError::Internal {
+            message: format!("Failed to query watermark: {e}"),
+        })?;
+
+    let new_entries: Vec<&ClientLogEntry> = match watermark.as_deref() {
+        Some(wm) => entries.iter().filter(|e| e.timestamp.as_str() > wm).collect(),
+        None => entries.iter().collect(),
+    };
+
+    if new_entries.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn.unchecked_transaction().map_err(|e| RpcError::Internal {
+        message: format!("Failed to begin transaction: {e}"),
+    })?;
+
+    {
+        let mut stmt = tx
+            .prepare_cached(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, origin) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'ios-client')",
+            )
+            .map_err(|e| RpcError::Internal {
+                message: format!("Failed to prepare statement: {e}"),
+            })?;
+
+        for entry in &new_entries {
+            let level = map_ios_level(&entry.level);
+            let component = format!("ios.{}", entry.category);
+            let level_str = level.to_string();
+            let level_num = level.as_num();
+
+            let _ = stmt
+                .execute([
+                    entry.timestamp.as_str(),
+                    level_str.as_str(),
+                    &level_num.to_string(),
+                    component.as_str(),
+                    entry.message.as_str(),
+                ])
+                .map_err(|e| RpcError::Internal {
+                    message: format!("Failed to insert log entry: {e}"),
+                })?;
+        }
+    }
+
+    tx.commit().map_err(|e| RpcError::Internal {
+        message: format!("Failed to commit transaction: {e}"),
+    })?;
+
+    Ok(new_entries.len())
+}
+
+/// Ingest structured client logs into the database.
+pub struct IngestLogsHandler;
 
 #[async_trait]
-impl MethodHandler for ExportLogsHandler {
-    #[instrument(skip(self, _ctx), fields(method = "logs.export"))]
-    async fn handle(&self, params: Option<Value>, _ctx: &RpcContext) -> Result<Value, RpcError> {
-        let content = require_string_param(params.as_ref(), "content")?;
+impl MethodHandler for IngestLogsHandler {
+    #[instrument(skip(self, ctx), fields(method = "logs.ingest"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let entries_val = params
+            .as_ref()
+            .and_then(|p| p.get("entries"))
+            .ok_or_else(|| RpcError::InvalidParams {
+                message: "Missing required parameter: entries".to_string(),
+            })?;
 
-        let logs_dir = client_logs_dir();
+        let entries: Vec<ClientLogEntry> =
+            serde_json::from_value(entries_val.clone()).map_err(|e| RpcError::InvalidParams {
+                message: format!("Invalid entries: {e}"),
+            })?;
 
-        let _ = std::fs::create_dir_all(&logs_dir);
+        if entries.len() > 10_000 {
+            return Err(RpcError::InvalidParams {
+                message: format!(
+                    "Too many entries: {} (max 10000)",
+                    entries.len()
+                ),
+            });
+        }
 
-        let filename = format!("client-log-{}.txt", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
-        let path = logs_dir.join(&filename);
-
-        let bytes_written = content.len();
-        std::fs::write(&path, &content).map_err(|e| RpcError::Internal {
-            message: format!("Failed to write log file: {e}"),
+        let conn = ctx.event_store.pool().get().map_err(|e| RpcError::Internal {
+            message: format!("Failed to get DB connection: {e}"),
         })?;
+
+        let inserted = insert_client_logs(&conn, &entries)?;
 
         Ok(serde_json::json!({
             "success": true,
-            "path": path.to_string_lossy(),
-            "bytesWritten": bytes_written,
+            "inserted": inserted,
         }))
     }
 }
@@ -53,47 +148,259 @@ mod tests {
     use crate::rpc::handlers::test_helpers::make_test_context;
     use serde_json::json;
 
-    #[test]
-    fn client_logs_dir_uses_artifacts_path() {
-        let dir = client_logs_dir();
-        let path = dir.to_string_lossy();
-        assert!(
-            path.ends_with(".tron/artifacts/client-logs"),
-            "expected path ending in .tron/artifacts/client-logs, got: {path}"
-        );
+    #[tokio::test]
+    async fn ingest_logs_inserts_entries() {
+        let ctx = make_test_context();
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "WebSocket", "message": "connected"},
+                {"timestamp": "2026-03-03T14:30:05.200Z", "level": "debug", "category": "RPC", "message": "sending ping"},
+                {"timestamp": "2026-03-03T14:30:05.300Z", "level": "error", "category": "Network", "message": "timeout"},
+            ]
+        });
+
+        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        assert_eq!(result["success"], true);
+        assert_eq!(result["inserted"], 3);
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 3);
+
+        let component: String = conn
+            .query_row(
+                "SELECT component FROM logs WHERE origin = 'ios-client' ORDER BY timestamp LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(component, "ios.WebSocket");
     }
 
     #[tokio::test]
-    async fn export_logs_writes_file_and_returns_success() {
+    async fn ingest_logs_empty_entries() {
         let ctx = make_test_context();
-        let result = ExportLogsHandler
-            .handle(Some(json!({"content": "test log data"})), &ctx)
+        let result = IngestLogsHandler
+            .handle(Some(json!({"entries": []})), &ctx)
             .await
             .unwrap();
-
         assert_eq!(result["success"], true);
-        assert_eq!(result["bytesWritten"], 13);
-
-        // Verify file was actually written
-        let path = result["path"].as_str().unwrap();
-        assert!(
-            path.contains("artifacts/client-logs/"),
-            "path should use artifacts/client-logs, got: {path}"
-        );
-        let content = std::fs::read_to_string(path).unwrap();
-        assert_eq!(content, "test log data");
-
-        // Clean up test artifact
-        let _ = std::fs::remove_file(path);
+        assert_eq!(result["inserted"], 0);
     }
 
     #[tokio::test]
-    async fn export_logs_missing_content() {
+    async fn ingest_logs_missing_entries_param() {
         let ctx = make_test_context();
-        let err = ExportLogsHandler
+        let err = IngestLogsHandler
             .handle(Some(json!({})), &ctx)
             .await
             .unwrap_err();
         assert_eq!(err.code(), "INVALID_PARAMS");
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_level_mapping() {
+        let ctx = make_test_context();
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.001Z", "level": "verbose", "category": "A", "message": "a"},
+                {"timestamp": "2026-03-03T14:30:05.002Z", "level": "debug", "category": "A", "message": "b"},
+                {"timestamp": "2026-03-03T14:30:05.003Z", "level": "info", "category": "A", "message": "c"},
+                {"timestamp": "2026-03-03T14:30:05.004Z", "level": "warning", "category": "A", "message": "d"},
+                {"timestamp": "2026-03-03T14:30:05.005Z", "level": "error", "category": "A", "message": "e"},
+            ]
+        });
+
+        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT level_num FROM logs WHERE origin = 'ios-client' ORDER BY timestamp")
+            .unwrap();
+        let levels: Vec<i32> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+
+        assert_eq!(levels, vec![10, 20, 30, 40, 50]);
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_component_prefix() {
+        let ctx = make_test_context();
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.000Z", "level": "info", "category": "WebSocket", "message": "test"},
+            ]
+        });
+
+        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let component: String = conn
+            .query_row(
+                "SELECT component FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(component, "ios.WebSocket");
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_too_many_entries() {
+        let ctx = make_test_context();
+        let entries: Vec<Value> = (0..10_001)
+            .map(|i| {
+                json!({"timestamp": format!("2026-03-03T14:30:{:02}.{:03}Z", i / 1000, i % 1000), "level": "info", "category": "A", "message": "x"})
+            })
+            .collect();
+        let err = IngestLogsHandler
+            .handle(Some(json!({"entries": entries})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INVALID_PARAMS");
+        assert!(err.to_string().contains("Too many entries"));
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_fts_searchable() {
+        let ctx = make_test_context();
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.000Z", "level": "info", "category": "Network", "message": "connection established successfully"},
+            ]
+        });
+
+        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM logs_fts WHERE logs_fts MATCH 'connection'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_dedup_skips_old_entries() {
+        let ctx = make_test_context();
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "first"},
+                {"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "A", "message": "second"},
+                {"timestamp": "2026-03-03T14:30:05.300Z", "level": "info", "category": "A", "message": "third"},
+            ]
+        });
+
+        let r1 = IngestLogsHandler
+            .handle(Some(params.clone()), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r1["inserted"], 3);
+
+        let r2 = IngestLogsHandler
+            .handle(Some(params), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r2["inserted"], 0);
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_dedup_inserts_only_new() {
+        let ctx = make_test_context();
+
+        let first_batch = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "a"},
+                {"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "A", "message": "b"},
+                {"timestamp": "2026-03-03T14:30:05.300Z", "level": "info", "category": "A", "message": "c"},
+            ]
+        });
+        IngestLogsHandler
+            .handle(Some(first_batch), &ctx)
+            .await
+            .unwrap();
+
+        let second_batch = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.100Z", "level": "info", "category": "A", "message": "a"},
+                {"timestamp": "2026-03-03T14:30:05.200Z", "level": "info", "category": "A", "message": "b"},
+                {"timestamp": "2026-03-03T14:30:05.300Z", "level": "info", "category": "A", "message": "c"},
+                {"timestamp": "2026-03-03T14:30:05.400Z", "level": "info", "category": "A", "message": "d"},
+                {"timestamp": "2026-03-03T14:30:05.500Z", "level": "info", "category": "A", "message": "e"},
+            ]
+        });
+        let r2 = IngestLogsHandler
+            .handle(Some(second_batch), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(r2["inserted"], 2);
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 5);
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_unknown_level_defaults_to_info() {
+        let ctx = make_test_context();
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.000Z", "level": "custom", "category": "A", "message": "x"},
+            ]
+        });
+
+        IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+
+        let conn = ctx.event_store.pool().get().unwrap();
+        let level_num: i32 = conn
+            .query_row(
+                "SELECT level_num FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(level_num, 30); // Info
+    }
+
+    #[tokio::test]
+    async fn ingest_logs_first_export_no_watermark() {
+        let ctx = make_test_context();
+
+        // Verify no ios-client logs exist yet
+        let conn = ctx.event_store.pool().get().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+
+        let params = json!({
+            "entries": [
+                {"timestamp": "2026-03-03T14:30:05.000Z", "level": "info", "category": "A", "message": "first ever"},
+            ]
+        });
+        let result = IngestLogsHandler.handle(Some(params), &ctx).await.unwrap();
+        assert_eq!(result["inserted"], 1);
     }
 }

@@ -351,17 +351,17 @@ final class MiscClient {
 
     // MARK: - Logs Methods
 
-    /// Export logs to server filesystem at $HOME/.tron/artifacts/client-logs/
-    func exportLogs(content: String, filename: String? = nil) async throws -> LogsExportResult {
+    /// Ingest structured client logs into the server database.
+    func ingestLogs(entries: [ClientLogEntry]) async throws -> LogsIngestResult {
         let ws = try transport.requireConnection()
 
-        let params = LogsExportParams(content: content, filename: filename)
-        let result: LogsExportResult = try await ws.send(
-            method: "logs.export",
+        let params = LogsIngestParams(entries: entries)
+        let result: LogsIngestResult = try await ws.send(
+            method: "logs.ingest",
             params: params
         )
 
-        logger.info("Logs exported to server: \(result.path) (\(result.bytesWritten) bytes)", category: .general)
+        logger.info("Ingested \(result.inserted) log entries into server database", category: .general)
         return result
     }
 }

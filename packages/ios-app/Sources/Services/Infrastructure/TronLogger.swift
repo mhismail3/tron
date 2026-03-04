@@ -269,21 +269,6 @@ final class TronLogger: @unchecked Sendable {
         bufferLock.unlock()
     }
 
-    func exportLogs() -> String {
-        bufferLock.lock()
-        defer { bufferLock.unlock() }
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-
-        // Merge all buffers and sort by timestamp
-        let allLogs = categoryBuffers.values.flatMap { $0 }.sorted { $0.0 < $1.0 }
-
-        return allLogs.map { entry in
-            let (date, category, level, message) = entry
-            return "[\(formatter.string(from: date))] \(level.prefix) [\(category.rawValue)] \(message)"
-        }.joined(separator: "\n")
-    }
 }
 
 // MARK: - Global Convenience

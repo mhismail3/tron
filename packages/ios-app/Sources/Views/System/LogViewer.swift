@@ -264,21 +264,21 @@ struct LogViewer: View {
             // Get ALL logs (not just filtered) for complete export
             let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
 
-            let logText = allLogs.map { entry in
-                let timestamp = DateParser.formatLogTimestamp(entry.0)
-                let category = entry.1.rawValue
-                let level = String(describing: entry.2).uppercased()
-                let message = entry.3
-                return "\(timestamp) [\(level)] [\(category)] \(message)"
-            }.joined(separator: "\n")
+            let entries = allLogs.map { entry in
+                ClientLogEntry(
+                    timestamp: DateParser.formatISO8601WithMillis(entry.0),
+                    level: String(describing: entry.2).lowercased(),
+                    category: entry.1.rawValue,
+                    message: entry.3
+                )
+            }
 
             do {
                 let rpcClient = dependencies.rpcClient
-
-                let result = try await rpcClient.misc.exportLogs(content: logText)
-                logger.info("Exported \(allLogs.count) log entries to server: \(result.path)", category: .general)
+                let result = try await rpcClient.misc.ingestLogs(entries: entries)
+                logger.info("Ingested \(result.inserted) of \(entries.count) log entries into server", category: .general)
             } catch {
-                logger.error("Failed to export logs to server: \(error.localizedDescription)", category: .general)
+                logger.error("Failed to ingest logs to server: \(error.localizedDescription)", category: .general)
                 exportResult = "Error: \(error.localizedDescription)"
             }
 
