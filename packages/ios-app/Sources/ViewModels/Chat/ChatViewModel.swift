@@ -333,8 +333,6 @@ final class ChatViewModel: ChatEventContext {
                 self.messages[index].content = .streaming(text)
                 // Increment version to trigger SwiftUI onChange reliably
                 self.messages[index].streamingVersion += 1
-                // Sync to MessageWindowManager
-                self.messageWindowManager.updateMessage(self.messages[index])
             }
         }
 

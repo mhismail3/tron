@@ -585,11 +585,14 @@ struct ChatView: View {
                         }
                     }
                 }
-                // Auto-scroll during streaming — no withAnimation to avoid overlapping
-                // .animating phases at 30fps that block user touch recognition
+                // Content arrival tracking during streaming — 30fps (cheap: just sets a bool flag)
                 .onChange(of: viewModel.messages.last?.streamingVersion) { _, _ in
                     guard initialLoadComplete else { return }
                     scrollCoordinator.contentDidArrive()
+                }
+                // Scroll-to tracking during streaming — ~10fps (expensive: triggers ScrollView layout pass)
+                .onChange(of: viewModel.streamingManager.scrollVersion) { _, _ in
+                    guard initialLoadComplete else { return }
                     if scrollCoordinator.shouldAutoScroll {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }

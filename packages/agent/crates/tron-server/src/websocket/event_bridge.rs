@@ -1,7 +1,9 @@
 //! Event bridge — converts `TronEvent`s from the Orchestrator broadcast into
 //! `RpcEvent`s and routes them through the `BroadcastManager`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::rpc::types::RpcEvent;
 use tokio::sync::broadcast;
@@ -12,6 +14,60 @@ use tron_tools::cdp::types::BrowserEvent;
 
 use super::broadcast::BroadcastManager;
 
+/// Buffers text deltas per session, flushing on timer or non-delta event.
+/// Reduces WebSocket message frequency from per-LLM-delta to per-16ms-frame.
+struct DeltaCoalescer {
+    /// Pending text per session_id
+    pending: HashMap<String, String>,
+    /// Timestamp of first delta in each pending batch
+    pending_timestamps: HashMap<String, String>,
+}
+
+impl DeltaCoalescer {
+    fn new() -> Self {
+        Self {
+            pending: HashMap::new(),
+            pending_timestamps: HashMap::new(),
+        }
+    }
+
+    fn push(&mut self, session_id: &str, content: &str, timestamp: &str) {
+        self.pending
+            .entry(session_id.to_string())
+            .or_default()
+            .push_str(content);
+        let _ = self
+            .pending_timestamps
+            .entry(session_id.to_string())
+            .or_insert_with(|| timestamp.to_string());
+    }
+
+    fn take(&mut self, session_id: &str) -> Option<(String, String)> {
+        let content = self.pending.remove(session_id)?;
+        let timestamp = self
+            .pending_timestamps
+            .remove(session_id)
+            .unwrap_or_default();
+        Some((content, timestamp))
+    }
+
+    fn take_all(&mut self) -> Vec<(String, String, String)> {
+        let keys: Vec<String> = self.pending.keys().cloned().collect();
+        let mut result = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(content) = self.pending.remove(&key) {
+                let timestamp = self.pending_timestamps.remove(&key).unwrap_or_default();
+                result.push((key, content, timestamp));
+            }
+        }
+        result
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+}
+
 /// Bridges orchestrator events and browser events to WebSocket clients.
 pub struct EventBridge {
     rx: broadcast::Receiver<TronEvent>,
@@ -19,6 +75,7 @@ pub struct EventBridge {
     broadcast: Arc<BroadcastManager>,
     cancel: CancellationToken,
     accumulators: Arc<TurnAccumulatorMap>,
+    coalescer: DeltaCoalescer,
 }
 
 impl EventBridge {
@@ -38,6 +95,7 @@ impl EventBridge {
             broadcast,
             cancel,
             accumulators,
+            coalescer: DeltaCoalescer::new(),
         }
     }
 
@@ -45,15 +103,17 @@ impl EventBridge {
     #[tracing::instrument(skip_all, name = "event_bridge")]
     pub async fn run(mut self) {
         if let Some(mut browser_rx) = self.browser_rx.take() {
-            // Dual-channel select: TronEvent + BrowserEvent + shutdown
+            // Dual-channel select: TronEvent + BrowserEvent + timer + shutdown
             loop {
                 tokio::select! {
                     () = self.cancel.cancelled() => {
+                        self.flush_all_pending().await;
                         tracing::info!("event bridge: shutdown signal received");
                         break;
                     }
                     result = self.rx.recv() => {
                         if !self.handle_tron_recv(result).await {
+                            self.flush_all_pending().await;
                             break;
                         }
                     }
@@ -71,6 +131,9 @@ impl EventBridge {
                             }
                         }
                     }
+                    () = tokio::time::sleep(Duration::from_millis(16)), if self.coalescer.has_pending() => {
+                        self.flush_all_pending().await;
+                    }
                 }
             }
         } else {
@@ -82,13 +145,18 @@ impl EventBridge {
         loop {
             tokio::select! {
                 () = self.cancel.cancelled() => {
+                    self.flush_all_pending().await;
                     tracing::info!("event bridge: shutdown signal received");
                     break;
                 }
                 result = self.rx.recv() => {
                     if !self.handle_tron_recv(result).await {
+                        self.flush_all_pending().await;
                         break;
                     }
+                }
+                () = tokio::time::sleep(Duration::from_millis(16)), if self.coalescer.has_pending() => {
+                    self.flush_all_pending().await;
                 }
             }
         }
@@ -107,6 +175,8 @@ impl EventBridge {
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 tracing::warn!(lagged = n, "event bridge lagged");
                 metrics::counter!("broadcast_lagged_events_total", "source" => "event_bridge").increment(n);
+                // Flush all pending deltas — we may have missed events that should trigger a flush
+                self.flush_all_pending().await;
                 true
             }
             Err(broadcast::error::RecvError::Closed) => {
@@ -116,8 +186,28 @@ impl EventBridge {
         }
     }
 
-    async fn bridge_tron_event(&self, event: &TronEvent) {
+    async fn bridge_tron_event(&mut self, event: &TronEvent) {
         self.accumulators.update_from_event(event);
+
+        // Intercept MessageUpdate: buffer instead of broadcasting immediately
+        if let TronEvent::MessageUpdate {
+            content,
+            base,
+            ..
+        } = event
+        {
+            let session_id = event.session_id();
+            self.coalescer
+                .push(session_id, content, &base.timestamp);
+            return;
+        }
+
+        // For any non-delta event, flush pending delta for its session first
+        // to preserve causal ordering
+        let session_id = event.session_id();
+        if !session_id.is_empty() {
+            self.flush_session_pending(session_id).await;
+        }
 
         let event_type = event.event_type();
         tracing::debug!(event_type, "bridging event to client");
@@ -141,12 +231,43 @@ impl EventBridge {
                 | TronEvent::Error { .. }
         );
 
-        let session_id = event.session_id();
         if is_global || session_id.is_empty() {
             self.broadcast.broadcast_all(&rpc_event).await;
         } else {
             self.broadcast
                 .broadcast_to_session(session_id, &rpc_event)
+                .await;
+        }
+    }
+
+    /// Flush pending coalesced deltas for a single session.
+    async fn flush_session_pending(&mut self, session_id: &str) {
+        if let Some((content, timestamp)) = self.coalescer.take(session_id) {
+            let rpc_event = RpcEvent {
+                event_type: "agent.text_delta".to_string(),
+                session_id: Some(session_id.to_string()),
+                timestamp,
+                data: Some(serde_json::json!({ "delta": content })),
+                run_id: None,
+            };
+            self.broadcast
+                .broadcast_to_session(session_id, &rpc_event)
+                .await;
+        }
+    }
+
+    /// Flush all pending coalesced deltas across all sessions.
+    async fn flush_all_pending(&mut self) {
+        for (session_id, content, timestamp) in self.coalescer.take_all() {
+            let rpc_event = RpcEvent {
+                event_type: "agent.text_delta".to_string(),
+                session_id: Some(session_id.clone()),
+                timestamp,
+                data: Some(serde_json::json!({ "delta": content })),
+                run_id: None,
+            };
+            self.broadcast
+                .broadcast_to_session(&session_id, &rpc_event)
                 .await;
         }
     }
@@ -2392,5 +2513,59 @@ mod tests {
         assert_eq!(data["finalCommit"], "cafebabe");
         assert_eq!(data["branchPreserved"], true);
         assert_eq!(data["deleted"], true);
+    }
+
+    // -- DeltaCoalescer unit tests --
+
+    #[test]
+    fn coalescer_combines_deltas() {
+        let mut c = DeltaCoalescer::new();
+        c.push("s1", "Hello", "t1");
+        c.push("s1", " World", "t1");
+        c.push("s1", "!", "t1");
+        let result = c.take("s1");
+        assert_eq!(result, Some(("Hello World!".into(), "t1".into())));
+    }
+
+    #[test]
+    fn coalescer_per_session_isolation() {
+        let mut c = DeltaCoalescer::new();
+        c.push("s1", "A", "t1");
+        c.push("s2", "B", "t2");
+        let all = c.take_all();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn coalescer_take_clears_session() {
+        let mut c = DeltaCoalescer::new();
+        c.push("s1", "text", "t1");
+        assert!(c.take("s1").is_some());
+        assert!(c.take("s1").is_none());
+    }
+
+    #[test]
+    fn coalescer_has_pending() {
+        let mut c = DeltaCoalescer::new();
+        assert!(!c.has_pending());
+        c.push("s1", "x", "t1");
+        assert!(c.has_pending());
+        c.take_all();
+        assert!(!c.has_pending());
+    }
+
+    #[test]
+    fn coalescer_empty_take() {
+        let mut c = DeltaCoalescer::new();
+        assert!(c.take("nonexistent").is_none());
+    }
+
+    #[test]
+    fn coalescer_preserves_first_timestamp() {
+        let mut c = DeltaCoalescer::new();
+        c.push("s1", "first", "2026-01-01T00:00:00Z");
+        c.push("s1", " second", "2026-01-01T00:00:01Z");
+        let (_, ts) = c.take("s1").unwrap();
+        assert_eq!(ts, "2026-01-01T00:00:00Z");
     }
 }

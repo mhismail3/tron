@@ -1376,21 +1376,24 @@ async fn e2e_event_ordering_preserved() {
             });
     }
 
-    // Collect events and verify order
-    let mut received = Vec::new();
+    // Collect text_delta events — coalescing may merge multiple deltas
+    // into fewer WebSocket messages, so collect until we have all content
+    let expected: String = (0..20).map(|i| format!("msg_{i}")).collect();
+    let mut combined = String::new();
     for _ in 0..20 {
+        if combined.len() >= expected.len() {
+            break;
+        }
         if let Some(evt) = try_read_json(&mut ws, Duration::from_secs(3)).await {
             if evt.get("type").and_then(|v| v.as_str()) == Some("agent.text_delta") {
                 if let Some(data) = evt.get("data") {
-                    received.push(data["delta"].as_str().unwrap_or("").to_string());
+                    combined.push_str(data["delta"].as_str().unwrap_or(""));
                 }
             }
         }
     }
 
-    for (i, msg) in received.iter().enumerate() {
-        assert_eq!(msg, &format!("msg_{i}"), "event {i} out of order");
-    }
+    assert_eq!(combined, expected, "coalesced deltas should preserve content order");
 
     server.shutdown().shutdown();
 }

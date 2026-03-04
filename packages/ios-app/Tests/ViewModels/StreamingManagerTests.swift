@@ -298,4 +298,82 @@ final class StreamingManagerTests: XCTestCase {
 
         XCTAssertTrue(updateReceived, "flushPendingText should trigger immediate update")
     }
+
+    // MARK: - Scroll Version Throttling
+
+    func testScrollVersionIncrementsEveryThirdFlush() {
+        let manager = StreamingManager()
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in }
+
+        // Send 9 deltas, flush each one manually via flushPendingTextIfNeeded
+        for i in 0..<9 {
+            manager.handleTextDelta("x\(i)")
+            manager.flushPendingTextIfNeeded()
+        }
+
+        XCTAssertEqual(manager.scrollVersion, 3, "scrollVersion should increment every 3rd flush")
+    }
+
+    func testScrollVersionAlwaysIncrementsOnManualFlush() {
+        let manager = StreamingManager()
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in }
+
+        manager.handleTextDelta("a")
+        manager.flushPendingText()
+
+        XCTAssertEqual(manager.scrollVersion, 1, "Manual flush should always increment scrollVersion")
+    }
+
+    func testScrollVersionResetsOnReset() {
+        let manager = StreamingManager()
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in }
+
+        manager.handleTextDelta("text")
+        manager.flushPendingText()
+        XCTAssertGreaterThan(manager.scrollVersion, 0)
+
+        manager.reset()
+        XCTAssertEqual(manager.scrollVersion, 0)
+    }
+
+    func testScrollVersionResetsOnCancel() {
+        let manager = StreamingManager()
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in }
+
+        manager.handleTextDelta("text")
+        manager.flushPendingText()
+        XCTAssertGreaterThan(manager.scrollVersion, 0)
+
+        manager.cancelStreaming()
+        XCTAssertEqual(manager.scrollVersion, 0)
+    }
+
+    func testScrollVersionIncrementsOnFinalize() {
+        let manager = StreamingManager()
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onTextUpdate = { _, _ in }
+        manager.onFinalizeMessage = { _, _ in }
+
+        manager.handleTextDelta("text")
+        let before = manager.scrollVersion
+
+        _ = manager.finalizeStreamingMessage()
+
+        XCTAssertGreaterThan(manager.scrollVersion, before, "Finalize should increment scrollVersion")
+    }
+
+    func testScrollVersionIncrementsOnCatchUp() {
+        let manager = StreamingManager()
+        manager.onTextUpdate = { _, _ in }
+
+        let before = manager.scrollVersion
+
+        manager.catchUpToInProgress(existingText: "existing", messageId: UUID())
+
+        XCTAssertGreaterThan(manager.scrollVersion, before, "Catch-up should increment scrollVersion")
+    }
 }

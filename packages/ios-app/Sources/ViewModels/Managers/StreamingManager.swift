@@ -35,6 +35,18 @@ final class StreamingManager {
         streamingMessageId != nil
     }
 
+    // MARK: - Scroll Throttling
+
+    /// Version counter for scroll tracking (increments every Nth flush for throttled scrolling)
+    private(set) var scrollVersion: Int = 0
+
+    /// Flush counter to derive scrollVersion (not observed by SwiftUI)
+    @ObservationIgnored
+    private var flushesSinceLastScroll: Int = 0
+
+    /// Number of content flushes between scroll updates (~10fps at 30fps flush rate)
+    static let flushesPerScrollUpdate: Int = 3
+
     // MARK: - Display Link Timer
 
     /// Display link wrapper that manages its own lifecycle
@@ -113,7 +125,7 @@ final class StreamingManager {
         flushPendingTextIfNeeded()
     }
 
-    private func flushPendingTextIfNeeded() {
+    func flushPendingTextIfNeeded() {
         guard !pendingTextDelta.isEmpty,
               let messageId = streamingMessageId else {
             // Nothing to flush - pause the display link to save battery
@@ -125,6 +137,12 @@ final class StreamingManager {
 
         onTextUpdate?(messageId, streamingText)
         pendingTextDelta = ""
+
+        flushesSinceLastScroll += 1
+        if flushesSinceLastScroll >= Self.flushesPerScrollUpdate {
+            flushesSinceLastScroll = 0
+            scrollVersion += 1
+        }
     }
 
     // MARK: - Text Delta Handling
@@ -175,6 +193,9 @@ final class StreamingManager {
 
         onTextUpdate?(messageId, streamingText)
         pendingTextDelta = ""
+
+        flushesSinceLastScroll = 0
+        scrollVersion += 1
     }
 
     /// Finalize the current streaming message
@@ -208,6 +229,8 @@ final class StreamingManager {
         streamingMessageId = nil
         streamingText = ""
         pendingTextDelta = ""
+        scrollVersion = 0
+        flushesSinceLastScroll = 0
     }
 
     // MARK: - State Queries
@@ -238,6 +261,7 @@ final class StreamingManager {
 
         // Notify UI of current state
         onTextUpdate?(messageId, streamingText)
+        scrollVersion += 1
     }
 
     // MARK: - Reset
@@ -249,6 +273,8 @@ final class StreamingManager {
         streamingMessageId = nil
         streamingText = ""
         pendingTextDelta = ""
+        scrollVersion = 0
+        flushesSinceLastScroll = 0
     }
 }
 
