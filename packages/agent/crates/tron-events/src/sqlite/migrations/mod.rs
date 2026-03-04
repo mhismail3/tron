@@ -41,6 +41,11 @@ const MIGRATIONS: &[Migration] = &[
         description: "Purge ONNX Runtime log spam (ort::logging rows)",
         sql: include_str!("v004_purge_ort_logs.sql"),
     },
+    Migration {
+        version: 5,
+        description: "Deduplicate iOS client logs and add partial unique index",
+        sql: include_str!("v005_dedup_client_logs.sql"),
+    },
 ];
 
 /// Result of running migrations.
@@ -192,8 +197,8 @@ mod tests {
     fn run_migrations_creates_all_tables() {
         let conn = open_memory();
         let result = run_migrations(&conn).unwrap();
-        assert_eq!(result.applied, 4);
-        assert_eq!(result.max_version_applied, 4);
+        assert_eq!(result.applied, 5);
+        assert_eq!(result.max_version_applied, 5);
 
         // Verify core tables exist
         let tables: Vec<String> = conn
@@ -252,7 +257,7 @@ mod tests {
     fn run_migrations_is_idempotent() {
         let conn = open_memory();
         let first = run_migrations(&conn).unwrap();
-        assert_eq!(first.applied, 4);
+        assert_eq!(first.applied, 5);
 
         let second = run_migrations(&conn).unwrap();
         assert_eq!(second.applied, 0);
@@ -270,12 +275,12 @@ mod tests {
     fn current_version_after_migration() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), 4);
+        assert_eq!(current_version(&conn).unwrap(), 5);
     }
 
     #[test]
     fn latest_version_matches_migrations() {
-        assert_eq!(latest_version(), 4);
+        assert_eq!(latest_version(), 5);
     }
 
     #[test]
@@ -328,6 +333,7 @@ mod tests {
             "idx_sessions_origin",
             "idx_sessions_source",
             "idx_logs_origin",
+            "idx_logs_ios_client_dedup",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
@@ -798,7 +804,7 @@ mod tests {
 
         // Running full migrations (which includes v002) on a fresh DB is fine.
         // Verify no panic and version is correct.
-        assert_eq!(current_version(&conn).unwrap(), 4);
+        assert_eq!(current_version(&conn).unwrap(), 5);
 
         // Running again skips all migrations.
         let result = run_migrations(&conn).unwrap();
@@ -947,5 +953,94 @@ mod tests {
             )
             .unwrap();
         assert_eq!(read_at, "2026-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn v005_removes_duplicate_client_logs() {
+        let conn = open_memory();
+        ensure_version_table(&conn).unwrap();
+        // Apply v001 through v004
+        for m in &MIGRATIONS[..4] {
+            apply_migration(&conn, m).unwrap();
+        }
+
+        // Insert duplicate ios-client logs
+        for _ in 0..3 {
+            conn.execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
+                 VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, 3);
+
+        // Apply v005
+        apply_migration(&conn, &MIGRATIONS[4]).unwrap();
+
+        let after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, 1);
+    }
+
+    #[test]
+    fn v005_unique_index_prevents_duplicate_inserts() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
+             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+            [],
+        )
+        .unwrap();
+
+        // Exact duplicate should fail
+        let dup = conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
+             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+            [],
+        );
+        assert!(dup.is_err());
+
+        // INSERT OR IGNORE should succeed silently
+        conn.execute(
+            "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin)
+             VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'ios.WebSocket', 'connected', 'ios-client')",
+            [],
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs WHERE origin = 'ios-client'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn v005_unique_index_does_not_affect_server_logs() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        // Server logs with same timestamp+component+message should be fine
+        for origin in &["localhost:9847", "localhost:9846"] {
+            conn.execute(
+                "INSERT INTO logs (timestamp, level, level_num, component, message, origin)
+                 VALUES ('2026-03-03T14:30:05.100Z', 'info', 30, 'EventStore', 'test', ?1)",
+                [origin],
+            )
+            .unwrap();
+        }
+
+        // Two server logs with identical content but different origins
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM logs WHERE origin != 'ios-client'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 }

@@ -64,23 +64,24 @@ fn insert_client_logs(
         message: format!("Failed to begin transaction: {e}"),
     })?;
 
-    {
+    let inserted = {
         let mut stmt = tx
             .prepare_cached(
-                "INSERT INTO logs (timestamp, level, level_num, component, message, origin) \
+                "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin) \
                  VALUES (?1, ?2, ?3, ?4, ?5, 'ios-client')",
             )
             .map_err(|e| RpcError::Internal {
                 message: format!("Failed to prepare statement: {e}"),
             })?;
 
+        let mut count = 0usize;
         for entry in &new_entries {
             let level = map_ios_level(&entry.level);
             let component = format!("ios.{}", entry.category);
             let level_str = level.to_string();
             let level_num = level.as_num();
 
-            let _ = stmt
+            count += stmt
                 .execute([
                     entry.timestamp.as_str(),
                     level_str.as_str(),
@@ -92,13 +93,14 @@ fn insert_client_logs(
                     message: format!("Failed to insert log entry: {e}"),
                 })?;
         }
-    }
+        count
+    };
 
     tx.commit().map_err(|e| RpcError::Internal {
         message: format!("Failed to commit transaction: {e}"),
     })?;
 
-    Ok(new_entries.len())
+    Ok(inserted)
 }
 
 /// Ingest structured client logs into the database.
