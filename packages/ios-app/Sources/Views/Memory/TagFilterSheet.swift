@@ -67,7 +67,7 @@ struct TagFilterSheet: View {
             }
         }
         .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .tint(.purple)
     }
 }
