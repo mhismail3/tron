@@ -75,6 +75,9 @@ pub const GEMINI_2_5_PRO: &str = "gemini-2.5-pro";
 /// Gemini 2.5 Flash.
 pub const GEMINI_2_5_FLASH: &str = "gemini-2.5-flash";
 
+/// Gemini 3.1 Flash Lite (preview) — cost-optimized for high-volume agentic tasks.
+pub const GEMINI_3_1_FLASH_LITE_PREVIEW: &str = "gemini-3.1-flash-lite-preview";
+
 /// Gemini 2.5 Flash Lite.
 pub const GEMINI_2_5_FLASH_LITE: &str = "gemini-2.5-flash-lite";
 
@@ -151,6 +154,7 @@ pub const ALL_OPENAI_MODEL_IDS: &[&str] = &[
 /// All Google model IDs.
 pub const ALL_GOOGLE_MODEL_IDS: &[&str] = &[
     GEMINI_3_1_PRO_PREVIEW,
+    GEMINI_3_1_FLASH_LITE_PREVIEW,
     GEMINI_3_PRO_PREVIEW,
     GEMINI_3_FLASH_PREVIEW,
     GEMINI_2_5_PRO,

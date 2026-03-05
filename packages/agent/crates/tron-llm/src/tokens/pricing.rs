@@ -225,6 +225,9 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         // Google — Gemini Pro
         "gemini-3-pro-preview" | "gemini-2-5-pro" | "gemini-2.5-pro" => google_tier(1.25, 5.0),
 
+        // Google — Gemini 3.1 Flash Lite
+        "gemini-3.1-flash-lite-preview" => google_tier(0.25, 1.50),
+
         // Google — Gemini Flash
         "gemini-3-flash-preview" | "gemini-2-5-flash" | "gemini-2.5-flash" => {
             google_tier(0.075, 0.3)

@@ -509,6 +509,23 @@ pub static GEMINI_MODELS: LazyLock<HashMap<&'static str, GeminiModelInfo>> = Laz
         },
     );
     m.insert(
+        "gemini-3.1-flash-lite-preview",
+        GeminiModelInfo {
+            name: "Gemini 3.1 Flash Lite (Preview)",
+            short_name: "Gemini 3.1 Flash Lite",
+            context_window: 1_048_576,
+            max_output: 65_536,
+            supports_tools: true,
+            supports_images: true,
+            supports_thinking: false,
+            tier: "flash-lite",
+            preview: true,
+            default_thinking_level: None,
+            input_cost_per_million: 0.25,
+            output_cost_per_million: 1.50,
+        },
+    );
+    m.insert(
         "gemini-3-flash-preview",
         GeminiModelInfo {
             name: "Gemini 3 Flash (Preview)",
@@ -954,6 +971,20 @@ mod tests {
     }
 
     #[test]
+    fn model_gemini_3_1_flash_lite() {
+        let model = get_gemini_model("gemini-3.1-flash-lite-preview").unwrap();
+        assert_eq!(model.short_name, "Gemini 3.1 Flash Lite");
+        assert_eq!(model.context_window, 1_048_576);
+        assert_eq!(model.max_output, 65_536);
+        assert!(!model.supports_thinking);
+        assert_eq!(model.tier, "flash-lite");
+        assert!(model.preview);
+        assert!(model.default_thinking_level.is_none());
+        assert!((model.input_cost_per_million - 0.25).abs() < f64::EPSILON);
+        assert!((model.output_cost_per_million - 1.50).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn model_unknown_returns_none() {
         assert!(get_gemini_model("gpt-4").is_none());
     }
@@ -965,7 +996,8 @@ mod tests {
         assert!(ids.contains(&"gemini-3-pro-preview"));
         assert!(ids.contains(&"gemini-2.5-pro"));
         assert!(ids.contains(&"gemini-2.5-flash-lite"));
-        assert_eq!(ids.len(), 6);
+        assert!(ids.contains(&"gemini-3.1-flash-lite-preview"));
+        assert_eq!(ids.len(), 7);
     }
 
     #[test]

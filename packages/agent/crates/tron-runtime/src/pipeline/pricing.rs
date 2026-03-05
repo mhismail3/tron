@@ -105,6 +105,14 @@ const GEMINI_FLASH: PricingTier = PricingTier {
     cache_read_multiplier: 0.25,
 };
 
+const GEMINI_FLASH_LITE: PricingTier = PricingTier {
+    input_per_million: 0.25,
+    output_per_million: 1.50,
+    cache_write_5m_multiplier: 1.0,
+    cache_write_1h_multiplier: 1.0,
+    cache_read_multiplier: 0.25,
+};
+
 // ─── `MiniMax` ─────────────────────────────────────────────────────────────────
 
 const MINIMAX: PricingTier = PricingTier {
@@ -123,7 +131,8 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
     use tron_llm::models::model_ids::{
         CLAUDE_3_7_SONNET, CLAUDE_3_HAIKU, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4, CLAUDE_OPUS_4_1,
         CLAUDE_OPUS_4_5, CLAUDE_OPUS_4_6, CLAUDE_SONNET_4, CLAUDE_SONNET_4_5, GEMINI_2_5_FLASH,
-        GEMINI_2_5_PRO, GEMINI_3_FLASH_PREVIEW, GEMINI_3_PRO_PREVIEW, MINIMAX_M2,
+        GEMINI_2_5_PRO, GEMINI_3_1_FLASH_LITE_PREVIEW, GEMINI_3_FLASH_PREVIEW,
+        GEMINI_3_PRO_PREVIEW, MINIMAX_M2,
         MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
     };
 
@@ -139,6 +148,7 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
         CLAUDE_3_7_SONNET => return Some(&SONNET_3_7),
         CLAUDE_3_HAIKU => return Some(&HAIKU_3),
         GEMINI_3_PRO_PREVIEW | GEMINI_2_5_PRO => return Some(&GEMINI_PRO),
+        GEMINI_3_1_FLASH_LITE_PREVIEW => return Some(&GEMINI_FLASH_LITE),
         GEMINI_3_FLASH_PREVIEW | GEMINI_2_5_FLASH => return Some(&GEMINI_FLASH),
         MINIMAX_M2_5 | MINIMAX_M2_5_HIGHSPEED | MINIMAX_M2_1 | MINIMAX_M2_1_HIGHSPEED
         | MINIMAX_M2 => return Some(&MINIMAX),
@@ -174,6 +184,9 @@ fn get_pricing_tier(model: &str) -> Option<&'static PricingTier> {
     }
     if lower.contains("gemini-2.5-pro") || lower.contains("gemini-3-pro") {
         return Some(&GEMINI_PRO);
+    }
+    if lower.contains("flash-lite") {
+        return Some(&GEMINI_FLASH_LITE);
     }
     if lower.contains("gemini") {
         return Some(&GEMINI_FLASH);

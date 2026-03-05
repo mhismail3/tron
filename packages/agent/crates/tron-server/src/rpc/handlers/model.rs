@@ -379,6 +379,24 @@ fn known_models() -> Vec<Value> {
             "sortOrder": 2,
         }),
         serde_json::json!({
+            "id": "gemini-3.1-flash-lite-preview",
+            "name": "Gemini 3.1 Flash Lite",
+            "provider": "google",
+            "contextWindow": 1_048_576,
+            "maxOutput": 65_536,
+            "supportsThinking": false,
+            "supportsImages": true,
+            "inputCostPerMillion": 0.25,
+            "outputCostPerMillion": 1.50,
+            "tier": "flash-lite",
+            "family": "Gemini 3",
+            "description": "Gemini 3.1 Flash Lite (Preview) — cost-optimized for high-volume agentic tasks.",
+            "isPreview": true,
+            "recommended": false,
+            "isLegacy": false,
+            "sortOrder": 3,
+        }),
+        serde_json::json!({
             "id": "gemini-2.5-pro",
             "name": "Gemini 2.5 Pro",
             "provider": "google",
@@ -395,7 +413,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["low", "medium", "high"],
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 3,
+            "sortOrder": 4,
         }),
         serde_json::json!({
             "id": "gemini-2.5-flash",
@@ -414,7 +432,7 @@ fn known_models() -> Vec<Value> {
             "supportedThinkingLevels": ["minimal", "low", "medium", "high"],
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 4,
+            "sortOrder": 5,
         }),
         serde_json::json!({
             "id": "gemini-2.5-flash-lite",
@@ -431,7 +449,7 @@ fn known_models() -> Vec<Value> {
             "description": "Gemini 2.5 Flash Lite — flash-lite tier",
             "recommended": false,
             "isLegacy": false,
-            "sortOrder": 5,
+            "sortOrder": 6,
         }),
         // ── MiniMax Models ──
         serde_json::json!({
@@ -723,9 +741,14 @@ mod tests {
         assert!(models.iter().any(|m| m["id"] == "gemini-3-flash-preview"));
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-pro"));
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-flash"));
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "gemini-3.1-flash-lite-preview")
+        );
         assert!(models.iter().any(|m| m["id"] == "gemini-2.5-flash-lite"));
         let google_count = models.iter().filter(|m| m["provider"] == "google").count();
-        assert_eq!(google_count, 6);
+        assert_eq!(google_count, 7);
     }
 
     #[tokio::test]
