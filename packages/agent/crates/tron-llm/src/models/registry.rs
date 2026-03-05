@@ -197,6 +197,18 @@ mod tests {
     }
 
     #[test]
+    fn detect_registry_lookup_openai_gpt_54() {
+        assert_eq!(
+            detect_provider_from_model(GPT_5_4),
+            Some(ProviderType::OpenAi)
+        );
+        assert_eq!(
+            detect_provider_from_model(GPT_5_4_PRO),
+            Some(ProviderType::OpenAi)
+        );
+    }
+
+    #[test]
     fn detect_registry_lookup_openai_spark() {
         assert_eq!(
             detect_provider_from_model("gpt-5.3-codex-spark"),

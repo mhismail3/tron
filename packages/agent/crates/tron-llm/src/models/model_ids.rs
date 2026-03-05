@@ -41,7 +41,13 @@ pub const CLAUDE_3_HAIKU: &str = "claude-3-haiku-20240307";
 // OpenAI / GPT (Codex)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// GPT 5.3 Codex — latest `OpenAI` flagship.
+/// GPT 5.4 — latest `OpenAI` flagship with 1M context and tool search.
+pub const GPT_5_4: &str = "gpt-5.4";
+
+/// GPT 5.4 Pro — highest capability tier with 1M context and tool search.
+pub const GPT_5_4_PRO: &str = "gpt-5.4-pro";
+
+/// GPT 5.3 Codex — `OpenAI` flagship.
 pub const GPT_5_3_CODEX: &str = "gpt-5.3-codex";
 
 /// GPT 5.3 Codex Spark — fast distilled model (research preview).
@@ -144,6 +150,8 @@ pub const ALL_ANTHROPIC_MODEL_IDS: &[&str] = &[
 
 /// All `OpenAI` model IDs.
 pub const ALL_OPENAI_MODEL_IDS: &[&str] = &[
+    GPT_5_4,
+    GPT_5_4_PRO,
     GPT_5_3_CODEX,
     GPT_5_3_CODEX_SPARK,
     GPT_5_2_CODEX,
@@ -182,6 +190,12 @@ mod tests {
     fn openai_ids_not_empty() {
         assert!(!ALL_OPENAI_MODEL_IDS.is_empty());
         assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_3_CODEX));
+    }
+
+    #[test]
+    fn openai_ids_contains_gpt_54() {
+        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_4));
+        assert!(ALL_OPENAI_MODEL_IDS.contains(&GPT_5_4_PRO));
     }
 
     #[test]

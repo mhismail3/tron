@@ -211,6 +211,48 @@ fn known_models() -> Vec<Value> {
         }),
         // ── OpenAI Codex Models ──
         serde_json::json!({
+            "id": "gpt-5.4",
+            "name": "GPT-5.4",
+            "provider": "openai-codex",
+            "contextWindow": 1_000_000,
+            "maxOutput": 128_000,
+            "supportsThinking": false,
+            "supportsImages": true,
+            "inputCostPerMillion": 2.0,
+            "outputCostPerMillion": 16.0,
+            "cacheReadCostPerMillion": 0.2,
+            "tier": "flagship",
+            "family": "GPT-5.4",
+            "description": "Latest OpenAI flagship — 1M context, tool search, computer use, and expanded reasoning.",
+            "supportsReasoning": true,
+            "reasoningLevels": ["none", "low", "medium", "high", "xhigh"],
+            "defaultReasoningLevel": "medium",
+            "recommended": true,
+            "isLegacy": false,
+            "sortOrder": 0,
+        }),
+        serde_json::json!({
+            "id": "gpt-5.4-pro",
+            "name": "GPT-5.4 Pro",
+            "provider": "openai-codex",
+            "contextWindow": 1_000_000,
+            "maxOutput": 128_000,
+            "supportsThinking": false,
+            "supportsImages": true,
+            "inputCostPerMillion": 4.0,
+            "outputCostPerMillion": 32.0,
+            "cacheReadCostPerMillion": 0.4,
+            "tier": "flagship",
+            "family": "GPT-5.4",
+            "description": "Highest capability tier — 1M context, tool search, computer use, and maximum reasoning.",
+            "supportsReasoning": true,
+            "reasoningLevels": ["none", "low", "medium", "high", "xhigh"],
+            "defaultReasoningLevel": "high",
+            "recommended": false,
+            "isLegacy": false,
+            "sortOrder": 1,
+        }),
+        serde_json::json!({
             "id": "gpt-5.3-codex",
             "name": "GPT-5.3 Codex",
             "provider": "openai-codex",
@@ -223,13 +265,13 @@ fn known_models() -> Vec<Value> {
             "cacheReadCostPerMillion": 0.175,
             "tier": "flagship",
             "family": "GPT-5.3",
-            "description": "Most capable agentic coding model — 400K context, reasoning, vision, and structured outputs.",
+            "description": "Agentic coding model — 400K context, reasoning, vision, and structured outputs.",
             "supportsReasoning": true,
             "reasoningLevels": ["low", "medium", "high", "xhigh"],
             "defaultReasoningLevel": "medium",
             "knowledgeCutoff": "2025-08-31",
-            "recommended": true,
-            "isLegacy": false,
+            "recommended": false,
+            "isLegacy": true,
             "sortOrder": 0,
         }),
         serde_json::json!({
@@ -250,7 +292,7 @@ fn known_models() -> Vec<Value> {
             "reasoningLevels": ["low", "medium", "high"],
             "defaultReasoningLevel": "low",
             "recommended": false,
-            "isLegacy": false,
+            "isLegacy": true,
             "sortOrder": 1,
         }),
         serde_json::json!({
@@ -715,6 +757,8 @@ mod tests {
         let ctx = make_test_context();
         let result = ListModelsHandler.handle(None, &ctx).await.unwrap();
         let models = result["models"].as_array().unwrap();
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.4"));
+        assert!(models.iter().any(|m| m["id"] == "gpt-5.4-pro"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.3-codex-spark"));
         assert!(models.iter().any(|m| m["id"] == "gpt-5.2-codex"));
@@ -724,7 +768,7 @@ mod tests {
             .iter()
             .filter(|m| m["provider"] == "openai-codex")
             .count();
-        assert_eq!(openai_count, 5);
+        assert_eq!(openai_count, 7);
     }
 
     #[tokio::test]

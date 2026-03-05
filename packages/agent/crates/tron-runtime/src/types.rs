@@ -46,13 +46,16 @@ impl ReasoningLevel {
     }
 
     /// Convert to `OpenAI` `reasoning_effort` string.
-    /// `OpenAI` supports: "low", "medium", "high" only.
-    /// XHigh/Max clamp to "high".
+    /// GPT 5.4 supports: "none", "low", "medium", "high", "xhigh".
+    /// Older models may not support all levels — clamping happens in the provider.
     pub fn as_openai_reasoning_effort(&self) -> &str {
         match self {
-            Self::None | Self::Low => "low",
+            Self::None => "none",
+            Self::Low => "low",
             Self::Medium => "medium",
-            Self::High | Self::XHigh | Self::Max => "high",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "xhigh",
         }
     }
 
@@ -83,12 +86,16 @@ impl ReasoningLevel {
 
     /// Convert to `OpenAI` [`ReasoningEffort`].
     ///
-    /// `OpenAI` supports low/medium/high only — XHigh/Max clamp to High.
+    /// Full pass-through for GPT 5.4 levels. Provider-side clamping
+    /// handles older models that don't support all levels.
     pub fn as_openai_reasoning(&self) -> ReasoningEffort {
         match self {
-            Self::None | Self::Low => ReasoningEffort::Low,
+            Self::None => ReasoningEffort::None,
+            Self::Low => ReasoningEffort::Low,
             Self::Medium => ReasoningEffort::Medium,
-            Self::High | Self::XHigh | Self::Max => ReasoningEffort::High,
+            Self::High => ReasoningEffort::High,
+            Self::XHigh => ReasoningEffort::Xhigh,
+            Self::Max => ReasoningEffort::Max,
         }
     }
 
@@ -594,16 +601,16 @@ mod tests {
 
     #[test]
     fn reasoning_level_as_openai_reasoning_effort() {
-        assert_eq!(ReasoningLevel::None.as_openai_reasoning_effort(), "low");
+        assert_eq!(ReasoningLevel::None.as_openai_reasoning_effort(), "none");
         assert_eq!(ReasoningLevel::Low.as_openai_reasoning_effort(), "low");
         assert_eq!(
             ReasoningLevel::Medium.as_openai_reasoning_effort(),
             "medium"
         );
         assert_eq!(ReasoningLevel::High.as_openai_reasoning_effort(), "high");
-        // XHigh and Max clamp to high for OpenAI
-        assert_eq!(ReasoningLevel::XHigh.as_openai_reasoning_effort(), "high");
-        assert_eq!(ReasoningLevel::Max.as_openai_reasoning_effort(), "high");
+        assert_eq!(ReasoningLevel::XHigh.as_openai_reasoning_effort(), "xhigh");
+        // Max maps to xhigh
+        assert_eq!(ReasoningLevel::Max.as_openai_reasoning_effort(), "xhigh");
     }
 
     #[test]
@@ -665,7 +672,7 @@ mod tests {
     fn reasoning_level_as_openai_reasoning() {
         assert_eq!(
             ReasoningLevel::None.as_openai_reasoning(),
-            ReasoningEffort::Low
+            ReasoningEffort::None
         );
         assert_eq!(
             ReasoningLevel::Low.as_openai_reasoning(),
@@ -679,14 +686,13 @@ mod tests {
             ReasoningLevel::High.as_openai_reasoning(),
             ReasoningEffort::High
         );
-        // XHigh and Max clamp to High for OpenAI
         assert_eq!(
             ReasoningLevel::XHigh.as_openai_reasoning(),
-            ReasoningEffort::High
+            ReasoningEffort::Xhigh
         );
         assert_eq!(
             ReasoningLevel::Max.as_openai_reasoning(),
-            ReasoningEffort::High
+            ReasoningEffort::Max
         );
     }
 

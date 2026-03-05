@@ -13,6 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{ToolCallContext, parse_tool_call_arguments};
+use tracing::{debug, warn};
 use tron_core::content::AssistantContent;
 use tron_core::events::{AssistantMessage, StreamEvent};
 use tron_core::messages::TokenUsage;
@@ -185,6 +186,18 @@ pub fn process_stream_event(
             }
         }
 
+        SseEventType::ToolSearchCallSearching => {
+            debug!("Tool search: model is searching for relevant tools");
+        }
+
+        SseEventType::ToolSearchCallCompleted => {
+            debug!("Tool search: completed — selected tools loaded into context");
+        }
+
+        SseEventType::ComputerCallCompleted => {
+            warn!("Computer use event received but not implemented — ignoring");
+        }
+
         SseEventType::Completed => {
             events.extend(process_completed_response(event, state));
         }
@@ -300,6 +313,12 @@ fn merge_completed_output_items(
             OutputItemType::Message => merge_message_item(item, state),
             OutputItemType::Reasoning => merge_reasoning_item(item, state, events),
             OutputItemType::FunctionCall => merge_function_call_item(item, state),
+            OutputItemType::ToolSearchCall | OutputItemType::ToolSearchOutput => {
+                debug!(item_type = ?item.item_type, "Tool search output item — transparent");
+            }
+            OutputItemType::ComputerCall => {
+                warn!("Computer call output item — not implemented");
+            }
             OutputItemType::Unknown => {}
         }
     }
@@ -915,6 +934,41 @@ mod tests {
         assert!(events2.is_empty(), "duplicate OutputItemAdded should not emit ToolCallStart");
         // State should still have exactly one entry
         assert_eq!(state.tool_calls.len(), 1);
+    }
+
+    // ── Tool search events ────────────────────────────────────────
+
+    #[test]
+    fn tool_search_searching_returns_empty() {
+        let mut state = create_stream_state();
+        let event = ResponsesSseEvent {
+            event_type: SseEventType::ToolSearchCallSearching,
+            ..Default::default()
+        };
+        let events = process_stream_event(&event, &mut state);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn tool_search_completed_returns_empty() {
+        let mut state = create_stream_state();
+        let event = ResponsesSseEvent {
+            event_type: SseEventType::ToolSearchCallCompleted,
+            ..Default::default()
+        };
+        let events = process_stream_event(&event, &mut state);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn computer_call_completed_returns_empty() {
+        let mut state = create_stream_state();
+        let event = ResponsesSseEvent {
+            event_type: SseEventType::ComputerCallCompleted,
+            ..Default::default()
+        };
+        let events = process_stream_event(&event, &mut state);
+        assert!(events.is_empty());
     }
 
     // ── Unknown events ─────────────────────────────────────────────

@@ -15,7 +15,9 @@ use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
 use tron_core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use tron_core::tools::Tool;
 
-use super::types::{MessageContent, ResponsesInputItem, ResponsesTool, TOOL_RESULT_MAX_LENGTH};
+use super::types::{
+    MessageContent, ResponsesInputItem, ResponsesTool, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
+};
 
 /// Convert Tron messages to Responses API input format.
 ///
@@ -51,7 +53,37 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
     input
 }
 
-/// Convert Tron tools to Responses API format.
+/// Convert Tron tools to Responses API tool entries.
+///
+/// When `enable_tool_search` is `true`, marks all functions with `defer_loading: true`
+/// and appends a `ToolSearch` sentinel. This enables the model to dynamically discover
+/// which tools to use, reducing prompt tokens for large tool sets.
+///
+/// When `false`, produces standard function entries with no `defer_loading` field.
+#[must_use]
+pub fn convert_tools_v2(tools: &[Tool], enable_tool_search: bool) -> Vec<ResponsesToolEntry> {
+    let mut entries: Vec<ResponsesToolEntry> = tools
+        .iter()
+        .map(|t| {
+            let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
+            let params = normalize_schema_for_openai(&schema);
+            ResponsesToolEntry::Function {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                parameters: params,
+                defer_loading: if enable_tool_search { Some(true) } else { None },
+            }
+        })
+        .collect();
+
+    if enable_tool_search {
+        entries.push(ResponsesToolEntry::ToolSearch {});
+    }
+
+    entries
+}
+
+/// Convert Tron tools to Responses API format (legacy — kept for backward compatibility).
 ///
 /// Normalizes schemas to satisfy OpenAI's stricter validation
 /// (e.g., arrays must have `items`).
@@ -705,6 +737,73 @@ mod tests {
         let tools = vec![make_tool("tool_a", "Tool A"), make_tool("tool_b", "Tool B")];
         let result = convert_tools(&tools);
         assert_eq!(result.len(), 2);
+    }
+
+    // ── convert_tools_v2 ────────────────────────────────────────────
+
+    #[test]
+    fn convert_tools_v2_without_tool_search() {
+        use crate::openai::types::ResponsesToolEntry;
+        let tools = vec![make_tool("bash", "Run commands"), make_tool("read", "Read file")];
+        let result = convert_tools_v2(&tools, false);
+
+        assert_eq!(result.len(), 2);
+        for entry in &result {
+            match entry {
+                ResponsesToolEntry::Function { defer_loading, .. } => {
+                    assert!(defer_loading.is_none());
+                }
+                _ => panic!("expected Function entry"),
+            }
+        }
+    }
+
+    #[test]
+    fn convert_tools_v2_with_tool_search() {
+        use crate::openai::types::ResponsesToolEntry;
+        let tools = vec![make_tool("bash", "Run commands"), make_tool("read", "Read file")];
+        let result = convert_tools_v2(&tools, true);
+
+        // 2 functions + 1 tool_search sentinel
+        assert_eq!(result.len(), 3);
+
+        // All functions should have defer_loading: true
+        for entry in &result[..2] {
+            match entry {
+                ResponsesToolEntry::Function { defer_loading, .. } => {
+                    assert_eq!(*defer_loading, Some(true));
+                }
+                _ => panic!("expected Function entry"),
+            }
+        }
+
+        // Last entry should be ToolSearch
+        assert!(matches!(&result[2], ResponsesToolEntry::ToolSearch {}));
+    }
+
+    #[test]
+    fn convert_tools_v2_tool_search_json_shape() {
+        use crate::openai::types::ResponsesToolEntry;
+        let tools = vec![make_tool("bash", "Run commands")];
+        let result = convert_tools_v2(&tools, true);
+        let json = serde_json::to_value(&result).unwrap();
+        let arr = json.as_array().unwrap();
+
+        // Function with defer_loading
+        assert_eq!(arr[0]["type"], "function");
+        assert_eq!(arr[0]["defer_loading"], true);
+        assert_eq!(arr[0]["name"], "bash");
+
+        // Tool search sentinel
+        assert_eq!(arr[1]["type"], "tool_search");
+    }
+
+    #[test]
+    fn convert_tools_v2_empty_tools_with_search() {
+        use crate::openai::types::ResponsesToolEntry;
+        let result = convert_tools_v2(&[], true);
+        assert_eq!(result.len(), 1);
+        assert!(matches!(&result[0], ResponsesToolEntry::ToolSearch {}));
     }
 
     // ── generate_tool_clarification_message ─────────────────────────

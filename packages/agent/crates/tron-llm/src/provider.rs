@@ -59,6 +59,8 @@ impl std::fmt::Display for AnthropicEffortLevel {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningEffort {
+    /// No reasoning.
+    None,
     /// Low reasoning effort.
     Low,
     /// Medium reasoning effort.
@@ -76,6 +78,7 @@ impl ReasoningEffort {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::None => "none",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
@@ -446,6 +449,7 @@ mod tests {
     #[test]
     fn reasoning_effort_serde_roundtrip() {
         for (effort, expected_str) in [
+            (ReasoningEffort::None, "none"),
             (ReasoningEffort::Low, "low"),
             (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
