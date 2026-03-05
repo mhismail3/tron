@@ -12,6 +12,9 @@ use serde_json::Value;
 /// Default base URL for the `OpenAI` Codex API.
 pub const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 
+/// Default base URL for the `OpenAI` Platform API.
+pub const DEFAULT_PLATFORM_BASE_URL: &str = "https://api.openai.com";
+
 /// Default model.
 pub const DEFAULT_MODEL: &str = "gpt-5.3-codex";
 
@@ -25,10 +28,47 @@ pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 128_000;
 pub const TOOL_RESULT_MAX_LENGTH: usize = 16_384;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// API Endpoint
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Which `OpenAI` API endpoint a model targets.
+///
+/// Codex models use the ChatGPT backend; GPT 5.4+ use the standard Platform API.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiEndpoint {
+    /// ChatGPT Codex backend (`chatgpt.com/backend-api/codex/responses`).
+    #[default]
+    Codex,
+    /// Standard Platform API (`api.openai.com/v1/responses`).
+    Platform,
+}
+
+impl ApiEndpoint {
+    /// Default base URL for this endpoint.
+    #[must_use]
+    pub fn default_base_url(self) -> &'static str {
+        match self {
+            Self::Codex => DEFAULT_BASE_URL,
+            Self::Platform => DEFAULT_PLATFORM_BASE_URL,
+        }
+    }
+
+    /// URL path suffix for this endpoint.
+    #[must_use]
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::Codex => "/codex/responses",
+            Self::Platform => "/v1/responses",
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Authentication
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `OpenAI` authentication (OAuth only — the Codex API requires OAuth).
+/// `OpenAI` authentication.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OpenAIAuth {
@@ -37,6 +77,12 @@ pub enum OpenAIAuth {
     OAuth {
         /// OAuth tokens.
         tokens: crate::auth::OAuthTokens,
+    },
+    /// API key authentication (Platform endpoint).
+    #[serde(rename = "api_key")]
+    ApiKey {
+        /// API key.
+        api_key: String,
     },
 }
 
@@ -109,6 +155,8 @@ pub struct OpenAIModelInfo {
     pub family: &'static str,
     /// Model tier.
     pub tier: &'static str,
+    /// Which API endpoint this model uses.
+    pub api_endpoint: ApiEndpoint,
     /// Context window size in tokens.
     pub context_window: u64,
     /// Maximum output tokens.
@@ -119,6 +167,10 @@ pub struct OpenAIModelInfo {
     pub supports_images: bool,
     /// Whether the model supports reasoning.
     pub supports_reasoning: bool,
+    /// Whether the model supports tool search (dynamic tool loading).
+    pub supports_tool_search: bool,
+    /// Whether the model supports computer use.
+    pub supports_computer_use: bool,
     /// Supported reasoning effort levels.
     pub reasoning_levels: &'static [&'static str],
     /// Default reasoning effort level.
@@ -137,17 +189,66 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
     let mut m = HashMap::new();
 
     m.insert(
+        "gpt-5.4",
+        OpenAIModelInfo {
+            name: "GPT-5.4",
+            short_name: "GPT-5.4",
+            family: "GPT-5.4",
+            tier: "flagship",
+            api_endpoint: ApiEndpoint::Platform,
+            context_window: 1_000_000,
+            max_output: 128_000,
+            supports_tools: true,
+            supports_images: true,
+            supports_reasoning: true,
+            supports_tool_search: true,
+            supports_computer_use: true,
+            reasoning_levels: &["none", "low", "medium", "high", "xhigh"],
+            default_reasoning_level: "medium",
+            input_cost_per_million: 2.0,
+            output_cost_per_million: 16.0,
+            cache_read_cost_per_million: 0.2,
+        },
+    );
+
+    m.insert(
+        "gpt-5.4-pro",
+        OpenAIModelInfo {
+            name: "GPT-5.4 Pro",
+            short_name: "GPT-5.4 Pro",
+            family: "GPT-5.4",
+            tier: "flagship",
+            api_endpoint: ApiEndpoint::Platform,
+            context_window: 1_000_000,
+            max_output: 128_000,
+            supports_tools: true,
+            supports_images: true,
+            supports_reasoning: true,
+            supports_tool_search: true,
+            supports_computer_use: true,
+            reasoning_levels: &["none", "low", "medium", "high", "xhigh"],
+            default_reasoning_level: "high",
+            input_cost_per_million: 4.0,
+            output_cost_per_million: 32.0,
+            cache_read_cost_per_million: 0.4,
+        },
+    );
+
+    m.insert(
         "gpt-5.3-codex",
         OpenAIModelInfo {
             name: "GPT-5.3 Codex",
             short_name: "GPT-5.3",
             family: "GPT-5.3",
             tier: "flagship",
+            api_endpoint: ApiEndpoint::Codex,
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
             supports_images: true,
             supports_reasoning: true,
+            supports_tool_search: false,
+            supports_computer_use: false,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "medium",
             input_cost_per_million: 1.75,
@@ -163,14 +264,16 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             short_name: "GPT-5.3 Spark",
             family: "GPT-5.3",
             tier: "standard",
+            api_endpoint: ApiEndpoint::Codex,
             context_window: 128_000,
             max_output: 32_000,
             supports_tools: true,
             supports_images: false,
             supports_reasoning: true,
+            supports_tool_search: false,
+            supports_computer_use: false,
             reasoning_levels: &["low", "medium", "high"],
             default_reasoning_level: "low",
-            // Estimated pricing — matches gpt-5.3-codex until official pricing announced.
             input_cost_per_million: 1.75,
             output_cost_per_million: 14.0,
             cache_read_cost_per_million: 0.175,
@@ -184,11 +287,14 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             short_name: "GPT-5.2",
             family: "GPT-5.2",
             tier: "flagship",
+            api_endpoint: ApiEndpoint::Codex,
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
             supports_images: true,
             supports_reasoning: true,
+            supports_tool_search: false,
+            supports_computer_use: false,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "medium",
             input_cost_per_million: 1.75,
@@ -204,11 +310,14 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             short_name: "GPT-5.1 Max",
             family: "GPT-5.1",
             tier: "flagship",
+            api_endpoint: ApiEndpoint::Codex,
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
             supports_images: true,
             supports_reasoning: true,
+            supports_tool_search: false,
+            supports_computer_use: false,
             reasoning_levels: &["low", "medium", "high", "xhigh"],
             default_reasoning_level: "high",
             input_cost_per_million: 1.25,
@@ -224,11 +333,14 @@ pub static OPENAI_MODELS: LazyLock<HashMap<&'static str, OpenAIModelInfo>> = Laz
             short_name: "GPT-5.1 Mini",
             family: "GPT-5.1",
             tier: "standard",
+            api_endpoint: ApiEndpoint::Codex,
             context_window: 400_000,
             max_output: 128_000,
             supports_tools: true,
             supports_images: true,
             supports_reasoning: true,
+            supports_tool_search: false,
+            supports_computer_use: false,
             reasoning_levels: &["low", "medium", "high"],
             default_reasoning_level: "low",
             input_cost_per_million: 0.25,
@@ -327,7 +439,7 @@ pub enum ResponsesInputItem {
     },
 }
 
-/// A tool definition for the Responses API.
+/// A tool definition for the Responses API (legacy struct — use [`ResponsesToolEntry`] for new code).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResponsesTool {
     /// Always "function".
@@ -339,6 +451,42 @@ pub struct ResponsesTool {
     pub description: String,
     /// JSON Schema for parameters.
     pub parameters: Value,
+}
+
+/// Polymorphic tool entry for the Responses API.
+///
+/// Uses internally tagged serialization on `"type"` to discriminate variants.
+/// GPT 5.4+ supports `ToolSearch` and `Computer` entries alongside functions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ResponsesToolEntry {
+    /// Standard function tool.
+    #[serde(rename = "function")]
+    Function {
+        /// Function name.
+        name: String,
+        /// Function description.
+        description: String,
+        /// JSON Schema for parameters.
+        parameters: Value,
+        /// When `true`, the tool is available but not loaded into the prompt
+        /// until the model's tool search selects it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        defer_loading: Option<bool>,
+    },
+    /// Tool search sentinel — enables the model to dynamically discover tools.
+    #[serde(rename = "tool_search")]
+    ToolSearch {},
+    /// Computer use tool (stub — full implementation deferred).
+    #[serde(rename = "computer")]
+    Computer {
+        /// Viewport width in pixels.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        viewport_width: Option<u32>,
+        /// Viewport height in pixels.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        viewport_height: Option<u32>,
+    },
 }
 
 /// Request body for the Responses API.
@@ -358,9 +506,9 @@ pub struct ResponsesRequest {
     /// Temperature.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
-    /// Tool definitions.
+    /// Tool definitions (functions, tool search, computer use).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ResponsesTool>>,
+    pub tools: Option<Vec<ResponsesToolEntry>>,
     /// Max output tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
@@ -496,6 +644,15 @@ pub enum SseEventType {
     /// Streaming function call arguments.
     #[serde(rename = "response.function_call_arguments.delta")]
     FunctionCallArgsDelta,
+    /// Tool search call started (hosted tool search).
+    #[serde(rename = "response.tool_search_call.searching")]
+    ToolSearchCallSearching,
+    /// Tool search call completed (hosted tool search).
+    #[serde(rename = "response.tool_search_call.completed")]
+    ToolSearchCallCompleted,
+    /// Computer call output (stub).
+    #[serde(rename = "response.computer_call.completed")]
+    ComputerCallCompleted,
     /// Final complete response.
     #[serde(rename = "response.completed")]
     Completed,
@@ -515,6 +672,12 @@ pub enum OutputItemType {
     Message,
     /// Reasoning/thinking.
     Reasoning,
+    /// Tool search call (hosted tool discovery).
+    ToolSearchCall,
+    /// Tool search output (hosted tool discovery result).
+    ToolSearchOutput,
+    /// Computer call (screenshot + action loop).
+    ComputerCall,
     /// Forward-compatible catch-all for unknown item types.
     #[default]
     #[serde(other)]
@@ -535,6 +698,38 @@ mod tests {
     #[test]
     fn default_model_exists() {
         assert!(get_openai_model(DEFAULT_MODEL).is_some());
+    }
+
+    #[test]
+    fn model_gpt_54() {
+        let m = get_openai_model("gpt-5.4").unwrap();
+        assert_eq!(m.context_window, 1_000_000);
+        assert_eq!(m.max_output, 128_000);
+        assert!(m.supports_reasoning);
+        assert!(m.supports_tools);
+        assert!(m.supports_tool_search);
+        assert!(m.supports_computer_use);
+        assert_eq!(m.reasoning_levels, &["none", "low", "medium", "high", "xhigh"]);
+        assert_eq!(m.default_reasoning_level, "medium");
+    }
+
+    #[test]
+    fn model_gpt_54_pro() {
+        let m = get_openai_model("gpt-5.4-pro").unwrap();
+        assert_eq!(m.context_window, 1_000_000);
+        assert_eq!(m.max_output, 128_000);
+        assert!(m.supports_tool_search);
+        assert!(m.supports_computer_use);
+        assert_eq!(m.default_reasoning_level, "high");
+        assert_eq!(m.input_cost_per_million, 4.0);
+        assert_eq!(m.output_cost_per_million, 32.0);
+    }
+
+    #[test]
+    fn model_gpt_53_no_tool_search() {
+        let m = get_openai_model("gpt-5.3-codex").unwrap();
+        assert!(!m.supports_tool_search);
+        assert!(!m.supports_computer_use);
     }
 
     #[test]
@@ -619,6 +814,7 @@ mod tests {
     #[test]
     fn reasoning_effort_all_variants() {
         for (variant, expected) in [
+            (ReasoningEffort::None, "none"),
             (ReasoningEffort::Low, "low"),
             (ReasoningEffort::Medium, "medium"),
             (ReasoningEffort::High, "high"),
@@ -627,6 +823,66 @@ mod tests {
         ] {
             assert_eq!(variant.as_str(), expected);
             assert_eq!(variant.to_string(), expected);
+        }
+    }
+
+    // ── ApiEndpoint ────────────────────────────────────────────────────
+
+    #[test]
+    fn api_endpoint_serde_roundtrip() {
+        let codex = ApiEndpoint::Codex;
+        let json = serde_json::to_string(&codex).unwrap();
+        assert_eq!(json, r#""codex""#);
+        let back: ApiEndpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ApiEndpoint::Codex);
+
+        let platform = ApiEndpoint::Platform;
+        let json = serde_json::to_string(&platform).unwrap();
+        assert_eq!(json, r#""platform""#);
+        let back: ApiEndpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ApiEndpoint::Platform);
+    }
+
+    #[test]
+    fn api_endpoint_default_is_codex() {
+        assert_eq!(ApiEndpoint::default(), ApiEndpoint::Codex);
+    }
+
+    #[test]
+    fn api_endpoint_path() {
+        assert_eq!(ApiEndpoint::Codex.path(), "/codex/responses");
+        assert_eq!(ApiEndpoint::Platform.path(), "/v1/responses");
+    }
+
+    #[test]
+    fn api_endpoint_default_base_url() {
+        assert_eq!(ApiEndpoint::Codex.default_base_url(), DEFAULT_BASE_URL);
+        assert_eq!(ApiEndpoint::Platform.default_base_url(), DEFAULT_PLATFORM_BASE_URL);
+    }
+
+    #[test]
+    fn gpt_54_uses_platform_endpoint() {
+        let m = get_openai_model("gpt-5.4").unwrap();
+        assert_eq!(m.api_endpoint, ApiEndpoint::Platform);
+    }
+
+    #[test]
+    fn gpt_54_pro_uses_platform_endpoint() {
+        let m = get_openai_model("gpt-5.4-pro").unwrap();
+        assert_eq!(m.api_endpoint, ApiEndpoint::Platform);
+    }
+
+    #[test]
+    fn codex_models_use_codex_endpoint() {
+        for id in &[
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+            "gpt-5.2-codex",
+            "gpt-5.1-codex-max",
+            "gpt-5.1-codex-mini",
+        ] {
+            let m = get_openai_model(id).unwrap();
+            assert_eq!(m.api_endpoint, ApiEndpoint::Codex, "expected Codex for {id}");
         }
     }
 
@@ -644,6 +900,19 @@ mod tests {
         let json = serde_json::to_value(&auth).unwrap();
         assert_eq!(json["type"], "oauth");
         assert_eq!(json["tokens"]["accessToken"], "at");
+    }
+
+    #[test]
+    fn auth_api_key_serde() {
+        let auth = OpenAIAuth::ApiKey {
+            api_key: "sk-test-123".into(),
+        };
+        let json = serde_json::to_value(&auth).unwrap();
+        assert_eq!(json["type"], "api_key");
+        assert_eq!(json["api_key"], "sk-test-123");
+
+        let back: OpenAIAuth = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, OpenAIAuth::ApiKey { api_key } if api_key == "sk-test-123"));
     }
 
     // ── Config ─────────────────────────────────────────────────────────
@@ -735,6 +1004,125 @@ mod tests {
         let json = serde_json::to_value(&tool).unwrap();
         assert_eq!(json["type"], "function");
         assert_eq!(json["name"], "bash");
+    }
+
+    // ── ResponsesToolEntry ───────────────────────────────────────────
+
+    #[test]
+    fn tool_entry_function_serde() {
+        let entry = ResponsesToolEntry::Function {
+            name: "bash".into(),
+            description: "Run commands".into(),
+            parameters: json!({"type": "object"}),
+            defer_loading: None,
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["type"], "function");
+        assert_eq!(json["name"], "bash");
+        assert!(json.get("defer_loading").is_none());
+
+        let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, ResponsesToolEntry::Function { .. }));
+    }
+
+    #[test]
+    fn tool_entry_function_with_defer_loading() {
+        let entry = ResponsesToolEntry::Function {
+            name: "read_file".into(),
+            description: "Read a file".into(),
+            parameters: json!({"type": "object"}),
+            defer_loading: Some(true),
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["defer_loading"], true);
+    }
+
+    #[test]
+    fn tool_entry_tool_search_serde() {
+        let entry = ResponsesToolEntry::ToolSearch {};
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["type"], "tool_search");
+
+        let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, ResponsesToolEntry::ToolSearch {}));
+    }
+
+    #[test]
+    fn tool_entry_computer_serde() {
+        let entry = ResponsesToolEntry::Computer {
+            viewport_width: Some(1280),
+            viewport_height: Some(720),
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["type"], "computer");
+        assert_eq!(json["viewport_width"], 1280);
+
+        let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, ResponsesToolEntry::Computer { .. }));
+    }
+
+    #[test]
+    fn tool_entry_computer_minimal_serde() {
+        let entry = ResponsesToolEntry::Computer {
+            viewport_width: None,
+            viewport_height: None,
+        };
+        let json = serde_json::to_value(&entry).unwrap();
+        assert_eq!(json["type"], "computer");
+        assert!(json.get("viewport_width").is_none());
+    }
+
+    #[test]
+    fn tool_entry_serde_roundtrip_all_variants() {
+        let entries = vec![
+            ResponsesToolEntry::Function {
+                name: "bash".into(),
+                description: "Run".into(),
+                parameters: json!({}),
+                defer_loading: Some(true),
+            },
+            ResponsesToolEntry::ToolSearch {},
+            ResponsesToolEntry::Computer {
+                viewport_width: Some(1024),
+                viewport_height: Some(768),
+            },
+        ];
+        let json = serde_json::to_string(&entries).unwrap();
+        let back: Vec<ResponsesToolEntry> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.len(), 3);
+        assert!(matches!(&back[0], ResponsesToolEntry::Function { .. }));
+        assert!(matches!(&back[1], ResponsesToolEntry::ToolSearch {}));
+        assert!(matches!(&back[2], ResponsesToolEntry::Computer { .. }));
+    }
+
+    // ── SSE event types for tool search ──────────────────────────────
+
+    #[test]
+    fn sse_tool_search_event_deserializes() {
+        let json = json!({ "type": "response.tool_search_call.searching" });
+        let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(event.event_type, SseEventType::ToolSearchCallSearching);
+    }
+
+    #[test]
+    fn sse_tool_search_completed_deserializes() {
+        let json = json!({ "type": "response.tool_search_call.completed" });
+        let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(event.event_type, SseEventType::ToolSearchCallCompleted);
+    }
+
+    #[test]
+    fn output_item_type_tool_search_call() {
+        let json = json!({ "type": "tool_search_call" });
+        let item: ResponsesOutputItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.item_type, OutputItemType::ToolSearchCall);
+    }
+
+    #[test]
+    fn output_item_type_computer_call() {
+        let json = json!({ "type": "computer_call" });
+        let item: ResponsesOutputItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.item_type, OutputItemType::ComputerCall);
     }
 
     #[test]

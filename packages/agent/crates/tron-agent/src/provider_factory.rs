@@ -206,27 +206,27 @@ impl DefaultProviderFactory {
             }
         };
 
-        let tokens = match server_auth {
+        let auth = match server_auth {
             tron_llm::auth::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
-            } => tron_llm::auth::OAuthTokens {
-                access_token,
-                refresh_token,
-                expires_at,
+            } => tron_llm::openai::types::OpenAIAuth::OAuth {
+                tokens: tron_llm::auth::OAuthTokens {
+                    access_token,
+                    refresh_token,
+                    expires_at,
+                },
             },
-            tron_llm::auth::ServerAuth::ApiKey { api_key } => tron_llm::auth::OAuthTokens {
-                access_token: api_key,
-                refresh_token: String::new(),
-                expires_at: i64::MAX,
-            },
+            tron_llm::auth::ServerAuth::ApiKey { api_key } => {
+                tron_llm::openai::types::OpenAIAuth::ApiKey { api_key }
+            }
         };
 
         let config = tron_llm::openai::types::OpenAIConfig {
             model: model.to_string(),
-            auth: tron_llm::openai::types::OpenAIAuth::OAuth { tokens },
+            auth,
             max_tokens: None,
             temperature: None,
             base_url: None,

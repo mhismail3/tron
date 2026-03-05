@@ -9,4 +9,4 @@ pub mod stream_handler;
 pub mod types;
 
 pub use provider::OpenAIProvider;
-pub use types::{OpenAIAuth, OpenAIConfig};
+pub use types::{ApiEndpoint, OpenAIAuth, OpenAIConfig};

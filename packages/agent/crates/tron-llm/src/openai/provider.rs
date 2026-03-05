@@ -1,14 +1,15 @@
 //! `OpenAI` provider implementing the [`Provider`] trait.
 //!
-//! Builds and sends streaming requests to the `OpenAI` Responses API (Codex endpoint).
-//! Supports OAuth authentication with automatic JWT account ID extraction,
-//! token refresh before expiry, and reasoning effort levels.
+//! Builds and sends streaming requests to the `OpenAI` Responses API.
+//! Routes to either the Codex backend or the Platform API based on the model's
+//! [`ApiEndpoint`] declaration. Supports OAuth and API key authentication,
+//! automatic JWT account ID extraction (Codex only), token refresh before
+//! expiry, and reasoning effort levels.
 //!
 //! # Authentication
 //!
-//! OAuth only -- the Codex endpoint requires OAuth Bearer tokens. On every stream
-//! request, the provider checks if the access token is about to expire and
-//! refreshes it automatically.
+//! - **Codex endpoint**: OAuth Bearer tokens with automatic refresh.
+//! - **Platform endpoint**: API key or OAuth Bearer tokens (no Codex-specific headers).
 //!
 //! # Context Injection
 //!
@@ -30,11 +31,11 @@ use crate::provider::{
 use tron_core::messages::{Context, Message};
 
 use super::message_converter::{
-    convert_to_responses_input, convert_tools, generate_tool_clarification_message,
+    convert_to_responses_input, convert_tools_v2, generate_tool_clarification_message,
 };
 use super::stream_handler::{create_stream_state, process_stream_event};
 use super::types::{
-    DEFAULT_BASE_URL, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, ReasoningConfig,
+    ApiEndpoint, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, ReasoningConfig,
     ResponsesInputItem, ResponsesRequest, ResponsesSseEvent, get_openai_model,
 };
 
@@ -180,10 +181,45 @@ async fn refresh_tokens(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Reasoning clamping
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Global reasoning hierarchy from lowest to highest.
+/// "max" is a Tron-internal alias that maps to the highest available level.
+const REASONING_HIERARCHY: &[&str] = &["none", "low", "medium", "high", "xhigh", "max"];
+
+/// Clamp a reasoning effort to the closest supported level.
+///
+/// If `effort` is already in `levels`, returns it unchanged.
+/// Otherwise finds the closest level by rank distance (prefers higher on tie
+/// for "max"-like values, lower otherwise).
+fn clamp_reasoning_effort(effort: &str, levels: &[&str]) -> String {
+    if levels.contains(&effort) {
+        return effort.to_string();
+    }
+    let effort_rank = REASONING_HIERARCHY
+        .iter()
+        .position(|&h| h == effort)
+        .unwrap_or(2); // default to "medium" rank if unknown
+
+    levels
+        .iter()
+        .min_by_key(|&&l| {
+            let rank = REASONING_HIERARCHY
+                .iter()
+                .position(|&h| h == l)
+                .unwrap_or(2);
+            let dist = (rank as i64 - effort_rank as i64).unsigned_abs();
+            (dist, rank)
+        })
+        .map_or_else(|| "medium".to_string(), |s| (*s).to_string())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Provider
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `OpenAI` LLM provider for the Responses API (Codex endpoint).
+/// `OpenAI` LLM provider for the Responses API.
 pub struct OpenAIProvider {
     /// Provider configuration.
     config: OpenAIConfig,
@@ -191,6 +227,8 @@ pub struct OpenAIProvider {
     client: reqwest::Client,
     /// Resolved base URL.
     base_url: String,
+    /// Which API endpoint (Codex vs Platform) this provider targets.
+    api_endpoint: ApiEndpoint,
     /// Mutable OAuth token state (refreshed before each request).
     tokens: tokio::sync::Mutex<crate::auth::OAuthTokens>,
     /// API settings (token URL, client ID, etc.).
@@ -198,27 +236,56 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
-    /// Create a new `OpenAI` provider.
-    #[must_use]
-    pub fn new(config: OpenAIConfig) -> Self {
+    /// Resolve constructor fields shared between `new` and `with_client`.
+    ///
+    /// Effective endpoint depends on both the model's preference and auth type:
+    /// - **API key** → use the model's declared endpoint (Platform for GPT 5.4+, Codex for others)
+    /// - **OAuth** → always Codex (OAuth tokens lack Platform API scopes)
+    fn resolve(config: &OpenAIConfig) -> (ApiEndpoint, String, crate::auth::OAuthTokens) {
+        let model_endpoint = get_openai_model(&config.model)
+            .map(|m| m.api_endpoint)
+            .unwrap_or_default();
+
+        let (api_endpoint, tokens) = match &config.auth {
+            OpenAIAuth::OAuth { tokens } => {
+                // OAuth tokens only work on Codex — force endpoint regardless of model preference.
+                (ApiEndpoint::Codex, tokens.clone())
+            }
+            OpenAIAuth::ApiKey { api_key } => {
+                // API keys work on both — use the model's preferred endpoint.
+                (
+                    model_endpoint,
+                    crate::auth::OAuthTokens {
+                        access_token: api_key.clone(),
+                        refresh_token: String::new(),
+                        expires_at: i64::MAX,
+                    },
+                )
+            }
+        };
+
         let base_url = config
             .base_url
             .clone()
             .or_else(|| config.provider_settings.base_url.clone())
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+            .unwrap_or_else(|| api_endpoint.default_base_url().to_string());
 
-        let tokens = match &config.auth {
-            OpenAIAuth::OAuth { tokens } => tokens.clone(),
-        };
+        (api_endpoint, base_url, tokens)
+    }
 
+    /// Create a new `OpenAI` provider.
+    #[must_use]
+    pub fn new(config: OpenAIConfig) -> Self {
+        let (api_endpoint, base_url, tokens) = Self::resolve(&config);
         let provider_settings = config.provider_settings.clone();
 
-        info!(model = %config.model, base_url = %base_url, "OpenAI provider initialized");
+        info!(model = %config.model, base_url = %base_url, endpoint = ?api_endpoint, "OpenAI provider initialized");
 
         Self {
             config,
             client: reqwest::Client::new(),
             base_url,
+            api_endpoint,
             tokens: tokio::sync::Mutex::new(tokens),
             provider_settings,
         }
@@ -227,24 +294,16 @@ impl OpenAIProvider {
     /// Create a new `OpenAI` provider with a shared HTTP client.
     #[must_use]
     pub fn with_client(config: OpenAIConfig, client: reqwest::Client) -> Self {
-        let base_url = config
-            .base_url
-            .clone()
-            .or_else(|| config.provider_settings.base_url.clone())
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-
-        let tokens = match &config.auth {
-            OpenAIAuth::OAuth { tokens } => tokens.clone(),
-        };
-
+        let (api_endpoint, base_url, tokens) = Self::resolve(&config);
         let provider_settings = config.provider_settings.clone();
 
-        info!(model = %config.model, base_url = %base_url, "OpenAI provider initialized");
+        info!(model = %config.model, base_url = %base_url, endpoint = ?api_endpoint, "OpenAI provider initialized");
 
         Self {
             config,
             client,
             base_url,
+            api_endpoint,
             tokens: tokio::sync::Mutex::new(tokens),
             provider_settings,
         }
@@ -264,7 +323,13 @@ impl OpenAIProvider {
     }
 
     /// Build HTTP headers for the Responses API request.
-    fn build_headers(tokens: &crate::auth::OAuthTokens) -> ProviderResult<HeaderMap> {
+    ///
+    /// Codex endpoint requires extra headers (`openai-beta`, `openai-originator`,
+    /// `chatgpt-account-id`). Platform endpoint uses only standard auth headers.
+    fn build_headers(
+        tokens: &crate::auth::OAuthTokens,
+        api_endpoint: ApiEndpoint,
+    ) -> ProviderResult<HeaderMap> {
         let mut headers = HeaderMap::new();
 
         let auth_value = format!("Bearer {}", tokens.access_token);
@@ -276,19 +341,22 @@ impl OpenAIProvider {
         );
         let _ = headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let _ = headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
-        let _ = headers.insert(
-            "openai-beta",
-            HeaderValue::from_static("responses=experimental"),
-        );
-        let _ = headers.insert(
-            "openai-originator",
-            HeaderValue::from_static("codex_cli_rs"),
-        );
 
-        let account_id = extract_account_id(&tokens.access_token);
-        if !account_id.is_empty() {
-            if let Ok(val) = HeaderValue::from_str(&account_id) {
-                let _ = headers.insert("chatgpt-account-id", val);
+        if api_endpoint == ApiEndpoint::Codex {
+            let _ = headers.insert(
+                "openai-beta",
+                HeaderValue::from_static("responses=experimental"),
+            );
+            let _ = headers.insert(
+                "openai-originator",
+                HeaderValue::from_static("codex_cli_rs"),
+            );
+
+            let account_id = extract_account_id(&tokens.access_token);
+            if !account_id.is_empty() {
+                if let Ok(val) = HeaderValue::from_str(&account_id) {
+                    let _ = headers.insert("chatgpt-account-id", val);
+                }
             }
         }
 
@@ -296,8 +364,10 @@ impl OpenAIProvider {
     }
 
     /// Resolve the reasoning effort level from options -> config -> settings -> model default.
+    ///
+    /// After resolution, clamps to a level the model actually supports.
     fn resolve_reasoning_effort(&self, options: &ProviderStreamOptions) -> String {
-        options
+        let raw = options
             .reasoning_effort
             .as_ref()
             .map(ReasoningEffort::as_str)
@@ -305,8 +375,13 @@ impl OpenAIProvider {
             .or(self.provider_settings.default_reasoning_effort.as_deref())
             .unwrap_or_else(|| {
                 get_openai_model(&self.config.model).map_or("medium", |m| m.default_reasoning_level)
-            })
-            .to_string()
+            });
+
+        if let Some(model_info) = get_openai_model(&self.config.model) {
+            clamp_reasoning_effort(raw, model_info.reasoning_levels)
+        } else {
+            raw.to_string()
+        }
     }
 
     /// Determine if this is the first turn (no assistant messages in history).
@@ -362,6 +437,15 @@ impl OpenAIProvider {
         input
     }
 
+    /// Whether hosted tool search is available for this provider instance.
+    ///
+    /// Requires both: the model declares support AND we're on the Platform endpoint.
+    /// Tool search is not available on the Codex backend.
+    fn model_supports_tool_search(&self) -> bool {
+        self.api_endpoint == ApiEndpoint::Platform
+            && get_openai_model(&self.config.model).is_some_and(|m| m.supports_tool_search)
+    }
+
     /// Build the full [`ResponsesRequest`] from context and options.
     fn build_request(
         &self,
@@ -370,7 +454,11 @@ impl OpenAIProvider {
     ) -> ResponsesRequest {
         let reasoning_effort = self.resolve_reasoning_effort(options);
         let input = Self::build_input(context);
-        let tools = context.tools.as_ref().map(|t| convert_tools(t));
+        let enable_tool_search = self.model_supports_tool_search();
+        let tools = context
+            .tools
+            .as_ref()
+            .map(|t| convert_tools_v2(t, enable_tool_search));
 
         ResponsesRequest {
             model: self.config.model.clone(),
@@ -403,11 +491,11 @@ impl OpenAIProvider {
         );
 
         let tokens = self.tokens.lock().await;
-        let headers = Self::build_headers(&tokens)?;
+        let headers = Self::build_headers(&tokens, self.api_endpoint)?;
         drop(tokens);
 
         let request = self.build_request(context, options);
-        let url = format!("{}/codex/responses", self.base_url);
+        let url = format!("{}{}", self.base_url, self.api_endpoint.path());
 
         let response = self
             .client
@@ -489,7 +577,9 @@ impl Provider for OpenAIProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openai::types::{OpenAIApiSettings, ReasoningEffort};
+    use crate::openai::types::{
+        ApiEndpoint, DEFAULT_BASE_URL, OpenAIApiSettings, OpenAIAuth, ReasoningEffort,
+    };
 
     fn test_tokens() -> crate::auth::OAuthTokens {
         crate::auth::OAuthTokens {
@@ -653,7 +743,7 @@ mod tests {
     #[test]
     fn build_headers_has_required_fields() {
         let tokens = test_tokens();
-        let headers = OpenAIProvider::build_headers(&tokens).unwrap();
+        let headers = OpenAIProvider::build_headers(&tokens, ApiEndpoint::Codex).unwrap();
 
         assert_eq!(
             headers[AUTHORIZATION].to_str().unwrap(),
@@ -679,7 +769,7 @@ mod tests {
             expires_at: 9_999_999_999_999,
         };
 
-        let headers = OpenAIProvider::build_headers(&tokens).unwrap();
+        let headers = OpenAIProvider::build_headers(&tokens, ApiEndpoint::Codex).unwrap();
         assert_eq!(headers["chatgpt-account-id"], "acct_789");
     }
 
@@ -691,8 +781,189 @@ mod tests {
             expires_at: 9_999_999_999_999,
         };
 
-        let headers = OpenAIProvider::build_headers(&tokens).unwrap();
+        let headers = OpenAIProvider::build_headers(&tokens, ApiEndpoint::Codex).unwrap();
         assert!(headers.get("chatgpt-account-id").is_none());
+    }
+
+    // ── Platform headers ─────────────────────────────────────────────
+
+    #[test]
+    fn platform_headers_omit_codex_headers() {
+        let tokens = test_tokens();
+        let headers = OpenAIProvider::build_headers(&tokens, ApiEndpoint::Platform).unwrap();
+
+        assert_eq!(
+            headers[AUTHORIZATION].to_str().unwrap(),
+            "Bearer test-token"
+        );
+        assert_eq!(headers[CONTENT_TYPE], "application/json");
+        assert_eq!(headers[ACCEPT], "text/event-stream");
+        assert!(headers.get("openai-beta").is_none());
+        assert!(headers.get("openai-originator").is_none());
+        assert!(headers.get("chatgpt-account-id").is_none());
+    }
+
+    #[test]
+    fn platform_headers_no_account_id_even_with_jwt() {
+        let header = base64url_encode(r#"{"alg":"RS256"}"#);
+        let payload = base64url_encode(
+            r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#,
+        );
+        let jwt = format!("{header}.{payload}.sig");
+
+        let tokens = crate::auth::OAuthTokens {
+            access_token: jwt,
+            refresh_token: "rt".into(),
+            expires_at: 9_999_999_999_999,
+        };
+
+        let headers = OpenAIProvider::build_headers(&tokens, ApiEndpoint::Platform).unwrap();
+        assert!(headers.get("chatgpt-account-id").is_none());
+        assert!(headers.get("openai-beta").is_none());
+    }
+
+    // ── Endpoint routing ─────────────────────────────────────────────
+
+    #[test]
+    fn provider_endpoint_codex_for_53() {
+        let provider = OpenAIProvider::new(test_config());
+        assert_eq!(provider.api_endpoint, ApiEndpoint::Codex);
+    }
+
+    #[test]
+    fn provider_endpoint_oauth_54_forced_to_codex() {
+        // OAuth tokens lack Platform API scopes — always routes to Codex.
+        let mut config = test_config();
+        config.model = "gpt-5.4".into();
+        let provider = OpenAIProvider::new(config);
+        assert_eq!(provider.api_endpoint, ApiEndpoint::Codex);
+        assert_eq!(provider.base_url, DEFAULT_BASE_URL);
+    }
+
+    #[test]
+    fn provider_endpoint_api_key_54_uses_platform() {
+        let config = OpenAIConfig {
+            model: "gpt-5.4".into(),
+            auth: OpenAIAuth::ApiKey {
+                api_key: "sk-test-key".into(),
+            },
+            max_tokens: None,
+            temperature: None,
+            base_url: None,
+            reasoning_effort: None,
+            provider_settings: OpenAIApiSettings::default(),
+        };
+        let provider = OpenAIProvider::new(config);
+        assert_eq!(provider.api_endpoint, ApiEndpoint::Platform);
+        assert_eq!(
+            provider.base_url,
+            super::super::types::DEFAULT_PLATFORM_BASE_URL
+        );
+    }
+
+    #[test]
+    fn provider_endpoint_api_key_codex_model_stays_codex() {
+        let config = OpenAIConfig {
+            model: "gpt-5.3-codex".into(),
+            auth: OpenAIAuth::ApiKey {
+                api_key: "sk-test-key".into(),
+            },
+            max_tokens: None,
+            temperature: None,
+            base_url: None,
+            reasoning_effort: None,
+            provider_settings: OpenAIApiSettings::default(),
+        };
+        let provider = OpenAIProvider::new(config);
+        assert_eq!(provider.api_endpoint, ApiEndpoint::Codex);
+    }
+
+    #[test]
+    fn provider_endpoint_unknown_model_defaults_to_codex() {
+        let mut config = test_config();
+        config.model = "unknown-model".into();
+        let provider = OpenAIProvider::new(config);
+        assert_eq!(provider.api_endpoint, ApiEndpoint::Codex);
+    }
+
+    #[test]
+    fn url_codex_endpoint() {
+        let provider = OpenAIProvider::new(test_config());
+        let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
+        assert_eq!(url, "https://chatgpt.com/backend-api/codex/responses");
+    }
+
+    #[test]
+    fn url_platform_endpoint() {
+        let config = OpenAIConfig {
+            model: "gpt-5.4".into(),
+            auth: OpenAIAuth::ApiKey { api_key: "sk-test".into() },
+            max_tokens: None,
+            temperature: None,
+            base_url: None,
+            reasoning_effort: None,
+            provider_settings: OpenAIApiSettings::default(),
+        };
+        let provider = OpenAIProvider::new(config);
+        let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
+        assert_eq!(url, "https://api.openai.com/v1/responses");
+    }
+
+    #[test]
+    fn base_url_override_preserves_endpoint_path() {
+        let config = OpenAIConfig {
+            model: "gpt-5.4".into(),
+            auth: OpenAIAuth::ApiKey { api_key: "sk-test".into() },
+            max_tokens: None,
+            temperature: None,
+            base_url: Some("https://custom.example.com".into()),
+            reasoning_effort: None,
+            provider_settings: OpenAIApiSettings::default(),
+        };
+        let provider = OpenAIProvider::new(config);
+        let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
+        assert_eq!(url, "https://custom.example.com/v1/responses");
+    }
+
+    #[test]
+    fn base_url_override_codex_preserves_path() {
+        let mut config = test_config();
+        config.base_url = Some("https://custom.example.com".into());
+        let provider = OpenAIProvider::new(config);
+        let url = format!("{}{}", provider.base_url, provider.api_endpoint.path());
+        assert_eq!(url, "https://custom.example.com/codex/responses");
+    }
+
+    // ── Tool search availability ─────────────────────────────────────
+
+    #[test]
+    fn tool_search_disabled_on_codex_even_for_54() {
+        // OAuth → Codex, even for GPT 5.4 which declares tool_search support.
+        let mut config = test_config();
+        config.model = "gpt-5.4".into();
+        let provider = OpenAIProvider::new(config);
+        assert!(!provider.model_supports_tool_search());
+    }
+
+    #[test]
+    fn tool_search_enabled_on_platform_for_54() {
+        let config = OpenAIConfig {
+            model: "gpt-5.4".into(),
+            auth: OpenAIAuth::ApiKey { api_key: "sk-test".into() },
+            max_tokens: None,
+            temperature: None,
+            base_url: None,
+            reasoning_effort: None,
+            provider_settings: OpenAIApiSettings::default(),
+        };
+        let provider = OpenAIProvider::new(config);
+        assert!(provider.model_supports_tool_search());
+    }
+
+    #[test]
+    fn tool_search_disabled_for_codex_models() {
+        let provider = OpenAIProvider::new(test_config());
+        assert!(!provider.model_supports_tool_search());
     }
 
     // ── resolve_reasoning_effort ──────────────────────────────────────
@@ -742,7 +1013,8 @@ mod tests {
             reasoning_effort: Some(ReasoningEffort::Max),
             ..Default::default()
         };
-        assert_eq!(provider.resolve_reasoning_effort(&options), "max");
+        // gpt-5.3-codex doesn't support "max" — clamps to "xhigh" (highest available)
+        assert_eq!(provider.resolve_reasoning_effort(&options), "xhigh");
     }
 
     #[test]
@@ -771,6 +1043,82 @@ mod tests {
         let provider = OpenAIProvider::new(config);
         let options = ProviderStreamOptions::default();
         assert_eq!(provider.resolve_reasoning_effort(&options), "medium");
+    }
+
+    // ── Reasoning clamping ─────────────────────────────────────────
+
+    #[test]
+    fn clamp_none_on_53_to_low() {
+        // gpt-5.3-codex supports ["low", "medium", "high", "xhigh"] — no "none"
+        assert_eq!(
+            super::clamp_reasoning_effort("none", &["low", "medium", "high", "xhigh"]),
+            "low"
+        );
+    }
+
+    #[test]
+    fn clamp_xhigh_on_51_mini_to_high() {
+        // gpt-5.1-codex-mini supports ["low", "medium", "high"] — no "xhigh"
+        assert_eq!(
+            super::clamp_reasoning_effort("xhigh", &["low", "medium", "high"]),
+            "high"
+        );
+    }
+
+    #[test]
+    fn clamp_xhigh_on_54_passthrough() {
+        assert_eq!(
+            super::clamp_reasoning_effort("xhigh", &["none", "low", "medium", "high", "xhigh"]),
+            "xhigh"
+        );
+    }
+
+    #[test]
+    fn clamp_none_on_54_passthrough() {
+        assert_eq!(
+            super::clamp_reasoning_effort("none", &["none", "low", "medium", "high", "xhigh"]),
+            "none"
+        );
+    }
+
+    #[test]
+    fn clamp_medium_passthrough() {
+        assert_eq!(
+            super::clamp_reasoning_effort("medium", &["low", "medium", "high"]),
+            "medium"
+        );
+    }
+
+    #[test]
+    fn reasoning_effort_gpt54_defaults_to_medium() {
+        let mut config = test_config();
+        config.model = "gpt-5.4".into();
+        let provider = OpenAIProvider::new(config);
+        let options = ProviderStreamOptions::default();
+        assert_eq!(provider.resolve_reasoning_effort(&options), "medium");
+    }
+
+    #[test]
+    fn reasoning_effort_gpt54_none_passthrough() {
+        let mut config = test_config();
+        config.model = "gpt-5.4".into();
+        let provider = OpenAIProvider::new(config);
+        let options = ProviderStreamOptions {
+            reasoning_effort: Some(ReasoningEffort::None),
+            ..Default::default()
+        };
+        assert_eq!(provider.resolve_reasoning_effort(&options), "none");
+    }
+
+    #[test]
+    fn reasoning_effort_none_clamped_on_53() {
+        let provider = OpenAIProvider::new(test_config());
+        let options = ProviderStreamOptions {
+            reasoning_effort: Some(ReasoningEffort::None),
+            ..Default::default()
+        };
+        // gpt-5.3-codex doesn't support "none" — clamp to "low"
+        assert_eq!(provider.resolve_reasoning_effort(&options), "low");
     }
 
     // ── is_first_turn ────────────────────────────────────────────────
