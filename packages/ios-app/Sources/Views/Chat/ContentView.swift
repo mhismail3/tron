@@ -90,6 +90,9 @@ struct ContentView: View {
                     Task { await notificationStore.refresh() }
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .notificationReceived)) { _ in
+                Task { await notificationStore.refresh() }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
                 coordinator?.handleServerSettingsChanged()
             }

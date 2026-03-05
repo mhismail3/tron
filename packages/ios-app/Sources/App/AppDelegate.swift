@@ -67,9 +67,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             category: .notification
         )
 
-        // Show banner and sound when app is in foreground, but NOT badge
-        // (user is already in the app, no need to increment badge)
+        // Show banner and sound when app is in foreground
         completionHandler([.banner, .sound])
+
+        // Notify observers so dashboard can refresh notification badge
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .notificationReceived, object: nil)
+        }
     }
 
     /// Handle notification tap
@@ -120,4 +124,7 @@ extension Notification.Name {
 
     /// Posted when user taps a notification to navigate to a session
     static let navigateToSession = Notification.Name("navigateToSession")
+
+    /// Posted when a push notification is received while app is in foreground
+    static let notificationReceived = Notification.Name("notificationReceived")
 }
