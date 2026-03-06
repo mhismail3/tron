@@ -38,9 +38,9 @@ struct SessionSidebar: View {
     let actions: DashboardToolbarActions
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                if eventStoreManager.sortedSessions.isEmpty && eventStoreManager.chatSession == nil {
+                if eventStoreManager.sortedSessions.isEmpty {
                     // Empty state placeholder
                     VStack(spacing: 8) {
                         Text("No active sessions")
@@ -50,29 +50,6 @@ struct SessionSidebar: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selectedSessionId) {
-                        // Chat session pinned at top
-                        if let chat = eventStoreManager.chatSession {
-                            Section {
-                                ChatSessionHeroCard(
-                                    session: chat,
-                                    isSelected: chat.id == selectedSessionId
-                                )
-                                .tag(chat.id)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 2, trailing: 12))
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button {
-                                        chatToReset = true
-                                    } label: {
-                                        Image(systemName: "arrow.counterclockwise")
-                                    }
-                                    .tint(.tronMint)
-                                }
-                            }
-                        }
-
-                        // Regular sessions
                         Section {
                             ForEach(eventStoreManager.sortedSessions) { session in
                                 CachedSessionSidebarRow(
@@ -102,12 +79,21 @@ struct SessionSidebar: View {
                 }
             }
 
-            // Floating buttons - mic (smaller) and plus
-            HStack(spacing: 12) {
+            // Bottom floating bar
+            HStack {
+                if let chat = eventStoreManager.chatSession {
+                    FloatingChatPill(
+                        session: chat,
+                        isSelected: chat.id == selectedSessionId,
+                        onTap: { selectedSessionId = chat.id },
+                        onReset: { chatToReset = true }
+                    )
+                }
+                Spacer()
                 FloatingVoiceNotesButton(action: onVoiceNote)
                 FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
             }
-            .padding(.trailing, 20)
+            .padding(.horizontal, 20)
             .padding(.bottom, 24)
         }
         .background {
@@ -151,30 +137,24 @@ struct SessionSidebar: View {
     }
 }
 
-// MARK: - Chat Session Hero Card
+// MARK: - Floating Chat Pill
 
 @available(iOS 26.0, *)
-struct ChatSessionHeroCard: View {
+struct FloatingChatPill: View {
     let session: CachedSession
     let isSelected: Bool
+    let onTap: () -> Void
+    let onReset: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
             Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                 .foregroundStyle(.tronMint)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Chat")
-                    .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
-                    .foregroundStyle(.tronMint)
-
-                Text(session.formattedDate)
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronTextMuted)
-            }
-
-            Spacer()
+            Text("Chat")
+                .font(TronTypography.mono(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(.tronMint)
 
             if session.isProcessing == true {
                 Image(systemName: "brain")
@@ -183,19 +163,24 @@ struct ChatSessionHeroCard: View {
                     .symbolEffect(.pulse, options: .repeating)
             }
         }
-        .padding(.vertical, 14)
         .padding(.horizontal, 18)
+        .frame(height: 44)
         .glassEffect(
             isSelected
                 ? .regular.tint(Color.tronMint.opacity(0.25)).interactive()
-                : .regular.tint(Color.tronMint.opacity(0.12)).interactive(),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                : .regular.tint(Color.tronMint.opacity(0.2)).interactive(),
+            in: .capsule
         )
-        .contentShape(
-            [.interaction, .hoverEffect],
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
+        .contentShape([.interaction, .hoverEffect, .contextMenuPreview], Capsule())
         .hoverEffect(.highlight)
+        .onTapGesture { onTap() }
+        .contextMenu {
+            Button {
+                onReset()
+            } label: {
+                Label("Reset Chat", systemImage: "arrow.counterclockwise")
+            }
+        }
     }
 }
 
