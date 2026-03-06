@@ -623,6 +623,8 @@ async fn main() -> Result<()> {
                 deps.provider_factory.clone(),
                 deps.tool_factory.clone(),
                 origin.clone(),
+                shared_subagent_manager.clone(),
+                embedding_controller.clone(),
             )) as Arc<dyn tron_cron::AgentTurnExecutor>
         });
     let cron_deps = tron_cron::ExecutorDeps {

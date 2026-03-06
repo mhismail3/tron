@@ -3597,6 +3597,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
+ "futures",
  "metrics-exporter-prometheus",
  "mimalloc",
  "parking_lot",

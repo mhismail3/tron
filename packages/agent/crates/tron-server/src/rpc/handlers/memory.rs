@@ -26,7 +26,7 @@ use super::{opt_array, opt_string, opt_u64};
 // =============================================================================
 
 /// Information about a "cycle" — the messages between two memory.ledger boundaries.
-pub(crate) struct CycleInfo {
+pub struct CycleInfo {
     /// Messages in this cycle (after the last boundary).
     pub messages: Vec<Message>,
     /// First event ID in this cycle.
@@ -43,7 +43,7 @@ pub(crate) struct CycleInfo {
 ///
 /// Multiple ledger entries per session are expected — each covers a different cycle.
 /// This mirrors the TS server's `computeCycleRange()` pattern.
-pub(crate) fn compute_cycle_messages(
+pub fn compute_cycle_messages(
     event_store: &tron_events::EventStore,
     session_manager: &tron_runtime::orchestrator::session_manager::SessionManager,
     session_id: &str,
@@ -193,12 +193,17 @@ fn emit_memory_updated(
 ///
 /// Both the auto path (`RuntimeMemoryDeps`) and manual path (`UpdateLedgerHandler`)
 /// construct this from their respective contexts, then call [`execute_ledger_write()`].
-pub(crate) struct LedgerWriteDeps {
+pub struct LedgerWriteDeps {
+    /// Event store for persisting ledger events.
     pub event_store: Arc<tron_events::EventStore>,
+    /// Session manager for session context and message history.
     pub session_manager: Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    /// Subagent manager for spawning LLM subsessions (required for ledger generation).
     pub subagent_manager:
         Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
+    /// Embedding controller for fire-and-forget semantic vector indexing.
     pub embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+    /// Shutdown coordinator for tracking in-flight embedding tasks.
     pub shutdown_coordinator: Option<Arc<crate::shutdown::ShutdownCoordinator>>,
 }
 
@@ -217,7 +222,7 @@ pub(crate) struct LedgerWriteDeps {
 ///
 /// Returns a `LedgerWriteResult` suitable for both callers.
 #[allow(clippy::too_many_lines)]
-pub(crate) async fn execute_ledger_write(
+pub async fn execute_ledger_write(
     session_id: &str,
     working_directory: &str,
     deps: &LedgerWriteDeps,
@@ -247,7 +252,18 @@ pub(crate) async fn execute_ledger_write(
         use tron_runtime::context::llm_summarizer::SubsessionSpawner;
         use tron_runtime::context::summarizer::serialize_messages;
 
-        let transcript = serialize_messages(&cycle.messages);
+        let transcript = if source == "cron" {
+            let filtered = prepare_cron_transcript(&cycle.messages);
+            if cron_assistant_text_len(&filtered) < 500 {
+                debug!(session_id, "cron session had no meaningful assistant output, skipping ledger");
+                return tron_events::memory::types::LedgerWriteResult::skipped(
+                    "cron session had no meaningful output",
+                );
+            }
+            serialize_messages(&filtered)
+        } else {
+            serialize_messages(&cycle.messages)
+        };
         let spawner = SubagentManagerSpawner {
             manager: manager.clone(),
             parent_session_id: session_id.to_owned(),
@@ -395,6 +411,60 @@ fn spawn_embed_memory_with_deps(
         });
         if let Some(coord) = shutdown_coordinator {
             coord.register_task(handle);
+        }
+    }
+}
+
+// =============================================================================
+// Cron transcript preparation
+// =============================================================================
+
+/// Prepare transcript for a cron session by stripping long boilerplate user
+/// messages (reusable task prompts) so the ledger LLM focuses on the
+/// assistant's actual actions rather than static configuration.
+fn prepare_cron_transcript(messages: &[Message]) -> Vec<Message> {
+    messages
+        .iter()
+        .map(|m| {
+            if let Message::User { content, .. } = m {
+                if user_message_len(content) > 500 {
+                    return Message::User {
+                        content: UserMessageContent::Text(
+                            "[Recurring cron task prompt omitted — focus on the assistant's actions below]".into(),
+                        ),
+                        timestamp: None,
+                    };
+                }
+            }
+            m.clone()
+        })
+        .collect()
+}
+
+/// Total text length across all assistant messages (ignores tool_use, thinking, etc.).
+/// Used to detect no-op cron sessions before spending an LLM call on ledger generation.
+fn cron_assistant_text_len(messages: &[Message]) -> usize {
+    messages
+        .iter()
+        .map(|m| {
+            if let Message::Assistant { content, .. } = m {
+                content
+                    .iter()
+                    .filter_map(|c| c.as_text())
+                    .map(str::len)
+                    .sum::<usize>()
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
+fn user_message_len(content: &UserMessageContent) -> usize {
+    match content {
+        UserMessageContent::Text(t) => t.len(),
+        UserMessageContent::Blocks(blocks) => {
+            blocks.iter().filter_map(|c| c.as_text()).map(str::len).sum()
         }
     }
 }
@@ -1933,5 +2003,424 @@ mod tests {
         // session.start event exists but no message events → cycle has no messages
         // compute_cycle_messages returns None or Some with empty messages
         assert!(cycle.is_none() || cycle.unwrap().messages.is_empty());
+    }
+
+    // ── execute_ledger_write with "cron" source ──
+
+    use futures::stream;
+    use tron_core::content::AssistantContent;
+    use tron_core::events::{AssistantMessage, StreamEvent};
+    use tron_core::messages::TokenUsage;
+    use tron_llm::models::types::Provider as LlmProviderType;
+    use tron_llm::provider::{
+        Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+    };
+
+    const LEDGER_JSON: &str = r#"{"title":"Cron source test","entryType":"research","input":"test","actions":["tested source"]}"#;
+
+    struct LedgerMockProvider;
+    #[async_trait]
+    impl Provider for LedgerMockProvider {
+        fn provider_type(&self) -> LlmProviderType {
+            LlmProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock-ledger"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let s = stream::iter(vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::TextDelta {
+                    delta: LEDGER_JSON.into(),
+                }),
+                Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text(LEDGER_JSON)],
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            ..Default::default()
+                        }),
+                    },
+                    stop_reason: "end_turn".into(),
+                }),
+            ]);
+            Ok(Box::pin(s))
+        }
+    }
+
+    struct LedgerMockProviderFactory;
+    #[async_trait]
+    impl ProviderFactory for LedgerMockProviderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            Ok(Arc::new(LedgerMockProvider))
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_ledger_write_cron_source() {
+        let ctx = make_test_context();
+
+        // Seed a session with user + assistant messages
+        let sid = ctx
+            .session_manager
+            .create_session("mock", "/tmp/cron-test", Some("cron source test"))
+            .unwrap();
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: json!({"content": "Hello from cron"}),
+            parent_id: None,
+        });
+        // Assistant text must be >= 500 chars to pass cron no-op filter
+        let long_response = "x".repeat(600);
+        let _ = ctx.event_store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageAssistant,
+            payload: json!({
+                "content": [{"type": "text", "text": long_response}],
+                "turn": 1,
+                "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+            }),
+            parent_id: None,
+        });
+        ctx.session_manager.invalidate_session(&sid);
+
+        // Build SubagentManager with mock LLM that returns valid ledger JSON
+        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
+        let subagent = Arc::new(
+            tron_runtime::orchestrator::subagent_manager::SubagentManager::new(
+                ctx.session_manager.clone(),
+                ctx.event_store.clone(),
+                broadcast,
+                Arc::new(LedgerMockProviderFactory),
+                None,
+                None,
+            ),
+        );
+        subagent.set_tool_factory(Arc::new(tron_tools::registry::ToolRegistry::new));
+
+        let deps = LedgerWriteDeps {
+            event_store: ctx.event_store.clone(),
+            session_manager: ctx.session_manager.clone(),
+            subagent_manager: Some(subagent),
+            embedding_controller: None,
+            shutdown_coordinator: None,
+        };
+
+        let result = execute_ledger_write(&sid, "/tmp/cron-test", &deps, "cron").await;
+        assert!(result.written, "ledger write should succeed");
+
+        // Verify persisted event has source: "cron"
+        let events = ctx
+            .event_store
+            .get_events_by_type(&sid, &["memory.ledger"], Some(10))
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        let payload: Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["source"], "cron");
+        assert_eq!(payload["title"], "Cron source test");
+    }
+
+    // ── prepare_cron_transcript tests ──
+
+    #[test]
+    fn prepare_cron_transcript_strips_long_user_message() {
+        let long_text = "x".repeat(501);
+        let messages = vec![
+            Message::User {
+                content: UserMessageContent::Text(long_text),
+                timestamp: Some(1.0),
+            },
+            Message::Assistant {
+                content: vec![tron_core::content::AssistantContent::Text {
+                    text: "I did something".into(),
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+        ];
+
+        let result = prepare_cron_transcript(&messages);
+        assert_eq!(result.len(), 2);
+
+        match &result[0] {
+            Message::User { content, timestamp } => {
+                match content {
+                    UserMessageContent::Text(t) => assert!(t.contains("omitted")),
+                    _ => panic!("expected Text variant"),
+                }
+                assert_eq!(*timestamp, None);
+            }
+            _ => panic!("expected User message"),
+        }
+
+        assert!(matches!(&result[1], Message::Assistant { .. }));
+    }
+
+    #[test]
+    fn prepare_cron_transcript_keeps_short_user_message() {
+        let short_text = "what's the weather?";
+        let messages = vec![Message::User {
+            content: UserMessageContent::Text(short_text.into()),
+            timestamp: Some(2.0),
+        }];
+
+        let result = prepare_cron_transcript(&messages);
+        match &result[0] {
+            Message::User { content, timestamp } => {
+                match content {
+                    UserMessageContent::Text(t) => assert_eq!(t, short_text),
+                    _ => panic!("expected Text variant"),
+                }
+                assert_eq!(*timestamp, Some(2.0));
+            }
+            _ => panic!("expected User message"),
+        }
+    }
+
+    #[test]
+    fn prepare_cron_transcript_preserves_assistant_messages() {
+        let messages = vec![
+            Message::User {
+                content: UserMessageContent::Text("x".repeat(600)),
+                timestamp: None,
+            },
+            Message::Assistant {
+                content: vec![
+                    tron_core::content::AssistantContent::Text {
+                        text: "response".into(),
+                    },
+                    tron_core::content::AssistantContent::ToolUse {
+                        id: "t1".into(),
+                        name: "search".into(),
+                        arguments: serde_json::Map::new(),
+                        thought_signature: None,
+                    },
+                ],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: Some("deep thoughts".into()),
+            },
+        ];
+
+        let result = prepare_cron_transcript(&messages);
+        match &result[1] {
+            Message::Assistant {
+                content, thinking, ..
+            } => {
+                assert_eq!(content.len(), 2);
+                assert_eq!(thinking.as_deref(), Some("deep thoughts"));
+            }
+            _ => panic!("expected Assistant message"),
+        }
+    }
+
+    #[test]
+    fn prepare_cron_transcript_handles_empty() {
+        let result = prepare_cron_transcript(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn prepare_cron_transcript_multiple_user_messages() {
+        let messages = vec![
+            Message::User {
+                content: UserMessageContent::Text("x".repeat(600)),
+                timestamp: None,
+            },
+            Message::User {
+                content: UserMessageContent::Text("short follow-up".into()),
+                timestamp: None,
+            },
+        ];
+
+        let result = prepare_cron_transcript(&messages);
+        match &result[0] {
+            Message::User { content, .. } => match content {
+                UserMessageContent::Text(t) => assert!(t.contains("omitted")),
+                _ => panic!("expected Text"),
+            },
+            _ => panic!("expected User"),
+        }
+        match &result[1] {
+            Message::User { content, .. } => match content {
+                UserMessageContent::Text(t) => assert_eq!(t, "short follow-up"),
+                _ => panic!("expected Text"),
+            },
+            _ => panic!("expected User"),
+        }
+    }
+
+    #[test]
+    fn prepare_cron_transcript_blocks_variant() {
+        use tron_core::content::UserContent;
+        let messages = vec![Message::User {
+            content: UserMessageContent::Blocks(vec![
+                UserContent::Text {
+                    text: "x".repeat(300),
+                },
+                UserContent::Text {
+                    text: "y".repeat(300),
+                },
+            ]),
+            timestamp: None,
+        }];
+
+        let result = prepare_cron_transcript(&messages);
+        match &result[0] {
+            Message::User { content, .. } => match content {
+                UserMessageContent::Text(t) => assert!(t.contains("omitted")),
+                _ => panic!("expected Text replacement"),
+            },
+            _ => panic!("expected User"),
+        }
+    }
+
+    #[test]
+    fn user_message_len_text() {
+        let content = UserMessageContent::Text("hello".into());
+        assert_eq!(user_message_len(&content), 5);
+    }
+
+    #[test]
+    fn user_message_len_blocks() {
+        use tron_core::content::UserContent;
+        let content = UserMessageContent::Blocks(vec![
+            UserContent::Text {
+                text: "abc".into(),
+            },
+            UserContent::Text {
+                text: "de".into(),
+            },
+        ]);
+        assert_eq!(user_message_len(&content), 5);
+    }
+
+    #[test]
+    fn user_message_len_empty_blocks() {
+        use tron_core::content::UserContent;
+        let content = UserMessageContent::Blocks(vec![UserContent::Image {
+            data: "base64data".into(),
+            mime_type: "image/png".into(),
+        }]);
+        assert_eq!(user_message_len(&content), 0);
+    }
+
+    // ── cron_assistant_text_len tests ──
+
+    #[test]
+    fn cron_assistant_text_len_sums_text_blocks() {
+        use tron_core::content::AssistantContent;
+        let messages = vec![
+            Message::Assistant {
+                content: vec![
+                    AssistantContent::Text {
+                        text: "hello".into(),
+                    },
+                    AssistantContent::ToolUse {
+                        id: "t1".into(),
+                        name: "Bash".into(),
+                        arguments: serde_json::Map::new(),
+                        thought_signature: None,
+                    },
+                    AssistantContent::Text {
+                        text: "world".into(),
+                    },
+                ],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::Assistant {
+                content: vec![AssistantContent::Text {
+                    text: "more text".into(),
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+        ];
+        // "hello" (5) + "world" (5) + "more text" (9) = 19
+        assert_eq!(cron_assistant_text_len(&messages), 19);
+    }
+
+    #[test]
+    fn cron_assistant_text_len_ignores_user_and_tool_result_messages() {
+        use tron_core::content::AssistantContent;
+        let messages = vec![
+            Message::User {
+                content: UserMessageContent::Text("long user text that should not count".into()),
+                timestamp: None,
+            },
+            Message::Assistant {
+                content: vec![AssistantContent::Text {
+                    text: "short".into(),
+                }],
+                usage: None,
+                cost: None,
+                stop_reason: None,
+                thinking: None,
+            },
+            Message::ToolResult {
+                tool_call_id: "t1".into(),
+                content: tron_core::messages::ToolResultMessageContent::Text(
+                    "tool output that should not count".into(),
+                ),
+                is_error: Some(false),
+            },
+        ];
+        assert_eq!(cron_assistant_text_len(&messages), 5);
+    }
+
+    #[test]
+    fn cron_assistant_text_len_empty() {
+        assert_eq!(cron_assistant_text_len(&[]), 0);
+    }
+
+    #[test]
+    fn cron_assistant_text_len_only_tool_use_no_text() {
+        use tron_core::content::AssistantContent;
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::ToolUse {
+                id: "t1".into(),
+                name: "Remember".into(),
+                arguments: serde_json::Map::new(),
+                thought_signature: None,
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        assert_eq!(cron_assistant_text_len(&messages), 0);
+    }
+
+    #[test]
+    fn cron_assistant_text_len_boundary_500() {
+        use tron_core::content::AssistantContent;
+        let messages = vec![Message::Assistant {
+            content: vec![AssistantContent::Text {
+                text: "x".repeat(500),
+            }],
+            usage: None,
+            cost: None,
+            stop_reason: None,
+            thinking: None,
+        }];
+        // Exactly 500 — below threshold, should be skippable
+        assert_eq!(cron_assistant_text_len(&messages), 500);
     }
 }

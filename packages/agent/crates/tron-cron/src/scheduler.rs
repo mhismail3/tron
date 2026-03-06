@@ -236,11 +236,18 @@ impl CronScheduler {
             }
         }
 
+        // Clean up orphaned run records from previous server instance
+        let now = self.clock.now_utc();
+        if let Ok(orphaned) = store::complete_orphaned_runs(&self.pool, now, "server restarted") {
+            if orphaned > 0 {
+                tracing::info!(count = orphaned, "cleaned up orphaned run records from previous instance");
+            }
+        }
+
         // Detect stuck jobs
         self.detect_stuck_jobs()?;
 
         // Apply misfire policy and compute next_run_at
-        let now = self.clock.now_utc();
         for job in &config.jobs {
             if !job.enabled {
                 continue;
@@ -523,26 +530,35 @@ impl CronScheduler {
                     "stuck job detected, clearing"
                 );
 
-                // Record a timed_out run
-                let run_id = format!("cronrun_{}", Uuid::now_v7());
-                let _ = store::insert_run(&self.pool, &run_id, &job_id, "stuck", since);
-                let run = crate::types::CronRun {
-                    id: run_id,
-                    job_id: Some(job_id.clone()),
-                    job_name: "stuck".into(),
-                    status: RunStatus::TimedOut,
-                    started_at: since,
-                    completed_at: Some(now),
-                    duration_ms: Some((now - since).num_milliseconds()),
-                    output: None,
-                    output_truncated: false,
-                    error: Some("stuck job cleared on startup/maintenance".into()),
-                    exit_code: None,
-                    attempt: 0,
-                    session_id: None,
-                    delivery_status: None,
-                };
-                let _ = store::complete_run(&self.pool, &run);
+                // Update the original running run record(s) to timed_out
+                let error_msg = "stuck job cleared on startup/maintenance";
+                let updated = store::complete_stuck_runs(&self.pool, &job_id, now, error_msg)
+                    .unwrap_or(0);
+
+                // If no records found (edge case: record deleted or DB inconsistency),
+                // create a synthetic timed_out record for audit trail
+                if updated == 0 {
+                    let run_id = format!("cronrun_{}", Uuid::now_v7());
+                    let _ = store::insert_run(&self.pool, &run_id, &job_id, "stuck", since);
+                    let run = crate::types::CronRun {
+                        id: run_id,
+                        job_id: Some(job_id.clone()),
+                        job_name: "stuck".into(),
+                        status: RunStatus::TimedOut,
+                        started_at: since,
+                        completed_at: Some(now),
+                        duration_ms: Some((now - since).num_milliseconds()),
+                        output: None,
+                        output_truncated: false,
+                        error: Some(error_msg.into()),
+                        exit_code: None,
+                        attempt: 0,
+                        session_id: None,
+                        delivery_status: None,
+                    };
+                    let _ = store::complete_run(&self.pool, &run);
+                }
+
                 store::clear_running_since(&self.pool, &job_id)?;
                 let _ = store::increment_consecutive_failures(&self.pool, &job_id);
             }
@@ -994,6 +1010,175 @@ mod tests {
         cancel.cancel();
         let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
         let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
+    }
+
+    #[test]
+    fn detect_stuck_updates_original_run() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, config_path, backup_path, cancel);
+
+        // Insert a job with running_since 3 hours ago (timeout is 7200s = 2h)
+        let job = CronJob {
+            id: "cron_stuck".into(),
+            name: "Stuck".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every { interval_secs: 60, anchor: None },
+            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        store::upsert_job(&pool, &job).unwrap();
+
+        let three_hours_ago = clock.now_utc() - chrono::Duration::hours(3);
+        store::set_running_since(&pool, "cron_stuck", three_hours_ago).unwrap();
+
+        // Insert the original running run record
+        store::insert_run(&pool, "run_orig", "cron_stuck", "Stuck", three_hours_ago).unwrap();
+
+        scheduler.detect_stuck_jobs().unwrap();
+
+        // Original run should be timed_out — no extra records
+        let (runs, total) = store::get_runs(&pool, Some("cron_stuck"), None, 10, 0).unwrap();
+        assert_eq!(total, 1, "should have exactly 1 run, not a duplicate");
+        assert_eq!(runs[0].id, "run_orig");
+        assert_eq!(runs[0].status, RunStatus::TimedOut);
+        assert!(runs[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn detect_stuck_creates_synthetic_when_no_run() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, config_path, backup_path, cancel);
+
+        let job = CronJob {
+            id: "cron_ghost".into(),
+            name: "Ghost".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every { interval_secs: 60, anchor: None },
+            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        store::upsert_job(&pool, &job).unwrap();
+
+        let three_hours_ago = clock.now_utc() - chrono::Duration::hours(3);
+        store::set_running_since(&pool, "cron_ghost", three_hours_ago).unwrap();
+        // No run record exists
+
+        scheduler.detect_stuck_jobs().unwrap();
+
+        // Should create a synthetic timed_out record
+        let (runs, total) = store::get_runs(&pool, Some("cron_ghost"), None, 10, 0).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(runs[0].status, RunStatus::TimedOut);
+    }
+
+    #[tokio::test]
+    async fn startup_cleans_orphaned_runs() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+
+        // Pre-populate with a job and orphaned running runs
+        let job = CronJob {
+            id: "cron_orphan".into(),
+            name: "Orphan".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every { interval_secs: 60, anchor: None },
+            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::default(),
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        // Config must include the job so sync doesn't delete it (and NULL the run job_ids)
+        let config = CronConfig { version: 1, jobs: vec![job.clone()] };
+        crate::config::save_config(&config_path, &backup_path, &config).unwrap();
+
+        store::upsert_job(&pool, &job).unwrap();
+        store::insert_run(&pool, "orphan_1", "cron_orphan", "Orphan", Utc::now()).unwrap();
+        store::insert_run(&pool, "orphan_2", "cron_orphan", "Orphan", Utc::now()).unwrap();
+
+        assert_eq!(store::count_running_runs(&pool, "cron_orphan").unwrap(), 2);
+
+        let deps = make_deps(&pool);
+        let scheduler = Arc::new(CronScheduler::new(pool.clone(), clock, deps, config_path, backup_path, cancel.clone()));
+        let (h1, h2) = scheduler.start();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // All orphaned runs should be failed
+        assert_eq!(store::count_running_runs(&pool, "cron_orphan").unwrap(), 0);
+        let (runs, _) = store::get_runs(&pool, Some("cron_orphan"), Some("failed"), 10, 0).unwrap();
+        assert_eq!(runs.len(), 2);
+
+        cancel.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), h1).await;
+        let _ = tokio::time::timeout(Duration::from_secs(5), h2).await;
+    }
+
+    #[test]
+    fn overlap_unblocked_after_stuck_detection() {
+        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let deps = make_deps(&pool);
+        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, config_path, backup_path, cancel);
+
+        let job = CronJob {
+            id: "cron_overlap".into(),
+            name: "Overlap".into(),
+            description: None,
+            enabled: true,
+            schedule: Schedule::Every { interval_secs: 60, anchor: None },
+            payload: Payload::ShellCommand { command: "echo hi".into(), working_directory: None, timeout_secs: 300 },
+            delivery: vec![],
+            overlap_policy: OverlapPolicy::Skip,
+            misfire_policy: MisfirePolicy::default(),
+            max_retries: 0,
+            auto_disable_after: 0,
+            stuck_timeout_secs: 7200,
+            tags: vec![],
+            workspace_id: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        store::upsert_job(&pool, &job).unwrap();
+
+        let three_hours_ago = clock.now_utc() - chrono::Duration::hours(3);
+        store::set_running_since(&pool, "cron_overlap", three_hours_ago).unwrap();
+        store::insert_run(&pool, "run_old", "cron_overlap", "Overlap", three_hours_ago).unwrap();
+
+        // Overlap check blocks new runs
+        assert_eq!(store::count_running_runs(&pool, "cron_overlap").unwrap(), 1);
+
+        scheduler.detect_stuck_jobs().unwrap();
+
+        // After stuck detection, overlap check should pass
+        assert_eq!(store::count_running_runs(&pool, "cron_overlap").unwrap(), 0);
     }
 
 }

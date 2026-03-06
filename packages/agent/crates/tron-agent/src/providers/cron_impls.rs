@@ -36,6 +36,8 @@ pub struct CronAgentTurnExecutor {
     provider_factory: Arc<dyn tron_llm::provider::ProviderFactory>,
     tool_factory: Arc<dyn Fn() -> tron_tools::registry::ToolRegistry + Send + Sync>,
     origin: String,
+    subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
+    embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
 }
 
 impl CronAgentTurnExecutor {
@@ -46,6 +48,8 @@ impl CronAgentTurnExecutor {
         provider_factory: Arc<dyn tron_llm::provider::ProviderFactory>,
         tool_factory: Arc<dyn Fn() -> tron_tools::registry::ToolRegistry + Send + Sync>,
         origin: String,
+        subagent_manager: Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
+        embedding_controller: Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
     ) -> Self {
         Self {
             event_store,
@@ -53,6 +57,8 @@ impl CronAgentTurnExecutor {
             provider_factory,
             tool_factory,
             origin,
+            subagent_manager,
+            embedding_controller,
         }
     }
 
@@ -154,7 +160,7 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
             system_prompt: system_prompt.map(String::from),
             max_turns: 25,
             enable_thinking: true,
-            working_directory: Some(workspace_path),
+            working_directory: Some(workspace_path.clone()),
             server_origin: Some(self.origin.clone()),
             workspace_id: workspace_id.map(String::from),
             ..tron_runtime::AgentConfig::default()
@@ -236,10 +242,25 @@ impl tron_cron::AgentTurnExecutor for CronAgentTurnExecutor {
         // 10. Extract output
         let (output, output_truncated) = Self::extract_output(&agent);
 
-        // 11. Flush persister
+        // 11. Flush persister then invalidate cached session state.
+        //     Invalidation forces compute_cycle_messages() to reconstruct from
+        //     persisted events instead of returning the stale empty snapshot
+        //     cached at create_session() time (before the agent ran).
         if let Ok(active) = self.session_manager.resume_session(&session_id) {
             let _ = active.context.persister.flush().await;
         }
+        self.session_manager.invalidate_session(&session_id);
+
+        // 12. Write memory ledger entry (fail-silent — never blocks the result)
+        let _ = write_cron_ledger(
+            &session_id,
+            &workspace_path,
+            &self.event_store,
+            &self.session_manager,
+            &self.subagent_manager,
+            &self.embedding_controller,
+        )
+        .await;
 
         Ok(tron_cron::AgentTurnResult {
             session_id,
@@ -262,6 +283,46 @@ impl Drop for SessionGuard {
     fn drop(&mut self) {
         self.session_manager.invalidate_session(&self.session_id);
     }
+}
+
+/// Write a memory ledger entry for a completed cron session.
+/// Returns `true` if written, `false` if skipped/failed (never errors).
+async fn write_cron_ledger(
+    session_id: &str,
+    workspace_path: &str,
+    event_store: &Arc<tron_events::EventStore>,
+    session_manager: &Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    subagent_manager: &Option<Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager>>,
+    embedding_controller: &Option<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+) -> bool {
+    let deps = tron_server::rpc::handlers::memory::LedgerWriteDeps {
+        event_store: event_store.clone(),
+        session_manager: session_manager.clone(),
+        subagent_manager: subagent_manager.clone(),
+        embedding_controller: embedding_controller.clone(),
+        shutdown_coordinator: None,
+    };
+    let result = tron_server::rpc::handlers::memory::execute_ledger_write(
+        session_id,
+        workspace_path,
+        &deps,
+        "cron",
+    )
+    .await;
+    if result.written {
+        tracing::debug!(
+            session_id,
+            title = ?result.title,
+            "cron session ledger entry written"
+        );
+    } else {
+        tracing::debug!(
+            session_id,
+            reason = ?result.reason,
+            "cron session ledger write skipped"
+        );
+    }
+    result.written
 }
 
 // ── Push Notifications ──────────────────────────────────────────────
@@ -411,6 +472,217 @@ impl tron_cron::SystemEventInjector for CronSystemEventInjector {
             .ok()
             .flatten()
             .is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_store_and_manager() -> (
+        Arc<tron_events::EventStore>,
+        Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    ) {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(tron_events::EventStore::new(pool));
+        let mgr = Arc::new(tron_runtime::orchestrator::session_manager::SessionManager::new(
+            store.clone(),
+        ));
+        (store, mgr)
+    }
+
+    #[tokio::test]
+    async fn write_cron_ledger_no_subagent_manager() {
+        let (store, mgr) = make_test_store_and_manager();
+        let sid = mgr
+            .create_session("mock", "/tmp", Some("test"))
+            .unwrap();
+        // Append a user message so compute_cycle_messages finds something
+        let _ = store.append(&tron_events::AppendOptions {
+            session_id: &sid,
+            event_type: tron_events::EventType::MessageUser,
+            payload: serde_json::json!({"content": "hello"}),
+            parent_id: None,
+        });
+        mgr.invalidate_session(&sid);
+
+        let result = write_cron_ledger(&sid, "/tmp", &store, &mgr, &None, &None).await;
+        assert!(!result, "should skip when subagent_manager is None");
+    }
+
+    #[tokio::test]
+    async fn write_cron_ledger_no_session_events() {
+        let (store, mgr) = make_test_store_and_manager();
+        let sid = mgr
+            .create_session("mock", "/tmp", Some("empty"))
+            .unwrap();
+        mgr.invalidate_session(&sid);
+
+        let result = write_cron_ledger(&sid, "/tmp", &store, &mgr, &None, &None).await;
+        assert!(!result, "should skip for session with no messages");
+    }
+
+    #[tokio::test]
+    async fn write_cron_ledger_no_embedding_controller() {
+        let (store, mgr) = make_test_store_and_manager();
+        let result = write_cron_ledger(
+            "nonexistent",
+            "/tmp",
+            &store,
+            &mgr,
+            &None,
+            &None::<Arc<tokio::sync::Mutex<tron_embeddings::EmbeddingController>>>,
+        )
+        .await;
+        // Must not panic — gracefully returns false
+        assert!(!result);
+    }
+
+    // ── Mock LLM that returns valid ledger JSON ──
+
+    use async_trait::async_trait;
+    use futures::stream;
+    use tron_core::content::AssistantContent;
+    use tron_core::events::{AssistantMessage, StreamEvent};
+    use tron_core::messages::TokenUsage;
+    use tron_llm::models::types::Provider as ProviderType;
+    use tron_llm::provider::{
+        Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+    };
+
+    const LEDGER_JSON: &str = r#"{"title":"Cron test session","entryType":"research","input":"test prompt","actions":["executed cron task"]}"#;
+
+    struct LedgerMockProvider;
+    #[async_trait]
+    impl Provider for LedgerMockProvider {
+        fn provider_type(&self) -> ProviderType {
+            ProviderType::Anthropic
+        }
+        fn model(&self) -> &str {
+            "mock-ledger"
+        }
+        async fn stream(
+            &self,
+            _c: &tron_core::messages::Context,
+            _o: &ProviderStreamOptions,
+        ) -> Result<StreamEventStream, ProviderError> {
+            let s = stream::iter(vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::TextDelta {
+                    delta: LEDGER_JSON.into(),
+                }),
+                Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text(LEDGER_JSON)],
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            ..Default::default()
+                        }),
+                    },
+                    stop_reason: "end_turn".into(),
+                }),
+            ]);
+            Ok(Box::pin(s))
+        }
+    }
+
+    struct LedgerMockProviderFactory;
+    #[async_trait]
+    impl ProviderFactory for LedgerMockProviderFactory {
+        async fn create_for_model(
+            &self,
+            _model: &str,
+        ) -> Result<Arc<dyn Provider>, ProviderError> {
+            Ok(Arc::new(LedgerMockProvider))
+        }
+    }
+
+    fn make_subagent_manager_with_mock_llm(
+        store: &Arc<tron_events::EventStore>,
+        mgr: &Arc<tron_runtime::orchestrator::session_manager::SessionManager>,
+    ) -> Arc<tron_runtime::orchestrator::subagent_manager::SubagentManager> {
+        let broadcast = Arc::new(tron_runtime::EventEmitter::new());
+        let manager = tron_runtime::orchestrator::subagent_manager::SubagentManager::new(
+            mgr.clone(),
+            store.clone(),
+            broadcast,
+            Arc::new(LedgerMockProviderFactory),
+            None,
+            None,
+        );
+        manager.set_tool_factory(Arc::new(tron_tools::registry::ToolRegistry::new));
+        Arc::new(manager)
+    }
+
+    /// Seed a session with a user + assistant message cycle for ledger generation.
+    fn seed_session_with_messages(
+        store: &tron_events::EventStore,
+        mgr: &tron_runtime::orchestrator::session_manager::SessionManager,
+    ) -> String {
+        let sid = mgr
+            .create_session("mock", "/tmp", Some("cron test"))
+            .unwrap();
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageUser,
+                payload: serde_json::json!({"content": "Hello from cron"}),
+                parent_id: None,
+            })
+            .unwrap();
+        // Assistant text must be >= 500 chars to pass cron no-op filter
+        let long_response = "x".repeat(600);
+        let _ = store
+            .append(&tron_events::AppendOptions {
+                session_id: &sid,
+                event_type: tron_events::EventType::MessageAssistant,
+                payload: serde_json::json!({
+                    "content": [{"type": "text", "text": long_response}],
+                    "turn": 1,
+                    "tokenUsage": {"inputTokens": 10, "outputTokens": 5}
+                }),
+                parent_id: None,
+            })
+            .unwrap();
+        mgr.invalidate_session(&sid);
+        sid
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn write_cron_ledger_source_is_cron() {
+        let (store, mgr) = make_test_store_and_manager();
+        let sid = seed_session_with_messages(&store, &mgr);
+        let subagent = make_subagent_manager_with_mock_llm(&store, &mgr);
+
+        let deps = tron_server::rpc::handlers::memory::LedgerWriteDeps {
+            event_store: store.clone(),
+            session_manager: mgr.clone(),
+            subagent_manager: Some(subagent),
+            embedding_controller: None,
+            shutdown_coordinator: None,
+        };
+        let lw = tron_server::rpc::handlers::memory::execute_ledger_write(
+            &sid, "/tmp", &deps, "cron",
+        )
+        .await;
+        assert!(
+            lw.written,
+            "ledger write should succeed: reason={:?}",
+            lw.reason
+        );
+
+        // Verify the persisted memory.ledger event has source: "cron"
+        let events = store
+            .get_events_by_type(&sid, &["memory.ledger"], Some(10))
+            .unwrap();
+        assert_eq!(events.len(), 1, "should have exactly 1 ledger event");
+        let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
+        assert_eq!(payload["source"], "cron");
     }
 }
 

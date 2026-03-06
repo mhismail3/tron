@@ -396,6 +396,41 @@ pub fn get_stuck_candidates(pool: &ConnectionPool) -> Result<Vec<(String, DateTi
     Ok(results)
 }
 
+/// Complete all orphaned `running` runs (bulk cleanup on startup).
+///
+/// On startup, nothing is actually running — any `running` record is
+/// orphaned from a previous server instance.
+pub fn complete_orphaned_runs(
+    pool: &ConnectionPool,
+    completed_at: DateTime<Utc>,
+    error: &str,
+) -> Result<u32, CronError> {
+    let conn = pool.get()?;
+    let affected = conn.execute(
+        "UPDATE cron_runs SET status = 'failed', completed_at = ?1, error = ?2 WHERE status = 'running'",
+        params![completed_at.to_rfc3339(), error],
+    )?;
+    Ok(affected as u32)
+}
+
+/// Complete stuck `running` runs for a specific job.
+///
+/// Used by the stuck detector to update the original run record(s)
+/// instead of creating a duplicate.
+pub fn complete_stuck_runs(
+    pool: &ConnectionPool,
+    job_id: &str,
+    completed_at: DateTime<Utc>,
+    error: &str,
+) -> Result<u32, CronError> {
+    let conn = pool.get()?;
+    let affected = conn.execute(
+        "UPDATE cron_runs SET status = 'timed_out', completed_at = ?1, error = ?2 WHERE job_id = ?3 AND status = 'running'",
+        params![completed_at.to_rfc3339(), error, job_id],
+    )?;
+    Ok(affected as u32)
+}
+
 // ── Garbage collection ──
 
 /// Delete old runs (older than `cutoff`), keeping at least `min_per_job` per job.
@@ -869,6 +904,144 @@ mod tests {
         let (_, _, removed) = sync_from_config(&pool, &jobs[..1]).unwrap();
         assert_eq!(removed, 1);
         assert!(get_job(&pool, "cron_2").unwrap().is_none());
+    }
+
+    #[test]
+    fn complete_orphaned_runs_updates_all() {
+        let pool = setup_pool();
+        let job_a = make_job("cron_a", "Job A");
+        let job_b = make_job("cron_b", "Job B");
+        upsert_job(&pool, &job_a).unwrap();
+        upsert_job(&pool, &job_b).unwrap();
+
+        insert_run(&pool, "run_1", "cron_a", "Job A", Utc::now()).unwrap();
+        insert_run(&pool, "run_2", "cron_a", "Job A", Utc::now()).unwrap();
+        insert_run(&pool, "run_3", "cron_b", "Job B", Utc::now()).unwrap();
+
+        let now = Utc::now();
+        let updated = complete_orphaned_runs(&pool, now, "server restarted").unwrap();
+        assert_eq!(updated, 3);
+
+        let (runs, _) = get_runs(&pool, None, Some("running"), 10, 0).unwrap();
+        assert_eq!(runs.len(), 0);
+
+        let (runs, _) = get_runs(&pool, None, Some("failed"), 10, 0).unwrap();
+        assert_eq!(runs.len(), 3);
+        for r in &runs {
+            assert_eq!(r.error.as_deref(), Some("server restarted"));
+            assert!(r.completed_at.is_some());
+        }
+    }
+
+    #[test]
+    fn complete_orphaned_runs_ignores_non_running() {
+        let pool = setup_pool();
+        let job = make_job("cron_1", "Test");
+        upsert_job(&pool, &job).unwrap();
+
+        // One running
+        insert_run(&pool, "run_1", "cron_1", "Test", Utc::now()).unwrap();
+        // One completed
+        insert_run(&pool, "run_2", "cron_1", "Test", Utc::now()).unwrap();
+        complete_run(
+            &pool,
+            &CronRun {
+                id: "run_2".into(),
+                job_id: Some("cron_1".into()),
+                job_name: "Test".into(),
+                status: RunStatus::Completed,
+                started_at: Utc::now(),
+                completed_at: Some(Utc::now()),
+                duration_ms: None,
+                output: None,
+                output_truncated: false,
+                error: None,
+                exit_code: Some(0),
+                attempt: 0,
+                session_id: None,
+                delivery_status: None,
+            },
+        )
+        .unwrap();
+        // One failed
+        insert_run(&pool, "run_3", "cron_1", "Test", Utc::now()).unwrap();
+        complete_run(
+            &pool,
+            &CronRun {
+                id: "run_3".into(),
+                job_id: Some("cron_1".into()),
+                job_name: "Test".into(),
+                status: RunStatus::Failed,
+                started_at: Utc::now(),
+                completed_at: Some(Utc::now()),
+                duration_ms: None,
+                output: None,
+                output_truncated: false,
+                error: Some("boom".into()),
+                exit_code: Some(1),
+                attempt: 0,
+                session_id: None,
+                delivery_status: None,
+            },
+        )
+        .unwrap();
+
+        let updated = complete_orphaned_runs(&pool, Utc::now(), "server restarted").unwrap();
+        assert_eq!(updated, 1);
+    }
+
+    #[test]
+    fn complete_orphaned_runs_empty() {
+        let pool = setup_pool();
+        let updated = complete_orphaned_runs(&pool, Utc::now(), "server restarted").unwrap();
+        assert_eq!(updated, 0);
+    }
+
+    #[test]
+    fn complete_stuck_runs_targets_job() {
+        let pool = setup_pool();
+        let job_a = make_job("cron_a", "Job A");
+        let job_b = make_job("cron_b", "Job B");
+        upsert_job(&pool, &job_a).unwrap();
+        upsert_job(&pool, &job_b).unwrap();
+
+        insert_run(&pool, "run_a", "cron_a", "Job A", Utc::now()).unwrap();
+        insert_run(&pool, "run_b", "cron_b", "Job B", Utc::now()).unwrap();
+
+        let updated = complete_stuck_runs(&pool, "cron_a", Utc::now(), "stuck").unwrap();
+        assert_eq!(updated, 1);
+
+        // Job A's run is timed_out
+        assert_eq!(count_running_runs(&pool, "cron_a").unwrap(), 0);
+        // Job B's run still running
+        assert_eq!(count_running_runs(&pool, "cron_b").unwrap(), 1);
+    }
+
+    #[test]
+    fn complete_stuck_runs_sets_timed_out() {
+        let pool = setup_pool();
+        let job = make_job("cron_1", "Test");
+        upsert_job(&pool, &job).unwrap();
+
+        insert_run(&pool, "run_1", "cron_1", "Test", Utc::now()).unwrap();
+        let now = Utc::now();
+        complete_stuck_runs(&pool, "cron_1", now, "stuck timeout").unwrap();
+
+        let (runs, _) = get_runs(&pool, Some("cron_1"), Some("timed_out"), 10, 0).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, RunStatus::TimedOut);
+        assert!(runs[0].completed_at.is_some());
+        assert_eq!(runs[0].error.as_deref(), Some("stuck timeout"));
+    }
+
+    #[test]
+    fn complete_stuck_runs_no_match() {
+        let pool = setup_pool();
+        let job = make_job("cron_1", "Test");
+        upsert_job(&pool, &job).unwrap();
+
+        let updated = complete_stuck_runs(&pool, "cron_1", Utc::now(), "stuck").unwrap();
+        assert_eq!(updated, 0);
     }
 
     #[test]
