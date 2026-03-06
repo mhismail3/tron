@@ -25,8 +25,8 @@ final class SessionRepository {
             (id, workspace_id, root_event_id, head_event_id, title, latest_model,
              working_directory, created_at, last_activity_at, archived_at, event_count,
              message_count, input_tokens, output_tokens, last_turn_input_tokens,
-             cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin, is_chat)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         var stmt: OpaquePointer?
@@ -55,6 +55,7 @@ final class SessionRepository {
         sqlite3_bind_double(stmt, 18, session.cost)
         sqlite3_bind_int(stmt, 19, Int32(session.isFork == true ? 1 : 0))
         transport.bindOptionalText(stmt, 20, session.serverOrigin)
+        sqlite3_bind_int(stmt, 21, Int32(session.isChat ? 1 : 0))
 
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw EventDatabaseError.insertFailed(transport.errorMessage)
@@ -73,7 +74,8 @@ final class SessionRepository {
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, archived_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                   cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
+                   cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
+                   is_chat
             FROM sessions WHERE id = ?
         """
 
@@ -102,7 +104,8 @@ final class SessionRepository {
             SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                    working_directory, created_at, last_activity_at, archived_at, event_count,
                    message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                   cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
+                   cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
+                   is_chat
             FROM sessions ORDER BY last_activity_at DESC
         """
 
@@ -136,7 +139,8 @@ final class SessionRepository {
                 SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                       cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
+                       cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
+                       is_chat
                 FROM sessions
                 WHERE server_origin = ?
                 ORDER BY last_activity_at DESC
@@ -146,7 +150,8 @@ final class SessionRepository {
                 SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                        working_directory, created_at, last_activity_at, archived_at, event_count,
                        message_count, input_tokens, output_tokens, last_turn_input_tokens,
-                       cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin
+                       cache_read_tokens, cache_creation_tokens, cost, is_fork, server_origin,
+                       is_chat
                 FROM sessions ORDER BY last_activity_at DESC
             """
         }
@@ -311,6 +316,7 @@ final class SessionRepository {
         let cost = sqlite3_column_double(stmt, 17)
         let isFork = sqlite3_column_int(stmt, 18) != 0
         let serverOrigin = transport.getOptionalText(stmt, 19)
+        let isChat = sqlite3_column_int(stmt, 20) != 0
 
         return CachedSession(
             id: id,
@@ -332,7 +338,8 @@ final class SessionRepository {
             cacheCreationTokens: cacheCreationTokens,
             cost: cost,
             isFork: isFork,
-            serverOrigin: serverOrigin
+            serverOrigin: serverOrigin,
+            isChat: isChat
         )
     }
 

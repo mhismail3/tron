@@ -116,6 +116,20 @@ final class SessionClient {
         return result.messages
     }
 
+    // MARK: - Chat Session
+
+    func getChat() async throws -> ChatSessionResult {
+        let ws = try transport.requireConnection()
+        return try await ws.send(method: "session.getChat", params: EmptyParams())
+    }
+
+    func resetChat() async throws -> ResetChatResult {
+        let ws = try transport.requireConnection()
+        return try await ws.send(method: "session.resetChat", params: EmptyParams())
+    }
+
+    // MARK: - Fork
+
     func fork(_ sessionId: String, fromEventId: String? = nil) async throws -> SessionForkResult {
         let ws = try transport.requireConnection()
 

@@ -180,7 +180,8 @@ extension EventStoreManager {
             cacheCreationTokens: info.cacheCreationTokens ?? 0,
             cost: info.cost ?? 0,
             isFork: info.isFork,
-            serverOrigin: serverOrigin
+            serverOrigin: serverOrigin,
+            isChat: info.isChat ?? false
         )
     }
 
@@ -212,7 +213,8 @@ extension EventStoreManager {
             cacheCreationTokens: serverInfo.cacheCreationTokens ?? existing.cacheCreationTokens,
             cost: serverInfo.cost ?? existing.cost,
             isFork: serverInfo.isFork,
-            serverOrigin: serverOrigin
+            serverOrigin: serverOrigin,
+            isChat: serverInfo.isChat ?? existing.isChat
         )
     }
 

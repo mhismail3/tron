@@ -537,6 +537,9 @@ struct CachedSession: Identifiable, Codable {
     /// Server origin (host:port) this session was synced from
     var serverOrigin: String?
 
+    /// Whether this is the persistent chat session
+    var isChat: Bool = false
+
     /// Total input tokens sent to model (uncached + cache read)
     var totalInputTokens: Int { inputTokens + cacheReadTokens }
 

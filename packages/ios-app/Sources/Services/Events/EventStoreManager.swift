@@ -39,6 +39,9 @@ final class EventStoreManager {
         }
     }
 
+    /// ID of the persistent chat session (if any)
+    private(set) var chatSessionId: String?
+
     /// Whether to filter sessions by current server origin
     var filterByOrigin: Bool = true
 
@@ -236,6 +239,8 @@ final class EventStoreManager {
 
         logger.info("Global: session.created for \(sessionId) from another device", category: .session)
 
+        let isChat = result.isChat
+
         let newSession = CachedSession(
             id: sessionId,
             workspaceId: result.workingDirectory ?? "",
@@ -256,8 +261,13 @@ final class EventStoreManager {
             cacheCreationTokens: result.cacheCreationTokens,
             cost: result.cost,
             isFork: result.parentSessionId != nil,
-            serverOrigin: rpcClient.serverOrigin
+            serverOrigin: rpcClient.serverOrigin,
+            isChat: isChat
         )
+
+        if isChat {
+            chatSessionId = sessionId
+        }
 
         // Prepend new session (most recent first)
         sessions.insert(newSession, at: 0)
@@ -270,6 +280,11 @@ final class EventStoreManager {
     private func handleSessionArchived(_ result: SessionArchivedPlugin.Result) {
         let sessionId = result.sessionId
         logger.info("Global: session.archived for \(sessionId)", category: .session)
+
+        // Clear chat session tracking if this was the chat
+        if chatSessionId == sessionId {
+            chatSessionId = nil
+        }
 
         // Remove from in-memory list
         sessions.removeAll { $0.id == sessionId }
@@ -365,7 +380,8 @@ final class EventStoreManager {
             // Filter by current server origin if enabled
             let origin = filterByOrigin ? currentServerOrigin : nil
             sessions = try eventDB.sessions.getByOrigin(origin)
-            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"))", category: .session)
+            chatSessionId = sessions.first(where: { $0.isChat })?.id
+            logger.info("Loaded \(self.sessions.count) sessions from EventDatabase (origin filter: \(origin ?? "none"), chat: \(chatSessionId ?? "none"))", category: .session)
 
             // Restore preserved transient state and extract dashboard info
             for i in sessions.indices {
@@ -387,9 +403,16 @@ final class EventStoreManager {
         }
     }
 
-    /// Get sorted sessions (most recent first)
+    /// Get sorted non-chat sessions (most recent first)
     var sortedSessions: [CachedSession] {
-        sessions.sorted { $0.lastActivityAt > $1.lastActivityAt }
+        sessions
+            .filter { !$0.isChat }
+            .sorted { $0.lastActivityAt > $1.lastActivityAt }
+    }
+
+    /// The persistent chat session (if any)
+    var chatSession: CachedSession? {
+        sessions.first { $0.isChat }
     }
 
     /// Get active session

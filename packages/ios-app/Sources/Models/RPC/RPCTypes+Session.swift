@@ -55,6 +55,10 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let lastUserPrompt: String?
     /// Last assistant response text (for preview display)
     let lastAssistantResponse: String?
+    /// Session source (e.g. "chat" for persistent chat)
+    let source: String?
+    /// Whether this is the persistent chat session
+    let isChat: Bool?
 
     var id: String { sessionId }
 
@@ -149,6 +153,30 @@ struct SessionHistoryResult: Decodable {
     let hasMore: Bool
 }
 
+// MARK: - Chat Session
+
+struct ChatSessionResult: Decodable {
+    let sessionId: String
+    let created: Bool
+    let model: String
+    let workingDirectory: String
+    let createdAt: String
+    let isChat: Bool
+    let messageCount: Int
+    let eventCount: Int
+}
+
+struct ResetChatResult: Decodable {
+    let sessionId: String
+    let previousSessionId: String
+    let model: String
+    let workingDirectory: String
+    let createdAt: String
+    let isChat: Bool
+    let messageCount: Int
+    let eventCount: Int
+}
+
 // MARK: - Session Delete/Fork
 
 struct SessionDeleteParams: Encodable {
@@ -199,4 +227,6 @@ struct ServerSessionInfo: Decodable {
     let isActive: Bool
     let isArchived: Bool?
     let archivedAt: String?
+    let source: String?
+    let isChat: Bool?
 }

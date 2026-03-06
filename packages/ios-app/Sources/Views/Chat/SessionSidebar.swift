@@ -27,6 +27,7 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
+    @State private var chatToReset = false
 
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -39,7 +40,7 @@ struct SessionSidebar: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
-                if eventStoreManager.sortedSessions.isEmpty {
+                if eventStoreManager.sortedSessions.isEmpty && eventStoreManager.chatSession == nil {
                     // Empty state placeholder
                     VStack(spacing: 8) {
                         Text("No active sessions")
@@ -49,23 +50,48 @@ struct SessionSidebar: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selectedSessionId) {
-                        ForEach(eventStoreManager.sortedSessions) { session in
-                            CachedSessionSidebarRow(
-                                session: session,
-                                isSelected: session.id == selectedSessionId
-                            )
-                            .tag(session.id)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    sessionToArchive = session.id
-                                    showArchiveConfirmation = true
-                                } label: {
-                                    Image(systemName: "archivebox")
+                        // Chat session pinned at top
+                        if let chat = eventStoreManager.chatSession {
+                            Section {
+                                ChatSessionHeroCard(
+                                    session: chat,
+                                    isSelected: chat.id == selectedSessionId
+                                )
+                                .tag(chat.id)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 2, trailing: 12))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button {
+                                        chatToReset = true
+                                    } label: {
+                                        Image(systemName: "arrow.counterclockwise")
+                                    }
+                                    .tint(.tronMint)
                                 }
-                                .tint(.tronEmerald)
+                            }
+                        }
+
+                        // Regular sessions
+                        Section {
+                            ForEach(eventStoreManager.sortedSessions) { session in
+                                CachedSessionSidebarRow(
+                                    session: session,
+                                    isSelected: session.id == selectedSessionId
+                                )
+                                .tag(session.id)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button {
+                                        sessionToArchive = session.id
+                                        showArchiveConfirmation = true
+                                    } label: {
+                                        Image(systemName: "archivebox")
+                                    }
+                                    .tint(.tronEmerald)
+                                }
                             }
                         }
                     }
@@ -97,6 +123,15 @@ struct SessionSidebar: View {
                     Text("This will archive the session from your device. Server data will remain.")
                 }
                 .tint(.gray)
+                .alert("Reset Chat", isPresented: $chatToReset) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Reset", role: .destructive) {
+                        Task { await resetChatSession() }
+                    }
+                } message: {
+                    Text("This will archive the current chat and start a fresh one.")
+                }
+                .tint(.gray)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -104,6 +139,63 @@ struct SessionSidebar: View {
         .toolbar {
             DashboardToolbarContent(title: "Sessions", accent: .tronEmerald, actions: actions)
         }
+    }
+
+    private func resetChatSession() async {
+        do {
+            let result = try await dependencies.rpcClient.session.resetChat()
+            selectedSessionId = result.sessionId
+        } catch {
+            logger.error("Failed to reset chat: \(error.localizedDescription)", category: .session)
+        }
+    }
+}
+
+// MARK: - Chat Session Hero Card
+
+@available(iOS 26.0, *)
+struct ChatSessionHeroCard: View {
+    let session: CachedSession
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .medium))
+                .foregroundStyle(.tronMint)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Chat")
+                    .font(TronTypography.mono(size: TronTypography.sizeBodyLG, weight: .semibold))
+                    .foregroundStyle(.tronMint)
+
+                Text(session.formattedDate)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(.tronTextMuted)
+            }
+
+            Spacer()
+
+            if session.isProcessing == true {
+                Image(systemName: "brain")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                    .foregroundStyle(.tronMint)
+                    .symbolEffect(.pulse, options: .repeating)
+            }
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 18)
+        .glassEffect(
+            isSelected
+                ? .regular.tint(Color.tronMint.opacity(0.25)).interactive()
+                : .regular.tint(Color.tronMint.opacity(0.12)).interactive(),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .contentShape(
+            [.interaction, .hoverEffect],
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .hoverEffect(.highlight)
     }
 }
 

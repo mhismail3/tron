@@ -16,6 +16,8 @@ protocol SessionStoreProtocol: AnyObject {
 
     // MARK: - Computed Properties
     var sortedSessions: [CachedSession] { get }
+    var chatSession: CachedSession? { get }
+    var chatSessionId: String? { get }
     var activeSession: CachedSession? { get }
 
     // MARK: - State Setters

@@ -114,6 +114,9 @@ enum DatabaseSchema {
         try addColumnIfNotExists(db: db, table: "sessions", column: "server_origin", definition: "TEXT")
         try execute(db: db, "CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(server_origin)")
 
+        // Migration: Add is_chat column for persistent chat session
+        try addColumnIfNotExists(db: db, table: "sessions", column: "is_chat", definition: "INTEGER DEFAULT 0")
+
         // Migration: Remove provider, status columns; rename model to latest_model
         // Only needed for very old databases with the provider column
         if try columnExists(table: "sessions", column: "provider", db: db) {
