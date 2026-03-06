@@ -25,10 +25,12 @@ struct TaskManagerChipData: Equatable, Identifiable {
     let fullResult: String?
     /// Raw tool arguments JSON for detail sheet
     let arguments: String
-    /// Parsed entity snapshot from tool result (nil for list/search actions)
+    /// Parsed entity snapshot from tool result (nil for list/search/batch actions)
     let entityDetail: EntityDetail?
-    /// Parsed list result from tool result (nil for entity actions)
+    /// Parsed list result from tool result (nil for entity/batch actions)
     var listResult: ListResult? = nil
+    /// Parsed batch result from tool result (nil for non-batch actions)
+    var batchResult: BatchResult? = nil
     /// Duration in milliseconds (nil while running)
     var durationMs: Int? = nil
     /// Current status of the tool call
@@ -94,6 +96,21 @@ struct AreaListItem: Equatable, Identifiable {
     let projectCount: Int?
     let taskCount: Int?
     let activeTaskCount: Int?
+}
+
+// MARK: - Batch Result
+
+/// Parsed result from batch_create, batch_delete, or batch_update actions.
+struct BatchResult: Equatable {
+    enum BatchAction: String, Equatable {
+        case create, delete, update
+    }
+
+    let action: BatchAction
+    let affected: Int
+    let dryRun: Bool
+    /// Created task IDs (batch_create only)
+    let ids: [String]
 }
 
 // MARK: - Entity Detail

@@ -37,6 +37,9 @@ struct TaskDetailSheet: View {
         if let entity = chipData.entityDetail {
             // Entity actions: create, update, get, delete, log_time (+ project/area variants)
             EntitySnapshotCard(entity: entity, action: chipData.action)
+        } else if let batchResult = chipData.batchResult {
+            // Batch actions: batch_create, batch_delete, batch_update
+            batchResultSection(batchResult)
         } else if let listResult = chipData.listResult {
             // List/search actions
             listResultSection(listResult)
@@ -313,6 +316,104 @@ struct TaskDetailSheet: View {
                     .padding(.vertical, 2)
                 }
             }
+        }
+    }
+
+    // MARK: - Batch Result
+
+    @ViewBuilder
+    private func batchResultSection(_ result: BatchResult) -> some View {
+        glassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header with icon and action
+                HStack(spacing: 8) {
+                    Image(systemName: batchIcon(result.action))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(batchColor(result.action))
+
+                    Text(batchTitle(result))
+                        .font(TronTypography.mono(size: TronTypography.sizeBody2, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+
+                    Spacer()
+
+                    if result.dryRun {
+                        Text("preview")
+                            .font(TronTypography.mono(size: 10, weight: .medium))
+                            .foregroundStyle(.tronAmber)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.tronAmber.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                // Affected count
+                HStack(spacing: 6) {
+                    Text("\(result.affected)")
+                        .font(TronTypography.mono(size: 28, weight: .bold))
+                        .foregroundStyle(batchColor(result.action))
+
+                    Text("task\(result.affected == 1 ? "" : "s") \(batchVerb(result))")
+                        .font(TronTypography.mono(size: TronTypography.sizeBody3, weight: .regular))
+                        .foregroundStyle(.tronTextSecondary)
+                }
+
+                // Created IDs (batch_create only)
+                if !result.ids.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Created IDs")
+                            .font(TronTypography.mono(size: 11, weight: .semibold))
+                            .foregroundStyle(.tronTextMuted)
+
+                        ForEach(result.ids, id: \.self) { taskId in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color.tronSuccess.opacity(0.6))
+                                    .frame(width: 5, height: 5)
+                                Text(taskId)
+                                    .font(TronTypography.mono(size: 11, weight: .regular))
+                                    .foregroundStyle(.tronTextSecondary)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
+        }
+    }
+
+    private func batchIcon(_ action: BatchResult.BatchAction) -> String {
+        switch action {
+        case .create: "plus.circle.fill"
+        case .delete: "trash.fill"
+        case .update: "pencil.circle.fill"
+        }
+    }
+
+    private func batchColor(_ action: BatchResult.BatchAction) -> Color {
+        switch action {
+        case .create: .tronSuccess
+        case .delete: .tronError
+        case .update: .tronTeal
+        }
+    }
+
+    private func batchTitle(_ result: BatchResult) -> String {
+        if result.dryRun { return "Dry Run" }
+        switch result.action {
+        case .create: return "Batch Create"
+        case .delete: return "Batch Delete"
+        case .update: return "Batch Update"
+        }
+    }
+
+    private func batchVerb(_ result: BatchResult) -> String {
+        if result.dryRun { return "would be affected" }
+        switch result.action {
+        case .create: return "created"
+        case .delete: return "deleted"
+        case .update: return "updated"
         }
     }
 

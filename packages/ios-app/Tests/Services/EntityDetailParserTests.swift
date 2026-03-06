@@ -762,4 +762,115 @@ struct EntityDetailParserTests {
         #expect(chipData?.entityDetail?.id == "task_abc")
         #expect(chipData?.listResult == nil)
     }
+
+    // MARK: - Batch Result Parsing
+
+    @Test("parseTaskManager attaches batchResult for batch_create")
+    func testParseTaskManagerBatchCreate() {
+        let result = """
+        {
+          "affected": 5,
+          "dryRun": false,
+          "ids": ["task_1", "task_2", "task_3", "task_4", "task_5"]
+        }
+        """
+
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_batch",
+            arguments: "{\"action\":\"batch_create\",\"items\":[]}",
+            status: .success,
+            result: result
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.batchResult != nil)
+        #expect(chipData?.batchResult?.action == .create)
+        #expect(chipData?.batchResult?.affected == 5)
+        #expect(chipData?.batchResult?.dryRun == false)
+        #expect(chipData?.batchResult?.ids.count == 5)
+        #expect(chipData?.entityDetail == nil)
+        #expect(chipData?.listResult == nil)
+        #expect(chipData?.chipSummary == "Created 5 tasks")
+    }
+
+    @Test("parseTaskManager attaches batchResult for batch_delete")
+    func testParseTaskManagerBatchDelete() {
+        let result = """
+        {
+          "affected": 3,
+          "dryRun": false
+        }
+        """
+
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_batch_del",
+            arguments: "{\"action\":\"batch_delete\",\"ids\":[\"a\",\"b\",\"c\"]}",
+            status: .success,
+            result: result
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.batchResult != nil)
+        #expect(chipData?.batchResult?.action == .delete)
+        #expect(chipData?.batchResult?.affected == 3)
+        #expect(chipData?.batchResult?.dryRun == false)
+        #expect(chipData?.chipSummary == "Deleted 3 tasks")
+    }
+
+    @Test("parseTaskManager handles batch_update dry run")
+    func testParseTaskManagerBatchUpdateDryRun() {
+        let result = """
+        {
+          "affected": 7,
+          "dryRun": true
+        }
+        """
+
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_batch_upd",
+            arguments: "{\"action\":\"batch_update\",\"filter\":{\"status\":\"pending\"}}",
+            status: .success,
+            result: result
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.batchResult != nil)
+        #expect(chipData?.batchResult?.action == .update)
+        #expect(chipData?.batchResult?.affected == 7)
+        #expect(chipData?.batchResult?.dryRun == true)
+        #expect(chipData?.chipSummary == "7 tasks (preview)")
+    }
+
+    @Test("parseTaskManager batch_delete with single task")
+    func testParseTaskManagerBatchDeleteSingle() {
+        let result = """
+        {
+          "affected": 1,
+          "dryRun": false
+        }
+        """
+
+        let tool = ToolUseData(
+            toolName: "TaskManager",
+            toolCallId: "call_batch_single",
+            arguments: "{\"action\":\"batch_delete\",\"ids\":[\"a\"]}",
+            status: .success,
+            result: result
+        )
+
+        let chipData = ToolResultParser.parseTaskManager(from: tool)
+        #expect(chipData?.chipSummary == "Deleted 1 task")
+    }
+
+    @Test("parseBatchResult returns nil for non-batch actions")
+    func testParseBatchResultNilForEntityActions() {
+        let result = """
+        { "id": "task_abc", "title": "Test", "status": "pending" }
+        """
+        let batch = TaskResultParser.parseBatchResult(from: result, action: "create")
+        #expect(batch == nil)
+    }
 }

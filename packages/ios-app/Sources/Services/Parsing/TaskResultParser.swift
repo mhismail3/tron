@@ -31,6 +31,7 @@ enum TaskResultParser {
         let chipSummary = taskManagerChipSummary(action: action, title: taskTitle, result: tool.result)
         let entityDetail = tool.result.flatMap { parseEntityDetail(from: $0, action: action) }
         let listResult = tool.result.flatMap { parseListResult(from: $0, action: action) }
+        let batchResult = tool.result.flatMap { parseBatchResult(from: $0, action: action) }
 
         return TaskManagerChipData(
             toolCallId: tool.toolCallId,
@@ -41,6 +42,7 @@ enum TaskResultParser {
             arguments: tool.arguments,
             entityDetail: entityDetail,
             listResult: listResult,
+            batchResult: batchResult,
             durationMs: tool.durationMs,
             status: .completed
         )
@@ -702,6 +704,9 @@ enum TaskResultParser {
         case "get_area": return "Getting area..."
         case "delete_area": return "Deleting area..."
         case "list_areas": return "Listing areas..."
+        case "batch_create": return "Creating tasks..."
+        case "batch_delete": return "Deleting tasks..."
+        case "batch_update": return "Updating tasks..."
         default: return "Managing tasks..."
         }
     }
@@ -776,6 +781,27 @@ enum TaskResultParser {
             }
             return "Areas listed"
 
+        // Batch actions — extract affected count from JSON
+        case "batch_create":
+            if let count = extractBatchAffected(from: result) {
+                return "Created \(count) task\(count == 1 ? "" : "s")"
+            }
+            return "Batch created"
+        case "batch_delete":
+            if let count = extractBatchAffected(from: result) {
+                let dryRun = extractBatchDryRun(from: result)
+                if dryRun { return "\(count) task\(count == 1 ? "" : "s") (preview)" }
+                return "Deleted \(count) task\(count == 1 ? "" : "s")"
+            }
+            return "Batch deleted"
+        case "batch_update":
+            if let count = extractBatchAffected(from: result) {
+                let dryRun = extractBatchDryRun(from: result)
+                if dryRun { return "\(count) task\(count == 1 ? "" : "s") (preview)" }
+                return "Updated \(count) task\(count == 1 ? "" : "s")"
+            }
+            return "Batch updated"
+
         default:
             return "Done"
         }
@@ -840,5 +866,60 @@ enum TaskResultParser {
         }
 
         return nil
+    }
+
+    // MARK: - Batch Result Parsing
+
+    /// Parse batch operation result JSON into a `BatchResult`.
+    /// Returns nil for non-batch actions.
+    static func parseBatchResult(from result: String, action: String) -> BatchResult? {
+        let batchActions: [String: BatchResult.BatchAction] = [
+            "batch_create": .create,
+            "batch_delete": .delete,
+            "batch_update": .update,
+        ]
+        guard let batchAction = batchActions[action] else { return nil }
+
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let affected = json["affected"] as? Int ?? 0
+        let dryRun = json["dryRun"] as? Bool ?? false
+        let ids = json["ids"] as? [String] ?? []
+
+        return BatchResult(
+            action: batchAction,
+            affected: affected,
+            dryRun: dryRun,
+            ids: ids
+        )
+    }
+
+    /// Extract `affected` count from batch result JSON.
+    private static func extractBatchAffected(from result: String?) -> Int? {
+        guard let result else { return nil }
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["affected"] as? Int
+    }
+
+    /// Extract `dryRun` flag from batch result JSON.
+    private static func extractBatchDryRun(from result: String?) -> Bool {
+        guard let result else { return false }
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        return json["dryRun"] as? Bool ?? false
     }
 }
