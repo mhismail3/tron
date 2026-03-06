@@ -763,8 +763,30 @@ pub struct AreaUpdateParams {
 // Filter types
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Result of a batch operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchResult {
+    /// Number of entities affected.
+    pub affected: u32,
+    /// Whether this was a dry-run (preview only, no mutations).
+    pub dry_run: bool,
+}
+
+/// Target for batch operations: explicit IDs or a filter.
+/// IDs take precedence when both are provided.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchTarget {
+    /// Explicit entity IDs to target.
+    pub ids: Option<Vec<String>>,
+    /// Filter criteria (same as list). IDs take precedence.
+    pub filter: Option<TaskFilter>,
+}
+
 /// Filter parameters for listing tasks.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct TaskFilter {
     /// Filter by status.
     pub status: Option<TaskStatus>,

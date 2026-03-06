@@ -500,6 +500,120 @@ impl MethodHandler for DeleteAreaHandler {
     }
 }
 
+/// Batch delete tasks by IDs or filter.
+pub struct BatchDeleteTasksHandler;
+
+#[async_trait]
+impl MethodHandler for BatchDeleteTasksHandler {
+    #[instrument(skip(self, ctx), fields(method = "tasks.batchDelete"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let conn = get_task_conn(ctx)?;
+        let dry_run = params
+            .as_ref()
+            .and_then(|p| p.get("dryRun"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let ids: Option<Vec<String>> = params
+            .as_ref()
+            .and_then(|p| p.get("ids"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let filter: Option<tron_runtime::tasks::TaskFilter> = params
+            .as_ref()
+            .and_then(|p| p.get("filter"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let target = tron_runtime::tasks::BatchTarget { ids, filter };
+        let result =
+            tron_runtime::tasks::TaskService::batch_delete_tasks(&conn, &target, dry_run, None)
+                .map_err(|e| RpcError::Internal {
+                    message: e.to_string(),
+                })?;
+
+        Ok(serde_json::to_value(&result).unwrap_or_default())
+    }
+}
+
+/// Batch update tasks by IDs or filter.
+pub struct BatchUpdateTasksHandler;
+
+#[async_trait]
+impl MethodHandler for BatchUpdateTasksHandler {
+    #[instrument(skip(self, ctx), fields(method = "tasks.batchUpdate"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let conn = get_task_conn(ctx)?;
+        let dry_run = params
+            .as_ref()
+            .and_then(|p| p.get("dryRun"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let ids: Option<Vec<String>> = params
+            .as_ref()
+            .and_then(|p| p.get("ids"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let filter: Option<tron_runtime::tasks::TaskFilter> = params
+            .as_ref()
+            .and_then(|p| p.get("filter"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+        let target = tron_runtime::tasks::BatchTarget { ids, filter };
+
+        let mut updates = tron_runtime::tasks::TaskUpdateParams::default();
+        if let Some(title) = opt_string(params.as_ref(), "title") {
+            updates.title = Some(title);
+        }
+        if let Some(status_str) = opt_string(params.as_ref(), "status") {
+            updates.status = serde_json::from_value(Value::String(status_str)).ok();
+        }
+        if let Some(priority_str) = opt_string(params.as_ref(), "priority") {
+            updates.priority = serde_json::from_value(Value::String(priority_str)).ok();
+        }
+        if let Some(desc) = opt_string(params.as_ref(), "description") {
+            updates.description = Some(desc);
+        }
+        if let Some(pid) = opt_string(params.as_ref(), "projectId") {
+            updates.project_id = Some(pid);
+        }
+        if let Some(aid) = opt_string(params.as_ref(), "areaId") {
+            updates.area_id = Some(aid);
+        }
+
+        let result = tron_runtime::tasks::TaskService::batch_update_tasks(
+            &conn, &target, &updates, dry_run, None,
+        )
+        .map_err(|e| RpcError::Internal {
+            message: e.to_string(),
+        })?;
+
+        Ok(serde_json::to_value(&result).unwrap_or_default())
+    }
+}
+
+/// Batch create tasks atomically.
+pub struct BatchCreateTasksHandler;
+
+#[async_trait]
+impl MethodHandler for BatchCreateTasksHandler {
+    #[instrument(skip(self, ctx), fields(method = "tasks.batchCreate"))]
+    async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let conn = get_task_conn(ctx)?;
+
+        let items: Vec<tron_runtime::tasks::TaskCreateParams> = params
+            .as_ref()
+            .and_then(|p| p.get("items"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let result = tron_runtime::tasks::TaskService::batch_create_tasks(&conn, &items, None)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
+
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,6 +806,105 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["deleted"], true);
+    }
+
+    // Batch tests
+    #[tokio::test]
+    async fn batch_delete_by_ids() {
+        let ctx = make_test_context_with_tasks();
+        let t1 = CreateTaskHandler
+            .handle(Some(json!({"title": "a"})), &ctx)
+            .await
+            .unwrap();
+        let t2 = CreateTaskHandler
+            .handle(Some(json!({"title": "b"})), &ctx)
+            .await
+            .unwrap();
+        let _t3 = CreateTaskHandler
+            .handle(Some(json!({"title": "c"})), &ctx)
+            .await
+            .unwrap();
+
+        let result = BatchDeleteTasksHandler
+            .handle(
+                Some(json!({"ids": [t1["id"], t2["id"]]})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 2);
+        assert_eq!(result["dryRun"], false);
+
+        let list = ListTasksHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(list["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn batch_delete_dry_run() {
+        let ctx = make_test_context_with_tasks();
+        let t1 = CreateTaskHandler
+            .handle(Some(json!({"title": "a"})), &ctx)
+            .await
+            .unwrap();
+
+        let result = BatchDeleteTasksHandler
+            .handle(Some(json!({"ids": [t1["id"]], "dryRun": true})), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 1);
+        assert_eq!(result["dryRun"], true);
+
+        // Still there
+        let list = ListTasksHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(list["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn batch_update_by_ids() {
+        let ctx = make_test_context_with_tasks();
+        let t1 = CreateTaskHandler
+            .handle(Some(json!({"title": "a"})), &ctx)
+            .await
+            .unwrap();
+        let t2 = CreateTaskHandler
+            .handle(Some(json!({"title": "b"})), &ctx)
+            .await
+            .unwrap();
+
+        let result = BatchUpdateTasksHandler
+            .handle(
+                Some(json!({"ids": [t1["id"], t2["id"]], "status": "completed"})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 2);
+    }
+
+    #[tokio::test]
+    async fn batch_create_tasks() {
+        let ctx = make_test_context_with_tasks();
+        let result = BatchCreateTasksHandler
+            .handle(
+                Some(json!({"items": [{"title": "x"}, {"title": "y"}]})),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 2);
+        assert_eq!(result["ids"].as_array().unwrap().len(), 2);
+
+        let list = ListTasksHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(list["total"], 2);
+    }
+
+    #[tokio::test]
+    async fn batch_delete_no_target() {
+        let ctx = make_test_context_with_tasks();
+        let result = BatchDeleteTasksHandler
+            .handle(Some(json!({})), &ctx)
+            .await;
+        assert!(result.is_err());
     }
 
     // Project details tests

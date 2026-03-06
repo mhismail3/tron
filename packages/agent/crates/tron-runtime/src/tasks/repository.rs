@@ -52,6 +52,141 @@ fn parse_metadata(json: Option<String>) -> Option<serde_json::Value> {
     })
 }
 
+/// Build a WHERE clause from a `TaskFilter`.
+///
+/// Returns `(where_clause, param_values)` where `where_clause` is either empty
+/// or starts with `"WHERE "`. The caller is responsible for converting the
+/// `Box<dyn ToSql>` values into `&dyn ToSql` refs for query execution.
+fn build_task_where_clause(
+    filter: &TaskFilter,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(status) = filter.status {
+        conditions.push("status = ?".to_string());
+        values.push(Box::new(status.as_sql().to_string()));
+    }
+    if let Some(priority) = filter.priority {
+        conditions.push("priority = ?".to_string());
+        values.push(Box::new(priority.as_sql().to_string()));
+    }
+    if let Some(ref pid) = filter.project_id {
+        conditions.push("project_id = ?".to_string());
+        values.push(Box::new(pid.clone()));
+    }
+    if let Some(ref wid) = filter.workspace_id {
+        conditions.push("workspace_id = ?".to_string());
+        values.push(Box::new(wid.clone()));
+    }
+    if let Some(ref aid) = filter.area_id {
+        conditions.push("area_id = ?".to_string());
+        values.push(Box::new(aid.clone()));
+    }
+    if let Some(ref ptid) = filter.parent_task_id {
+        conditions.push("parent_task_id = ?".to_string());
+        values.push(Box::new(ptid.clone()));
+    }
+    if let Some(ref due) = filter.due_before {
+        conditions.push("due_date IS NOT NULL AND due_date <= ?".to_string());
+        values.push(Box::new(due.clone()));
+    }
+
+    // Default exclusions
+    if !filter.include_completed {
+        conditions.push("status NOT IN ('completed', 'cancelled')".to_string());
+    }
+    if !filter.include_deferred {
+        conditions
+            .push("(deferred_until IS NULL OR deferred_until <= datetime('now'))".to_string());
+    }
+    if !filter.include_backlog {
+        conditions.push("status != 'backlog'".to_string());
+    }
+
+    // Tag filtering
+    if let Some(ref tags) = filter.tags {
+        for tag in tags {
+            conditions.push(
+                "EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)".to_string(),
+            );
+            values.push(Box::new(tag.clone()));
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    (where_clause, values)
+}
+
+/// Build a simple SET clause from `TaskUpdateParams` for batch operations.
+///
+/// Only supports flat field updates (no tag manipulation or note appending,
+/// which require per-task DB reads). Always appends `updated_at = ?`.
+fn build_simple_set_clause(
+    updates: &TaskUpdateParams,
+) -> Result<(Vec<String>, Vec<Box<dyn rusqlite::types::ToSql>>), TaskError> {
+    let mut sets: Vec<String> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref title) = updates.title {
+        sets.push("title = ?".to_string());
+        values.push(Box::new(title.clone()));
+    }
+    if let Some(ref desc) = updates.description {
+        sets.push("description = ?".to_string());
+        values.push(Box::new(desc.clone()));
+    }
+    if let Some(status) = updates.status {
+        sets.push("status = ?".to_string());
+        values.push(Box::new(status.as_sql().to_string()));
+
+        // Auto-set started_at when transitioning to InProgress
+        if status == TaskStatus::InProgress {
+            sets.push("started_at = COALESCE(started_at, ?)".to_string());
+            values.push(Box::new(now_iso()));
+        }
+
+        // Auto-set completed_at for terminal states
+        if status.is_terminal() {
+            sets.push("completed_at = COALESCE(completed_at, ?)".to_string());
+            values.push(Box::new(now_iso()));
+        }
+
+        // Clear completed_at when reopening (non-terminal)
+        if !status.is_terminal() {
+            sets.push("completed_at = NULL".to_string());
+        }
+    }
+    if let Some(priority) = updates.priority {
+        sets.push("priority = ?".to_string());
+        values.push(Box::new(priority.as_sql().to_string()));
+    }
+    if let Some(ref pid) = updates.project_id {
+        sets.push("project_id = ?".to_string());
+        let normalized: Option<String> = if pid.is_empty() { None } else { Some(pid.clone()) };
+        values.push(Box::new(normalized));
+    }
+    if let Some(ref aid) = updates.area_id {
+        sets.push("area_id = ?".to_string());
+        let normalized: Option<String> = if aid.is_empty() { None } else { Some(aid.clone()) };
+        values.push(Box::new(normalized));
+    }
+
+    if sets.is_empty() {
+        return Err(TaskError::Validation("no fields to update".to_string()));
+    }
+
+    sets.push("updated_at = ?".to_string());
+    values.push(Box::new(now_iso()));
+
+    Ok((sets, values))
+}
+
 /// Task repository for SQL CRUD operations.
 pub struct TaskRepository;
 
@@ -301,72 +436,13 @@ impl TaskRepository {
     }
 
     /// List tasks with filtering and pagination.
-    #[allow(clippy::too_many_lines)]
     pub fn list_tasks(
         conn: &Connection,
         filter: &TaskFilter,
         limit: u32,
         offset: u32,
     ) -> Result<TaskListResult, TaskError> {
-        let mut conditions: Vec<String> = Vec::new();
-        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(status) = filter.status {
-            conditions.push("status = ?".to_string());
-            values.push(Box::new(status.as_sql().to_string()));
-        }
-        if let Some(priority) = filter.priority {
-            conditions.push("priority = ?".to_string());
-            values.push(Box::new(priority.as_sql().to_string()));
-        }
-        if let Some(ref pid) = filter.project_id {
-            conditions.push("project_id = ?".to_string());
-            values.push(Box::new(pid.clone()));
-        }
-        if let Some(ref wid) = filter.workspace_id {
-            conditions.push("workspace_id = ?".to_string());
-            values.push(Box::new(wid.clone()));
-        }
-        if let Some(ref aid) = filter.area_id {
-            conditions.push("area_id = ?".to_string());
-            values.push(Box::new(aid.clone()));
-        }
-        if let Some(ref ptid) = filter.parent_task_id {
-            conditions.push("parent_task_id = ?".to_string());
-            values.push(Box::new(ptid.clone()));
-        }
-        if let Some(ref due) = filter.due_before {
-            conditions.push("due_date IS NOT NULL AND due_date <= ?".to_string());
-            values.push(Box::new(due.clone()));
-        }
-
-        // Default exclusions
-        if !filter.include_completed {
-            conditions.push("status NOT IN ('completed', 'cancelled')".to_string());
-        }
-        if !filter.include_deferred {
-            conditions
-                .push("(deferred_until IS NULL OR deferred_until <= datetime('now'))".to_string());
-        }
-        if !filter.include_backlog {
-            conditions.push("status != 'backlog'".to_string());
-        }
-
-        // Tag filtering
-        if let Some(ref tags) = filter.tags {
-            for tag in tags {
-                conditions.push(
-                    "EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)".to_string(),
-                );
-                values.push(Box::new(tag.clone()));
-            }
-        }
-
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
+        let (where_clause, values) = build_task_where_clause(filter);
 
         // Count query
         let count_sql = format!("SELECT COUNT(*) FROM tasks {where_clause}");
@@ -1053,6 +1129,175 @@ impl TaskRepository {
             .filter_map(Result::ok)
             .collect();
         Ok(activities)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Batch operations
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Delete tasks matching any of the given IDs. Returns count deleted.
+    pub fn delete_tasks_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("DELETE FROM tasks WHERE id IN ({placeholders})");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed as u32)
+    }
+
+    /// Delete tasks matching a filter. Returns count deleted.
+    pub fn delete_tasks_by_filter(
+        conn: &Connection,
+        filter: &TaskFilter,
+    ) -> Result<u32, TaskError> {
+        let (where_clause, values) = build_task_where_clause(filter);
+        let sql = format!("DELETE FROM tasks {where_clause}");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed as u32)
+    }
+
+    /// Count tasks matching IDs (for dry-run).
+    pub fn count_tasks_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT COUNT(*) FROM tasks WHERE id IN ({placeholders})");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// Count tasks matching a filter (for dry-run).
+    pub fn count_tasks_by_filter(
+        conn: &Connection,
+        filter: &TaskFilter,
+    ) -> Result<u32, TaskError> {
+        let (where_clause, values) = build_task_where_clause(filter);
+        let sql = format!("SELECT COUNT(*) FROM tasks {where_clause}");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
+        let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// Fetch tasks by IDs (for pre-delete/update activity logging).
+    pub fn get_tasks_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<Task>, TaskError> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("SELECT * FROM tasks WHERE id IN ({placeholders})");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let tasks = stmt
+            .query_map(params.as_slice(), |row| Ok(task_from_row(row)))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(tasks)
+    }
+
+    /// Fetch tasks by filter (for pre-delete/update activity logging).
+    pub fn get_tasks_by_filter(
+        conn: &Connection,
+        filter: &TaskFilter,
+    ) -> Result<Vec<Task>, TaskError> {
+        let (where_clause, values) = build_task_where_clause(filter);
+        let sql = format!("SELECT * FROM tasks {where_clause}");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let tasks = stmt
+            .query_map(params.as_slice(), |row| Ok(task_from_row(row)))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(tasks)
+    }
+
+    /// Bulk update tasks by IDs. Only supports simple field updates.
+    pub fn update_tasks_by_ids(
+        conn: &Connection,
+        ids: &[String],
+        updates: &TaskUpdateParams,
+    ) -> Result<u32, TaskError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let (sets, mut values) = build_simple_set_clause(updates)?;
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        for id in ids {
+            values.push(Box::new(id.clone()));
+        }
+        let sql = format!(
+            "UPDATE tasks SET {} WHERE id IN ({placeholders})",
+            sets.join(", ")
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(AsRef::as_ref).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed as u32)
+    }
+
+    /// Bulk update tasks by filter.
+    pub fn update_tasks_by_filter(
+        conn: &Connection,
+        filter: &TaskFilter,
+        updates: &TaskUpdateParams,
+    ) -> Result<u32, TaskError> {
+        let (sets, mut set_values) = build_simple_set_clause(updates)?;
+        let (where_clause, where_values) = build_task_where_clause(filter);
+        for v in where_values {
+            set_values.push(v);
+        }
+        let sql = format!("UPDATE tasks SET {} {}", sets.join(", "), where_clause);
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            set_values.iter().map(AsRef::as_ref).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed as u32)
+    }
+
+    /// Delete projects matching any of the given IDs. Returns count deleted.
+    pub fn delete_projects_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("DELETE FROM projects WHERE id IN ({placeholders})");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed as u32)
+    }
+
+    /// Delete areas matching any of the given IDs. Returns count deleted.
+    pub fn delete_areas_by_ids(conn: &Connection, ids: &[String]) -> Result<u32, TaskError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        // Cascade: orphan tasks/projects before deleting
+        for id in ids {
+            let _ = conn.execute(
+                "UPDATE projects SET area_id = NULL WHERE area_id = ?1",
+                params![id],
+            )?;
+            let _ = conn.execute(
+                "UPDATE tasks SET area_id = NULL WHERE area_id = ?1",
+                params![id],
+            )?;
+        }
+        let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!("DELETE FROM areas WHERE id IN ({placeholders})");
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed as u32)
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -2364,5 +2609,416 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(updated.project_id.is_none());
+    }
+
+    // --- Batch operations ---
+
+    #[test]
+    fn test_delete_tasks_by_ids() {
+        let conn = setup_db();
+        let t1 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        let t2 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+        let t3 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "C".into(), ..Default::default() },
+        ).unwrap();
+
+        let deleted = TaskRepository::delete_tasks_by_ids(
+            &conn,
+            &[t1.id.clone(), t2.id.clone()],
+        ).unwrap();
+        assert_eq!(deleted, 2);
+        assert!(TaskRepository::get_task(&conn, &t1.id).unwrap().is_none());
+        assert!(TaskRepository::get_task(&conn, &t3.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_delete_tasks_by_ids_empty() {
+        let conn = setup_db();
+        let deleted = TaskRepository::delete_tasks_by_ids(&conn, &[]).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn test_delete_tasks_by_ids_nonexistent() {
+        let conn = setup_db();
+        let deleted = TaskRepository::delete_tasks_by_ids(
+            &conn,
+            &["task-fake".to_string()],
+        ).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn test_delete_tasks_by_ids_mixed_existing() {
+        let conn = setup_db();
+        let t1 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        let t2 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+
+        let deleted = TaskRepository::delete_tasks_by_ids(
+            &conn,
+            &[t1.id.clone(), "task-fake".to_string(), t2.id.clone()],
+        ).unwrap();
+        assert_eq!(deleted, 2);
+    }
+
+    #[test]
+    fn test_delete_tasks_by_filter_status() {
+        let conn = setup_db();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Active".into(),
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Done".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Done2".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+
+        let filter = TaskFilter {
+            status: Some(TaskStatus::Completed),
+            include_completed: true,
+            ..Default::default()
+        };
+        let deleted = TaskRepository::delete_tasks_by_filter(&conn, &filter).unwrap();
+        assert_eq!(deleted, 2);
+        // Active task remains
+        let remaining = TaskRepository::list_tasks(
+            &conn,
+            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
+            100, 0,
+        ).unwrap();
+        assert_eq!(remaining.total, 1);
+        assert_eq!(remaining.tasks[0].title, "Active");
+    }
+
+    #[test]
+    fn test_delete_tasks_by_filter_project() {
+        let conn = setup_db();
+        let proj = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "In project".into(),
+                project_id: Some(proj.id.clone()),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "No project".into(), ..Default::default() },
+        ).unwrap();
+
+        let filter = TaskFilter {
+            project_id: Some(proj.id),
+            include_completed: true,
+            include_backlog: true,
+            include_deferred: true,
+            ..Default::default()
+        };
+        let deleted = TaskRepository::delete_tasks_by_filter(&conn, &filter).unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn test_delete_tasks_by_filter_empty_match() {
+        let conn = setup_db();
+        let filter = TaskFilter {
+            status: Some(TaskStatus::Completed),
+            include_completed: true,
+            ..Default::default()
+        };
+        let deleted = TaskRepository::delete_tasks_by_filter(&conn, &filter).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn test_count_tasks_by_ids() {
+        let conn = setup_db();
+        let t1 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        let t2 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "C".into(), ..Default::default() },
+        ).unwrap();
+
+        let count = TaskRepository::count_tasks_by_ids(
+            &conn,
+            &[t1.id, t2.id],
+        ).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_count_tasks_by_filter() {
+        let conn = setup_db();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "A".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+
+        let filter = TaskFilter {
+            status: Some(TaskStatus::Completed),
+            include_completed: true,
+            ..Default::default()
+        };
+        let count = TaskRepository::count_tasks_by_filter(&conn, &filter).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_update_tasks_by_ids_changes_status() {
+        let conn = setup_db();
+        let t1 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        let t2 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+        let t3 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "C".into(), ..Default::default() },
+        ).unwrap();
+
+        let updated = TaskRepository::update_tasks_by_ids(
+            &conn,
+            &[t1.id.clone(), t2.id.clone()],
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert_eq!(updated, 2);
+
+        let a = TaskRepository::get_task(&conn, &t1.id).unwrap().unwrap();
+        assert_eq!(a.status, TaskStatus::Completed);
+        assert!(a.completed_at.is_some());
+        let c = TaskRepository::get_task(&conn, &t3.id).unwrap().unwrap();
+        assert_eq!(c.status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn test_update_tasks_by_ids_empty() {
+        let conn = setup_db();
+        let updated = TaskRepository::update_tasks_by_ids(
+            &conn,
+            &[],
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert_eq!(updated, 0);
+    }
+
+    #[test]
+    fn test_update_tasks_by_filter_status() {
+        let conn = setup_db();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "C".into(),
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        ).unwrap();
+
+        let filter = TaskFilter {
+            status: Some(TaskStatus::Pending),
+            include_completed: true,
+            include_backlog: true,
+            include_deferred: true,
+            ..Default::default()
+        };
+        let updated = TaskRepository::update_tasks_by_filter(
+            &conn,
+            &filter,
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Cancelled),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert_eq!(updated, 2);
+    }
+
+    #[test]
+    fn test_update_tasks_by_filter_project() {
+        let conn = setup_db();
+        let proj = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "In project".into(),
+                project_id: Some(proj.id.clone()),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "No project".into(), ..Default::default() },
+        ).unwrap();
+
+        let filter = TaskFilter {
+            project_id: Some(proj.id),
+            include_completed: true,
+            include_backlog: true,
+            include_deferred: true,
+            ..Default::default()
+        };
+        let updated = TaskRepository::update_tasks_by_filter(
+            &conn,
+            &filter,
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        assert_eq!(updated, 1);
+    }
+
+    #[test]
+    fn test_delete_projects_by_ids() {
+        let conn = setup_db();
+        let p1 = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
+        ).unwrap();
+        let p2 = TaskRepository::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P2".into(), ..Default::default() },
+        ).unwrap();
+
+        let deleted = TaskRepository::delete_projects_by_ids(
+            &conn,
+            &[p1.id.clone(), p2.id.clone()],
+        ).unwrap();
+        assert_eq!(deleted, 2);
+        assert!(TaskRepository::get_project(&conn, &p1.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_delete_areas_by_ids() {
+        let conn = setup_db();
+        let a1 = TaskRepository::create_area(
+            &conn,
+            &AreaCreateParams { title: "A1".into(), ..Default::default() },
+        ).unwrap();
+        let a2 = TaskRepository::create_area(
+            &conn,
+            &AreaCreateParams { title: "A2".into(), ..Default::default() },
+        ).unwrap();
+
+        let deleted = TaskRepository::delete_areas_by_ids(
+            &conn,
+            &[a1.id.clone(), a2.id.clone()],
+        ).unwrap();
+        assert_eq!(deleted, 2);
+        assert!(TaskRepository::get_area(&conn, &a1.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_tasks_by_ids() {
+        let conn = setup_db();
+        let t1 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        let t2 = TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "C".into(), ..Default::default() },
+        ).unwrap();
+
+        let tasks = TaskRepository::get_tasks_by_ids(
+            &conn,
+            &[t1.id.clone(), t2.id.clone()],
+        ).unwrap();
+        assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn test_get_tasks_by_filter() {
+        let conn = setup_db();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "A".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskRepository::create_task(
+            &conn,
+            &TaskCreateParams { title: "B".into(), ..Default::default() },
+        ).unwrap();
+
+        let filter = TaskFilter {
+            status: Some(TaskStatus::Completed),
+            include_completed: true,
+            ..Default::default()
+        };
+        let tasks = TaskRepository::get_tasks_by_filter(&conn, &filter).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "A");
     }
 }

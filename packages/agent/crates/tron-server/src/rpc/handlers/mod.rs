@@ -161,6 +161,9 @@ fn register_capabilities(registry: &mut MethodRegistry) {
     registry.register("tasks.delete", task::DeleteTaskHandler);
     registry.register("tasks.search", task::SearchTasksHandler);
     registry.register("tasks.getActivity", task::GetTaskActivityHandler);
+    registry.register("tasks.batchDelete", task::BatchDeleteTasksHandler);
+    registry.register("tasks.batchUpdate", task::BatchUpdateTasksHandler);
+    registry.register("tasks.batchCreate", task::BatchCreateTasksHandler);
 
     // Projects (plural to match TypeScript wire format)
     registry.register("projects.create", task::CreateProjectHandler);
@@ -526,8 +529,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            119,
-            "expected 119 methods, got {}",
+            122,
+            "expected 122 methods, got {}",
             reg.methods().len()
         );
     }

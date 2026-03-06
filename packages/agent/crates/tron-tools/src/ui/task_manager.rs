@@ -32,6 +32,9 @@ const VALID_ACTIONS: &[&str] = &[
     "get_area",
     "delete_area",
     "list_areas",
+    "batch_delete",
+    "batch_update",
+    "batch_create",
 ];
 
 /// The `TaskManager` tool manages tasks, projects, and areas.
@@ -83,6 +86,10 @@ impl TronTool for TaskManagerTool {
 - **create_area**: Required: areaTitle. Optional: areaDescription\n\
 - **update_area**: Required: areaId. Optional: areaTitle, areaDescription, areaStatus\n\
 - **get_area** / **delete_area** / **list_areas**\n\n\
+### Batch Operations\n\
+- **batch_delete**: Delete multiple entities. Provide `ids` (array) OR `filter` (object with status/priority/projectId/areaId). Optional: `dryRun` to preview count\n\
+- **batch_update**: Update multiple entities with same changes. Provide `ids` OR `filter` + update fields (status, priority, title, etc). Optional: `dryRun`\n\
+- **batch_create**: Create multiple tasks atomically. Required: `items` (array of {title, ...})\n\n\
 ## Status Model\n\
 backlog → pending → in_progress → completed/cancelled\n\n\
 ## Key Behaviors\n\
@@ -107,6 +114,40 @@ backlog → pending → in_progress → completed/cancelled\n\n\
         .property("query", json!({"type": "string"}))
         .property("limit", json!({"type": "number"}))
         .property("offset", json!({"type": "number"}))
+        .property("ids", json!({
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Entity IDs for batch operations"
+        }))
+        .property("filter", json!({
+            "type": "object",
+            "description": "Filter for batch ops (same as list: status, priority, projectId, areaId)",
+            "properties": {
+                "status": {"type": "string"},
+                "priority": {"type": "string"},
+                "projectId": {"type": "string"},
+                "areaId": {"type": "string"}
+            }
+        }))
+        .property("dryRun", json!({
+            "type": "boolean",
+            "description": "Preview affected count without executing"
+        }))
+        .property("items", json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "status": {"type": "string"},
+                    "priority": {"type": "string"},
+                    "projectId": {"type": "string"},
+                    "areaId": {"type": "string"}
+                }
+            },
+            "description": "Array of tasks to create (batch_create only)"
+        }))
         .build()
     }
 

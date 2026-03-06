@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use tron_events::ConnectionPool;
 use tron_runtime::tasks::service::TaskService;
 use tron_runtime::tasks::types::{
-    AreaCreateParams, AreaFilter, AreaUpdateParams, ProjectCreateParams, ProjectFilter,
-    ProjectUpdateParams, TaskCreateParams, TaskFilter, TaskUpdateParams,
+    AreaCreateParams, AreaFilter, AreaUpdateParams, BatchTarget, ProjectCreateParams,
+    ProjectFilter, ProjectUpdateParams, TaskCreateParams, TaskFilter, TaskUpdateParams,
 };
 use tron_tools::errors::ToolError;
 use tron_tools::traits::TaskManagerDelegate;
@@ -160,6 +160,65 @@ impl SqliteTaskManagerDelegate {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
+    fn handle_batch(&self, action: &str, params: Value) -> Result<Value, ToolError> {
+        let conn = self.pool.get().map_err(ToolError::internal)?;
+        let dry_run = params.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
+
+        match action {
+            "batch_delete" => {
+                let target = Self::parse_batch_target(&params)?;
+                let result = TaskService::batch_delete_tasks(&conn, &target, dry_run, None)
+                    .map_err(ToolError::internal)?;
+                serde_json::to_value(&result).map_err(ToolError::internal)
+            }
+            "batch_update" => {
+                let target = Self::parse_batch_target(&params)?;
+                let get_str =
+                    |key: &str| params.get(key).and_then(Value::as_str).map(String::from);
+                let updates = TaskUpdateParams {
+                    title: get_str("title"),
+                    description: get_str("description"),
+                    status: get_str("status")
+                        .and_then(|s| serde_json::from_value(Value::String(s)).ok()),
+                    priority: get_str("priority")
+                        .and_then(|s| serde_json::from_value(Value::String(s)).ok()),
+                    project_id: get_str("projectId"),
+                    area_id: get_str("areaId"),
+                    ..Default::default()
+                };
+                let result =
+                    TaskService::batch_update_tasks(&conn, &target, &updates, dry_run, None)
+                        .map_err(ToolError::internal)?;
+                serde_json::to_value(&result).map_err(ToolError::internal)
+            }
+            "batch_create" => {
+                let items: Vec<TaskCreateParams> = params
+                    .get("items")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                TaskService::batch_create_tasks(&conn, &items, None)
+                    .map_err(ToolError::internal)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn parse_batch_target(params: &Value) -> Result<BatchTarget, ToolError> {
+        let ids = params
+            .get("ids")
+            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok());
+        let filter = params
+            .get("filter")
+            .and_then(|v| serde_json::from_value::<TaskFilter>(v.clone()).ok());
+        if ids.is_none() && filter.is_none() {
+            return Err(ToolError::internal(
+                "ids or filter required for batch operations",
+            ));
+        }
+        Ok(BatchTarget { ids, filter })
+    }
+
     #[allow(clippy::needless_pass_by_value, clippy::cast_possible_truncation)]
     fn handle_area(&self, action: &str, params: Value) -> Result<Value, ToolError> {
         let conn = self.pool.get().map_err(ToolError::internal)?;
@@ -224,6 +283,9 @@ impl TaskManagerDelegate for SqliteTaskManagerDelegate {
             | "list_projects" => self.handle_project(action, params),
             "create_area" | "update_area" | "get_area" | "delete_area" | "list_areas" => {
                 self.handle_area(action, params)
+            }
+            "batch_delete" | "batch_update" | "batch_create" => {
+                self.handle_batch(action, params)
             }
             other => Err(ToolError::internal(format!("Unknown action: {other}"))),
         }
@@ -489,6 +551,159 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result["success"], true);
+    }
+
+    // --- Batch operations ---
+
+    #[tokio::test]
+    async fn batch_delete_by_ids() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let t1 = delegate.execute_action("create", json!({"title": "A"})).await.unwrap();
+        let t2 = delegate.execute_action("create", json!({"title": "B"})).await.unwrap();
+        let _t3 = delegate.execute_action("create", json!({"title": "C"})).await.unwrap();
+
+        let result = delegate
+            .execute_action(
+                "batch_delete",
+                json!({
+                    "ids": [t1["id"].as_str().unwrap(), t2["id"].as_str().unwrap()]
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 2);
+        assert_eq!(result["dryRun"], false);
+
+        let list = delegate.execute_action("list", json!({})).await.unwrap();
+        assert_eq!(list["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn batch_delete_by_filter() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        delegate.execute_action("create", json!({"title": "A", "status": "completed"})).await.unwrap();
+        delegate.execute_action("create", json!({"title": "B", "status": "completed"})).await.unwrap();
+        delegate.execute_action("create", json!({"title": "C"})).await.unwrap();
+
+        let result = delegate
+            .execute_action("batch_delete", json!({"filter": {"status": "completed"}}))
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 2);
+    }
+
+    #[tokio::test]
+    async fn batch_delete_dry_run() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let t1 = delegate.execute_action("create", json!({"title": "A"})).await.unwrap();
+
+        let result = delegate
+            .execute_action(
+                "batch_delete",
+                json!({"ids": [t1["id"].as_str().unwrap()], "dryRun": true}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 1);
+        assert_eq!(result["dryRun"], true);
+
+        // Still exists
+        let list = delegate.execute_action("list", json!({})).await.unwrap();
+        assert_eq!(list["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn batch_delete_no_target_error() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let result = delegate.execute_action("batch_delete", json!({})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn batch_update_by_ids() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let t1 = delegate.execute_action("create", json!({"title": "A"})).await.unwrap();
+        let t2 = delegate.execute_action("create", json!({"title": "B"})).await.unwrap();
+
+        let result = delegate
+            .execute_action(
+                "batch_update",
+                json!({
+                    "ids": [t1["id"].as_str().unwrap(), t2["id"].as_str().unwrap()],
+                    "status": "completed"
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 2);
+    }
+
+    #[tokio::test]
+    async fn batch_update_by_filter() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        delegate.execute_action("create", json!({"title": "A"})).await.unwrap();
+        delegate.execute_action("create", json!({"title": "B", "status": "in_progress"})).await.unwrap();
+
+        let result = delegate
+            .execute_action(
+                "batch_update",
+                json!({"filter": {"status": "pending"}, "status": "cancelled"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 1);
+    }
+
+    #[tokio::test]
+    async fn batch_update_dry_run() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        delegate.execute_action("create", json!({"title": "A"})).await.unwrap();
+
+        let result = delegate
+            .execute_action(
+                "batch_update",
+                json!({"filter": {"status": "pending"}, "status": "completed", "dryRun": true}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 1);
+        assert_eq!(result["dryRun"], true);
+    }
+
+    #[tokio::test]
+    async fn batch_create_multiple() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let result = delegate
+            .execute_action(
+                "batch_create",
+                json!({"items": [{"title": "A"}, {"title": "B"}, {"title": "C"}]}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 3);
+        assert_eq!(result["ids"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn batch_create_empty() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let result = delegate
+            .execute_action("batch_create", json!({"items": []}))
+            .await
+            .unwrap();
+        assert_eq!(result["affected"], 0);
+    }
+
+    #[tokio::test]
+    async fn batch_create_invalid_item() {
+        let delegate = SqliteTaskManagerDelegate::new(setup_pool());
+        let result = delegate
+            .execute_action(
+                "batch_create",
+                json!({"items": [{"title": "Good"}, {"title": ""}, {"title": "Also Good"}]}),
+            )
+            .await;
+        assert!(result.is_err());
     }
 
     // --- Error handling ---

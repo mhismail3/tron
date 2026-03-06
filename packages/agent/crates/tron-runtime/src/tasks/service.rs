@@ -10,22 +10,110 @@
 //! - **Status reopening**: Moving from terminal → non-terminal clears `completed_at`.
 //! - **Circular dependency detection**: Only for `Blocks` relationships (BFS).
 
+use std::time::Duration;
+
 use rusqlite::Connection;
 use tracing::warn;
+
+use serde_json::{Value, json};
 
 use super::errors::TaskError;
 use super::repository::TaskRepository;
 use super::types::{
     ActivityAction, Area, AreaCreateParams, AreaFilter, AreaListResult, AreaUpdateParams,
-    DependencyRelationship, LogActivityParams, Project, ProjectCreateParams, ProjectFilter,
-    ProjectListResult, ProjectStatus, ProjectUpdateParams, Task, TaskCreateParams, TaskFilter,
-    TaskListResult, TaskStatus, TaskUpdateParams, TaskWithDetails,
+    BatchResult, BatchTarget, DependencyRelationship, LogActivityParams, Project,
+    ProjectCreateParams, ProjectFilter, ProjectListResult, ProjectStatus, ProjectUpdateParams,
+    Task, TaskCreateParams, TaskFilter, TaskListResult, TaskStatus, TaskUpdateParams,
+    TaskWithDetails,
 };
+
+/// Maximum retries for SQLITE_BUSY in batch operations.
+const BATCH_BUSY_MAX_RETRIES: u32 = 16;
 
 /// Task service with business logic and validation.
 pub struct TaskService;
 
 impl TaskService {
+    /// Run a closure inside a `BEGIN IMMEDIATE` transaction with retry on
+    /// `SQLITE_BUSY`. Unlike `BEGIN DEFERRED`, `IMMEDIATE` acquires the write
+    /// lock upfront so contention is detected at `BEGIN` rather than mid-txn.
+    /// Retries with linear backoff (matches `EventStore` pattern).
+    fn with_immediate_txn<T>(
+        conn: &Connection,
+        mut f: impl FnMut(&Connection) -> Result<T, TaskError>,
+    ) -> Result<T, TaskError> {
+        let mut attempts = 0u32;
+        loop {
+            // Acquire write lock upfront via BEGIN IMMEDIATE
+            match conn.execute_batch("BEGIN IMMEDIATE") {
+                Ok(()) => {
+                    match f(conn) {
+                        Ok(val) => {
+                            conn.execute_batch("COMMIT")?;
+                            return Ok(val);
+                        }
+                        Err(e) => {
+                            // Always rollback on error
+                            let _ = conn.execute_batch("ROLLBACK");
+                            if Self::is_sqlite_busy(&e) && attempts < BATCH_BUSY_MAX_RETRIES {
+                                attempts += 1;
+                                let backoff_ms =
+                                    u64::from(attempts).saturating_mul(10).min(500);
+                                std::thread::sleep(Duration::from_millis(backoff_ms));
+                                continue;
+                            }
+                            return Err(e);
+                        }
+                    }
+                }
+                Err(e) if Self::is_rusqlite_busy(&e) && attempts < BATCH_BUSY_MAX_RETRIES => {
+                    attempts += 1;
+                    let backoff_ms = u64::from(attempts).saturating_mul(10).min(500);
+                    std::thread::sleep(Duration::from_millis(backoff_ms));
+                }
+                Err(e) => return Err(TaskError::Database(e)),
+            }
+        }
+    }
+
+    fn is_sqlite_busy(err: &TaskError) -> bool {
+        matches!(
+            err,
+            TaskError::Database(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
+                    ..
+                },
+                _,
+            )) | TaskError::Database(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
+                    ..
+                },
+                _,
+            ))
+        )
+    }
+
+    fn is_rusqlite_busy(err: &rusqlite::Error) -> bool {
+        matches!(
+            err,
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseBusy,
+                    ..
+                },
+                _,
+            ) | rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error {
+                    code: rusqlite::ffi::ErrorCode::DatabaseLocked,
+                    ..
+                },
+                _,
+            )
+        )
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Task operations
     // ─────────────────────────────────────────────────────────────────────
@@ -333,6 +421,246 @@ impl TaskService {
             }
         }
         Ok(removed)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Batch operations
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// Batch delete tasks by IDs or filter. Transactional with activity logging.
+    pub fn batch_delete_tasks(
+        conn: &Connection,
+        target: &BatchTarget,
+        dry_run: bool,
+        session_id: Option<&str>,
+    ) -> Result<BatchResult, TaskError> {
+        let has_ids = target.ids.is_some();
+        let ids_empty = target.ids.as_ref().is_some_and(|ids| ids.is_empty());
+        let has_filter = target.filter.is_some();
+
+        if !has_ids && !has_filter {
+            return Err(TaskError::Validation("ids or filter required".into()));
+        }
+        if ids_empty {
+            return Ok(BatchResult { affected: 0, dry_run });
+        }
+
+        // For filter-based batch ops, force include_* to true so the filter
+        // only matches what the user explicitly specifies.
+        let filter = target.filter.as_ref().map(|f| {
+            let mut f = f.clone();
+            f.include_completed = true;
+            f.include_deferred = true;
+            f.include_backlog = true;
+            f
+        });
+
+        if dry_run {
+            let count = if has_ids {
+                TaskRepository::count_tasks_by_ids(conn, target.ids.as_ref().unwrap())?
+            } else {
+                TaskRepository::count_tasks_by_filter(conn, filter.as_ref().unwrap())?
+            };
+            return Ok(BatchResult { affected: count, dry_run: true });
+        }
+
+        Self::with_immediate_txn(conn, |tx| {
+            // Pre-fetch for activity logging
+            let tasks = if has_ids {
+                TaskRepository::get_tasks_by_ids(tx, target.ids.as_ref().unwrap())?
+            } else {
+                TaskRepository::get_tasks_by_filter(tx, filter.as_ref().unwrap())?
+            };
+
+            // Log activity BEFORE deleting — delete cascades task_activity rows,
+            // so inserting after would violate the FK constraint.
+            for task in &tasks {
+                TaskRepository::log_activity(
+                    tx,
+                    &LogActivityParams {
+                        task_id: task.id.clone(),
+                        session_id: session_id.map(String::from),
+                        event_id: None,
+                        action: ActivityAction::Deleted,
+                        old_value: Some(task.title.clone()),
+                        new_value: None,
+                        detail: None,
+                        minutes_logged: None,
+                    },
+                )?;
+            }
+
+            let affected = if has_ids {
+                TaskRepository::delete_tasks_by_ids(tx, target.ids.as_ref().unwrap())?
+            } else {
+                TaskRepository::delete_tasks_by_filter(tx, filter.as_ref().unwrap())?
+            };
+
+            Ok(BatchResult { affected, dry_run: false })
+        })
+    }
+
+    /// Batch update tasks by IDs or filter. Transactional with activity logging.
+    pub fn batch_update_tasks(
+        conn: &Connection,
+        target: &BatchTarget,
+        updates: &TaskUpdateParams,
+        dry_run: bool,
+        session_id: Option<&str>,
+    ) -> Result<BatchResult, TaskError> {
+        let has_ids = target.ids.is_some();
+        let ids_empty = target.ids.as_ref().is_some_and(|ids| ids.is_empty());
+        let has_filter = target.filter.is_some();
+
+        if !has_ids && !has_filter {
+            return Err(TaskError::Validation("ids or filter required".into()));
+        }
+        if ids_empty {
+            return Ok(BatchResult { affected: 0, dry_run });
+        }
+
+        let filter = target.filter.as_ref().map(|f| {
+            let mut f = f.clone();
+            f.include_completed = true;
+            f.include_deferred = true;
+            f.include_backlog = true;
+            f
+        });
+
+        if dry_run {
+            let count = if has_ids {
+                TaskRepository::count_tasks_by_ids(conn, target.ids.as_ref().unwrap())?
+            } else {
+                TaskRepository::count_tasks_by_filter(conn, filter.as_ref().unwrap())?
+            };
+            return Ok(BatchResult { affected: count, dry_run: true });
+        }
+
+        Self::with_immediate_txn(conn, |tx| {
+            let tasks_before = if has_ids {
+                TaskRepository::get_tasks_by_ids(tx, target.ids.as_ref().unwrap())?
+            } else {
+                TaskRepository::get_tasks_by_filter(tx, filter.as_ref().unwrap())?
+            };
+
+            let affected = if has_ids {
+                TaskRepository::update_tasks_by_ids(tx, target.ids.as_ref().unwrap(), updates)?
+            } else {
+                TaskRepository::update_tasks_by_filter(tx, filter.as_ref().unwrap(), updates)?
+            };
+
+            for task in &tasks_before {
+                let action = if updates.status.is_some() {
+                    ActivityAction::StatusChanged
+                } else {
+                    ActivityAction::Updated
+                };
+                TaskRepository::log_activity(
+                    tx,
+                    &LogActivityParams {
+                        task_id: task.id.clone(),
+                        session_id: session_id.map(String::from),
+                        event_id: None,
+                        action,
+                        old_value: updates.status.map(|_| task.status.as_sql().to_string()),
+                        new_value: updates.status.map(|s| s.as_sql().to_string()),
+                        detail: None,
+                        minutes_logged: None,
+                    },
+                )?;
+            }
+
+            Ok(BatchResult { affected, dry_run: false })
+        })
+    }
+
+    /// Batch create tasks atomically. Returns JSON with affected count and created IDs.
+    pub fn batch_create_tasks(
+        conn: &Connection,
+        items: &[TaskCreateParams],
+        session_id: Option<&str>,
+    ) -> Result<Value, TaskError> {
+        if items.is_empty() {
+            return Ok(json!({ "affected": 0, "dryRun": false, "ids": [] }));
+        }
+
+        for (i, item) in items.iter().enumerate() {
+            if item.title.trim().is_empty() {
+                return Err(TaskError::Validation(format!(
+                    "item[{i}]: title is required"
+                )));
+            }
+        }
+
+        Self::with_immediate_txn(conn, |tx| {
+            let mut created_ids = Vec::with_capacity(items.len());
+
+            for item in items {
+                let task = TaskRepository::create_task(tx, item)?;
+                TaskRepository::log_activity(
+                    tx,
+                    &LogActivityParams {
+                        task_id: task.id.clone(),
+                        session_id: session_id.map(String::from),
+                        event_id: None,
+                        action: ActivityAction::Created,
+                        old_value: None,
+                        new_value: Some(task.title.clone()),
+                        detail: None,
+                        minutes_logged: None,
+                    },
+                )?;
+                created_ids.push(task.id);
+            }
+
+            Ok(json!({
+                "affected": created_ids.len(),
+                "dryRun": false,
+                "ids": created_ids,
+            }))
+        })
+    }
+
+    /// Batch delete projects by IDs.
+    pub fn batch_delete_projects(
+        conn: &Connection,
+        ids: &[String],
+        dry_run: bool,
+    ) -> Result<BatchResult, TaskError> {
+        if ids.is_empty() {
+            return Ok(BatchResult { affected: 0, dry_run });
+        }
+        if dry_run {
+            let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!("SELECT COUNT(*) FROM projects WHERE id IN ({placeholders})");
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
+            return Ok(BatchResult { affected: count, dry_run: true });
+        }
+        let affected = TaskRepository::delete_projects_by_ids(conn, ids)?;
+        Ok(BatchResult { affected, dry_run: false })
+    }
+
+    /// Batch delete areas by IDs.
+    pub fn batch_delete_areas(
+        conn: &Connection,
+        ids: &[String],
+        dry_run: bool,
+    ) -> Result<BatchResult, TaskError> {
+        if ids.is_empty() {
+            return Ok(BatchResult { affected: 0, dry_run });
+        }
+        if dry_run {
+            let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!("SELECT COUNT(*) FROM areas WHERE id IN ({placeholders})");
+            let params: Vec<&dyn rusqlite::types::ToSql> =
+                ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+            let count: u32 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
+            return Ok(BatchResult { affected: count, dry_run: true });
+        }
+        let affected = TaskRepository::delete_areas_by_ids(conn, ids)?;
+        Ok(BatchResult { affected, dry_run: false })
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1050,6 +1378,325 @@ mod tests {
         let result = TaskService::list_areas(&conn, &filter, 20, 0).unwrap();
         assert_eq!(result.total, 1);
         assert_eq!(result.areas[0].area.title, "A1");
+    }
+
+    // --- Batch operations ---
+
+    #[test]
+    fn test_batch_delete_tasks_by_ids() {
+        let conn = setup_db();
+        let mut ids = Vec::new();
+        for title in &["A", "B", "C", "D", "E"] {
+            let t = TaskService::create_task(
+                &conn,
+                &TaskCreateParams { title: title.to_string(), ..Default::default() },
+            ).unwrap();
+            ids.push(t.id);
+        }
+        let target = BatchTarget {
+            ids: Some(ids[0..3].to_vec()),
+            filter: None,
+        };
+        let result = TaskService::batch_delete_tasks(&conn, &target, false, None).unwrap();
+        assert_eq!(result.affected, 3);
+        assert!(!result.dry_run);
+        // 2 remain
+        let all = TaskService::list_tasks(
+            &conn,
+            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
+            100, 0,
+        ).unwrap();
+        assert_eq!(all.total, 2);
+    }
+
+    #[test]
+    fn test_batch_delete_tasks_by_filter() {
+        let conn = setup_db();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Done".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "Done2".into(),
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams { title: "Active".into(), ..Default::default() },
+        ).unwrap();
+
+        let target = BatchTarget {
+            ids: None,
+            filter: Some(TaskFilter {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            }),
+        };
+        let result = TaskService::batch_delete_tasks(&conn, &target, false, None).unwrap();
+        assert_eq!(result.affected, 2);
+    }
+
+    #[test]
+    fn test_batch_delete_tasks_dry_run_by_ids() {
+        let conn = setup_db();
+        let mut ids = Vec::new();
+        for title in &["A", "B", "C"] {
+            let t = TaskService::create_task(
+                &conn,
+                &TaskCreateParams { title: title.to_string(), ..Default::default() },
+            ).unwrap();
+            ids.push(t.id);
+        }
+        let target = BatchTarget {
+            ids: Some(ids[0..2].to_vec()),
+            filter: None,
+        };
+        let result = TaskService::batch_delete_tasks(&conn, &target, true, None).unwrap();
+        assert_eq!(result.affected, 2);
+        assert!(result.dry_run);
+        // All 3 still exist
+        let all = TaskService::list_tasks(
+            &conn,
+            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
+            100, 0,
+        ).unwrap();
+        assert_eq!(all.total, 3);
+    }
+
+    #[test]
+    fn test_batch_delete_tasks_empty_ids() {
+        let conn = setup_db();
+        let target = BatchTarget { ids: Some(vec![]), filter: None };
+        let result = TaskService::batch_delete_tasks(&conn, &target, false, None).unwrap();
+        assert_eq!(result.affected, 0);
+    }
+
+    #[test]
+    fn test_batch_delete_tasks_no_target() {
+        let conn = setup_db();
+        let target = BatchTarget { ids: None, filter: None };
+        let result = TaskService::batch_delete_tasks(&conn, &target, false, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("ids or filter required"));
+    }
+
+    #[test]
+    fn test_batch_delete_tasks_logs_activity() {
+        let conn = setup_db();
+        let t = TaskService::create_task(
+            &conn,
+            &TaskCreateParams { title: "To Delete".into(), ..Default::default() },
+        ).unwrap();
+        let tid = t.id.clone();
+        let target = BatchTarget { ids: Some(vec![t.id]), filter: None };
+        TaskService::batch_delete_tasks(&conn, &target, false, None).unwrap();
+        // Activity was logged before the delete (task_activity references task_id but cascades)
+        // Just verify the method didn't error — the activity is cascade-deleted with the task
+    }
+
+    #[test]
+    fn test_batch_update_tasks_by_ids_status() {
+        let conn = setup_db();
+        let mut ids = Vec::new();
+        for title in &["A", "B", "C"] {
+            let t = TaskService::create_task(
+                &conn,
+                &TaskCreateParams { title: title.to_string(), ..Default::default() },
+            ).unwrap();
+            ids.push(t.id);
+        }
+        let target = BatchTarget { ids: Some(ids.clone()), filter: None };
+        let result = TaskService::batch_update_tasks(
+            &conn,
+            &target,
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+            false,
+            None,
+        ).unwrap();
+        assert_eq!(result.affected, 3);
+
+        // Verify completed_at auto-set
+        let t = TaskRepository::get_task(&conn, &ids[0]).unwrap().unwrap();
+        assert_eq!(t.status, TaskStatus::Completed);
+        assert!(t.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_batch_update_tasks_by_filter() {
+        let conn = setup_db();
+        let proj = TaskService::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
+        ).unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "In proj".into(),
+                project_id: Some(proj.id.clone()),
+                ..Default::default()
+            },
+        ).unwrap();
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams { title: "Outside".into(), ..Default::default() },
+        ).unwrap();
+
+        let target = BatchTarget {
+            ids: None,
+            filter: Some(TaskFilter {
+                project_id: Some(proj.id),
+                ..Default::default()
+            }),
+        };
+        let result = TaskService::batch_update_tasks(
+            &conn,
+            &target,
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Cancelled),
+                ..Default::default()
+            },
+            false,
+            None,
+        ).unwrap();
+        assert_eq!(result.affected, 1);
+    }
+
+    #[test]
+    fn test_batch_update_tasks_dry_run() {
+        let conn = setup_db();
+        let t = TaskService::create_task(
+            &conn,
+            &TaskCreateParams { title: "A".into(), ..Default::default() },
+        ).unwrap();
+        let target = BatchTarget { ids: Some(vec![t.id.clone()]), filter: None };
+        let result = TaskService::batch_update_tasks(
+            &conn,
+            &target,
+            &TaskUpdateParams {
+                status: Some(TaskStatus::Completed),
+                ..Default::default()
+            },
+            true,
+            None,
+        ).unwrap();
+        assert_eq!(result.affected, 1);
+        assert!(result.dry_run);
+        // Not actually updated
+        let task = TaskRepository::get_task(&conn, &t.id).unwrap().unwrap();
+        assert_eq!(task.status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn test_batch_update_tasks_no_target() {
+        let conn = setup_db();
+        let target = BatchTarget { ids: None, filter: None };
+        let result = TaskService::batch_update_tasks(
+            &conn,
+            &target,
+            &TaskUpdateParams { status: Some(TaskStatus::Completed), ..Default::default() },
+            false,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_batch_create_tasks() {
+        let conn = setup_db();
+        let items = vec![
+            TaskCreateParams { title: "A".into(), ..Default::default() },
+            TaskCreateParams { title: "B".into(), ..Default::default() },
+            TaskCreateParams { title: "C".into(), ..Default::default() },
+        ];
+        let result = TaskService::batch_create_tasks(&conn, &items, None).unwrap();
+        assert_eq!(result["affected"], 3);
+        assert_eq!(result["ids"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_batch_create_tasks_empty() {
+        let conn = setup_db();
+        let result = TaskService::batch_create_tasks(&conn, &[], None).unwrap();
+        assert_eq!(result["affected"], 0);
+    }
+
+    #[test]
+    fn test_batch_create_tasks_invalid_item_rolls_back() {
+        let conn = setup_db();
+        let items = vec![
+            TaskCreateParams { title: "Good".into(), ..Default::default() },
+            TaskCreateParams { title: "".into(), ..Default::default() },
+            TaskCreateParams { title: "Also Good".into(), ..Default::default() },
+        ];
+        let result = TaskService::batch_create_tasks(&conn, &items, None);
+        assert!(result.is_err());
+        // Nothing created
+        let all = TaskService::list_tasks(
+            &conn,
+            &TaskFilter { include_completed: true, include_backlog: true, include_deferred: true, ..Default::default() },
+            100, 0,
+        ).unwrap();
+        assert_eq!(all.total, 0);
+    }
+
+    #[test]
+    fn test_batch_delete_projects_by_ids() {
+        let conn = setup_db();
+        let p1 = TaskService::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P1".into(), ..Default::default() },
+        ).unwrap();
+        let p2 = TaskService::create_project(
+            &conn,
+            &ProjectCreateParams { title: "P2".into(), ..Default::default() },
+        ).unwrap();
+        // Create a task in P1 to verify orphaning
+        TaskService::create_task(
+            &conn,
+            &TaskCreateParams {
+                title: "In P1".into(),
+                project_id: Some(p1.id.clone()),
+                ..Default::default()
+            },
+        ).unwrap();
+
+        let result = TaskService::batch_delete_projects(
+            &conn,
+            &[p1.id.clone(), p2.id.clone()],
+            false,
+        ).unwrap();
+        assert_eq!(result.affected, 2);
+    }
+
+    #[test]
+    fn test_batch_delete_areas_by_ids() {
+        let conn = setup_db();
+        let a1 = TaskService::create_area(
+            &conn,
+            &AreaCreateParams { title: "A1".into(), ..Default::default() },
+        ).unwrap();
+        let a2 = TaskService::create_area(
+            &conn,
+            &AreaCreateParams { title: "A2".into(), ..Default::default() },
+        ).unwrap();
+
+        let result = TaskService::batch_delete_areas(
+            &conn,
+            &[a1.id.clone(), a2.id.clone()],
+            false,
+        ).unwrap();
+        assert_eq!(result.affected, 2);
     }
 
     // --- Area validation ---
