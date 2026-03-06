@@ -782,6 +782,12 @@ impl EventStore {
         SessionRepo::get_by_id(&conn, session_id)
     }
 
+    /// Find the active chat session (`source = 'chat'`, not ended).
+    pub fn find_chat_session(&self) -> Result<Option<SessionRow>> {
+        let conn = self.conn()?;
+        SessionRepo::find_chat_session(&conn)
+    }
+
     /// List sessions with filtering.
     pub fn list_sessions(&self, opts: &ListSessionsOptions<'_>) -> Result<Vec<SessionRow>> {
         let conn = self.conn()?;

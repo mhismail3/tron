@@ -311,6 +311,72 @@ impl SessionManager {
         let _ = self.active_sessions.remove(session_id);
     }
 
+    /// Get or create the singleton chat session.
+    ///
+    /// Chat sessions use `source = "chat"` and are singleton — at most one
+    /// exists at any time. Returns `(session_id, created)`.
+    pub fn get_or_create_chat_session(
+        &self,
+        model: &str,
+        working_directory: &str,
+    ) -> Result<(String, bool), RuntimeError> {
+        // Check for existing active chat session
+        if let Some(existing) = self
+            .event_store
+            .find_chat_session()
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+        {
+            return Ok((existing.id, false));
+        }
+
+        // Create a new session and mark it as chat
+        let session_id = self.create_session(model, working_directory, Some("Chat"))?;
+        let _ = self
+            .event_store
+            .update_source(&session_id, "chat")
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        Ok((session_id, true))
+    }
+
+    /// Check if a session is the chat session.
+    pub fn is_chat_session(&self, session_id: &str) -> bool {
+        self.event_store
+            .get_session(session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|s| s.source.as_deref() == Some("chat"))
+    }
+
+    /// Reset the chat session: archive the current one and create a fresh replacement.
+    ///
+    /// Returns `(new_session_id, old_session_id)`. Fails if no active chat session exists.
+    pub fn reset_chat_session(
+        &self,
+        model: &str,
+        working_directory: &str,
+    ) -> Result<(String, String), RuntimeError> {
+        let old = self
+            .event_store
+            .find_chat_session()
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
+            .ok_or_else(|| {
+                RuntimeError::SessionNotFound("no active chat session to reset".into())
+            })?;
+
+        // Archive the old chat session (evict from cache + set ended_at)
+        self.archive_session(&old.id)?;
+
+        // Create a fresh session and mark it as chat
+        let new_id = self.create_session(model, working_directory, Some("Chat"))?;
+        let _ = self
+            .event_store
+            .update_source(&new_id, "chat")
+            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
+
+        Ok((new_id, old.id))
+    }
+
     /// Get the event store.
     pub fn event_store(&self) -> &Arc<EventStore> {
         &self.event_store
@@ -525,5 +591,116 @@ mod tests {
 
         let all = mgr.list_sessions(&SessionFilter::default()).unwrap();
         assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_or_create_chat_session_creates_then_returns_existing() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        // First call creates
+        let (id1, created) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        assert!(created);
+        assert!(!id1.is_empty());
+
+        // Second call returns existing
+        let (id2, created2) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        assert!(!created2);
+        assert_eq!(id1, id2);
+    }
+
+    #[tokio::test]
+    async fn is_chat_session() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let (chat_id, _) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        assert!(mgr.is_chat_session(&chat_id));
+
+        let normal_id = mgr.create_session("test-model", "/tmp", Some("normal")).unwrap();
+        assert!(!mgr.is_chat_session(&normal_id));
+    }
+
+    #[tokio::test]
+    async fn user_only_includes_chat_sessions() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let _ = mgr.create_session("test-model", "/tmp", Some("user session")).unwrap();
+        let (chat_id, _) = mgr.get_or_create_chat_session("test-model", "/tmp").unwrap();
+        let cron_id = mgr.create_session("test-model", "/tmp", Some("Cron: daily")).unwrap();
+        store.update_source(&cron_id, "cron").unwrap();
+
+        let filtered = mgr
+            .list_sessions(&SessionFilter {
+                user_only: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Should include user session + chat, but NOT cron
+        assert_eq!(filtered.len(), 2);
+        let ids: Vec<&str> = filtered.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&chat_id.as_str()));
+        assert!(!ids.contains(&cron_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn reset_chat_session_replaces_with_new() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store.clone());
+
+        let (old_id, created) = mgr.get_or_create_chat_session("m", "/tmp").unwrap();
+        assert!(created);
+
+        let (new_id, returned_old) = mgr.reset_chat_session("m", "/tmp").unwrap();
+        assert_eq!(returned_old, old_id);
+        assert_ne!(new_id, old_id);
+
+        // Old session should be archived
+        let old = store.get_session(&old_id).unwrap().unwrap();
+        assert!(old.ended_at.is_some());
+
+        // New session should be the active chat
+        assert!(mgr.is_chat_session(&new_id));
+
+        // get_or_create should return the new one
+        let (found_id, found_created) = mgr.get_or_create_chat_session("m", "/tmp").unwrap();
+        assert_eq!(found_id, new_id);
+        assert!(!found_created);
+    }
+
+    #[tokio::test]
+    async fn reset_chat_session_fails_without_existing() {
+        let pool = tron_events::new_in_memory(&tron_events::ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            let _ = tron_events::run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let mgr = SessionManager::new(store);
+
+        let err = mgr.reset_chat_session("m", "/tmp").unwrap_err();
+        assert!(matches!(err, RuntimeError::SessionNotFound(_)));
     }
 }

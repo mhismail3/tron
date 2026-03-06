@@ -681,6 +681,7 @@ async fn main() -> Result<()> {
     };
 
     // RPC context
+    let session_manager_for_startup = session_manager.clone();
     let rpc_context = RpcContext {
         orchestrator: orchestrator.clone(),
         session_manager,
@@ -751,6 +752,18 @@ async fn main() -> Result<()> {
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
 
     tracing::info!("Tron agent listening on http://{addr} ({method_count} RPC methods registered)");
+
+    // Auto-create the default chat session if enabled
+    if settings.session.chat.enabled {
+        match session_manager_for_startup.get_or_create_chat_session(
+            &settings.server.default_model,
+            &settings.session.chat.working_directory,
+        ) {
+            Ok((id, true)) => tracing::info!(session_id = %id, "default chat session created"),
+            Ok((_, false)) => tracing::debug!("default chat session already exists"),
+            Err(e) => tracing::warn!(error = %e, "failed to create default chat session"),
+        }
+    }
 
     // Post-deploy sentinel processing
     {

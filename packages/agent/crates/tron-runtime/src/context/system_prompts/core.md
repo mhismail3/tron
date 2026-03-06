@@ -288,4 +288,4 @@ Key behaviors:
 
 Debugging workflow: `sessions` to find it, `session` for overview, `events` with `type: "error"` for errors, `logs` with `level: "error"` for log-level errors, `events` with specific `turn` to examine a turn. When tool results reference a `blob_id`, use `read_blob` to retrieve full content.
 
-Client logs are at `~/.tron/artifacts/client-logs/`. Check these when investigating client-side issues — they contain client-side logs that complement the server-side event history.
+Client logs are ingested into the same database as server logs. Use `logs` with appropriate filters to check both server-side and client-side issues — all events and logs live in one place.

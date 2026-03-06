@@ -26,6 +26,11 @@ use super::constants::MAX_SYSTEM_PROMPT_FILE_SIZE;
 /// creating `.tron/SYSTEM.md` in their project directory.
 pub const TRON_CORE_PROMPT: &str = include_str!("core.md");
 
+/// Chat-mode system prompt for the default conversational session.
+///
+/// More conversational, general-purpose persona. Not project-scoped.
+pub const TRON_CHAT_PROMPT: &str = include_str!("chat.md");
+
 /// Working directory suffix template appended to system prompts.
 pub const WORKING_DIRECTORY_SUFFIX: &str = "\n\nCurrent working directory: {workingDirectory}";
 
@@ -321,6 +326,13 @@ mod tests {
     #[test]
     fn working_directory_suffix_has_placeholder() {
         assert!(WORKING_DIRECTORY_SUFFIX.contains("{workingDirectory}"));
+    }
+
+    #[test]
+    fn chat_prompt_is_non_empty() {
+        assert!(!TRON_CHAT_PROMPT.is_empty());
+        assert!(TRON_CHAT_PROMPT.len() > 500);
+        assert!(TRON_CHAT_PROMPT.contains("Tron"));
     }
 
     // ── Subagent prompts ─────────────────────────────────────────────────

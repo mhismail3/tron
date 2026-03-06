@@ -78,6 +78,8 @@ fn register_core(registry: &mut MethodRegistry) {
     registry.register("session.getHistory", session::GetHistoryHandler);
     registry.register("session.archive", session::ArchiveSessionHandler);
     registry.register("session.unarchive", session::UnarchiveSessionHandler);
+    registry.register("session.getChat", session::GetChatSessionHandler);
+    registry.register("session.resetChat", session::ResetChatSessionHandler);
 
     // Agent
     registry.register("agent.prompt", agent::PromptHandler);
@@ -524,8 +526,8 @@ mod tests {
         register_all(&mut reg);
         assert_eq!(
             reg.methods().len(),
-            117,
-            "expected 117 methods, got {}",
+            119,
+            "expected 119 methods, got {}",
             reg.methods().len()
         );
     }

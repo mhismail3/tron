@@ -534,6 +534,7 @@ impl MethodHandler for PromptHandler {
             let run_id_clone = run_id.clone();
             let model = session.latest_model.clone();
             let working_dir = session.working_directory.clone();
+            let is_chat = session.source.as_deref() == Some("chat");
 
             let event_store = ctx.event_store.clone();
             let embedding_controller = ctx.embedding_controller.clone();
@@ -841,6 +842,11 @@ impl MethodHandler for PromptHandler {
                     model: model.clone(),
                     working_directory: Some(working_dir),
                     server_origin: Some(server_origin),
+                    system_prompt: if is_chat {
+                        Some(tron_runtime::context::system_prompts::TRON_CHAT_PROMPT.to_string())
+                    } else {
+                        None
+                    },
                     enable_thinking: true,
                     max_turns: settings.agent.max_turns,
                     compaction: tron_runtime::context::types::CompactionConfig {

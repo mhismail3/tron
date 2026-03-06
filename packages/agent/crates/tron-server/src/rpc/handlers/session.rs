@@ -233,6 +233,8 @@ impl MethodHandler for ListSessionsHandler {
                     "endedAt": s.ended_at,
                     "isActive": is_active,
                     "isArchived": s.ended_at.is_some(),
+                    "isChat": s.source.as_deref() == Some("chat"),
+                    "source": s.source,
                     "eventCount": s.event_count,
                     "messageCount": s.message_count,
                     "inputTokens": s.total_input_tokens,
@@ -260,6 +262,15 @@ impl MethodHandler for DeleteSessionHandler {
     #[instrument(skip(self, ctx), fields(method = "session.delete", session_id))]
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
+
+        // Protect chat session from deletion
+        if ctx.session_manager.is_chat_session(&session_id) {
+            return Err(RpcError::Custom {
+                code: "CHAT_SESSION_PROTECTED".into(),
+                message: "The default chat session cannot be deleted".into(),
+                details: None,
+            });
+        }
 
         ctx.session_manager
             .delete_session(&session_id)
@@ -397,6 +408,15 @@ impl MethodHandler for ArchiveSessionHandler {
     async fn handle(&self, params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
 
+        // Protect chat session from archiving
+        if ctx.session_manager.is_chat_session(&session_id) {
+            return Err(RpcError::Custom {
+                code: "CHAT_SESSION_PROTECTED".into(),
+                message: "The default chat session cannot be archived".into(),
+                details: None,
+            });
+        }
+
         ctx.session_manager
             .archive_session(&session_id)
             .map_err(|e| RpcError::Internal {
@@ -515,6 +535,165 @@ impl MethodHandler for GetHistoryHandler {
         Ok(serde_json::json!({
             "messages": messages,
             "hasMore": has_more,
+        }))
+    }
+}
+
+/// Get or create the default chat session.
+pub struct GetChatSessionHandler;
+
+#[async_trait]
+impl MethodHandler for GetChatSessionHandler {
+    #[instrument(skip(self, ctx), fields(method = "session.getChat"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let settings = tron_settings::get_settings();
+        if !settings.session.chat.enabled {
+            return Err(RpcError::Custom {
+                code: "CHAT_DISABLED".into(),
+                message: "Default chat mode is disabled".into(),
+                details: None,
+            });
+        }
+
+        let model = &settings.server.default_model;
+        let working_dir = &settings.session.chat.working_directory;
+
+        let (session_id, created) = ctx
+            .session_manager
+            .get_or_create_chat_session(model, working_dir)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
+
+        if created {
+            let _ = ctx
+                .orchestrator
+                .broadcast()
+                .emit(TronEvent::SessionCreated {
+                    base: BaseEvent::now(&session_id),
+                    model: model.to_string(),
+                    working_directory: working_dir.clone(),
+                });
+
+            // Optimistic context preload
+            let event_store = ctx.event_store.clone();
+            let broadcast = ctx.orchestrator.broadcast().clone();
+            let sid = session_id.clone();
+            let wd = working_dir.clone();
+            let join = tokio::task::spawn_blocking(move || {
+                emit_optimistic_context_events(&event_store, &broadcast, &sid, &wd);
+            })
+            .await;
+            if let Err(e) = join {
+                tracing::warn!(error = %e, "chat session context preload panicked");
+            }
+        }
+
+        let session = ctx
+            .session_manager
+            .get_session(&session_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| RpcError::Internal {
+                message: "Chat session disappeared after creation".into(),
+            })?;
+
+        Ok(serde_json::json!({
+            "sessionId": session_id,
+            "created": created,
+            "model": session.latest_model,
+            "workingDirectory": session.working_directory,
+            "createdAt": session.created_at,
+            "isActive": true,
+            "isArchived": false,
+            "isChat": true,
+            "messageCount": session.message_count,
+            "eventCount": session.event_count,
+        }))
+    }
+}
+
+/// Reset the chat session: archive the current one and create a fresh replacement.
+///
+/// Takes no parameters — operates on the singleton chat session. Returns the
+/// new session info (same shape as `session.getChat`). Rejects calls when no
+/// active chat session exists or when chat mode is disabled.
+pub struct ResetChatSessionHandler;
+
+#[async_trait]
+impl MethodHandler for ResetChatSessionHandler {
+    #[instrument(skip(self, ctx), fields(method = "session.resetChat"))]
+    async fn handle(&self, _params: Option<Value>, ctx: &RpcContext) -> Result<Value, RpcError> {
+        let settings = tron_settings::get_settings();
+        if !settings.session.chat.enabled {
+            return Err(RpcError::Custom {
+                code: "CHAT_DISABLED".into(),
+                message: "Default chat mode is disabled".into(),
+                details: None,
+            });
+        }
+
+        let model = &settings.server.default_model;
+        let working_dir = &settings.session.chat.working_directory;
+
+        let (new_id, old_id) = ctx
+            .session_manager
+            .reset_chat_session(model, working_dir)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?;
+
+        // Broadcast archive of old + creation of new
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionArchived {
+                base: BaseEvent::now(&old_id),
+            });
+        let _ = ctx
+            .orchestrator
+            .broadcast()
+            .emit(TronEvent::SessionCreated {
+                base: BaseEvent::now(&new_id),
+                model: model.to_string(),
+                working_directory: working_dir.clone(),
+            });
+
+        // Optimistic context preload for the new session
+        let event_store = ctx.event_store.clone();
+        let broadcast = ctx.orchestrator.broadcast().clone();
+        let sid = new_id.clone();
+        let wd = working_dir.clone();
+        let join = tokio::task::spawn_blocking(move || {
+            emit_optimistic_context_events(&event_store, &broadcast, &sid, &wd);
+        })
+        .await;
+        if let Err(e) = join {
+            tracing::warn!(error = %e, "reset chat context preload panicked");
+        }
+
+        let session = ctx
+            .session_manager
+            .get_session(&new_id)
+            .map_err(|e| RpcError::Internal {
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| RpcError::Internal {
+                message: "New chat session disappeared after creation".into(),
+            })?;
+
+        Ok(serde_json::json!({
+            "sessionId": new_id,
+            "previousSessionId": old_id,
+            "model": session.latest_model,
+            "workingDirectory": session.working_directory,
+            "createdAt": session.created_at,
+            "isActive": true,
+            "isArchived": false,
+            "isChat": true,
+            "messageCount": 0,
+            "eventCount": session.event_count,
         }))
     }
 }
@@ -1461,5 +1640,158 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── session.getChat tests ──
+
+    #[tokio::test]
+    async fn get_chat_session_creates_on_first_call() {
+        let ctx = make_test_context();
+        let result = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        assert!(result["sessionId"].is_string());
+        assert_eq!(result["created"], true);
+        assert_eq!(result["isChat"], true);
+    }
+
+    #[tokio::test]
+    async fn get_chat_session_returns_existing() {
+        let ctx = make_test_context();
+        let r1 = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let r2 = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(r1["sessionId"], r2["sessionId"]);
+        assert_eq!(r2["created"], false);
+    }
+
+    #[tokio::test]
+    async fn list_sessions_includes_chat_with_is_chat_field() {
+        let ctx = make_test_context();
+        let chat = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let chat_id = chat["sessionId"].as_str().unwrap();
+
+        let _ = ctx
+            .session_manager
+            .create_session("m", "/tmp", Some("normal"))
+            .unwrap();
+
+        let result = ListSessionsHandler.handle(None, &ctx).await.unwrap();
+        let sessions = result["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+
+        let chat_entry = sessions.iter().find(|s| s["sessionId"] == chat_id).unwrap();
+        assert_eq!(chat_entry["isChat"], true);
+        assert_eq!(chat_entry["source"], "chat");
+
+        let normal_entry = sessions.iter().find(|s| s["sessionId"] != chat_id).unwrap();
+        assert_eq!(normal_entry["isChat"], false);
+        assert!(normal_entry["source"].is_null());
+    }
+
+    // ── Chat session protection tests ──
+
+    #[tokio::test]
+    async fn delete_chat_session_blocked() {
+        let ctx = make_test_context();
+        let chat = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let chat_id = chat["sessionId"].as_str().unwrap();
+
+        let err = DeleteSessionHandler
+            .handle(Some(json!({"sessionId": chat_id})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "CHAT_SESSION_PROTECTED");
+    }
+
+    #[tokio::test]
+    async fn archive_chat_session_blocked() {
+        let ctx = make_test_context();
+        let chat = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let chat_id = chat["sessionId"].as_str().unwrap();
+
+        let err = ArchiveSessionHandler
+            .handle(Some(json!({"sessionId": chat_id})), &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "CHAT_SESSION_PROTECTED");
+    }
+
+    // ── session.resetChat tests ──
+
+    #[tokio::test]
+    async fn reset_chat_creates_new_session() {
+        let ctx = make_test_context();
+        let original = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let original_id = original["sessionId"].as_str().unwrap();
+
+        let result = ResetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let new_id = result["sessionId"].as_str().unwrap();
+
+        assert_ne!(new_id, original_id);
+        assert_eq!(result["previousSessionId"], original_id);
+        assert_eq!(result["isChat"], true);
+        assert_eq!(result["messageCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn reset_chat_archives_old_session() {
+        let ctx = make_test_context();
+        let original = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let original_id = original["sessionId"].as_str().unwrap();
+
+        let _ = ResetChatSessionHandler.handle(None, &ctx).await.unwrap();
+
+        // Old session should be archived (ended_at set)
+        let old = ctx.session_manager.get_session(original_id).unwrap().unwrap();
+        assert!(old.ended_at.is_some(), "old chat session should be archived");
+    }
+
+    #[tokio::test]
+    async fn reset_chat_new_session_is_chat() {
+        let ctx = make_test_context();
+        let _ = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+
+        let result = ResetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let new_id = result["sessionId"].as_str().unwrap();
+
+        assert!(ctx.session_manager.is_chat_session(new_id));
+    }
+
+    #[tokio::test]
+    async fn reset_chat_get_chat_returns_new_session() {
+        let ctx = make_test_context();
+        let _ = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+
+        let reset = ResetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        let new_id = reset["sessionId"].as_str().unwrap();
+
+        // getChat should now return the new session
+        let get = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+        assert_eq!(get["sessionId"], new_id);
+        assert_eq!(get["created"], false);
+    }
+
+    #[tokio::test]
+    async fn reset_chat_fails_without_existing_chat() {
+        let ctx = make_test_context();
+        // No chat session created — reset should fail
+        let err = ResetChatSessionHandler
+            .handle(None, &ctx)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), "INTERNAL_ERROR");
+    }
+
+    #[tokio::test]
+    async fn reset_chat_emits_archive_and_create_events() {
+        let ctx = make_test_context();
+        let _ = GetChatSessionHandler.handle(None, &ctx).await.unwrap();
+
+        let mut rx = ctx.orchestrator.subscribe();
+
+        let _ = ResetChatSessionHandler.handle(None, &ctx).await.unwrap();
+
+        let e1 = rx.try_recv().unwrap();
+        assert_eq!(e1.event_type(), "session_archived");
+        let e2 = rx.try_recv().unwrap();
+        assert_eq!(e2.event_type(), "session_created");
     }
 }

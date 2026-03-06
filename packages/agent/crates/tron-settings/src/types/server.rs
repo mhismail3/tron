@@ -213,6 +213,8 @@ pub struct SessionSettings {
     pub worktree_timeout_ms: u64,
     /// Git worktree isolation settings.
     pub isolation: IsolationSettings,
+    /// Default chat session settings.
+    pub chat: ChatSettings,
 }
 
 impl Default for SessionSettings {
@@ -220,6 +222,27 @@ impl Default for SessionSettings {
         Self {
             worktree_timeout_ms: 30_000,
             isolation: IsolationSettings::default(),
+            chat: ChatSettings::default(),
+        }
+    }
+}
+
+/// Default chat session settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ChatSettings {
+    /// Whether the default chat session is enabled.
+    pub enabled: bool,
+    /// Working directory for the chat session.
+    pub working_directory: String,
+}
+
+impl Default for ChatSettings {
+    fn default() -> Self {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        Self {
+            enabled: true,
+            working_directory: format!("{home}/Workspace"),
         }
     }
 }
@@ -387,6 +410,8 @@ mod tests {
         assert!(s.isolation.auto_commit_on_release);
         assert!(s.isolation.preserve_branches);
         assert!(s.isolation.delete_worktree_on_release);
+        assert!(s.chat.enabled);
+        assert!(s.chat.working_directory.contains("Workspace"));
     }
 
     #[test]
