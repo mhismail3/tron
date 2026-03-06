@@ -29,14 +29,18 @@ use crate::types::{CronJob, JobRuntimeState, MisfirePolicy, OverlapPolicy, RunSt
 /// Default global execution concurrency limit.
 const DEFAULT_EXECUTION_LIMIT: usize = 10;
 
+/// Shared in-memory runtime state map, accessible from spawned tasks.
+type RuntimeMap = Arc<parking_lot::RwLock<HashMap<String, JobRuntimeState>>>;
+
 /// Main cron scheduler.
 pub struct CronScheduler {
     pool: ConnectionPool,
     clock: Arc<dyn Clock>,
     /// In-memory job definitions (synced from file).
     jobs: parking_lot::RwLock<HashMap<String, CronJob>>,
-    /// Runtime state per job (synced from SQLite).
-    runtime: parking_lot::RwLock<HashMap<String, JobRuntimeState>>,
+    /// Runtime state per job (synced from SQLite). Arc-wrapped for sharing
+    /// with spawned execution tasks.
+    runtime: RuntimeMap,
     /// Serializes all access to `automations.json`.
     config_lock: tokio::sync::Mutex<()>,
     /// Wakes scheduler when config file changes.
@@ -69,7 +73,7 @@ impl CronScheduler {
             pool,
             clock,
             jobs: parking_lot::RwLock::new(HashMap::new()),
-            runtime: parking_lot::RwLock::new(HashMap::new()),
+            runtime: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             config_lock: tokio::sync::Mutex::new(()),
             config_notify: Arc::new(tokio::sync::Notify::new()),
             reschedule_notify: Arc::new(tokio::sync::Notify::new()),
@@ -148,6 +152,11 @@ impl CronScheduler {
     /// Update runtime state for a job in memory.
     pub fn update_runtime(&self, state: JobRuntimeState) {
         self.runtime.write().insert(state.job_id.clone(), state);
+    }
+
+    /// Get an Arc handle to the runtime map (for spawned execution tasks).
+    fn runtime_ref(&self) -> RuntimeMap {
+        self.runtime.clone()
     }
 
     /// Get next wakeup time across all enabled jobs.
@@ -403,10 +412,11 @@ impl CronScheduler {
                         let pool = self.pool.clone();
                         let clock = self.clock.clone();
                         let cancel = self.cancel.child_token();
+                        let runtime = self.runtime_ref();
 
                         active_tasks.spawn(async move {
                             let _permit = permit;
-                            execute_job(&job, &deps, &pool, clock.as_ref(), cancel).await;
+                            execute_job(&job, &deps, &pool, clock.as_ref(), cancel, &runtime).await;
                         });
                     }
 
@@ -560,6 +570,7 @@ impl CronScheduler {
                 }
 
                 store::clear_running_since(&self.pool, &job_id)?;
+                self.runtime.write().entry(job_id.clone()).and_modify(|s| s.running_since = None);
                 let _ = store::increment_consecutive_failures(&self.pool, &job_id);
             }
         }
@@ -576,16 +587,18 @@ async fn execute_job(
     pool: &ConnectionPool,
     clock: &dyn Clock,
     cancel: CancellationToken,
+    runtime: &RuntimeMap,
 ) {
     let run_id = format!("cronrun_{}", Uuid::now_v7());
     let started_at = clock.now_utc();
 
-    // Record running state
+    // Record running state (DB + in-memory)
     if let Err(e) = store::insert_run(pool, &run_id, &job.id, &job.name, started_at) {
         tracing::error!(job_id = %job.id, error = %e, "failed to insert run record");
         return;
     }
     let _ = store::set_running_since(pool, &job.id, started_at);
+    runtime.write().entry(job.id.clone()).and_modify(|s| s.running_since = Some(started_at));
 
     // Execute with retries
     let clock_ref: &dyn Clock = clock;
@@ -599,10 +612,14 @@ async fn execute_job(
     )
     .await;
 
-    // Update run record
+    // Update run record (DB + in-memory)
     let _ = store::complete_run(pool, &run);
     let _ = store::clear_running_since(pool, &job.id);
     let _ = store::update_last_run_at(pool, &job.id, clock.now_utc());
+    runtime.write().entry(job.id.clone()).and_modify(|s| {
+        s.running_since = None;
+        s.last_run_at = Some(clock.now_utc());
+    });
 
     // Update consecutive failures
     if run.status == RunStatus::Completed {
