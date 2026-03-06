@@ -232,7 +232,7 @@ final class StreamingManager {
 
         guard let messageId = streamingMessageId else { return "" }
 
-        let finalText = receivedText
+        let finalText = receivedText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         onFinalizeMessage?(messageId, finalText)
 

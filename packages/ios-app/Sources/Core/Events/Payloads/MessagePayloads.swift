@@ -177,8 +177,8 @@ struct AssistantMessagePayload {
         }
         guard !texts.isEmpty else { return nil }
         let joined = texts.joined(separator: "\n")
-        let trimmed = joined.drop(while: \.isNewline)
-        return trimmed.isEmpty ? nil : String(trimmed)
+        let trimmed = joined.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Extracts thinking content if present

@@ -128,6 +128,34 @@ final class StreamingManagerTests: XCTestCase {
         XCTAssertEqual(result, "")
     }
 
+    func testFinalizeTrimsTrailingWhitespace() {
+        let manager = StreamingManager()
+        var finalizedText: String?
+
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onFinalizeMessage = { _, text in finalizedText = text }
+
+        manager.handleTextDelta("Hello world\n\n\n")
+        let result = manager.finalizeStreamingMessage()
+
+        XCTAssertEqual(result, "Hello world")
+        XCTAssertEqual(finalizedText, "Hello world")
+    }
+
+    func testFinalizeTrimsWhitespaceOnlyToEmpty() {
+        let manager = StreamingManager()
+        var finalizedText: String?
+
+        manager.onCreateStreamingMessage = { UUID() }
+        manager.onFinalizeMessage = { _, text in finalizedText = text }
+
+        manager.handleTextDelta("\n\n  \n")
+        let result = manager.finalizeStreamingMessage()
+
+        XCTAssertEqual(result, "")
+        XCTAssertEqual(finalizedText, "")
+    }
+
     func testFinalizeFlushesBeforeReturning() {
         let manager = StreamingManager()
         var updateCount = 0

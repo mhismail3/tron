@@ -170,7 +170,7 @@ enum InterleavedContentProcessor {
             return nil
         }
         // Strip leading newlines (Anthropic adaptive thinking artifact)
-        let text = String(rawText.drop(while: \.isNewline))
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
 
         return ChatMessage(
