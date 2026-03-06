@@ -164,6 +164,26 @@ enum CronScheduleDTO: Codable, Hashable {
             return "\(ordinal(dayNum)) of each month at \(time) (\(tz))"
         }
 
+        // "5,25,45 8-23 * * *" → "Every 20 min, 8 AM – 11 PM (PT)"
+        if dom == "*" && mon == "*" && dow == "*",
+           let interval = evenMinuteInterval(min),
+           let range = hourRange(hour) {
+            return "Every \(interval) min, \(formatHour(range.0)) – \(formatHour(range.1)) (\(tz))"
+        }
+
+        // "30 9,13,19 * * *" → "Daily at 9:30 AM, 1:30 & 7:30 PM (PT)"
+        if dom == "*" && mon == "*" && dow == "*",
+           let _ = Int(min) {
+            let hours = hour.split(separator: ",").compactMap { Int($0) }
+            if hours.count >= 2, hours.allSatisfy({ (0...23).contains($0) }) {
+                let times = hours.compactMap { formatTime(hour: String($0), minute: min) }
+                if times.count == hours.count {
+                    let joined = times.dropLast().joined(separator: ", ") + " & " + times.last!
+                    return "Daily at \(joined) (\(tz))"
+                }
+            }
+        }
+
         // Fallback
         return "\(expression) (\(tz))"
     }
@@ -208,6 +228,33 @@ enum CronScheduleDTO: Codable, Hashable {
     private static func singleDayName(_ dow: String) -> String? {
         if let num = Int(dow), (0...6).contains(num) { return dayNames[num] }
         return dayAbbrevMap[dow.uppercased()]
+    }
+
+    /// Detect evenly-spaced minute lists: "5,25,45" → 20, "6,16,26,36,46,56" → 10.
+    private static func evenMinuteInterval(_ field: String) -> Int? {
+        let parts = field.split(separator: ",").compactMap { Int($0) }
+        guard parts.count >= 2 else { return nil }
+        let sorted = parts.sorted()
+        let interval = sorted[1] - sorted[0]
+        guard interval > 0 else { return nil }
+        for i in 1..<sorted.count where sorted[i] - sorted[i - 1] != interval { return nil }
+        return interval
+    }
+
+    /// Parse "8-23" → (8, 23).
+    private static func hourRange(_ field: String) -> (Int, Int)? {
+        let parts = field.split(separator: "-")
+        guard parts.count == 2,
+              let start = Int(parts[0]), let end = Int(parts[1]),
+              (0...23).contains(start), (0...23).contains(end) else { return nil }
+        return (start, end)
+    }
+
+    /// Format a single hour as "8 AM", "11 PM", etc.
+    private static func formatHour(_ h: Int) -> String {
+        let period = h < 12 ? "AM" : "PM"
+        let h12 = h == 0 ? 12 : (h > 12 ? h - 12 : h)
+        return "\(h12) \(period)"
     }
 
     private static func ordinal(_ n: Int) -> String {
