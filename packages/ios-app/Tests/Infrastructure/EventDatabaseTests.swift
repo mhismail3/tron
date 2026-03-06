@@ -621,12 +621,17 @@ final class EventDatabaseTests: XCTestCase {
     func testConsolidatedAnalyticsErrorTracking() {
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
-            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "error.agent", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
+            SessionEvent(id: "e1a", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:00:30Z", sequence: 2, payload: [
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 1))
+            ]),
+            SessionEvent(id: "e2", parentId: "e1a", sessionId: "s1", workspaceId: "/test", type: "error.agent", timestamp: "2024-01-01T00:01:00Z", sequence: 3, payload: [
                 "error": AnyCodable("Something went wrong"),
                 "recoverable": AnyCodable(true),
                 "turn": AnyCodable(1)
             ]),
-            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:00Z", sequence: 4, payload: [
                 "error": AnyCodable("Rate limit exceeded"),
                 "retryable": AnyCodable(true),
                 "turn": AnyCodable(1)
@@ -636,7 +641,6 @@ final class EventDatabaseTests: XCTestCase {
         let analytics = ConsolidatedAnalytics(from: events)
 
         XCTAssertEqual(analytics.totalErrors, 2)
-        // Errors are now tracked per-turn
         XCTAssertEqual(analytics.turns.first?.errorCount, 2)
         XCTAssertTrue(analytics.turns.first?.errors.contains("Something went wrong") ?? false)
         XCTAssertTrue(analytics.turns.first?.errors.contains("Rate limit exceeded") ?? false)
@@ -734,6 +738,219 @@ final class EventDatabaseTests: XCTestCase {
         // Output: 100K tokens @ $15/M = $1.50
         // Total: $4.50
         XCTAssertEqual(analytics.totalCost, 4.50, accuracy: 0.01)
+    }
+
+    // MARK: - Turn Collision Tests (Multi-Model Sessions)
+
+    func testConsolidatedAnalyticsMultiModelSession() {
+        // THE BUG: 3 conversations with overlapping turn numbers (model switches reset to 1)
+        // GPT turns 1-2, MiniMax turns 1-2, Sonnet turns 1-3 = 7 actual turns
+        let events: [SessionEvent] = [
+            // GPT conversation: turns 1-2
+            SessionEvent(id: "g1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("gpt-4o"),
+                "latency": AnyCodable(400),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 200, turn: 1))
+            ]),
+            SessionEvent(id: "g2", parentId: "g1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
+                "turn": AnyCodable(2), "model": AnyCodable("gpt-4o"),
+                "latency": AnyCodable(500),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 300, turn: 2))
+            ]),
+            // MiniMax conversation: turns reset to 1-2
+            SessionEvent(id: "m1", parentId: "g2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:03:00Z", sequence: 3, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("minimax-01"),
+                "latency": AnyCodable(600),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 3000, outputTokens: 400, turn: 1))
+            ]),
+            SessionEvent(id: "m2", parentId: "m1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:04:00Z", sequence: 4, payload: [
+                "turn": AnyCodable(2), "model": AnyCodable("minimax-01"),
+                "latency": AnyCodable(700),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 4000, outputTokens: 500, turn: 2))
+            ]),
+            // Sonnet conversation: turns reset to 1-3
+            SessionEvent(id: "s1a", parentId: "m2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:05:00Z", sequence: 5, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("claude-sonnet-4"),
+                "latency": AnyCodable(300),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 5000, outputTokens: 600, turn: 1))
+            ]),
+            SessionEvent(id: "s2a", parentId: "s1a", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:06:00Z", sequence: 6, payload: [
+                "turn": AnyCodable(2), "model": AnyCodable("claude-sonnet-4"),
+                "latency": AnyCodable(350),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 6000, outputTokens: 700, turn: 2))
+            ]),
+            SessionEvent(id: "s3a", parentId: "s2a", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:07:00Z", sequence: 7, payload: [
+                "turn": AnyCodable(3), "model": AnyCodable("claude-sonnet-4"),
+                "latency": AnyCodable(250),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 7000, outputTokens: 800, turn: 3))
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+
+        // Must be 7 turns, not 3 (the bug was collapsing via max() on turn number key)
+        XCTAssertEqual(analytics.totalTurns, 7)
+
+        // Tokens must be SUMMED across all turns, not collapsed
+        XCTAssertEqual(analytics.totalInputTokens, 1000 + 2000 + 3000 + 4000 + 5000 + 6000 + 7000)  // 28000
+        XCTAssertEqual(analytics.totalOutputTokens, 200 + 300 + 400 + 500 + 600 + 700 + 800)  // 3500
+
+        // Sequential 1-based indexing
+        XCTAssertEqual(analytics.turns.map(\.turn), [1, 2, 3, 4, 5, 6, 7])
+
+        // Average latency: (400+500+600+700+300+350+250) / 7 = 442
+        XCTAssertEqual(analytics.avgLatency, 442)
+    }
+
+    func testConsolidatedAnalyticsTurnResetWithTools() {
+        // 2 conversations with overlapping turn numbers and different tools
+        let events: [SessionEvent] = [
+            // Conversation 1, turn 1 with Read tool
+            SessionEvent(id: "a1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("claude-sonnet-4"),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 1))
+            ]),
+            SessionEvent(id: "a2", parentId: "a1", sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:01:01Z", sequence: 2, payload: [
+                "name": AnyCodable("Read"), "turn": AnyCodable(1), "toolCallId": AnyCodable("tc1")
+            ]),
+            // Conversation 2, turn 1 (reset) with Write tool
+            SessionEvent(id: "b1", parentId: "a2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("gpt-4o"),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 200, outputTokens: 100, turn: 1))
+            ]),
+            SessionEvent(id: "b2", parentId: "b1", sessionId: "s1", workspaceId: "/test", type: "tool.call", timestamp: "2024-01-01T00:02:01Z", sequence: 4, payload: [
+                "name": AnyCodable("Write"), "turn": AnyCodable(1), "toolCallId": AnyCodable("tc2")
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+
+        XCTAssertEqual(analytics.totalTurns, 2)
+        XCTAssertEqual(analytics.totalToolCalls, 2)
+
+        // First turn should have Read, second should have Write
+        XCTAssertEqual(analytics.turns[0].tools, ["Read"])
+        XCTAssertEqual(analytics.turns[1].tools, ["Write"])
+    }
+
+    func testConsolidatedAnalyticsTurnResetWithErrors() {
+        let events: [SessionEvent] = [
+            // Conversation 1, turn 1 with error
+            SessionEvent(id: "a1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("claude-sonnet-4"),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 1))
+            ]),
+            SessionEvent(id: "a2", parentId: "a1", sessionId: "s1", workspaceId: "/test", type: "error.agent", timestamp: "2024-01-01T00:01:01Z", sequence: 2, payload: [
+                "error": AnyCodable("Context overflow"), "turn": AnyCodable(1)
+            ]),
+            // Conversation 2, turn 1 (reset) with different error
+            SessionEvent(id: "b1", parentId: "a2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "turn": AnyCodable(1), "model": AnyCodable("gpt-4o"),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 200, outputTokens: 100, turn: 1))
+            ]),
+            SessionEvent(id: "b2", parentId: "b1", sessionId: "s1", workspaceId: "/test", type: "error.provider", timestamp: "2024-01-01T00:02:01Z", sequence: 4, payload: [
+                "error": AnyCodable("Rate limit"), "turn": AnyCodable(1)
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+
+        XCTAssertEqual(analytics.totalTurns, 2)
+        XCTAssertEqual(analytics.totalErrors, 2)
+        XCTAssertEqual(analytics.turns[0].errors, ["Context overflow"])
+        XCTAssertEqual(analytics.turns[1].errors, ["Rate limit"])
+    }
+
+    func testConsolidatedAnalyticsEmptyEvents() {
+        let analytics = ConsolidatedAnalytics(from: [])
+        XCTAssertEqual(analytics.totalTurns, 0)
+        XCTAssertEqual(analytics.totalCost, 0)
+        XCTAssertEqual(analytics.avgLatency, 0)
+        XCTAssertEqual(analytics.totalToolCalls, 0)
+        XCTAssertEqual(analytics.totalErrors, 0)
+        XCTAssertEqual(analytics.totalInputTokens, 0)
+        XCTAssertEqual(analytics.totalOutputTokens, 0)
+    }
+
+    func testConsolidatedAnalyticsOnlyNonTurnEvents() {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [
+                "model": AnyCodable("claude-sonnet-4")
+            ]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [
+                "content": AnyCodable("Hello")
+            ]),
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "config.model_switch", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "previousModel": AnyCodable("claude-sonnet-4"), "newModel": AnyCodable("gpt-4o")
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+        XCTAssertEqual(analytics.totalTurns, 0)
+    }
+
+    func testConsolidatedAnalyticsStreamTurnEndWithoutAssistant() {
+        // stream.turn_end arrives but no preceding message.assistant for that turn
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1),
+                "cost": AnyCodable(0.01),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 500, outputTokens: 100, turn: 1))
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+        // No crash, no phantom turn created from orphaned stream.turn_end
+        XCTAssertEqual(analytics.totalTurns, 0)
+    }
+
+    func testConsolidatedAnalyticsMessageAssistantWithoutTokenRecord() {
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "latency": AnyCodable(800)
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+        XCTAssertEqual(analytics.totalTurns, 1)
+        XCTAssertEqual(analytics.turns[0].inputTokens, 0)
+        XCTAssertEqual(analytics.turns[0].outputTokens, 0)
+        XCTAssertEqual(analytics.turns[0].latency, 800)
+        XCTAssertNotNil(analytics.turns[0].model)
+    }
+
+    func testConsolidatedAnalyticsLatencyNotDoubleCounted() {
+        // message.assistant has latency, paired stream.turn_end also present
+        let events: [SessionEvent] = [
+            SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
+                "turn": AnyCodable(1),
+                "model": AnyCodable("claude-sonnet-4"),
+                "latency": AnyCodable(500),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 1))
+            ]),
+            SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:01:01Z", sequence: 2, payload: [
+                "turn": AnyCodable(1),
+                "cost": AnyCodable(0.01),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 100, outputTokens: 50, turn: 1))
+            ]),
+            SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [
+                "turn": AnyCodable(2),
+                "model": AnyCodable("claude-sonnet-4"),
+                "latency": AnyCodable(300),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 200, outputTokens: 100, turn: 2))
+            ]),
+            SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:01Z", sequence: 4, payload: [
+                "turn": AnyCodable(2),
+                "cost": AnyCodable(0.02),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 200, outputTokens: 100, turn: 2))
+            ])
+        ]
+
+        let analytics = ConsolidatedAnalytics(from: events)
+        // (500 + 300) / 2 = 400, NOT (500 + 300) / 4
+        XCTAssertEqual(analytics.avgLatency, 400)
     }
 
     // MARK: - Deduplication Tests

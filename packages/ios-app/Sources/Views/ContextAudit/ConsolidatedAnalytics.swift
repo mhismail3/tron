@@ -295,7 +295,6 @@ struct ConsolidatedAnalytics {
     // MARK: - Initialization
 
     init(from events: [SessionEvent]) {
-        // Track data per turn
         struct TurnAccumulator {
             var input: Int = 0
             var output: Int = 0
@@ -303,14 +302,18 @@ struct ConsolidatedAnalytics {
             var cacheCreation: Int = 0
             var cacheCreation5m: Int = 0
             var cacheCreation1h: Int = 0
-            var cost: Double? = nil  // nil means we need to calculate it
+            var cost: Double? = nil
             var latency: Int = 0
             var tools: [String] = []
             var errors: [String] = []
             var model: String? = nil
         }
 
-        var turnData: [Int: TurnAccumulator] = [:]
+        // Sequential array — each message.assistant appends a new entry (no collisions).
+        // turnNumberToLatestIndex maps turn number → latest array index so that
+        // stream.turn_end / tool.call / errors route to the correct entry.
+        var turnEntries: [TurnAccumulator] = []
+        var turnNumberToLatestIndex: [Int: Int] = [:]
         var latencySum = 0
         var latencyCount = 0
         var totalTools = 0
@@ -320,76 +323,67 @@ struct ConsolidatedAnalytics {
             switch event.eventType {
             case .messageAssistant:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
-                var existing = turnData[turn] ?? TurnAccumulator()
+                var acc = TurnAccumulator()
 
-                // Token usage
                 if let tokens = Self.extractTokenUsage(from: event.payload) {
-                    existing.input = max(existing.input, tokens.input)
-                    existing.output = max(existing.output, tokens.output)
-                    existing.cacheRead = max(existing.cacheRead, tokens.cacheRead)
-                    existing.cacheCreation = max(existing.cacheCreation, tokens.cacheCreation)
-                    existing.cacheCreation5m = max(existing.cacheCreation5m, tokens.cacheCreation5m)
-                    existing.cacheCreation1h = max(existing.cacheCreation1h, tokens.cacheCreation1h)
+                    acc.input = tokens.input
+                    acc.output = tokens.output
+                    acc.cacheRead = tokens.cacheRead
+                    acc.cacheCreation = tokens.cacheCreation
+                    acc.cacheCreation5m = tokens.cacheCreation5m
+                    acc.cacheCreation1h = tokens.cacheCreation1h
                 }
 
-                // Latency
                 if let latency = Self.extractInt(event.payload["latency"]?.value), latency > 0 {
-                    existing.latency = max(existing.latency, latency)
+                    acc.latency = latency
                     latencySum += latency
                     latencyCount += 1
                 }
 
-                // Model
                 if let model = event.payload["model"]?.value as? String {
-                    existing.model = model
+                    acc.model = model
                 }
 
-                turnData[turn] = existing
+                let index = turnEntries.count
+                turnEntries.append(acc)
+                turnNumberToLatestIndex[turn] = index
 
             case .streamTurnEnd:
-                guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
-                var existing = turnData[turn] ?? TurnAccumulator()
+                guard let turn = Self.extractInt(event.payload["turn"]?.value),
+                      let index = turnNumberToLatestIndex[turn] else { continue }
 
-                // Token usage (primary source for turn end)
                 if let tokens = Self.extractTokenUsage(from: event.payload) {
-                    // Use turn end tokens if we don't have them yet or if they're larger
-                    if existing.input == 0 { existing.input = tokens.input }
-                    if existing.output == 0 { existing.output = tokens.output }
-                    existing.cacheRead = max(existing.cacheRead, tokens.cacheRead)
-                    existing.cacheCreation = max(existing.cacheCreation, tokens.cacheCreation)
-                    existing.cacheCreation5m = max(existing.cacheCreation5m, tokens.cacheCreation5m)
-                    existing.cacheCreation1h = max(existing.cacheCreation1h, tokens.cacheCreation1h)
+                    if turnEntries[index].input == 0 { turnEntries[index].input = tokens.input }
+                    if turnEntries[index].output == 0 { turnEntries[index].output = tokens.output }
+                    turnEntries[index].cacheRead = max(turnEntries[index].cacheRead, tokens.cacheRead)
+                    turnEntries[index].cacheCreation = max(turnEntries[index].cacheCreation, tokens.cacheCreation)
+                    turnEntries[index].cacheCreation5m = max(turnEntries[index].cacheCreation5m, tokens.cacheCreation5m)
+                    turnEntries[index].cacheCreation1h = max(turnEntries[index].cacheCreation1h, tokens.cacheCreation1h)
                 }
 
-                // Cost - this is the authoritative source from server
                 if let cost = Self.extractDouble(event.payload["cost"]?.value) {
-                    existing.cost = cost
+                    turnEntries[index].cost = cost
                 }
 
-                // Model (if not already set from messageAssistant)
-                if existing.model == nil, let model = event.payload["model"]?.value as? String {
-                    existing.model = model
+                if turnEntries[index].model == nil, let model = event.payload["model"]?.value as? String {
+                    turnEntries[index].model = model
                 }
-
-                turnData[turn] = existing
 
             case .toolCall:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value),
-                      let toolName = event.payload["name"]?.value as? String else { continue }
+                      let toolName = event.payload["name"]?.value as? String,
+                      let index = turnNumberToLatestIndex[turn] else { continue }
 
-                var existing = turnData[turn] ?? TurnAccumulator()
-                if !existing.tools.contains(toolName) {
-                    existing.tools.append(toolName)
+                if !turnEntries[index].tools.contains(toolName) {
+                    turnEntries[index].tools.append(toolName)
                 }
-                turnData[turn] = existing
                 totalTools += 1
 
             case .errorAgent, .errorProvider, .errorTool:
                 let errorMsg = (event.payload["error"]?.value as? String) ?? "Unknown error"
-                if let turn = Self.extractInt(event.payload["turn"]?.value) {
-                    var existing = turnData[turn] ?? TurnAccumulator()
-                    existing.errors.append(errorMsg)
-                    turnData[turn] = existing
+                if let turn = Self.extractInt(event.payload["turn"]?.value),
+                   let index = turnNumberToLatestIndex[turn] {
+                    turnEntries[index].errors.append(errorMsg)
                 }
                 totalErrs += 1
 
@@ -398,9 +392,7 @@ struct ConsolidatedAnalytics {
             }
         }
 
-        // Convert to array and calculate missing costs
-        self.turns = turnData.sorted { $0.key < $1.key }.map { key, value in
-            // Use server cost if available, otherwise calculate locally
+        self.turns = turnEntries.enumerated().map { offset, value in
             let finalCost = value.cost ?? Self.calculateCost(
                 model: value.model,
                 inputTokens: value.input,
@@ -412,7 +404,7 @@ struct ConsolidatedAnalytics {
             )
 
             return TurnData(
-                turn: key,
+                turn: offset + 1,
                 inputTokens: value.input,
                 outputTokens: value.output,
                 cacheReadTokens: value.cacheRead,
