@@ -26,6 +26,7 @@ struct SettingsView: View {
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
     @State private var showArchiveAllConfirmation = false
+    @State private var showResetChatConfirmation = false
     @State private var isArchivingAll = false
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showModelPicker = false
@@ -109,8 +110,10 @@ struct SettingsView: View {
                     updateServerSetting: updateServerSetting,
                     sessionCount: eventStoreManager.sessions.count,
                     hasActiveSessions: !eventStoreManager.sessions.isEmpty,
+                    hasChatSession: eventStoreManager.chatSession != nil,
                     isArchivingAll: isArchivingAll,
-                    onArchiveAll: { showArchiveAllConfirmation = true }
+                    onArchiveAll: { showArchiveAllConfirmation = true },
+                    onResetChat: { showResetChatConfirmation = true }
                 )
 
                 AdvancedSection(onResetSettings: { showingResetAlert = true })
@@ -196,6 +199,14 @@ struct SettingsView: View {
             } message: {
                 Text("This will reset all settings to their default values.")
             }
+            .alert("Reset Chat?", isPresented: $showResetChatConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Reset", role: .destructive) {
+                    resetChatSession()
+                }
+            } message: {
+                Text("This will archive the current chat and start a fresh one.")
+            }
             .alert("Archive All Sessions?", isPresented: $showArchiveAllConfirmation) {
                 Button("Cancel", role: .cancel) {}
                 Button("Archive All", role: .destructive) {
@@ -225,6 +236,12 @@ struct SettingsView: View {
         settingsState.resetToDefaults()
         updateServerSetting { settingsState.buildResetUpdate() }
         dependencies.updateServerSettings(host: AppConstants.defaultHost, port: Self.defaultPort, useTLS: false)
+    }
+
+    private func resetChatSession() {
+        Task {
+            _ = try? await rpcClient.session.resetChat()
+        }
     }
 
     private func archiveAllSessions() {

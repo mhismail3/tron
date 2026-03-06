@@ -6,8 +6,10 @@ struct DataSection: View {
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
     let sessionCount: Int
     let hasActiveSessions: Bool
+    let hasChatSession: Bool
     let isArchivingAll: Bool
     let onArchiveAll: () -> Void
+    let onResetChat: () -> Void
 
     var body: some View {
         Section {
@@ -32,6 +34,15 @@ struct DataSection: View {
                 Label("Confirm before archiving", systemImage: "questionmark.circle")
                     .font(TronTypography.subheadline)
             }
+
+            Button(role: .destructive) {
+                onResetChat()
+            } label: {
+                Label("Reset Chat Session", systemImage: "arrow.counterclockwise")
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.red)
+            }
+            .disabled(!hasChatSession)
 
             Button(role: .destructive) {
                 onArchiveAll()

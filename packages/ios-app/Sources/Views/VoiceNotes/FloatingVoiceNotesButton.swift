@@ -12,7 +12,7 @@ struct FloatingVoiceNotesButton: View {
             Image(systemName: audioMonitor.isRecordingAvailable ? "mic.fill" : "mic.slash.fill")
                 .font(TronTypography.button)
                 .foregroundStyle(audioMonitor.isRecordingAvailable ? .tronTeal : .tronTextDisabled)
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
         }
         .disabled(!audioMonitor.isRecordingAvailable)

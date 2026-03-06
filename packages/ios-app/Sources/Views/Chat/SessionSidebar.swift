@@ -27,7 +27,6 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
-    @State private var chatToReset = false
 
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -81,17 +80,16 @@ struct SessionSidebar: View {
 
             // Bottom floating bar
             HStack {
+                Spacer()
+                FloatingVoiceNotesButton(action: onVoiceNote)
+                FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
                 if let chat = eventStoreManager.chatSession {
                     FloatingChatPill(
                         session: chat,
                         isSelected: chat.id == selectedSessionId,
-                        onTap: { selectedSessionId = chat.id },
-                        onReset: { chatToReset = true }
+                        onTap: { selectedSessionId = chat.id }
                     )
                 }
-                Spacer()
-                FloatingVoiceNotesButton(action: onVoiceNote)
-                FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
@@ -109,15 +107,6 @@ struct SessionSidebar: View {
                     Text("This will archive the session from your device. Server data will remain.")
                 }
                 .tint(.gray)
-                .alert("Reset Chat", isPresented: $chatToReset) {
-                    Button("Cancel", role: .cancel) {}
-                    Button("Reset", role: .destructive) {
-                        Task { await resetChatSession() }
-                    }
-                } message: {
-                    Text("This will archive the current chat and start a fresh one.")
-                }
-                .tint(.gray)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -127,14 +116,6 @@ struct SessionSidebar: View {
         }
     }
 
-    private func resetChatSession() async {
-        do {
-            let result = try await dependencies.rpcClient.session.resetChat()
-            selectedSessionId = result.sessionId
-        } catch {
-            logger.error("Failed to reset chat: \(error.localizedDescription)", category: .session)
-        }
-    }
 }
 
 // MARK: - Floating Chat Pill
@@ -144,7 +125,6 @@ struct FloatingChatPill: View {
     let session: CachedSession
     let isSelected: Bool
     let onTap: () -> Void
-    let onReset: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -171,16 +151,9 @@ struct FloatingChatPill: View {
                 : .regular.tint(Color.tronMint.opacity(0.2)).interactive(),
             in: .capsule
         )
-        .contentShape([.interaction, .hoverEffect, .contextMenuPreview], Capsule())
+        .contentShape([.interaction, .hoverEffect], Capsule())
         .hoverEffect(.highlight)
         .onTapGesture { onTap() }
-        .contextMenu {
-            Button {
-                onReset()
-            } label: {
-                Label("Reset Chat", systemImage: "arrow.counterclockwise")
-            }
-        }
     }
 }
 
@@ -193,9 +166,9 @@ struct FloatingNewSessionButton: View {
 
     var body: some View {
         Image(systemName: "plus")
-            .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
+            .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
             .foregroundStyle(.tronEmerald)
-            .frame(width: 56, height: 56)
+            .frame(width: 44, height: 44)
             .contentShape(Circle())
             .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.25)).interactive(), in: .circle)
             .onTapGesture { action() }
