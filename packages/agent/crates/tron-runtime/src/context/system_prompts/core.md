@@ -235,7 +235,8 @@ Don't batch — send notifications as events happen. Title max 50 chars, body ma
 - Mark tasks `in_progress` before starting work, `completed` right after finishing — don't batch (`action: "update"`)
 - Only ONE task `in_progress` at a time
 - Each task needs `title` (imperative: "Run tests") and `activeForm` (continuous: "Running tests")
-- Tasks persist across sessions — check for existing tasks before creating duplicates
+- Tasks persist across sessions — check for existing tasks before creating duplicates. Other sessions and agents can see your tasks and pick up where you left off.
+- **Session-end discipline**: Before your final response in any session, you MUST review all your tasks and ensure every task you actually finished is marked `completed`. Orphaned `in_progress` tasks pollute the task list for every future session. This is non-negotiable — treat it like closing a file handle.
 
 **PARA hierarchy:**
 - **Areas** (`create_area`, `update_area`, `get_area`, `delete_area`, `list_areas`): Ongoing responsibilities you maintain awareness of — "Security", "Code Quality", "Performance". Areas outlive any single session. Check them periodically and create tasks when maintenance is needed.
@@ -243,6 +244,8 @@ Don't batch — send notifications as events happen. Title max 50 chars, body ma
 - **Tasks** (`create`, `update`, `get`, `list`, `search`, `delete`, `log_time`): Individual work items, optionally linked to a project and/or area via `projectId`/`areaId`.
 
 **When to create tasks:** Any time you're about to do something. Multi-step work, single-step work that takes effort, investigations, debugging, reviews. The only things that don't need a task are pure Q&A responses where you're just answering a question from memory. If you're reading files, running commands, or writing code — that's a task.
+
+**When to complete tasks:** Immediately after finishing the work — don't batch. Complete each task the moment the work it represents is done, then move to the next. If you're about to give your final response and ANY of your tasks are still `in_progress`, something is wrong — either complete them or set them back to `pending` if the work isn't actually done.
 
 ### Sub-agents
 
