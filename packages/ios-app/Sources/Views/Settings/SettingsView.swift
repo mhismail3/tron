@@ -51,72 +51,68 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                ServerSettingsSection(
-                    serverHost: $serverHost,
-                    serverPort: $serverPort,
-                    onHostSubmit: {
-                        dependencies.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
-                    },
-                    onPortChange: { newPort in
-                        dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                // Category links
+                Section {
+                    NavigationLink {
+                        ConnectionSettingsPage(
+                            serverHost: $serverHost,
+                            serverPort: $serverPort,
+                            settingsState: settingsState,
+                            onHostSubmit: {
+                                dependencies.updateServerSettings(host: serverHost, port: effectivePort, useTLS: false)
+                            },
+                            onPortChange: { newPort in
+                                dependencies.updateServerSettings(host: serverHost, port: newPort, useTLS: false)
+                            },
+                            updateServerSetting: updateServerSetting
+                        )
+                    } label: {
+                        settingsRow("network", "Connection", "Server, accounts")
                     }
-                )
 
-                if !settingsState.anthropicAccounts.isEmpty {
-                    AccountSection(
-                        accounts: settingsState.anthropicAccounts,
-                        selectedAccount: Bindable(settingsState).selectedAnthropicAccount,
-                        updateServerSetting: updateServerSetting
-                    )
+                    NavigationLink {
+                        SessionSettingsPage(
+                            settingsState: settingsState,
+                            confirmArchive: $confirmArchive,
+                            selectedModelDisplayName: selectedModelDisplayName,
+                            onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
+                            onModelTap: { showModelPicker = true },
+                            updateServerSetting: updateServerSetting
+                        )
+                    } label: {
+                        settingsRow("bolt", "Session", "Workspace, model, limits")
+                    }
+
+                    NavigationLink {
+                        ContextSettingsPage(
+                            settingsState: settingsState,
+                            updateServerSetting: updateServerSetting
+                        )
+                    } label: {
+                        settingsRow("brain", "Context", "Compaction, memory, rules")
+                    }
+
+                    if #available(iOS 26.0, *) {
+                        NavigationLink {
+                            AppearanceSettingsPage()
+                        } label: {
+                            settingsRow("paintbrush", "Appearance", "Theme, font, indicators")
+                        }
+                    }
                 }
 
-                if #available(iOS 26.0, *) {
-                    QuickSessionSection(
-                        displayWorkspace: settingsState.displayQuickSessionWorkspace,
-                        selectedModelDisplayName: selectedModelDisplayName,
-                        onWorkspaceTap: { showQuickSessionWorkspaceSelector = true },
-                        onModelTap: { showModelPicker = true }
-                    )
-                }
-
-                CompactionSection(
-                    triggerTokenThreshold: Bindable(settingsState).triggerTokenThreshold,
-                    defaultTurnFallback: Bindable(settingsState).defaultTurnFallback,
-                    preserveRecentCount: Bindable(settingsState).preserveRecentCount,
-                    forceAlwaysCompact: Bindable(settingsState).forceAlwaysCompact,
-                    updateServerSetting: updateServerSetting
-                )
-
-                ContextSettingsSection(
-                    memoryLedgerEnabled: Bindable(settingsState).memoryLedgerEnabled,
-                    memoryAutoInject: Bindable(settingsState).memoryAutoInject,
-                    memoryAutoInjectCount: Bindable(settingsState).memoryAutoInjectCount,
-                    memorySemanticInjection: Bindable(settingsState).memorySemanticInjection,
-                    memoryRecencyAnchorCount: Bindable(settingsState).memoryRecencyAnchorCount,
-                    taskAutoInjectEnabled: Bindable(settingsState).taskAutoInjectEnabled,
-                    discoverStandaloneFiles: Bindable(settingsState).rulesDiscoverStandaloneFiles,
-                    updateServerSetting: updateServerSetting
-                )
-
-                if #available(iOS 26.0, *) {
-                    AppearanceSection()
-                }
-
+                // Inline notifications toggle
                 NotificationsSection(autoMarkRead: $autoMarkRead)
 
-                DataSection(
-                    confirmArchive: $confirmArchive,
-                    maxConcurrentSessions: Bindable(settingsState).maxConcurrentSessions,
-                    updateServerSetting: updateServerSetting,
-                    sessionCount: eventStoreManager.sessions.count,
-                    hasActiveSessions: !eventStoreManager.sessions.isEmpty,
+                // Danger zone
+                DangerZoneSection(
                     hasChatSession: eventStoreManager.chatSession != nil,
+                    hasActiveSessions: !eventStoreManager.sessions.isEmpty,
                     isArchivingAll: isArchivingAll,
+                    onResetChat: { showResetChatConfirmation = true },
                     onArchiveAll: { showArchiveAllConfirmation = true },
-                    onResetChat: { showResetChatConfirmation = true }
+                    onResetSettings: { showingResetAlert = true }
                 )
-
-                AdvancedSection(onResetSettings: { showingResetAlert = true })
 
                 // Footer
                 Section {
@@ -219,6 +215,24 @@ struct SettingsView: View {
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
+    }
+
+    // MARK: - Row Helper
+
+    private func settingsRow(_ icon: String, _ title: String, _ subtitle: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(TronTypography.subheadline)
+                    .foregroundStyle(.tronTextPrimary)
+                Text(subtitle)
+                    .font(TronTypography.caption2)
+                    .foregroundStyle(.tronTextMuted)
+            }
+        } icon: {
+            Image(systemName: icon)
+                .foregroundStyle(.tronEmerald)
+        }
     }
 
     // MARK: - Computed Properties
