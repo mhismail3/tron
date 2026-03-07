@@ -228,6 +228,7 @@ enum ContentBlockType: String {
 
 /// Status of a tool call execution.
 enum ToolCallStatus: String {
+    case generating = "generating"
     case running = "running"
     case completed = "completed"
     case error = "error"

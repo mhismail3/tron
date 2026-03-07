@@ -144,6 +144,10 @@ final class ChatViewModel: ChatEventContext {
     var catchingUpMessageId: UUID?
     /// True while catch-up content is being processed — suppresses real-time events to prevent duplicates
     var isCatchingUp = false
+    /// IDs of messages created during catch-up processing.
+    /// Used by the preservation filter to retain ALL catch-up content (text, tools, thinking)
+    /// across DB reloads, since in-progress turn content has no DB counterpart.
+    var catchUpMessageIds: Set<UUID> = []
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
     /// ID of the memory-updating-in-progress notification (replaced when memory update completes)

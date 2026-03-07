@@ -113,24 +113,17 @@ extension ChatViewModel {
         var catchUpMessagesToRestore: [ChatMessage] = []
 
         if preserveStreamingState {
-            // Only preserve ACTUAL catch-up content, not history that was already loaded
+            // Preserve ALL messages created during catch-up processing.
+            // These represent in-progress turn content (text, thinking, tools, AskUserQuestion)
+            // that has no DB counterpart until turn_end persists them.
+            // Also preserve transient system notifications (catching-up spinner, etc.).
             catchUpMessagesToRestore = messages.filter { msg in
-                // Keep streaming messages (in-progress text)
-                if msg.isStreaming {
+                if catchUpMessageIds.contains(msg.id) {
                     return true
                 }
-
-                // Keep running tools (not yet completed)
-                if case .toolUse(let data) = msg.content, data.status == .running {
-                    return true
-                }
-
-                // Keep system notifications (catching-up, etc.)
                 if case .systemEvent = msg.content {
                     return true
                 }
-
-                // Discard everything else (history, completed tools)
                 return false
             }
             logger.info("Preserving \(catchUpMessagesToRestore.count) catch-up messages (filtered from \(messages.count) total)", category: .session)
@@ -264,6 +257,29 @@ extension ChatViewModel {
                                 }
                                 return false
                             }
+                        }
+                    }
+
+                    // Static text: deduplicate against DB messages
+                    // (if turn completed between catch-up and sync, DB now has the same text)
+                    if case .text(let text) = catchUpMsg.content, catchUpMsg.role == .assistant {
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return !messages.suffix(20).contains { msg in
+                            if case .text(let existingText) = msg.content, msg.role == .assistant {
+                                return existingText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
+                            }
+                            return false
+                        }
+                    }
+
+                    // Thinking: deduplicate against DB reconstructed thinking
+                    // (thinking_complete events reconstruct thinking messages after turn ends)
+                    if case .thinking(let visible, _, _) = catchUpMsg.content {
+                        return !messages.contains { msg in
+                            if case .thinking(let existingVisible, _, _) = msg.content {
+                                return existingVisible == visible
+                            }
+                            return false
                         }
                     }
 

@@ -42,10 +42,10 @@ pub enum ContentSequenceItem {
 impl ContentSequenceItem {
     fn to_json(&self) -> Value {
         match self {
-            Self::Text(t) => serde_json::json!({ "type": "text", "content": t }),
-            Self::Thinking(t) => serde_json::json!({ "type": "thinking", "content": t }),
+            Self::Text(t) => serde_json::json!({ "type": "text", "text": t }),
+            Self::Thinking(t) => serde_json::json!({ "type": "thinking", "thinking": t }),
             Self::ToolRef { tool_call_id } => {
-                serde_json::json!({ "type": "toolRef", "toolCallId": tool_call_id })
+                serde_json::json!({ "type": "tool_ref", "toolCallId": tool_call_id })
             }
         }
     }
@@ -74,6 +74,8 @@ pub struct AccumulatedToolCall {
     pub started_at: Option<String>,
     /// ISO-8601 timestamp when execution finished.
     pub completed_at: Option<String>,
+    /// Progressive output accumulated during execution.
+    pub streaming_output: Option<String>,
 }
 
 impl AccumulatedToolCall {
@@ -95,6 +97,9 @@ impl AccumulatedToolCall {
         }
         if let Some(ref completed) = self.completed_at {
             obj["completedAt"] = Value::String(completed.clone());
+        }
+        if let Some(ref output) = self.streaming_output {
+            obj["streamingOutput"] = Value::String(output.clone());
         }
         obj
     }
@@ -160,6 +165,7 @@ impl TurnAccumulator {
             is_error: false,
             started_at: None,
             completed_at: None,
+            streaming_output: None,
         });
         self.content_sequence.push(ContentSequenceItem::ToolRef {
             tool_call_id: tool_call_id.to_string(),
@@ -281,6 +287,20 @@ impl TurnAccumulatorMap {
         }
     }
 
+    /// Append streaming output to a running tool call.
+    pub fn handle_tool_output(&self, session_id: &str, tool_call_id: &str, output: &str) {
+        if let Some(acc) = self.accumulators.lock().unwrap().get_mut(session_id) {
+            if let Some(tc) = acc
+                .tool_calls
+                .iter_mut()
+                .find(|tc| tc.tool_call_id == tool_call_id)
+            {
+                let streaming = tc.streaming_output.get_or_insert_with(String::new);
+                streaming.push_str(output);
+            }
+        }
+    }
+
     /// Record tool completion or error.
     pub fn handle_tool_end(
         &self,
@@ -386,6 +406,13 @@ impl TurnAccumulatorMap {
                     result_text.as_deref(),
                     is_error.unwrap_or(false),
                 );
+            }
+            TronEvent::ToolExecutionUpdate {
+                tool_call_id,
+                update,
+                ..
+            } => {
+                self.handle_tool_output(session_id, tool_call_id, update);
             }
             _ => {} // Irrelevant events are no-ops
         }
@@ -565,6 +592,71 @@ mod tests {
         assert!(sequence.is_array());
     }
 
+    // ── ContentSequenceItem::to_json key tests (Phase 1 fix) ──
+
+    #[test]
+    fn to_json_text_uses_text_key() {
+        let item = ContentSequenceItem::Text("hello".into());
+        let json = item.to_json();
+        assert_eq!(json["type"], "text");
+        assert_eq!(json["text"], "hello");
+        assert!(json.get("content").is_none());
+    }
+
+    #[test]
+    fn to_json_thinking_uses_thinking_key() {
+        let item = ContentSequenceItem::Thinking("hmm".into());
+        let json = item.to_json();
+        assert_eq!(json["type"], "thinking");
+        assert_eq!(json["thinking"], "hmm");
+        assert!(json.get("content").is_none());
+    }
+
+    #[test]
+    fn to_json_tool_ref_uses_snake_case_type() {
+        let item = ContentSequenceItem::ToolRef {
+            tool_call_id: "tc_1".into(),
+        };
+        let json = item.to_json();
+        assert_eq!(json["type"], "tool_ref");
+        assert_eq!(json["toolCallId"], "tc_1");
+    }
+
+    // ── Streaming output tests (Phase 2) ──
+
+    #[test]
+    fn tool_streaming_output_accumulates() {
+        let mut acc = TurnAccumulator::new();
+        acc.add_tool_generating("tc_1", "bash");
+        acc.update_tool_start("tc_1", None);
+        let tc = &mut acc.tool_calls[0];
+        let streaming = tc.streaming_output.get_or_insert_with(String::new);
+        streaming.push_str("line 1\n");
+        streaming.push_str("line 2\n");
+        assert_eq!(
+            acc.tool_calls[0].streaming_output.as_deref(),
+            Some("line 1\nline 2\n")
+        );
+    }
+
+    #[test]
+    fn tool_streaming_output_included_in_json() {
+        let mut acc = TurnAccumulator::new();
+        acc.add_tool_generating("tc_1", "bash");
+        acc.update_tool_start("tc_1", None);
+        acc.tool_calls[0].streaming_output = Some("partial output".into());
+        let (_, tools, _) = acc.to_json();
+        assert_eq!(tools[0]["streamingOutput"], "partial output");
+    }
+
+    #[test]
+    fn tool_streaming_output_omitted_when_none() {
+        let mut acc = TurnAccumulator::new();
+        acc.add_tool_generating("tc_1", "bash");
+        let (_, tools, _) = acc.to_json();
+        assert!(tools[0].get("streamingOutput").is_none());
+    }
+
     // ── TurnAccumulatorMap tests ──
 
     #[test]
@@ -634,6 +726,18 @@ mod tests {
         assert_eq!(tools[0]["status"], "completed");
         let seq = sequence.as_array().unwrap();
         assert_eq!(seq.len(), 4); // thinking, text, tool_ref, text
+    }
+
+    #[test]
+    fn map_tool_streaming_output() {
+        let map = TurnAccumulatorMap::new();
+        map.handle_turn_start("s1");
+        map.handle_tool_generating("s1", "tc_1", "bash");
+        map.handle_tool_start("s1", "tc_1", None);
+        map.handle_tool_output("s1", "tc_1", "partial ");
+        map.handle_tool_output("s1", "tc_1", "output");
+        let (_, tools, _) = map.get_state("s1").unwrap();
+        assert_eq!(tools[0]["streamingOutput"], "partial output");
     }
 
     #[test]
@@ -736,6 +840,38 @@ mod tests {
         });
         let (_, tools, _) = map.get_state("s1").unwrap();
         assert_eq!(tools[0]["status"], "completed");
+    }
+
+    #[test]
+    fn update_from_tool_execution_update_event() {
+        let map = TurnAccumulatorMap::new();
+        map.update_from_event(&TronEvent::TurnStart {
+            base: BaseEvent::now("s1"),
+            turn: 1,
+        });
+        map.update_from_event(&TronEvent::ToolCallGenerating {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "bash".into(),
+        });
+        map.update_from_event(&TronEvent::ToolExecutionStart {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            tool_name: "bash".into(),
+            arguments: None,
+        });
+        map.update_from_event(&TronEvent::ToolExecutionUpdate {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            update: "line 1\n".into(),
+        });
+        map.update_from_event(&TronEvent::ToolExecutionUpdate {
+            base: BaseEvent::now("s1"),
+            tool_call_id: "tc_1".into(),
+            update: "line 2\n".into(),
+        });
+        let (_, tools, _) = map.get_state("s1").unwrap();
+        assert_eq!(tools[0]["streamingOutput"], "line 1\nline 2\n");
     }
 
     #[test]

@@ -189,6 +189,11 @@ final class ChatEventHandler {
         return ThinkingDeltaResult(thinkingText: thinkingText)
     }
 
+    /// Seed thinking text from catch-up content so future deltas append correctly
+    func seedThinkingText(_ text: String) {
+        thinkingText = text
+    }
+
     // MARK: - Tool Handling
 
     /// Handle a tool start event

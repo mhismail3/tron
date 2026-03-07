@@ -54,10 +54,16 @@ extension ChatViewModel: ConnectionContext {
     }
 
     func cleanUpStreamingState() {
+        // Capture streaming message ID before reset nulls it
+        let streamingId = streamingManager.streamingMessageId
         streamingManager.reset()
         // Remove any in-flight streaming message
-        if let streamingId = streamingManager.streamingMessageId {
+        if let streamingId {
             messages.removeAll { $0.id == streamingId }
+        }
+        // Remove in-flight thinking message (will be re-created from catch-up)
+        if let thinkingId = thinkingMessageId {
+            messages.removeAll { $0.id == thinkingId }
         }
         // Remove running tool messages (will be re-created from catch-up)
         let runningToolIds = currentToolMessages.keys
@@ -66,6 +72,11 @@ extension ChatViewModel: ConnectionContext {
         thinkingMessageId = nil
         currentTurnToolCalls.removeAll()
         currentToolMessages.removeAll()
+        catchUpMessageIds.removeAll()
+        // Reset thinking accumulators so stale content from previous catch-up
+        // doesn't bleed into the next catch-up or future thinking deltas
+        eventHandler.seedThinkingText("")
+        thinkingState.seedCatchUpThinking("", isStreaming: false)
     }
 
     // Note: The following methods are already defined in other extensions:
@@ -107,30 +118,38 @@ extension ChatViewModel {
         turnStartMessageIndex = messages.count
         firstTextMessageIdForTurn = nil
 
+        // Record message count before catch-up so we can track which messages were added
+        let preCount = messages.count
+
         // Prefer structured contentSequence when available (server >= v3a)
         if let sequence = contentSequence, !sequence.isEmpty {
             await processCatchUpFromSequence(sequence, toolCalls: toolCalls)
-            return
+        } else {
+            // Fallback: legacy newline-splitting for older servers
+            await processCatchUpFromLegacyText(accumulatedText, toolCalls: toolCalls)
         }
 
-        // Fallback: legacy newline-splitting for older servers
-        await processCatchUpFromLegacyText(accumulatedText, toolCalls: toolCalls)
+        // Track all messages created during catch-up so the preservation filter
+        // can retain them across DB reloads (in-progress turn content has no DB counterpart)
+        catchUpMessageIds = Set(messages[preCount...].map { $0.id })
+        logger.debug("Catch-up created \(catchUpMessageIds.count) messages for preservation tracking", category: .session)
     }
 
     /// Process catch-up using structured content sequence items
     private func processCatchUpFromSequence(_ sequence: [ContentSequenceItem], toolCalls: [CurrentTurnToolCall]) async {
         let toolCallMap = Dictionary(uniqueKeysWithValues: toolCalls.map { ($0.toolCallId, $0) })
         let lastTextIndex = sequence.lastIndex(where: { if case .text = $0 { return true }; return false })
+        var accumulatedThinking = ""
 
         for (index, item) in sequence.enumerated() {
             switch item {
             case .text(let text):
                 guard !text.isEmpty else { continue }
                 let isLastText = index == lastTextIndex
-                let allToolsDone = toolCalls.allSatisfy { $0.status == ToolCallStatus.completed.rawValue || $0.status == ToolCallStatus.error.rawValue }
+                let isLastInSequence = index == sequence.count - 1
 
-                if isLastText && !allToolsDone {
-                    // Last text block with running tools → streaming
+                if isLastText && isLastInSequence {
+                    // Last text is the final item → agent is actively producing text → streaming
                     let streamingMessage = ChatMessage.streaming()
                     messages.append(streamingMessage)
                     streamingManager.catchUpToInProgress(existingText: text, messageId: streamingMessage.id)
@@ -141,9 +160,29 @@ extension ChatViewModel {
                     if firstTextMessageIdForTurn == nil { firstTextMessageIdForTurn = textMessage.id }
                 }
 
-            case .thinking:
-                // Thinking is shown via ThinkingState, not as catch-up messages
-                continue
+            case .thinking(let thinkingText):
+                guard !thinkingText.isEmpty else { continue }
+
+                // Thinking is still in-progress only if it's the last item in the sequence
+                let isThinkingStillStreaming = (index == sequence.count - 1)
+                accumulatedThinking += thinkingText
+
+                // Seed accumulators so future deltas append correctly
+                eventHandler.seedThinkingText(accumulatedThinking)
+                thinkingState.seedCatchUpThinking(accumulatedThinking, isStreaming: isThinkingStillStreaming)
+
+                if thinkingMessageId == nil {
+                    let msg = ChatMessage.thinking(accumulatedThinking, isStreaming: isThinkingStillStreaming)
+                    messages.append(msg)
+                    thinkingMessageId = msg.id
+                } else if let id = thinkingMessageId,
+                          let idx = MessageFinder.indexById(id, in: messages) {
+                    messages[idx].content = .thinking(
+                        visible: accumulatedThinking,
+                        isExpanded: false,
+                        isStreaming: isThinkingStillStreaming
+                    )
+                }
 
             case .toolRef(let toolCallId):
                 if let toolCall = toolCallMap[toolCallId] {
@@ -221,16 +260,59 @@ extension ChatViewModel {
         record.isError = toolCall.isError ?? false
         currentTurnToolCalls.append(record)
 
+        let kind = ToolKind(toolName: toolCall.toolName)
+
+        // AskUserQuestion: create interactive form instead of generic tool chip
+        if kind == .askUserQuestion {
+            let isActive = toolCall.status == ToolCallStatus.running.rawValue
+                || toolCall.status == ToolCallStatus.generating.rawValue
+
+            var params = AskUserQuestionParams(questions: [], context: nil)
+            if let argsData = argsString.data(using: .utf8),
+               let decoded = try? JSONDecoder().decode(AskUserQuestionParams.self, from: argsData) {
+                params = decoded
+            }
+
+            let toolData = AskUserQuestionToolData(
+                toolCallId: toolCall.toolCallId,
+                params: params,
+                answers: [:],
+                status: isActive ? .pending : .superseded,
+                result: nil
+            )
+            let message = ChatMessage(role: .assistant, content: .askUserQuestion(toolData))
+            messages.append(message)
+            currentToolMessages[message.id] = message
+            animationCoordinator.makeToolVisible(toolCall.toolCallId)
+
+            if isActive {
+                askUserQuestionState.currentData = toolData
+            }
+
+            logger.info("Resume catch-up: created AskUserQuestion form for \(toolCall.toolCallId)", category: .session)
+            return
+        }
+
         // Create UI message for the tool call
         let messageId = UUID(uuidString: toolCall.toolCallId) ?? UUID()
+
+        let status: ToolStatus = switch toolCall.status {
+            case ToolCallStatus.generating.rawValue, ToolCallStatus.running.rawValue:
+                .running
+            case ToolCallStatus.error.rawValue:
+                .error
+            default:
+                .success
+        }
 
         let toolUseData = ToolUseData(
             toolName: toolCall.toolName,
             toolCallId: toolCall.toolCallId,
             arguments: argsString,
-            status: toolCall.status == ToolCallStatus.running.rawValue ? .running : (toolCall.isError == true ? .error : .success),
+            status: status,
             result: toolCall.result,
-            durationMs: nil
+            durationMs: nil,
+            streamingOutput: (status == .running) ? toolCall.streamingOutput : nil
         )
 
         var toolMessage = ChatMessage(
@@ -247,7 +329,8 @@ extension ChatViewModel {
         if toolCall.status == ToolCallStatus.completed.rawValue || toolCall.status == ToolCallStatus.error.rawValue {
             var durationMs: Int? = nil
             if let completedAt = toolCall.completedAt,
-               let startDate = DateParser.parse(toolCall.startedAt),
+               let startedAt = toolCall.startedAt,
+               let startDate = DateParser.parse(startedAt),
                let endDate = DateParser.parse(completedAt) {
                 durationMs = Int(endDate.timeIntervalSince(startDate) * 1000)
             }

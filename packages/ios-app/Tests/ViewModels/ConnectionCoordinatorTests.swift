@@ -454,7 +454,7 @@ struct TestToolCall {
     let status: String
     let result: String?
     let isError: Bool?
-    let startedAt: String
+    let startedAt: String?
     let completedAt: String?
 }
 
@@ -545,7 +545,7 @@ final class MockConnectionContext: ConnectionContext {
                     "status": "\(tc.status)",
                     "result": \(tc.result.map { "\"\($0)\"" } ?? "null"),
                     "isError": \(tc.isError ?? false),
-                    "startedAt": "\(tc.startedAt)",
+                    "startedAt": \(tc.startedAt.map { "\"\($0)\"" } ?? "null"),
                     "completedAt": \(tc.completedAt.map { "\"\($0)\"" } ?? "null")
                 }
                 """

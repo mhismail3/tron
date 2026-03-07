@@ -89,11 +89,13 @@ struct CurrentTurnToolCall: Decodable {
     let toolCallId: String
     let toolName: String
     let arguments: [String: AnyCodable]?
-    let status: String  // "pending" | "running" | "completed" | "error"
+    let status: String  // "generating" | "running" | "completed" | "error"
     let result: String?
     let isError: Bool?
-    let startedAt: String
+    let startedAt: String?
     let completedAt: String?
+    /// Progressive output accumulated during execution
+    let streamingOutput: String?
 }
 
 /// Structured content sequence item (interleaved text/thinking/tool_ref)

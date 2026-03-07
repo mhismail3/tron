@@ -11,6 +11,8 @@ extension ChatMessage {
             return data.toolCallId
         case .toolResult(let data):
             return data.toolCallId
+        case .askUserQuestion(let data):
+            return data.toolCallId
         default:
             return nil
         }

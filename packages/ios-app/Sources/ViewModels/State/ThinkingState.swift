@@ -56,6 +56,14 @@ final class ThinkingState {
         self.sessionId = sessionId
     }
 
+    // MARK: - Catch-Up Seeding
+
+    /// Seed thinking state from catch-up content so future deltas append correctly
+    func seedCatchUpThinking(_ text: String, isStreaming: Bool) {
+        currentText = text
+        self.isStreaming = isStreaming
+    }
+
     // MARK: - Streaming Methods
 
     /// Handle incoming thinking delta from streaming
