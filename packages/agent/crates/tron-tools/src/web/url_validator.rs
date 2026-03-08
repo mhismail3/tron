@@ -3,8 +3,24 @@
 //! Validates URLs for safety (blocks private IPs, localhost, internal domains)
 //! and auto-upgrades HTTP to HTTPS.
 
+use std::sync::LazyLock;
+
 use regex::Regex;
 use url::Url;
+
+static INTERNAL_PATTERNS: LazyLock<[Regex; 9]> = LazyLock::new(|| {
+    [
+        Regex::new(r"^localhost$").unwrap(),
+        Regex::new(r"^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$").unwrap(),
+        Regex::new(r"^0\.0\.0\.0$").unwrap(),
+        Regex::new(r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$").unwrap(),
+        Regex::new(r"^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$").unwrap(),
+        Regex::new(r"^192\.168\.\d{1,3}\.\d{1,3}$").unwrap(),
+        Regex::new(r"^\[?::1\]?$").unwrap(),
+        Regex::new(r"\.local$").unwrap(),
+        Regex::new(r"\.internal$").unwrap(),
+    ]
+});
 
 const MAX_URL_LENGTH: usize = 2000;
 
@@ -119,21 +135,8 @@ fn domain_in_list(host: &str, domains: &[String]) -> bool {
 }
 
 fn is_internal_address(host: &str) -> bool {
-    let patterns = [
-        r"^localhost$",
-        r"^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$",
-        r"^0\.0\.0\.0$",
-        r"^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$",
-        r"^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$",
-        r"^192\.168\.\d{1,3}\.\d{1,3}$",
-        r"^\[?::1\]?$",
-        r"\.local$",
-        r"\.internal$",
-    ];
     let host_lower = host.to_lowercase();
-    patterns
-        .iter()
-        .any(|p| Regex::new(p).is_ok_and(|re| re.is_match(&host_lower)))
+    INTERNAL_PATTERNS.iter().any(|re| re.is_match(&host_lower))
 }
 
 #[cfg(test)]

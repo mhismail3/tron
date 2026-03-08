@@ -31,7 +31,7 @@ use tron_events::EventType;
 
 use crate::errors::StopReason;
 use crate::orchestrator::event_persister::EventPersister;
-use crate::pipeline::{persistence, pricing};
+use crate::pipeline::persistence;
 use crate::types::{RunContext, TurnResult};
 
 /// Parameters for a single turn of the agent loop.
@@ -347,7 +347,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let cost = stream_result
         .token_usage
         .as_ref()
-        .and_then(|u| pricing::calculate_cost(provider.model(), u));
+        .and_then(|u| tron_llm::tokens::calculate_cost(provider.model(), u).map(|c| c.total));
 
     // Explicit pricing metadata: unknown models should not silently receive
     // default pricing assumptions.

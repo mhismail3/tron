@@ -6,7 +6,8 @@
 //! blocks requests (single-provider mode).
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+
+use parking_lot::Mutex;
 
 use tracing::debug;
 
@@ -98,10 +99,7 @@ impl ProviderHealthTracker {
 
     /// Check if a provider is currently degraded (error rate above threshold).
     pub fn is_degraded(&self, provider: &str) -> bool {
-        let inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self.inner.lock();
         inner
             .providers
             .get(provider)
@@ -110,10 +108,7 @@ impl ProviderHealthTracker {
 
     /// Get the current error rate for a provider (0.0–1.0).
     pub fn error_rate(&self, provider: &str) -> f64 {
-        let inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self.inner.lock();
         inner
             .providers
             .get(provider)
@@ -121,10 +116,7 @@ impl ProviderHealthTracker {
     }
 
     fn record(&self, provider: &str, success: bool) {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self.inner.lock();
         let window = inner
             .providers
             .entry(provider.to_string())

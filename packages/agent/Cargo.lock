@@ -3772,6 +3772,7 @@ dependencies = [
  "insta",
  "metrics",
  "mockall",
+ "parking_lot",
  "percent-encoding",
  "pin-project-lite",
  "proptest",
@@ -3870,6 +3871,7 @@ dependencies = [
 name = "tron-settings"
 version = "0.1.0"
 dependencies = [
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",

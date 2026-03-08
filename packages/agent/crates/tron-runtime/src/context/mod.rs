@@ -19,7 +19,6 @@
 //! | `token_estimator` | Token counting and context budget calculations |
 //! | `path_extractor` | Extracts workspace paths from session context |
 //! | `constants` | Token limits, compaction thresholds |
-//! | `audit` | Context assembly audit logging |
 //! | `types` | Shared types for context subsystem |
 //!
 //! ## Entry Point
@@ -32,7 +31,6 @@
 //! Compaction always runs before ledger writing, ensuring `compact.boundary`
 //! events precede `memory.ledger` events in the event log.
 
-pub mod audit;
 pub mod compaction_engine;
 pub mod constants;
 pub mod context_manager;

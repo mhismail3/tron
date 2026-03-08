@@ -4,10 +4,26 @@
 //! patterns (rm -rf /, fork bombs, dd to device, etc.) and blocks them.
 //! Output is truncated if it exceeds the character budget.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use regex::Regex;
+
+static DANGER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [
+        r"rm\s+(-[^\s]*\s+)*-[^\s]*[rR][^\s]*\s+/($|\s|;|\|)",
+        r"rm\s+(-[^\s]*\s+)*-[^\s]*[rR][^\s]*\s+/\*",
+        r"rm\s+(-[^\s]*\s+)*-[^\s]*[rR][^\s]*\s+/(usr|etc|var|home|boot|dev|proc|sys)\b",
+        r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",
+        r"dd\s+.*of=/dev/[sh]d",
+        r"mkfs\.\w+\s+/dev/",
+        r"chmod\s+(-[^\s]+\s+)*777\s+/$",
+        r">\s*/dev/[sh]d",
+    ]
+    .iter()
+    .map(|p| Regex::new(p).expect("danger pattern must compile"))
+    .collect()
+});
 use serde_json::{Value, json};
 use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
@@ -24,43 +40,22 @@ const MAX_OUTPUT_CHARS: usize = 400_000;
 /// The `Bash` tool executes shell commands.
 pub struct BashTool {
     runner: Arc<dyn ProcessRunner>,
-    danger_patterns: Vec<Regex>,
 }
 
 impl BashTool {
     /// Create a new `Bash` tool with the given process runner.
     pub fn new(runner: Arc<dyn ProcessRunner>) -> Self {
-        Self {
-            runner,
-            danger_patterns: compile_danger_patterns(),
-        }
+        Self { runner }
     }
 
     fn check_dangerous(&self, command: &str) -> Option<String> {
-        for pattern in &self.danger_patterns {
+        for pattern in &*DANGER_PATTERNS {
             if pattern.is_match(command) {
                 return Some("Potentially destructive command pattern detected".into());
             }
         }
         None
     }
-}
-
-fn compile_danger_patterns() -> Vec<Regex> {
-    let patterns = [
-        r"rm\s+(-[^\s]*\s+)*-[^\s]*[rR][^\s]*\s+/($|\s|;|\|)",
-        r"rm\s+(-[^\s]*\s+)*-[^\s]*[rR][^\s]*\s+/\*",
-        r"rm\s+(-[^\s]*\s+)*-[^\s]*[rR][^\s]*\s+/(usr|etc|var|home|boot|dev|proc|sys)\b",
-        r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",
-        r"dd\s+.*of=/dev/[sh]d",
-        r"mkfs\.\w+\s+/dev/",
-        r"chmod\s+(-[^\s]+\s+)*777\s+/$",
-        r">\s*/dev/[sh]d",
-    ];
-    patterns
-        .iter()
-        .map(|p| Regex::new(p).expect("danger pattern must compile"))
-        .collect()
 }
 
 #[async_trait]
@@ -476,12 +471,11 @@ mod tests {
 
     #[test]
     fn all_danger_patterns_compile() {
-        let patterns = compile_danger_patterns();
         assert_eq!(
-            patterns.len(),
+            DANGER_PATTERNS.len(),
             8,
             "expected 8 danger patterns, got {}",
-            patterns.len()
+            DANGER_PATTERNS.len()
         );
     }
 }

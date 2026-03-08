@@ -203,7 +203,6 @@ pub fn format_model_pricing(cost_per_million: f64) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
 

@@ -4,4 +4,3 @@
 //! event persistence during agent execution.
 
 pub mod persistence;
-pub mod pricing;

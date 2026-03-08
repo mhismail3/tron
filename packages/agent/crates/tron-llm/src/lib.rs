@@ -12,7 +12,6 @@
 //! - [`tool_parsing`] — Robust JSON parsing for tool call arguments
 //! - [`context_composition`] — Context part ordering and stable/volatile grouping
 //! - [`id_remapping`] — Tool call ID format conversion between providers
-//! - [`stop_reason`] — Provider-specific stop reason to unified enum mapping
 //!
 //! # Architecture
 //!
@@ -40,7 +39,6 @@ pub mod openai;
 pub mod provider;
 pub mod retry;
 pub mod sse;
-pub mod stop_reason;
 pub mod stream_pipeline;
 pub mod tokens;
 pub mod tool_parsing;
@@ -49,24 +47,16 @@ pub use context_composition::{
     GroupedContextParts, compose_context_parts, compose_context_parts_grouped,
 };
 pub use health::ProviderHealthTracker;
-pub use id_remapping::{
-    IdFormat, build_tool_call_id_mapping, detect_id_format, is_anthropic_id, is_openai_id,
-    remap_tool_call_id,
-};
+pub use id_remapping::{IdFormat, build_tool_call_id_mapping, remap_tool_call_id};
 pub use models::model_ids;
 pub use models::registry::{
     all_model_ids, detect_provider_from_model, is_model_supported, model_supports_images,
     strip_provider_prefix,
-};
-pub use models::types::{
-    ModelCapabilities, ModelCategory, ModelInfo, ModelTier, calculate_cost, format_context_window,
-    format_model_pricing,
 };
 pub use provider::{
     AnthropicEffortLevel, Provider, ProviderError, ProviderFactory, ProviderResult,
     ProviderStreamOptions, ReasoningEffort, StreamEventStream,
 };
 pub use retry::{StreamFactory, StreamRetryConfig, with_provider_retry};
-pub use sse::{SseParserOptions, parse_sse_data, parse_sse_lines};
-pub use stop_reason::{map_google_stop_reason, map_openai_stop_reason};
+pub use sse::{SseParserOptions, parse_sse_lines};
 pub use tool_parsing::{ToolCallContext, is_valid_tool_call_arguments, parse_tool_call_arguments};

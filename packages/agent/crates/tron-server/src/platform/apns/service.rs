@@ -2,7 +2,7 @@
 //!
 //! Uses `reqwest` for HTTP/2 transport and `jsonwebtoken` for ES256 JWT signing.
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
@@ -228,10 +228,7 @@ impl ApnsService {
 
     /// Get a cached JWT or generate a new one.
     fn get_or_refresh_token(&self) -> Result<String, ApnsError> {
-        let mut cached = self
-            .cached_token
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cached = self.cached_token.lock();
 
         if let Some(ref token) = *cached
             && token.created_at.elapsed() < TOKEN_VALIDITY {

@@ -39,7 +39,9 @@ pub use loader::{deep_merge, deploy_dir, load_settings, load_settings_from_path,
 pub use types::*;
 
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 /// Global settings singleton.
 ///
@@ -60,14 +62,14 @@ static SETTINGS: RwLock<Option<Arc<TronSettings>>> = RwLock::new(None);
 pub fn get_settings() -> Arc<TronSettings> {
     // Fast path: read lock
     {
-        let guard = SETTINGS.read().expect("settings lock poisoned");
+        let guard = SETTINGS.read();
         if let Some(ref s) = *guard {
             return Arc::clone(s);
         }
     }
 
     // Slow path: first access, take write lock
-    let mut guard = SETTINGS.write().expect("settings lock poisoned");
+    let mut guard = SETTINGS.write();
     // Double-check after acquiring write lock (another thread may have initialized)
     if let Some(ref s) = *guard {
         return Arc::clone(s);
@@ -89,7 +91,7 @@ pub fn get_settings() -> Arc<TronSettings> {
 /// Replaces any previously cached settings. Useful for tests and
 /// server startup where the settings path is known.
 pub fn init_settings(settings: TronSettings) {
-    let mut guard = SETTINGS.write().expect("settings lock poisoned");
+    let mut guard = SETTINGS.write();
     *guard = Some(Arc::new(settings));
 }
 
@@ -108,7 +110,7 @@ pub fn reload_settings_from_path(path: &Path) {
             TronSettings::default()
         }
     });
-    let mut guard = SETTINGS.write().expect("settings lock poisoned");
+    let mut guard = SETTINGS.write();
     *guard = Some(new);
     tracing::debug!(?path, "settings reloaded from disk");
 }
@@ -120,7 +122,7 @@ pub fn reload_settings_from_path(path: &Path) {
 /// global is `static`.
 #[cfg(test)]
 pub(crate) fn reset_settings() {
-    let mut guard = SETTINGS.write().expect("settings lock poisoned");
+    let mut guard = SETTINGS.write();
     *guard = None;
 }
 

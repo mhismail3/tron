@@ -12,24 +12,26 @@ pub mod rules;
 pub mod types;
 
 // Re-export main public API
-pub use audit::AuditLogger;
-pub use core_rules::{CORE_RULE_IDS, default_rules, is_core_rule};
 pub use engine::GuardrailEngine;
 pub use errors::GuardrailError;
 pub use rules::GuardrailRule;
 pub use types::{
-    AuditEntry, AuditEntryParams, AuditStats, EvaluationContext, GuardrailEngineOptions,
-    GuardrailEvaluation, RuleEvaluationResult, RuleOverride, RuleTier, Scope, Severity,
+    EvaluationContext, GuardrailEngineOptions, RuleOverride, RuleTier, Scope, Severity,
 };
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guardrails::audit::AuditLogger;
+    use crate::guardrails::core_rules::{default_rules, is_core_rule};
     use crate::guardrails::rules::RuleBase;
     use crate::guardrails::rules::composite::{CompositeOperator, CompositeRule};
     use crate::guardrails::rules::context::ContextRule;
     use crate::guardrails::rules::pattern::PatternRule;
     use crate::guardrails::rules::resource::ResourceRule;
+    use crate::guardrails::types::{
+        AuditEntry, AuditEntryParams, AuditStats, GuardrailEvaluation, RuleEvaluationResult,
+    };
     use std::collections::HashMap;
 
     fn make_bash_ctx(command: &str) -> EvaluationContext {

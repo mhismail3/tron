@@ -439,20 +439,6 @@ pub enum ResponsesInputItem {
     },
 }
 
-/// A tool definition for the Responses API (legacy struct — use [`ResponsesToolEntry`] for new code).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ResponsesTool {
-    /// Always "function".
-    #[serde(rename = "type")]
-    pub tool_type: String,
-    /// Function name.
-    pub name: String,
-    /// Function description.
-    pub description: String,
-    /// JSON Schema for parameters.
-    pub parameters: Value,
-}
-
 /// Polymorphic tool entry for the Responses API.
 ///
 /// Uses internally tagged serialization on `"type"` to discriminate variants.
@@ -991,19 +977,6 @@ mod tests {
         assert_eq!(json["type"], "function_call_output");
         assert_eq!(json["call_id"], "call_abc");
         assert_eq!(json["output"], "file.txt");
-    }
-
-    #[test]
-    fn responses_tool_serde() {
-        let tool = ResponsesTool {
-            tool_type: "function".into(),
-            name: "bash".into(),
-            description: "Run commands".into(),
-            parameters: json!({"type": "object"}),
-        };
-        let json = serde_json::to_value(&tool).unwrap();
-        assert_eq!(json["type"], "function");
-        assert_eq!(json["name"], "bash");
     }
 
     // ── ResponsesToolEntry ───────────────────────────────────────────

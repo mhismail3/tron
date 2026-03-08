@@ -1,6 +1,9 @@
 //! Git handler: clone.
 
+use std::sync::LazyLock;
+
 use async_trait::async_trait;
+use regex::Regex;
 use serde_json::Value;
 use tokio::time::{Duration, timeout};
 use tracing::instrument;
@@ -12,13 +15,16 @@ use crate::rpc::registry::MethodHandler;
 
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Validate a GitHub/GitLab URL.
-fn is_valid_git_url(url: &str) -> bool {
-    let re = regex::Regex::new(
+static GIT_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"^https://(github\.com|gitlab\.com|bitbucket\.org)/[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\.git)?$",
     )
-    .expect("valid regex");
-    re.is_match(url)
+    .unwrap()
+});
+
+/// Validate a GitHub/GitLab URL.
+fn is_valid_git_url(url: &str) -> bool {
+    GIT_URL_RE.is_match(url)
 }
 
 /// Check for path traversal in a target directory.

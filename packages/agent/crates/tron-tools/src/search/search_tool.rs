@@ -4,10 +4,13 @@
 //! Otherwise, uses regex-based text search. The `type` parameter can force
 //! a specific mode.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use regex::Regex;
+
+static AST_METAVAR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$[A-Z_][A-Z0-9_]*|\$\$\$").unwrap());
 use serde_json::{Value, json};
 use tron_core::tools::{Tool, ToolCategory, ToolResultBody, TronToolResult, error_result};
 
@@ -21,8 +24,7 @@ use crate::utils::validation::{get_optional_string, get_optional_u64, validate_r
 
 /// Returns `true` if `pattern` contains AST metavariables (`$VAR` or `$$$`).
 fn has_ast_metavariables(pattern: &str) -> bool {
-    let re = Regex::new(r"\$[A-Z_][A-Z0-9_]*|\$\$\$").expect("valid regex");
-    re.is_match(pattern)
+    AST_METAVAR_RE.is_match(pattern)
 }
 
 /// The unified `Search` tool — routes to text or AST search.

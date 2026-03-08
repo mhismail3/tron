@@ -10,33 +10,29 @@ use super::types::PricingTier;
 
 /// Look up the pricing tier for a model identifier.
 ///
-/// Uses exact-match first, then prefix/pattern matching, then falls back
-/// to Claude Sonnet 4.5 pricing as the default.
+/// Uses exact-match first, then prefix/pattern matching.
+/// Returns `None` for unknown models (no implicit fallback pricing).
 #[must_use]
-pub fn get_pricing_tier(model: &str) -> PricingTier {
+pub fn get_pricing_tier(model: &str) -> Option<PricingTier> {
     // Exact match first
     if let Some(tier) = exact_match(model) {
-        return tier;
+        return Some(tier);
     }
 
     // Pattern match (prefix-based)
-    if let Some(tier) = pattern_match(model) {
-        return tier;
-    }
-
-    // Default: Sonnet 4.5
-    anthropic_tier(3.0, 15.0)
+    pattern_match(model)
 }
 
 /// Calculate cost for a given model and token usage.
 ///
-/// Returns a [`Cost`] with separate input/output costs and total.
+/// Returns a [`Cost`] with separate input/output costs and total,
+/// or `None` when pricing is unavailable for the model.
 /// Handles Anthropic per-TTL cache tiers (5-minute @ 1.25x, 1-hour @ 2.0x)
 /// and standard cache pricing for other providers.
 #[must_use]
 #[allow(clippy::cast_precision_loss)] // Token counts never approach 2^52
-pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Cost {
-    let tier = get_pricing_tier(model);
+pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Option<Cost> {
+    let tier = get_pricing_tier(model)?;
 
     let input = usage.input_tokens;
     let output = usage.output_tokens;
@@ -74,12 +70,12 @@ pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Cost {
     let output_cost = output as f64 / 1_000_000.0 * tier.output_per_million;
     let total = input_cost + output_cost;
 
-    Cost {
+    Some(Cost {
         input_cost,
         output_cost,
         total,
         currency: "USD".to_string(),
-    }
+    })
 }
 
 /// Format a cost value for display.
@@ -326,7 +322,7 @@ mod tests {
 
     #[test]
     fn pricing_claude_opus_46() {
-        let tier = get_pricing_tier("claude-opus-4-6");
+        let tier = get_pricing_tier("claude-opus-4-6").unwrap();
         assert_eq!(tier.input_per_million, 5.0);
         assert_eq!(tier.output_per_million, 25.0);
         assert_eq!(tier.cache_write_5m_multiplier, 1.25);
@@ -336,35 +332,35 @@ mod tests {
 
     #[test]
     fn pricing_claude_sonnet_45() {
-        let tier = get_pricing_tier("claude-sonnet-4-5-20250929");
+        let tier = get_pricing_tier("claude-sonnet-4-5-20250929").unwrap();
         assert_eq!(tier.input_per_million, 3.0);
         assert_eq!(tier.output_per_million, 15.0);
     }
 
     #[test]
     fn pricing_claude_haiku_45() {
-        let tier = get_pricing_tier("claude-haiku-4-5-20251001");
+        let tier = get_pricing_tier("claude-haiku-4-5-20251001").unwrap();
         assert_eq!(tier.input_per_million, 1.0);
         assert_eq!(tier.output_per_million, 5.0);
     }
 
     #[test]
     fn pricing_claude_opus_41() {
-        let tier = get_pricing_tier("claude-opus-4-1");
+        let tier = get_pricing_tier("claude-opus-4-1").unwrap();
         assert_eq!(tier.input_per_million, 15.0);
         assert_eq!(tier.output_per_million, 75.0);
     }
 
     #[test]
     fn pricing_claude_3_haiku() {
-        let tier = get_pricing_tier("claude-3-haiku");
+        let tier = get_pricing_tier("claude-3-haiku").unwrap();
         assert_eq!(tier.input_per_million, 0.25);
         assert_eq!(tier.output_per_million, 1.25);
     }
 
     #[test]
     fn pricing_gemini_pro() {
-        let tier = get_pricing_tier("gemini-3-pro-preview");
+        let tier = get_pricing_tier("gemini-3-pro-preview").unwrap();
         assert_eq!(tier.input_per_million, 1.25);
         assert_eq!(tier.output_per_million, 5.0);
         assert_eq!(tier.cache_read_multiplier, 0.25);
@@ -372,32 +368,29 @@ mod tests {
 
     #[test]
     fn pricing_gemini_flash() {
-        let tier = get_pricing_tier("gemini-2-5-flash");
+        let tier = get_pricing_tier("gemini-2-5-flash").unwrap();
         assert_eq!(tier.input_per_million, 0.075);
         assert_eq!(tier.output_per_million, 0.3);
     }
 
     #[test]
     fn pricing_o3() {
-        let tier = get_pricing_tier("o3");
+        let tier = get_pricing_tier("o3").unwrap();
         assert_eq!(tier.input_per_million, 10.0);
         assert_eq!(tier.output_per_million, 40.0);
     }
 
     #[test]
-    fn pricing_unknown_defaults_to_sonnet() {
-        let tier = get_pricing_tier("some-unknown-model");
-        assert_eq!(tier.input_per_million, 3.0);
-        assert_eq!(tier.output_per_million, 15.0);
+    fn pricing_unknown_returns_none() {
+        assert!(get_pricing_tier("some-unknown-model").is_none());
     }
 
     #[test]
     fn pricing_pattern_match_partial_names() {
-        // Should match via pattern
-        let tier = get_pricing_tier("claude-opus-4-6-extended");
+        let tier = get_pricing_tier("claude-opus-4-6-extended").unwrap();
         assert_eq!(tier.input_per_million, 5.0);
 
-        let tier = get_pricing_tier("gemini-2-5-pro-latest");
+        let tier = get_pricing_tier("gemini-2-5-pro-latest").unwrap();
         assert_eq!(tier.input_per_million, 1.25);
     }
 
@@ -410,7 +403,7 @@ mod tests {
             output_tokens: 100_000,
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage);
+        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
         assert!((cost.input_cost - 3.0).abs() < 0.001); // 1M * $3/M
         assert!((cost.output_cost - 1.5).abs() < 0.001); // 100K * $15/M
         assert!((cost.total - 4.5).abs() < 0.001);
@@ -426,7 +419,7 @@ mod tests {
             cache_creation_tokens: Some(100_000),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage);
+        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
 
         // base = 1M - 800K - 100K = 100K @ $3/M = $0.30
         // cache creation = 100K @ $3/M * 1.25 = $0.375
@@ -448,7 +441,7 @@ mod tests {
             cache_creation_1h_tokens: Some(100_000),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-opus-4-6", &usage);
+        let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
 
         // Per-TTL takes precedence over aggregate
         // 5m: 100K @ $5/M * 1.25 = $0.625
@@ -465,7 +458,7 @@ mod tests {
     #[test]
     fn cost_zero_usage() {
         let usage = TokenUsage::default();
-        let cost = calculate_cost("claude-opus-4-6", &usage);
+        let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
         assert_eq!(cost.total, 0.0);
     }
 
@@ -479,10 +472,20 @@ mod tests {
             cache_creation_tokens: Some(200),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage);
+        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
         // Base input saturates to 0, but cache costs are still counted
         assert!(cost.input_cost >= 0.0);
         assert!(cost.total >= 0.0);
+    }
+
+    #[test]
+    fn cost_unknown_model_returns_none() {
+        let usage = TokenUsage {
+            input_tokens: 1000,
+            output_tokens: 1000,
+            ..Default::default()
+        };
+        assert!(calculate_cost("totally-unknown-model", &usage).is_none());
     }
 
     // ── Format utilities ──
@@ -567,7 +570,7 @@ mod tests {
 
     #[test]
     fn pricing_minimax_m2_5() {
-        let tier = get_pricing_tier("MiniMax-M2.5");
+        let tier = get_pricing_tier("MiniMax-M2.5").unwrap();
         assert!((tier.input_per_million - 0.3).abs() < f64::EPSILON);
         assert!((tier.output_per_million - 1.2).abs() < f64::EPSILON);
     }

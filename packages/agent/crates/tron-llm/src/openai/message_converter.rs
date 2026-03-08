@@ -15,9 +15,7 @@ use tron_core::content::{AssistantContent, ToolResultContent, UserContent};
 use tron_core::messages::{Message, ToolResultMessageContent, UserMessageContent};
 use tron_core::tools::Tool;
 
-use super::types::{
-    MessageContent, ResponsesInputItem, ResponsesTool, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
-};
+use super::types::{MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH};
 
 /// Convert Tron messages to Responses API input format.
 ///
@@ -81,27 +79,6 @@ pub fn convert_tools_v2(tools: &[Tool], enable_tool_search: bool) -> Vec<Respons
     }
 
     entries
-}
-
-/// Convert Tron tools to Responses API format (legacy — kept for backward compatibility).
-///
-/// Normalizes schemas to satisfy `OpenAI`'s stricter validation
-/// (e.g., arrays must have `items`).
-#[must_use]
-pub fn convert_tools(tools: &[Tool]) -> Vec<ResponsesTool> {
-    tools
-        .iter()
-        .map(|t| {
-            let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
-            let params = normalize_schema_for_openai(&schema);
-            ResponsesTool {
-                tool_type: "function".into(),
-                name: t.name.clone(),
-                description: t.description.clone(),
-                parameters: params,
-            }
-        })
-        .collect()
 }
 
 /// Normalize a JSON schema for the `OpenAI` API.
@@ -717,26 +694,6 @@ mod tests {
     fn empty_messages_returns_empty() {
         let result = convert_to_responses_input(&[]);
         assert!(result.is_empty());
-    }
-
-    // ── convert_tools ──────────────────────────────────────────────
-
-    #[test]
-    fn converts_tools_to_responses_format() {
-        let tools = vec![make_tool("read_file", "Read a file from disk")];
-        let result = convert_tools(&tools);
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].tool_type, "function");
-        assert_eq!(result[0].name, "read_file");
-        assert_eq!(result[0].description, "Read a file from disk");
-    }
-
-    #[test]
-    fn converts_multiple_tools() {
-        let tools = vec![make_tool("tool_a", "Tool A"), make_tool("tool_b", "Tool B")];
-        let result = convert_tools(&tools);
-        assert_eq!(result.len(), 2);
     }
 
     // ── convert_tools_v2 ────────────────────────────────────────────
