@@ -57,6 +57,76 @@ struct SharedContentTests {
     }
 }
 
+@Suite("SharedContent.buildSharePrompt")
+struct SharedContentBuildPromptTests {
+
+    @Test("URL-only share produces notes prompt with skill")
+    func urlOnlyShare() {
+        let content = SharedContent(text: nil, url: "https://example.com/article", timestamp: Date())
+        let payload = content.buildSharePrompt()
+
+        #expect(payload != nil)
+        #expect(payload?.prompt == "Add this to your notes\n\nhttps://example.com/article")
+        #expect(payload?.skillName == "obsidian")
+    }
+
+    @Test("URL + text share includes both in prompt")
+    func urlWithTextShare() {
+        let content = SharedContent(text: "Great article about Swift", url: "https://example.com", timestamp: Date())
+        let payload = content.buildSharePrompt()
+
+        #expect(payload != nil)
+        #expect(payload?.prompt == "Add this to your notes\n\nhttps://example.com\n\nGreat article about Swift")
+        #expect(payload?.skillName == "obsidian")
+    }
+
+    @Test("text-only share sends raw text without skill")
+    func textOnlyShare() {
+        let content = SharedContent(text: "Remember this for later", url: nil, timestamp: Date())
+        let payload = content.buildSharePrompt()
+
+        #expect(payload != nil)
+        #expect(payload?.prompt == "Remember this for later")
+        #expect(payload?.skillName == nil)
+    }
+
+    @Test("empty text-only share returns nil")
+    func emptyTextShare() {
+        let content = SharedContent(text: "", url: nil, timestamp: Date())
+        #expect(content.buildSharePrompt() == nil)
+    }
+
+    @Test("nil text and nil URL returns nil")
+    func nilBothShare() {
+        let content = SharedContent(text: nil, url: nil, timestamp: Date())
+        #expect(content.buildSharePrompt() == nil)
+    }
+
+    @Test("empty URL falls through to text-only")
+    func emptyUrlWithText() {
+        let content = SharedContent(text: "Just text", url: "", timestamp: Date())
+        let payload = content.buildSharePrompt()
+
+        #expect(payload != nil)
+        #expect(payload?.prompt == "Just text")
+        #expect(payload?.skillName == nil)
+    }
+
+    @Test("URL + empty text omits text portion")
+    func urlWithEmptyText() {
+        let content = SharedContent(text: "", url: "https://example.com", timestamp: Date())
+        let payload = content.buildSharePrompt()
+
+        #expect(payload?.prompt == "Add this to your notes\n\nhttps://example.com")
+        #expect(payload?.skillName == "obsidian")
+    }
+
+    @Test("skill name constant is obsidian")
+    func skillNameConstant() {
+        #expect(SharedContent.urlShareSkillName == "obsidian")
+    }
+}
+
 @Suite("PendingShareService")
 struct PendingShareServiceTests {
     /// Use standard UserDefaults for testing (App Group suite requires entitlements)

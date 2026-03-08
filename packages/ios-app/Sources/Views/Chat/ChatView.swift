@@ -262,9 +262,15 @@ struct ChatView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage)) { notification in
-            guard let prompt = notification.object as? String else { return }
-            viewModel.inputText = prompt
-            viewModel.sendMessage()
+            guard let payload = notification.object as? ShareMessagePayload else { return }
+            viewModel.inputText = payload.prompt
+
+            var skills: [Skill]?
+            if let skillName = payload.skillName,
+               let skill = skillStore?.skills.first(where: { $0.name.lowercased() == skillName }) {
+                skills = [skill]
+            }
+            viewModel.sendMessage(skills: skills)
         }
         .onAppear {
             // Load persisted reasoning level for this session

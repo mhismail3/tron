@@ -79,6 +79,13 @@ struct ContentView: View {
                         await notificationStore.refresh()
                     }
                 }
+
+                // Cold launch share: the .pendingShareContent notification may have
+                // fired before this view existed (app was still initializing). Check
+                // for unconsumed share data and process it now.
+                if PendingShareService.load() != nil {
+                    handlePendingShare()
+                }
             }
             .onDisappear {
                 // Stop polling when leaving the dashboard
@@ -446,20 +453,14 @@ struct ContentView: View {
         guard let shared = PendingShareService.load() else { return }
         PendingShareService.clear()
 
-        var prompt = ""
-        if let text = shared.text { prompt += text }
-        if let url = shared.url {
-            if !prompt.isEmpty { prompt += "\n\n" }
-            prompt += url
-        }
-        guard !prompt.isEmpty else { return }
+        guard let payload = shared.buildSharePrompt() else { return }
 
         coordinator?.createQuickSession(selectedSessionId: selectedSessionId) { newId in
             selectedSessionId = newId
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 NotificationCenter.default.post(
                     name: .pendingShareMessage,
-                    object: prompt
+                    object: payload
                 )
             }
         }
